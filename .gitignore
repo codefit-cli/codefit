@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# codefit build output
+/bin/
+/dist/
+
+# codefit local artifacts (cache is gitignored; baseline.json is committed)
+/.codefit/cache/
+codefit-report.json
+codefit-report.md
+codefit-report.html
+
+# Agent tooling (skill registry, local only)
+.atl/
