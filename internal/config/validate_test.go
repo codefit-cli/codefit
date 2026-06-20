@@ -1,0 +1,93 @@
+package config_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/codefit-cli/codefit/internal/config"
+)
+
+// writeConfig writes a .codefit.yaml with the given body to a temp dir and
+// returns its path.
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".codefit.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing temp config: %v", err)
+	}
+	return p
+}
+
+const validBody = `version: "1"
+project:
+  name: "demo"
+  language: "go"
+`
+
+func TestLoadAcceptsValidConfig(t *testing.T) {
+	_, err := config.Load(writeConfig(t, validBody))
+	if err != nil {
+		t.Fatalf("Load on valid config errored: %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownLanguage(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "rust"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil {
+		t.Fatal("Load accepted an unknown language, want error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "language") || !strings.Contains(msg, "rust") {
+		t.Errorf("error %q should mention the field and the bad value", msg)
+	}
+	// Located error: the bad value is on line 4 of the body.
+	if !strings.Contains(msg, ":4:") {
+		t.Errorf("error %q should point to line 4", msg)
+	}
+}
+
+func TestLoadRejectsMissingName(t *testing.T) {
+	body := `version: "1"
+project:
+  language: "go"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil || !strings.Contains(err.Error(), "name") {
+		t.Fatalf("Load should reject a missing project name, got: %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownParadigm(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+database:
+  paradigm: "graph"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil || !strings.Contains(err.Error(), "paradigm") {
+		t.Fatalf("Load should reject an unknown db paradigm, got: %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownFramework(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "typescript"
+  framework: "angularjs"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil || !strings.Contains(err.Error(), "framework") {
+		t.Fatalf("Load should reject an unknown framework, got: %v", err)
+	}
+}
