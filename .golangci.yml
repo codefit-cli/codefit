@@ -1,0 +1,33 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - misspell
+    - revive
+    - unconvert
+    - bodyclose
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    errcheck:
+      # Writing to a terminal/buffer: the error is not actionable.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - io.WriteString
+  exclusions:
+    rules:
+      # Test files may carry credential-shaped fixtures on purpose.
+      - path: _test\.go
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
