@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: build without CGO
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      - name: cross-compile
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=linux   GOARCH=amd64 go build -o /dev/null ./cmd/codefit
+          GOOS=linux   GOARCH=arm64 go build -o /dev/null ./cmd/codefit
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/codefit
+
+      - name: self-audit (codefit scans itself)
+        # No ANTHROPIC_API_KEY needed: --no-llm runs the static layers only.
+        # Fails the build if codefit finds critical findings in its own code.
+        run: |
+          go build -o bin/codefit ./cmd/codefit
+          ./bin/codefit scan --no-llm --fail-on critical
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          # v7 installs golangci-lint v2 (the schema .golangci.yml uses).
+          # Pinned to the version validated locally for reproducible CI.
+          version: v2.12.2

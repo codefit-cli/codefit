@@ -1,0 +1,15 @@
+# .codefit.yaml — codefit auditing itself (self-dogfooding, Go provider).
+# Committed to the repository.
+version: "1"
+
+project:
+  name: "codefit"
+  language: "go"
+  description: "AI-generated code auditor"
+  # Path criticality weights finding severity by location (RF-11).
+  path_criticality:
+    production:
+      - "internal/**"
+      - "cmd/**"
+    test:
+      - "**/*_test.go"

@@ -1,0 +1,58 @@
+version: 2
+
+project_name: codefit
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: codefit
+    main: ./cmd/codefit
+    binary: codefit
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Targets: linux/amd64, linux/arm64, windows/amd64, darwin/arm64.
+      - goos: windows
+        goarch: arm64
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w
+      - -X github.com/codefit-cli/codefit/internal/version.Version={{ .Version }}
+      - -X github.com/codefit-cli/codefit/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/codefit-cli/codefit/internal/version.BuildDate={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+
+release:
+  draft: false
+  prerelease: auto
