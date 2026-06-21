@@ -3,6 +3,7 @@ package report_test
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,36 @@ func sampleReport() report.AuditReport {
 			{ID: "SEC-001", Dimension: findings.DimensionSecurity, Severity: findings.SeverityCritical,
 				File: "src/auth.go", Line: 12, Title: "Hardcoded key", Suggestion: "Use env var"},
 		},
+	}
+}
+
+func TestReportCarriesSurfaceAndCoverageNote(t *testing.T) {
+	r := sampleReport()
+	r.Surface = []findings.SurfaceItem{{Category: "authz", File: "h.go", Line: 3}}
+	r.CoverageNote = "Not audited: race conditions, architectural design flaws."
+
+	var buf bytes.Buffer
+	if err := (report.JSONRenderer{}).Render(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{`"surface"`, `"authz"`, `"coverage_note"`, "race conditions"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report JSON missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestReportShowsUnmeasuredDimensionAsNull(t *testing.T) {
+	r := sampleReport()
+	r.Score = scoring.Compute(
+		[]findings.Dimension{findings.DimensionSecurity}, nil, scoring.DefaultWeights())
+	var buf bytes.Buffer
+	if err := (report.JSONRenderer{}).Render(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"complexity": null`) {
+		t.Errorf("unmeasured dimension should render as null:\n%s", buf.String())
 	}
 }
 

@@ -29,6 +29,13 @@ type AuditReport struct {
 	BlockReason    string                  `json:"block_reason,omitempty"`
 	Baseline       *BaselineSummary        `json:"baseline,omitempty"`
 	Findings       []findings.Finding      `json:"findings"`
+	// Surface is the auditable structural surface the agent must reason about
+	// (PRD section 10), aggregated across sensors.
+	Surface []findings.SurfaceItem `json:"surface,omitempty"`
+	// CoverageNote states which classes of problems were not audited (derived
+	// from the coverage manifest), so the report always informs its own limits
+	// (PRD section 21). Populated once the coverage manifest exists (Fase C).
+	CoverageNote   string                  `json:"coverage_note,omitempty"`
 	RegressionRisk *RegressionRisk         `json:"regression_risk,omitempty"`
 	SensorResults  []findings.SensorResult `json:"sensor_results"`
 }
