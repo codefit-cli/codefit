@@ -79,6 +79,33 @@ func TestComputeRenormalizesGlobalOverMeasured(t *testing.T) {
 	}
 }
 
+// TestComputeMeasuredZeroIsNotNull guards the *int boundary: a measured
+// dimension that scored 0 (audited, terrible) must be a non-nil pointer to 0,
+// distinct from a not-measured dimension (nil). The zero is included in the
+// global with its full weight; only nil dimensions are excluded.
+func TestComputeMeasuredZeroIsNotNull(t *testing.T) {
+	measured := []findings.Dimension{findings.DimensionSecurity, findings.DimensionReview}
+	// 5 criticals on security → 100 - 5*20 = 0.
+	in := []findings.Finding{
+		f("security", "critical"), f("security", "critical"), f("security", "critical"),
+		f("security", "critical"), f("security", "critical"),
+	}
+	s := scoring.Compute(measured, in, scoring.DefaultWeights())
+
+	p, ok := s.ByDimension[findings.DimensionSecurity]
+	if !ok || p == nil {
+		t.Fatal("a measured dimension scoring 0 must be a non-nil *int(0), not null")
+	}
+	if *p != 0 {
+		t.Errorf("security = %d, want 0", *p)
+	}
+	// security's weight (35) stays in the denominator, so the zero drags the
+	// global down: (0*35 + 100*20) / (35+20) = 2000/55 = 36.
+	if s.Global != 36 {
+		t.Errorf("Global = %d, want 36 (measured-zero included with its weight, not excluded)", s.Global)
+	}
+}
+
 func TestComputeNotMeasuredSerializesNull(t *testing.T) {
 	s := scoring.Compute([]findings.Dimension{findings.DimensionSecurity}, nil, scoring.DefaultWeights())
 	data, err := json.Marshal(s)
