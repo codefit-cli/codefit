@@ -2,7 +2,6 @@ package report
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -56,22 +55,15 @@ type RegressionItem struct {
 	Reason    string   `json:"reason,omitempty"`
 }
 
-// Format identifies an output renderer.
-type Format string
-
-const (
-	FormatJSON     Format = "json"
-	FormatMarkdown Format = "markdown"
-	FormatHTML     Format = "html"
-)
-
 // Renderer writes an AuditReport to w. Renderers never reach into the core;
 // they only consume the canonical report.
 type Renderer interface {
 	Render(w io.Writer, r AuditReport) error
 }
 
-// JSONRenderer writes the canonical JSON, indented.
+// JSONRenderer writes the canonical JSON, indented. In the MCP-first model the
+// report is delivered as JSON to the agent; this is the only renderer in v1
+// (an HTML renderer is a future addition over the same canonical report).
 type JSONRenderer struct{}
 
 func (JSONRenderer) Render(w io.Writer, r AuditReport) error {
@@ -81,27 +73,4 @@ func (JSONRenderer) Render(w io.Writer, r AuditReport) error {
 		return fmt.Errorf("encoding report JSON: %w", err)
 	}
 	return nil
-}
-
-// HTMLRenderer is a placeholder until the standalone HTML report is built.
-type HTMLRenderer struct{}
-
-func (HTMLRenderer) Render(io.Writer, AuditReport) error {
-	return errors.New("HTML renderer not yet implemented")
-}
-
-// ChooseRenderer selects a renderer for the output format. For markdown the
-// plain renderer is used regardless of TTY today; a future TUI renderer will
-// branch on isTTY && !noTUI here (PRD §18).
-func ChooseRenderer(format string, isTTY, noTUI bool) Renderer {
-	switch Format(format) {
-	case FormatJSON:
-		return JSONRenderer{}
-	case FormatHTML:
-		return HTMLRenderer{}
-	default:
-		_ = isTTY
-		_ = noTUI
-		return PlainRenderer{}
-	}
 }
