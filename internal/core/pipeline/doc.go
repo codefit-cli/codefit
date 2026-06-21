@@ -5,7 +5,11 @@
 // on.
 //
 // [Pipeline] runs its [LayerProcessor] tiers in [FilterLayer] order, threading
-// each layer's escalated files into the next and early-exiting before the LLM
-// layer when the accumulated findings already satisfy --fail-on. The concrete
-// layer implementations arrive with the sensors.
+// each layer's escalated files into the next. The concrete layer
+// implementations arrive with the sensors.
+//
+// Status: INERT. Built and tested, but not yet wired to any consumer. The MCP
+// orchestrator will use it in Fase 1; kept in the core per PRD section 15.
+// (The LLM layer is dropped in a later step — MCP-first: codefit never reaches
+// layer 3; the agent reasons over the mapped surface.)
 package pipeline
