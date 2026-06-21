@@ -16,7 +16,6 @@ type Config struct {
 	Database Database `yaml:"database"`
 	Sensors  Sensors  `yaml:"sensors"`
 	Report   Report   `yaml:"report"`
-	LLM      LLM      `yaml:"llm"`
 	Cache    Cache    `yaml:"cache"`
 	Baseline Baseline `yaml:"baseline"`
 	MCP      MCP      `yaml:"mcp"`
@@ -76,14 +75,6 @@ type Report struct {
 	ScoreWeights map[string]int `yaml:"score_weights"`
 }
 
-// LLM configures the model and token-optimization toggles.
-type LLM struct {
-	Model         string            `yaml:"model"`
-	Provider      string            `yaml:"provider"`
-	PromptCaching bool              `yaml:"prompt_caching"`
-	Batching      bool              `yaml:"batching"`
-	SensorModels  map[string]string `yaml:"sensor_models"`
-}
 
 // Cache configures the content-hash finding cache.
 type Cache struct {

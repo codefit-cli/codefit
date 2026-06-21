@@ -14,14 +14,8 @@ import (
 // subcommand.
 type globalFlags struct {
 	config  string
-	output  string
-	outFile string
-	failOn  string
 	quiet   bool
-	noLLM   bool
 	verbose bool
-	tui     bool
-	noTUI   bool
 }
 
 var globals globalFlags
@@ -35,11 +29,12 @@ func Execute() error {
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "codefit",
-		Short: "Audit AI-generated code for what you never see",
-		Long: "codefit is an open-source auditor for AI-generated code. It surfaces what a\n" +
-			"developer never sees during normal development: security vulnerabilities,\n" +
-			"algorithmic complexity that scales badly, structural DB problems, deep code\n" +
-			"review issues and regression risk. It runs as a CLI or as a stateless MCP server.",
+		Short: "The MCP-first auditor for AI-generated code",
+		Long: "codefit audits AI-generated code for what the developer never sees:\n" +
+			"security vulnerabilities, structural DB problems, regression risk and more.\n" +
+			"It runs exclusively as an MCP server that AI agents consume as tools; this\n" +
+			"binary only exposes plumbing commands (mcp serve, init, status) — there is\n" +
+			"no audit CLI and codefit never calls an LLM.",
 		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -50,21 +45,12 @@ func newRootCmd() *cobra.Command {
 
 	pf := root.PersistentFlags()
 	pf.StringVar(&globals.config, "config", "./.codefit.yaml", "path to the project .codefit.yaml")
-	pf.StringVar(&globals.output, "output", "markdown", "output format: json | markdown | html")
-	pf.StringVar(&globals.outFile, "out-file", "", "write output to a file instead of stdout")
-	pf.StringVar(&globals.failOn, "fail-on", "critical", "exit 1 on findings at this severity or worse: critical | high | medium")
-	pf.BoolVar(&globals.quiet, "quiet", false, "only show the final score and critical findings")
-	pf.BoolVar(&globals.noLLM, "no-llm", false, "disable analysis that requires an LLM")
+	pf.BoolVar(&globals.quiet, "quiet", false, "quiet logging (warnings and errors only)")
 	pf.BoolVar(&globals.verbose, "verbose", false, "verbose, debug-level logging")
-	pf.BoolVar(&globals.tui, "tui", false, "force the interactive TUI renderer")
-	pf.BoolVar(&globals.noTUI, "no-tui", false, "force the plain (non-interactive) renderer")
-	root.MarkFlagsMutuallyExclusive("tui", "no-tui")
 
 	root.AddCommand(
 		newInitCmd(),
 		newMCPCmd(),
-		newAuthCmd(),
-		newSetCmd(),
 		newStatusCmd(),
 	)
 	return root
