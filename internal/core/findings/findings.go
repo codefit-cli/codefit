@@ -37,13 +37,15 @@ type Finding struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Suggestion  string    `json:"suggestion"`
-	// Reasoning explains why an LLM flagged the finding. Only set for
-	// probabilistic findings; it builds trust in non-deterministic results.
+	// Reasoning explains why the finding was flagged. Only set for findings the
+	// agent reasoned from mapped surface; it records the agent's rationale so it
+	// survives beyond the conversation (PRD section 11).
 	Reasoning string `json:"reasoning,omitempty"`
 	// Confidence is 1.0 for deterministic (regex/AST) findings and < 1.0 for
-	// LLM-inferred ones.
+	// findings the agent reasoned from surface.
 	Confidence float64 `json:"confidence"`
-	// Probabilistic is true when the finding comes from LLM inference.
+	// Probabilistic is true when the finding comes from the agent's reasoning
+	// over mapped surface rather than a deterministic match.
 	Probabilistic bool `json:"probabilistic"`
 	// RequiresConsent is true for critical security findings, which cannot be
 	// silenced with a plain ignore — they need an explicit ConsentRecord.
@@ -64,13 +66,31 @@ type ConsentRecord struct {
 	Reason     string `json:"reason"`
 }
 
-// SensorResult is what a single sensor returns after a run: its findings, the
-// dimension score it computed, how long it took, and an error string if it
-// failed (kept as a string so partial results survive serialization).
+// SurfaceItem is one element of the auditable surface a sensor enumerates for
+// the agent to reason about (PRD section 10). codefit does not decide whether a
+// surface item is vulnerable — it maps the complete structural surface of a
+// category (IDOR endpoints, protectable handlers, data serializations, ...) so
+// the agent reasons over each with its own LLM, with no blind spots.
+type SurfaceItem struct {
+	// Category is the surface class: "idor" | "authz" | "overfetch" | ...
+	Category string `json:"category"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	// Snippet is the relevant source fragment for the agent to read.
+	Snippet string `json:"snippet"`
+	// ReasonToReview tells the agent what to verify about this item.
+	ReasonToReview string `json:"reason_to_review"`
+}
+
+// SensorResult is what a single sensor returns after a run: its deterministic
+// findings, the surface to be reasoned by the agent, the dimension score, how
+// long it took, and an error string if it failed (kept as a string so partial
+// results survive serialization).
 type SensorResult struct {
-	Sensor     string    `json:"sensor"`
-	Score      int       `json:"score"`
-	Findings   []Finding `json:"findings"`
-	DurationMs int64     `json:"duration_ms"`
-	Error      string    `json:"error,omitempty"`
+	Sensor     string        `json:"sensor"`
+	Score      int           `json:"score"`
+	Findings   []Finding     `json:"findings"`
+	Surface    []SurfaceItem `json:"surface,omitempty"`
+	DurationMs int64         `json:"duration_ms"`
+	Error      string        `json:"error,omitempty"`
 }
