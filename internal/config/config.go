@@ -75,7 +75,6 @@ type Report struct {
 	ScoreWeights map[string]int `yaml:"score_weights"`
 }
 
-
 // Cache configures the content-hash finding cache.
 type Cache struct {
 	Enabled bool   `yaml:"enabled"`

@@ -18,17 +18,17 @@ const SchemaVersion = "1.0"
 // AuditReport is the canonical, language-agnostic audit result. JSON is the
 // single source of truth; every renderer derives from this struct.
 type AuditReport struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	CodefitVersion string                  `json:"codefit_version"`
-	Timestamp      time.Time               `json:"timestamp"`
-	Project        string                  `json:"project"`
-	Language       string                  `json:"language"`
-	Commit         string                  `json:"commit,omitempty"`
-	Score          scoring.ScoreSummary    `json:"score"`
-	Blocked        bool                    `json:"blocked"`
-	BlockReason    string                  `json:"block_reason,omitempty"`
-	Baseline       *BaselineSummary        `json:"baseline,omitempty"`
-	Findings       []findings.Finding      `json:"findings"`
+	SchemaVersion  string               `json:"schema_version"`
+	CodefitVersion string               `json:"codefit_version"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Project        string               `json:"project"`
+	Language       string               `json:"language"`
+	Commit         string               `json:"commit,omitempty"`
+	Score          scoring.ScoreSummary `json:"score"`
+	Blocked        bool                 `json:"blocked"`
+	BlockReason    string               `json:"block_reason,omitempty"`
+	Baseline       *BaselineSummary     `json:"baseline,omitempty"`
+	Findings       []findings.Finding   `json:"findings"`
 	// Surface is the auditable structural surface the agent must reason about
 	// (PRD section 10), aggregated across sensors.
 	Surface []findings.SurfaceItem `json:"surface,omitempty"`

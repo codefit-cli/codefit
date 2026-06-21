@@ -29,7 +29,7 @@ func child(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 func TestRootHasAllSubcommands(t *testing.T) {
 	root := newRootCmd()
 	want := []string{
-		"init", "mcp", "status",
+		"init", "mcp", "update", "status", "version",
 	}
 	got := subcommandNames(root)
 	for _, name := range want {
