@@ -29,8 +29,7 @@ func child(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 func TestRootHasAllSubcommands(t *testing.T) {
 	root := newRootCmd()
 	want := []string{
-		"init", "scan", "bench", "review", "run",
-		"baseline", "report", "mcp", "auth", "set", "status",
+		"init", "mcp", "auth", "set", "status",
 	}
 	got := subcommandNames(root)
 	for _, name := range want {
@@ -45,15 +44,6 @@ func TestRootHasGlobalFlags(t *testing.T) {
 	for _, name := range []string{"config", "output", "out-file", "fail-on", "quiet", "no-llm", "verbose", "tui", "no-tui"} {
 		if pf.Lookup(name) == nil {
 			t.Errorf("root is missing global flag --%s", name)
-		}
-	}
-}
-
-func TestScanHasItsFlags(t *testing.T) {
-	scan := child(t, newRootCmd(), "scan")
-	for _, name := range []string{"since", "sensor"} {
-		if scan.Flags().Lookup(name) == nil {
-			t.Errorf("scan is missing flag --%s", name)
 		}
 	}
 }
