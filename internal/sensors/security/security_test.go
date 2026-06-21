@@ -107,6 +107,27 @@ var k = "sk-ant-api03-AbCdEf1234567890"
 	}
 }
 
+func TestSensorMapsSurface(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "routes.go", `package x
+import "net/http"
+func ListPlants(w http.ResponseWriter, r *http.Request) {}
+`)
+	res := runSensor(t, root)
+	if len(res.Surface) == 0 {
+		t.Fatal("sensor should map the HTTP handler as surface")
+	}
+	found := false
+	for _, it := range res.Surface {
+		if it.Category == "authz" && strings.HasSuffix(it.File, "routes.go") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want an authz surface item for routes.go, got %+v", res.Surface)
+	}
+}
+
 func TestSensorExampleFilesAreInfo(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "examples/demo.go", `package x

@@ -1,7 +1,9 @@
 // Package security is the universal security sensor. It orchestrates the
-// filtering pyramid — a language-agnostic regex layer for obvious secrets, the
-// active provider's AST analysis, and (later) an LLM layer — and adjusts each
-// finding's severity by the file's path criticality (RF-11).
+// filtering pyramid — a language-agnostic regex layer for obvious secrets and
+// the active provider's AST analysis (deterministic findings plus mapped
+// surface) — and adjusts each finding's severity by the file's path criticality
+// (RF-11). codefit runs no LLM layer: the surface is returned to the agent,
+// which reasons over it with its own model.
 package security
 
 import (
@@ -44,6 +46,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	exts := s.provider.FileExtensions()
 
 	var all []findings.Finding
+	var surface []findings.SurfaceItem
 	walkErr := filepath.WalkDir(ctx.ProjectRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -63,12 +66,13 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
-		fileFindings, fileErr := s.scanFile(rel, path)
+		fileFindings, fileSurface, fileErr := s.scanFile(rel, path)
 		if fileErr != nil {
 			return fileErr
 		}
 		applyCriticality(ctx.Config, rel, fileFindings)
 		all = append(all, fileFindings...)
+		surface = append(surface, fileSurface...)
 		return nil
 	})
 	if walkErr != nil {
@@ -79,30 +83,37 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		Sensor:     s.Name(),
 		Score:      scoring.DimensionScore(all),
 		Findings:   all,
+		Surface:    surface,
 		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
 }
 
-// scanFile runs the pyramid layers over a single file.
-func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, error) {
+// scanFile runs the pyramid layers over a single file: deterministic findings
+// (regex + provider AST) and the mapped surface for the agent to reason about.
+// codefit never runs a layer-3 LLM — the surface is returned to the agent.
+func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, []findings.SurfaceItem, error) {
 	content, err := os.ReadFile(abs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	src := providers.SourceFile{Path: rel, Content: content}
 	var out []findings.Finding
 
 	// Layer 1: language-agnostic regex for obvious secrets.
 	out = append(out, layer1Secrets(rel, content)...)
 
-	// Layer 2: provider AST analysis.
-	astFindings, err := s.provider.AnalyzeSecurity(providers.SourceFile{Path: rel, Content: content})
+	// Layer 2: provider AST analysis — deterministic findings + mapped surface.
+	astFindings, err := s.provider.AnalyzeSecurity(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out = append(out, astFindings...)
 
-	// Layer 3 (LLM): skeleton — implemented in a later phase.
-	return out, nil
+	surface, err := s.provider.AnalyzeSurface(src)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, surface, nil
 }
 
 // apiKeyPatterns matches well-known credential shapes (layer 1).
