@@ -6,15 +6,16 @@ import (
 )
 
 // FilterLayer identifies a tier of the filtering pyramid, ordered from cheapest
-// (0) to most expensive (3). Cheaper layers run first and only what they cannot
-// conclude is escalated to the next (PRD §15).
+// (0) to most expensive (2). Cheaper layers run first and only what they cannot
+// conclude is escalated to the next (PRD section 15). codefit never goes past
+// layer 2: it produces deterministic findings and maps surface; the agent does
+// the layer-3 reasoning over the surface with its own LLM.
 type FilterLayer int
 
 const (
 	LayerChanges  FilterLayer = 0 // unchanged files (via --since or cache hash)
 	LayerPatterns FilterLayer = 1 // regex / obvious patterns
-	LayerAST      FilterLayer = 2 // tree-sitter structural analysis
-	LayerLLM      FilterLayer = 3 // semantic LLM reasoning
+	LayerAST      FilterLayer = 2 // AST: deterministic findings + surface mapping
 )
 
 // PipelineResult is what a layer returns: the findings it concluded and the
@@ -31,9 +32,7 @@ type LayerProcessor interface {
 }
 
 // Pipeline orchestrates the layers in order, threading each layer's escalated
-// files into the next, and early-exits before the LLM layer when the
-// accumulated findings already satisfy --fail-on (so no tokens are spent on
-// code that will block anyway).
+// files into the next.
 type Pipeline struct {
 	Layers []LayerProcessor
 }
@@ -43,9 +42,6 @@ func (p *Pipeline) Run(files []string, ctx auditctx.AuditContext) ([]findings.Fi
 	var all []findings.Finding
 	current := files
 	for _, layer := range p.Layers {
-		if layer.Layer() == LayerLLM && meetsFailOn(all, ctx.FailOn) {
-			break // skip the expensive layer; we already fail
-		}
 		res, err := layer.Process(current, ctx)
 		if err != nil {
 			return all, err
@@ -54,28 +50,4 @@ func (p *Pipeline) Run(files []string, ctx auditctx.AuditContext) ([]findings.Fi
 		current = res.PassedToNextLayer
 	}
 	return all, nil
-}
-
-// severityRank orders severities for --fail-on comparisons.
-var severityRank = map[findings.Severity]int{
-	findings.SeverityInfo:     0,
-	findings.SeverityLow:      1,
-	findings.SeverityMedium:   2,
-	findings.SeverityHigh:     3,
-	findings.SeverityCritical: 4,
-}
-
-// meetsFailOn reports whether any finding reaches the failOn threshold
-// (critical|high|medium). An empty or unknown threshold never triggers.
-func meetsFailOn(fs []findings.Finding, failOn string) bool {
-	threshold, ok := severityRank[findings.Severity(failOn)]
-	if !ok {
-		return false
-	}
-	for _, f := range fs {
-		if severityRank[f.Severity] >= threshold {
-			return true
-		}
-	}
-	return false
 }
