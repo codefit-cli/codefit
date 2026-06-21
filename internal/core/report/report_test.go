@@ -11,6 +11,8 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 )
 
+func ptr(i int) *int { return &i }
+
 func sampleReport() report.AuditReport {
 	return report.AuditReport{
 		SchemaVersion:  report.SchemaVersion,
@@ -20,7 +22,7 @@ func sampleReport() report.AuditReport {
 		Language:       "go",
 		Score: scoring.ScoreSummary{
 			Global:      64,
-			ByDimension: map[findings.Dimension]int{findings.DimensionSecurity: 41},
+			ByDimension: map[findings.Dimension]*int{findings.DimensionSecurity: ptr(41)},
 		},
 		Blocked: true,
 		Findings: []findings.Finding{
