@@ -33,13 +33,6 @@ func (*Provider) DefaultPathCriticality() config.PathCriticality {
 	}
 }
 
-func (*Provider) ReviewPromptContext() string {
-	return "This is Go code. Favor idiomatic Go: explicit error handling with " +
-		"wrapped errors (fmt.Errorf with %w), small interfaces, no panics in " +
-		"library code, contexts for cancellation, and the standard project " +
-		"layout. Flag ignored errors, data races, and misuse of goroutines."
-}
-
 // AnalyzeSecurity runs the static (go/ast) security checks for Go.
 func (*Provider) AnalyzeSecurity(src providers.SourceFile) ([]findings.Finding, error) {
 	p, err := parse(src.Path, src.Content)
@@ -56,4 +49,13 @@ func (*Provider) AnalyzePractices(src providers.SourceFile) ([]findings.Finding,
 		return nil, err
 	}
 	return practiceChecks(p), nil
+}
+
+// AnalyzeSurface maps the auditable structural surface of a Go file.
+func (*Provider) AnalyzeSurface(src providers.SourceFile) ([]findings.SurfaceItem, error) {
+	p, err := parse(src.Path, src.Content)
+	if err != nil {
+		return nil, err
+	}
+	return surfaceItems(p), nil
 }
