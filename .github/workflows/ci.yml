@@ -44,7 +44,11 @@ jobs:
         # MCP-first: there is no audit CLI. The dogfooding gate is a Go
         # integration test that runs the real security sensor + Go provider over
         # codefit's own source and fails on any unconsented critical finding.
-        run: go test -race -run TestSelfAudit ./internal/sensors/security/
+        # Runs with CGO_ENABLED=0 — the mode codefit ships in. Race coverage of
+        # this test already happens in the `go test -race ./...` step above.
+        env:
+          CGO_ENABLED: "0"
+        run: go test -run TestSelfAudit ./internal/sensors/security/
 
   lint:
     name: golangci-lint
