@@ -12,6 +12,8 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 )
 
+func ptr(i int) *int { return &i }
+
 func sampleReport() report.AuditReport {
 	return report.AuditReport{
 		SchemaVersion:  report.SchemaVersion,
@@ -21,13 +23,43 @@ func sampleReport() report.AuditReport {
 		Language:       "go",
 		Score: scoring.ScoreSummary{
 			Global:      64,
-			ByDimension: map[findings.Dimension]int{findings.DimensionSecurity: 41},
+			ByDimension: map[findings.Dimension]*int{findings.DimensionSecurity: ptr(41)},
 		},
 		Blocked: true,
 		Findings: []findings.Finding{
 			{ID: "SEC-001", Dimension: findings.DimensionSecurity, Severity: findings.SeverityCritical,
 				File: "src/auth.go", Line: 12, Title: "Hardcoded key", Suggestion: "Use env var"},
 		},
+	}
+}
+
+func TestReportCarriesSurfaceAndCoverageNote(t *testing.T) {
+	r := sampleReport()
+	r.Surface = []findings.SurfaceItem{{Category: "authz", File: "h.go", Line: 3}}
+	r.CoverageNote = "Not audited: race conditions, architectural design flaws."
+
+	var buf bytes.Buffer
+	if err := (report.JSONRenderer{}).Render(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{`"surface"`, `"authz"`, `"coverage_note"`, "race conditions"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report JSON missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestReportShowsUnmeasuredDimensionAsNull(t *testing.T) {
+	r := sampleReport()
+	r.Score = scoring.Compute(
+		[]findings.Dimension{findings.DimensionSecurity}, nil, scoring.DefaultWeights())
+	var buf bytes.Buffer
+	if err := (report.JSONRenderer{}).Render(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"complexity": null`) {
+		t.Errorf("unmeasured dimension should render as null:\n%s", buf.String())
 	}
 }
 
@@ -46,56 +78,5 @@ func TestJSONRendererProducesCanonicalJSON(t *testing.T) {
 	score, ok := m["score"].(map[string]any)
 	if !ok || score["global"].(float64) != 64 {
 		t.Errorf("score.global missing or wrong: %v", m["score"])
-	}
-}
-
-func TestPlainRendererContainsScoreAndFindings(t *testing.T) {
-	var buf bytes.Buffer
-	if err := (report.PlainRenderer{}).Render(&buf, sampleReport()); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	for _, want := range []string{"64", "SEC-001", "src/auth.go"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("plain output missing %q:\n%s", want, out)
-		}
-	}
-	if !strings.Contains(strings.ToUpper(out), "SCORE") {
-		t.Errorf("plain output should show a SCORE header:\n%s", out)
-	}
-}
-
-func TestHTMLRendererNotImplemented(t *testing.T) {
-	err := (report.HTMLRenderer{}).Render(&bytes.Buffer{}, sampleReport())
-	if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("HTML renderer should report not-implemented, got: %v", err)
-	}
-}
-
-func TestChooseRenderer(t *testing.T) {
-	cases := map[string]string{
-		"json":     "report.JSONRenderer",
-		"html":     "report.HTMLRenderer",
-		"markdown": "report.PlainRenderer",
-		"":         "report.PlainRenderer", // default
-	}
-	for format, wantType := range cases {
-		r := report.ChooseRenderer(format, false, false)
-		if got := typeName(r); got != wantType {
-			t.Errorf("ChooseRenderer(%q) = %s, want %s", format, got, wantType)
-		}
-	}
-}
-
-func typeName(v any) string {
-	switch v.(type) {
-	case report.JSONRenderer:
-		return "report.JSONRenderer"
-	case report.PlainRenderer:
-		return "report.PlainRenderer"
-	case report.HTMLRenderer:
-		return "report.HTMLRenderer"
-	default:
-		return "unknown"
 	}
 }

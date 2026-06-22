@@ -29,9 +29,6 @@ type LanguageProvider interface {
 	// for this ecosystem (RF-11), overridable in .codefit.yaml.
 	DefaultPathCriticality() config.PathCriticality
 
-	// ReviewPromptContext returns language-specific context for the LLM review.
-	ReviewPromptContext() string
-
 	// AnalyzeSecurity runs the provider's language-specific static security
 	// analysis (the AST layer of the pyramid) and returns deterministic
 	// findings with their natural, pre-path-criticality severity.
@@ -39,4 +36,14 @@ type LanguageProvider interface {
 
 	// AnalyzePractices runs the provider's best-practice checks.
 	AnalyzePractices(src SourceFile) ([]findings.Finding, error)
+
+	// AnalyzeSurface maps the auditable structural surface of a file (PRD
+	// section 10): it enumerates, per category, every structure the agent
+	// should reason about (e.g. HTTP handlers to verify authorization on). It
+	// does not judge whether an item is vulnerable.
+	//
+	// Provisional: this parser-agnostic, provider-owns-analysis shape (ADR 0001)
+	// is revisited in Fase 1 against the real TypeScript provider, where a
+	// declarative SurfaceQuery model may replace it.
+	AnalyzeSurface(src SourceFile) ([]findings.SurfaceItem, error)
 }

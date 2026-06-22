@@ -3,10 +3,14 @@ package scoring
 import "github.com/codefit-cli/codefit/internal/core/findings"
 
 // ScoreSummary is the computed result of an audit: the global score and the
-// per-dimension breakdown, each on a 0-100 scale.
+// per-dimension breakdown, each on a 0-100 scale. A dimension whose sensor did
+// not run is "not measured" and reported as nil (JSON null) — distinct from a
+// dimension that was audited and scored 100. The global is re-normalized over
+// the measured dimensions only, so unmeasured dimensions never inflate it
+// (PRD section 21).
 type ScoreSummary struct {
-	Global      int                        `json:"global"`
-	ByDimension map[findings.Dimension]int `json:"by_dimension"`
+	Global      int                         `json:"global"`
+	ByDimension map[findings.Dimension]*int `json:"by_dimension"`
 }
 
 // severityPenalty is the point cost a finding of each severity subtracts from a
@@ -54,19 +58,29 @@ func DimensionScore(fs []findings.Finding) int {
 	return score
 }
 
-// Compute calculates the per-dimension scores for every weighted dimension and
-// the weighted global score. Dimensions with no findings score 100.
-func Compute(fs []findings.Finding, weights map[findings.Dimension]int) ScoreSummary {
-	byDim := make(map[findings.Dimension]int, len(weights))
-	for dim := range weights {
-		byDim[dim] = DimensionScore(findingsFor(fs, dim))
+// Compute calculates the per-dimension scores and the weighted global score.
+// Only the dimensions in measured are scored (others are reported as nil, "not
+// measured"); a measured dimension with no findings scores 100. The global is
+// the weighted average over the measured dimensions' weights only.
+func Compute(measured []findings.Dimension, fs []findings.Finding, weights map[findings.Dimension]int) ScoreSummary {
+	measuredSet := make(map[findings.Dimension]bool, len(measured))
+	for _, d := range measured {
+		measuredSet[d] = true
 	}
 
+	byDim := make(map[findings.Dimension]*int, len(weights))
 	totalWeight, weighted := 0, 0
 	for dim, w := range weights {
-		weighted += byDim[dim] * w
+		if !measuredSet[dim] {
+			byDim[dim] = nil // not measured
+			continue
+		}
+		score := DimensionScore(findingsFor(fs, dim))
+		byDim[dim] = &score
+		weighted += score * w
 		totalWeight += w
 	}
+
 	global := 0
 	if totalWeight > 0 {
 		global = weighted / totalWeight

@@ -29,8 +29,7 @@ func child(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 func TestRootHasAllSubcommands(t *testing.T) {
 	root := newRootCmd()
 	want := []string{
-		"init", "scan", "bench", "review", "run",
-		"baseline", "report", "mcp", "auth", "set", "status",
+		"init", "mcp", "update", "status", "version",
 	}
 	got := subcommandNames(root)
 	for _, name := range want {
@@ -42,18 +41,9 @@ func TestRootHasAllSubcommands(t *testing.T) {
 
 func TestRootHasGlobalFlags(t *testing.T) {
 	pf := newRootCmd().PersistentFlags()
-	for _, name := range []string{"config", "output", "out-file", "fail-on", "quiet", "no-llm", "verbose", "tui", "no-tui"} {
+	for _, name := range []string{"config", "quiet", "verbose"} {
 		if pf.Lookup(name) == nil {
 			t.Errorf("root is missing global flag --%s", name)
-		}
-	}
-}
-
-func TestScanHasItsFlags(t *testing.T) {
-	scan := child(t, newRootCmd(), "scan")
-	for _, name := range []string{"since", "sensor"} {
-		if scan.Flags().Lookup(name) == nil {
-			t.Errorf("scan is missing flag --%s", name)
 		}
 	}
 }
@@ -61,11 +51,6 @@ func TestScanHasItsFlags(t *testing.T) {
 func TestNestedCommands(t *testing.T) {
 	root := newRootCmd()
 	child(t, child(t, root, "mcp"), "serve")
-	auth := child(t, root, "auth")
-	for _, name := range []string{"login", "logout", "status"} {
-		child(t, auth, name)
-	}
-	child(t, child(t, root, "set"), "model")
 }
 
 // TestEverySubcommandHasShortHelp guards against shipping a command with no

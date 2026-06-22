@@ -21,20 +21,44 @@ Su principio rector es **"codefit audita lo que el desarrollador no va a ver
 nunca"** — si una dimensión es visible durante el desarrollo normal, está fuera
 de scope.
 
-Opera en **dos modos sobre el mismo núcleo de sensores**: modo **CLI**
-(reactivo, para terminal y CI/CD) y modo **MCP** (proactivo y stateless, donde
-agentes de IA llaman los sensores como herramientas durante la generación de
-código). La arquitectura separa un núcleo universal de language providers
+codefit es **MCP-first puro**: se opera **exclusivamente** como servidor MCP que
+los agentes de IA (Claude Code, OpenCode, Codex, Cursor, VSCode, etc.) consumen
+como un conjunto de herramientas. **codefit no tiene modo CLI de auditoría y no
+gestiona ningún LLM propio.** Corre las capas determinísticas (patrones + AST),
+mapea la **superficie** estructural de las clases que requieren razonamiento
+(IDOR, authz, over-fetching), y devuelve `findings + surface` al agente, que
+razona la superficie con **su propio LLM**. La inteligencia la pone el agente.
+Esto materializa la **democratización**: cualquiera que ya codee con IA puede
+auditar sin pagar API keys ni configurar infraestructura.
+
+El binario sí expone unos pocos comandos de **plumbing** (que no auditan y no
+usan LLM): `mcp serve`, `init`, `update`, `status`, `version`.
+
+La arquitectura separa un núcleo universal de language providers
 intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 
 - **Módulo Go:** `github.com/codefit-cli/codefit` (org GitHub `github.com/codefit-cli`).
-  El PRD v1.2 fue alineado a `codefit-cli` en todas sus referencias de org/módulo/repo.
 - **Licencia:** Apache 2.0
-- **Binario / config:** binario `codefit`, config de proyecto `.codefit.yaml`,
-  config global `~/.config/codefit/config.yaml`
-- **Fuente de verdad:** `docs/PRD-codefit-v1.2.md`. Ante **cualquier** duda de
+- **Binario / config:** binario `codefit`, config de proyecto `.codefit.yaml`.
+  (No hay config global de LLM ni de auth — codefit no gestiona modelos.)
+- **Fuente de verdad:** `docs/PRD-codefit-v1.3.md`. Ante **cualquier** duda de
   scope o diseño, consultarlo **antes** de decidir. El análisis cuantitativo
   (tokens, costos, tiempos) vive en `docs/codefit-analisis-tokens-costos.md`.
+
+---
+
+## Principio de autonomía del developer (INNEGOCIABLE)
+
+**Siempre decide el developer. Nunca pasamos por encima de sus decisiones.
+Siempre se informan las consecuencias.** Es transversal a todo el diseño:
+
+- El bloqueo de commit por crítico lo **configura el dev** al aceptar (o no) que
+  codefit enriquezca el `AGENT.md`. codefit propone; el dev dispone.
+- El consentimiento de seguridad siempre **informa la consecuencia** y deja
+  registro auditable (`accepted_by`, `accepted_at`, `reason`).
+- codefit **modifica el `AGENT.md` solo con confirmación explícita** del dev.
+- Cuando codefit señala un bloqueo, explica *por qué* y *qué pasa si igual se
+  avanza* — nunca un "no" sin fundamento.
 
 ---
 
@@ -48,8 +72,8 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 - Cada función pública necesita tests **antes** de implementarse.
 - Cobertura objetivo: **> 80%** en `internal/core` y `internal/sensors`.
 - Los tests son parte del entregable, no un extra opcional.
-- codefit **se audita a sí mismo**: el código sin tests será detectado por su
-  propio sensor de tests. Predicamos con el ejemplo.
+- codefit **se audita a sí mismo** (ver más abajo): el código sin tests será
+  detectado por su propio sensor de tests. Predicamos con el ejemplo.
 
 ### SDD (Specification-Driven Development)
 
@@ -60,6 +84,13 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 - Para features grandes: escribir la spec en `docs/specs/<componente>.md`
   primero.
 - Flujo: **spec → tests (TDD) → implementación → verificación contra spec**.
+
+### Consulta antes de codear
+
+El autor del proyecto trabaja como **arquitecto de software** y usa la IA como
+desarrolladora. **Antes de escribir código de alcance no trivial, presentar el
+plan y esperar confirmación.** No avanzar a implementación de un componente
+nuevo sin que el enfoque esté acordado.
 
 ---
 
@@ -72,23 +103,39 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 - **Binario único**, sin dependencias de runtime.
 - **Parsing de Go:** usar `go/ast` de la stdlib (no tree-sitter).
 - **Otros lenguajes (fases futuras):** tree-sitter **puro Go, sin CGO**.
+- **codefit nunca llama a un LLM.** Las dos capas que produce son determinístico
+  (certeza 1.0) y superficie mapeada (a razonar por el agente). Nada de clientes
+  de modelos, API keys ni wizards de auth en el código.
 
 ---
 
-## Arquitectura (resumen del PRD, secciones 13–14)
+## Arquitectura (resumen del PRD, secciones 15–16)
 
 - **Tres capas:** `core/` (universal) → `sensors/` (lógica de auditoría) →
   `providers/` (específico por lenguaje).
 - El **núcleo NUNCA depende de un lenguaje específico**. Solo conoce la interface
   `LanguageProvider`.
 - **Agregar un lenguaje = implementar `LanguageProvider`**, sin tocar el núcleo,
-  los sensores, el MCP server, el CLI ni el reporting. Si agregar un lenguaje
-  obliga a tocar el núcleo, el diseño falló.
-- **Dos modos sobre el mismo núcleo:** CLI y MCP (stateless). El MCP server es un
-  adapter delgado, no reimplementa lógica.
-- **Pirámide de filtrado: regex → AST → LLM.** Nunca mandar al LLM lo que una
-  capa más barata puede descartar o resolver. El orden de ejecución es una
-  decisión de costo, no arbitraria.
+  los sensores, el MCP server ni el reporting. Si agregar un lenguaje obliga a
+  tocar el núcleo, el diseño falló.
+- **El MCP server es un adapter delgado**, no reimplementa lógica: traduce las
+  llamadas a las tools (`codefit-scan-security`, `codefit-surface-*`,
+  `codefit-scan-all`, `codefit-review-code`, `codefit-coverage`, etc.) a
+  invocaciones del núcleo. Stateless.
+- **Pirámide de filtrado: capa 0 (cambios) → capa 1 (regex) → capa 2 (AST +
+  reglas + mapeo de superficie).** codefit nunca pasa de la capa 2; la capa 3
+  (razonamiento) la ejecuta el agente sobre el `surface` devuelto. Nunca enviar
+  al agente para razonar lo que una capa más barata resuelve con certeza.
+- **Mapeo de superficie completa, no quirúrgico:** el AST no decide *si* hay
+  vulnerabilidad — enumera *toda* la superficie auditable de cada categoría, para
+  que el agente razone sin puntos ciegos (PRD §10).
+- **Motor de reglas:** matcher propio en Go que interpreta un **subset del formato
+  Semgrep** (operadores core: `pattern`, `pattern-either`, `patterns`,
+  `pattern-not`, `pattern-inside`, metavariables, `metavariable-regex`). **No** se
+  embebe OpenGrep/OCaml. **No** se implementa `mode: taint` — su función la cubre
+  el razonamiento del agente sobre la superficie (PRD §17).
+- **CVEs:** vía **OSV.dev** (gratis, sin API key). codefit no mantiene base
+  propia (PRD §18).
 
 ---
 
@@ -98,6 +145,8 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 - **Logging:** `slog` estructurado.
 - **Nombres:** descriptivos, sin abreviaturas crípticas.
 - **Cada paquete** tiene un `doc.go` con su propósito.
+- **Tools MCP:** nombres con prefijo `codefit-` y guión medio; familia
+  `codefit-surface-*` para el mapeo de superficie.
 - **Commits:** conventional commits (`feat:`, `fix:`, `test:`, `docs:`,
   `refactor:`). Sin atribución de IA ni `Co-Authored-By`.
 
@@ -120,69 +169,42 @@ go test -cover ./internal/sensors/security/
 
 # Verificación obligatoria antes de un PR (lo que corre el CI)
 CGO_ENABLED=0 go build ./...        # el no-CGO no es negociable
-go vet ./... && go test -race ./...
-./bin/codefit scan --no-llm --fail-on critical   # self-audit; debe quedar verde
+go vet ./... && go test -race ./...  # incluye self-audit + test de integración MCP
 ```
+
+**Self-audit:** en el modelo MCP-first puro, el self-audit es un **test de
+integración Go**, no un comando de terminal. Un test corre los sensores (vía su
+API interna de Go) sobre el propio código de codefit y asegura que no haya
+findings críticos. Un test de integración MCP aparte valida la capa de
+transporte (levantar el server, llamar una tool, verificar la respuesta). Ambos
+viven en `go test ./...` y corren en cada PR (PRD §26).
 
 **Vulnerabilidades de dependencias:** `govulncheck` está **pinneado a `@v1.1.4`**
 en `.github/workflows/security.yml`. Las versiones `>= ~v1.2` crashean
 (`panic: ForEachElement ... *types.TypeParam`) analizando los generics de
 `charmbracelet/huh`. No subir el pin hasta que el bug upstream esté resuelto.
 
-**Ejecutar el binario:** `scan` requiere un `.codefit.yaml` existente. `codefit
-init` todavía es un stub, así que en un proyecto nuevo hay que escribir el config
-a mano (ver el `.codefit.yaml` de la raíz como ejemplo).
-
 ---
 
-## Arquitectura del código (as-built)
-
-El árbol real difiere del esbozo del PRD §13 en algunos puntos; esto es lo que
-está construido y por qué:
-
-```
-cmd/codefit/              # main: llama a internal/cli.Execute()
-internal/
-  cli/                    # cobra: 1 archivo por subcomando. scan/report/auth/set/status
-                          #   funcionan; init/bench/review/run/baseline/mcp serve son stubs.
-  config/                 # parser .codefit.yaml (validación ubicada path:línea) + config global
-  auth/                   # keychain (go-keyring) + fallback AES-256-GCM; wizard (huh); resolver
-  core/                   # NÚCLEO universal, language-agnostic:
-    findings/             #   tipos base (Finding, Severity, Dimension, SensorResult) — HOJA
-    context/              #   AuditContext (NO va en findings/, ver abajo)
-    scoring/              #   ScoreSummary, Compute, IsBlocked
-    report/               #   AuditReport canónico + renderers JSON/Plain/HTML + detección TTY
-    pipeline/             #   pirámide (FilterLayer, Pipeline con early-exit) — construido, no wireado aún
-    cache/                #   caché por hash SHA-256 — construido, no wireado aún
-    llm/                  #   LLMClient + AnthropicClient (HTTP, prompt caching)
-  sensors/                # sensores agnósticos al lenguaje:
-    security/             #   pirámide regex (capa 1) + AST del provider (capa 2); capa LLM = skeleton
-  providers/              # un provider por lenguaje:
-    golang/               #   provider Go con go/ast (parse, security, practices)
-  sandbox/                # gestor de contenedores Docker (para el sensor de complejidad)
-  version/                # Version/Commit/BuildDate inyectados por ldflags
-```
-
-**Reglas de layering no obvias (respetarlas o se rompe el diseño):**
+## Reglas de layering no obvias (respetarlas o se rompe el diseño)
 
 - **`core/findings/` es una HOJA**: no importa ningún otro paquete de codefit.
-  Por eso `AuditContext` vive en `core/context/` y no en `findings/` — tiene un
-  `*config.Config`, y si estuviera en `findings/` la capa de tipos base
-  dependería del parser de config (ciclo).
-- **El núcleo NUNCA importa un provider concreto.** El CLI (`scan.go
-  resolveProvider`) es el único lugar que mapea `language → provider`. Los
-  sensores solo conocen la interface `providers.LanguageProvider`.
+  `AuditContext` vive en `core/context/` y no en `findings/` (tiene un
+  `*config.Config`; ponerlo en `findings/` crearía un ciclo con el parser).
+- **El núcleo NUNCA importa un provider concreto.** El adapter MCP (o el plumbing
+  que resuelva `language → provider`) es el único lugar que mapea lenguaje a
+  provider. Los sensores solo conocen la interface `providers.LanguageProvider`.
 - **La interface `LanguageProvider` es agnóstica al parser** (ver
-  `docs/decisions/0001-...md`): expone `AnalyzeSecurity/AnalyzePractices(SourceFile)
-  ([]Finding, error)`, NO queries de tree-sitter. El provider es dueño de su
-  parser. **Go usa `go/ast` de la stdlib, no tree-sitter** (decisión cerrada para
-  Go; tree-sitter queda para TS/Java/Python).
-- **Severidad contextual**: el sensor emite findings con su severidad "natural";
-  el ajuste por `path_criticality` (test baja un nivel, example → info) lo aplica
-  el sensor con `cfg.PathCriticalityFor(path)`, no el provider.
-- **El bloqueo de deploy NO es configurable**: `scoring.IsBlocked` (critical de
-  seguridad sin consent ni baseline) fuerza `Blocked: true` y exit ≠ 0
-  independientemente de `--fail-on`.
+  `docs/decisions/`): el provider es dueño de su parser. **Go usa `go/ast`**;
+  tree-sitter puro Go queda para TS/Java/Python.
+- **Severidad contextual:** el sensor emite findings con su severidad "natural";
+  el ajuste por `path_criticality` lo aplica el sensor con
+  `cfg.PathCriticalityFor(path)`, no el provider. Findings de seguridad en
+  archivos de test se degradan a `info` (configurable, PRD RF-10).
+- **El bloqueo NO es configurable:** `scoring.IsBlocked` (critical de seguridad
+  sin consent ni baseline) fuerza `Blocked: true`. codefit **informa**
+  `blocked`; la conducta de bloqueo del commit la ejecuta el agente vía el
+  `AGENT.md` (codefit no tiene poder sobre el git del usuario).
 
 **Decisiones de arquitectura** se registran como ADR en `docs/decisions/`.
 
@@ -205,15 +227,17 @@ Protocolo de sesión:
 
 ---
 
-## Estado actual
+## Rollout (PRD §25)
 
-- **Fase 0 (Foundations): completa.** Estructura de tres capas, interfaces
-  `Sensor` y `LanguageProvider`, Go provider (go/ast), sensor de seguridad,
-  `scan` end-to-end con self-audit, núcleo (scoring/report/llm/cache/pipeline),
-  config + auth, CI/CD + goreleaser. Todo compila sin CGO y se auto-audita verde.
-- **Diferido a fases siguientes** (construido pero no wireado, o stub): conectar
-  `cache`/`pipeline` al scan; `--since` incremental (RF-08); aplicación de
-  supresiones/baseline (RF-10); `init`/`bench`/`review`/`run`/`baseline`/`mcp
-  serve`; capa LLM del sensor de seguridad.
-- **Próximo (PRD §21):** Fase 1 — TypeScript provider + sensor de seguridad
-  completo con capa 3 (LLM). Ver el rollout en el PRD, sección 21.
+- **Fase 0** — Foundations + núcleo + Go provider (self-audit).
+- **Fase 1** — TypeScript provider + sensor de seguridad completo (con mapeo de
+  superficie) + **MCP server funcional** + `codefit init` (enriquece `AGENT.md`
+  con confirmación) + baseline.
+- **Fase 2** — Sensor de DB (OLTP/OLAP, índices, vistas, procs, N+1).
+- **Fase 3** — Code review + best practices + tests + riesgo de regresión.
+- **Fase 4** — Knowledge packs + `codefit update` + manifiesto de cobertura
+  (`COVERAGE.md` + tool `codefit-coverage`) + release público v0.1.0.
+- **Post-v1.0** — Java (v1.1), Python (v1.2). El sensor de complejidad empírica
+  (sandbox Docker) se evalúa post-v1.0 por requerir ejecución de código.
+
+Ver el rollout completo y los criterios de "done" en el PRD, sección 25.

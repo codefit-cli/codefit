@@ -2,7 +2,6 @@ package report
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -19,17 +18,24 @@ const SchemaVersion = "1.0"
 // AuditReport is the canonical, language-agnostic audit result. JSON is the
 // single source of truth; every renderer derives from this struct.
 type AuditReport struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	CodefitVersion string                  `json:"codefit_version"`
-	Timestamp      time.Time               `json:"timestamp"`
-	Project        string                  `json:"project"`
-	Language       string                  `json:"language"`
-	Commit         string                  `json:"commit,omitempty"`
-	Score          scoring.ScoreSummary    `json:"score"`
-	Blocked        bool                    `json:"blocked"`
-	BlockReason    string                  `json:"block_reason,omitempty"`
-	Baseline       *BaselineSummary        `json:"baseline,omitempty"`
-	Findings       []findings.Finding      `json:"findings"`
+	SchemaVersion  string               `json:"schema_version"`
+	CodefitVersion string               `json:"codefit_version"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Project        string               `json:"project"`
+	Language       string               `json:"language"`
+	Commit         string               `json:"commit,omitempty"`
+	Score          scoring.ScoreSummary `json:"score"`
+	Blocked        bool                 `json:"blocked"`
+	BlockReason    string               `json:"block_reason,omitempty"`
+	Baseline       *BaselineSummary     `json:"baseline,omitempty"`
+	Findings       []findings.Finding   `json:"findings"`
+	// Surface is the auditable structural surface the agent must reason about
+	// (PRD section 10), aggregated across sensors.
+	Surface []findings.SurfaceItem `json:"surface,omitempty"`
+	// CoverageNote states which classes of problems were not audited (derived
+	// from the coverage manifest), so the report always informs its own limits
+	// (PRD section 21). Populated once the coverage manifest exists (Fase C).
+	CoverageNote   string                  `json:"coverage_note,omitempty"`
 	RegressionRisk *RegressionRisk         `json:"regression_risk,omitempty"`
 	SensorResults  []findings.SensorResult `json:"sensor_results"`
 }
@@ -56,22 +62,15 @@ type RegressionItem struct {
 	Reason    string   `json:"reason,omitempty"`
 }
 
-// Format identifies an output renderer.
-type Format string
-
-const (
-	FormatJSON     Format = "json"
-	FormatMarkdown Format = "markdown"
-	FormatHTML     Format = "html"
-)
-
 // Renderer writes an AuditReport to w. Renderers never reach into the core;
 // they only consume the canonical report.
 type Renderer interface {
 	Render(w io.Writer, r AuditReport) error
 }
 
-// JSONRenderer writes the canonical JSON, indented.
+// JSONRenderer writes the canonical JSON, indented. In the MCP-first model the
+// report is delivered as JSON to the agent; this is the only renderer in v1
+// (an HTML renderer is a future addition over the same canonical report).
 type JSONRenderer struct{}
 
 func (JSONRenderer) Render(w io.Writer, r AuditReport) error {
@@ -81,27 +80,4 @@ func (JSONRenderer) Render(w io.Writer, r AuditReport) error {
 		return fmt.Errorf("encoding report JSON: %w", err)
 	}
 	return nil
-}
-
-// HTMLRenderer is a placeholder until the standalone HTML report is built.
-type HTMLRenderer struct{}
-
-func (HTMLRenderer) Render(io.Writer, AuditReport) error {
-	return errors.New("HTML renderer not yet implemented")
-}
-
-// ChooseRenderer selects a renderer for the output format. For markdown the
-// plain renderer is used regardless of TTY today; a future TUI renderer will
-// branch on isTTY && !noTUI here (PRD §18).
-func ChooseRenderer(format string, isTTY, noTUI bool) Renderer {
-	switch Format(format) {
-	case FormatJSON:
-		return JSONRenderer{}
-	case FormatHTML:
-		return HTMLRenderer{}
-	default:
-		_ = isTTY
-		_ = noTUI
-		return PlainRenderer{}
-	}
 }

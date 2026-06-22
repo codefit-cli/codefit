@@ -50,3 +50,19 @@ diverges from the PRD's tree-sitter-shaped interface sketch (§14).
   contract backed by tree-sitter, with no change to the core or the sensors.
 - The provider, not the core, decides how to parse — the right place for that
   knowledge to live.
+
+## Addendum (v1.3 alignment) — surface mapping shape
+
+The same parser-agnostic, provider-owns-analysis style was extended to surface
+mapping (PRD section 10): the provider exposes
+`AnalyzeSurface(SourceFile) ([]findings.SurfaceItem, error)` instead of the PRD
+section 16 sketch `SurfaceQuery() []SurfaceQuery`. The Go provider's first
+category is HTTP handlers → `authz` surface.
+
+**This shape is PROVISIONAL.** It is revisited in Fase 1 against the real
+TypeScript provider, where a declarative `SurfaceQuery` model (run by a shared
+`core/surface` framework) may replace per-provider `AnalyzeSurface`. The choice
+between "provider walks its AST" and "provider declares queries, core runs them"
+is best made with two concrete languages in hand, not one. `ReviewPromptContext`
+was removed in the same alignment — codefit no longer runs an LLM review, so a
+provider no longer supplies LLM prompt context.

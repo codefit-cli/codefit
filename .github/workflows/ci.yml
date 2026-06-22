@@ -40,12 +40,15 @@ jobs:
           GOOS=linux   GOARCH=arm64 go build -o /dev/null ./cmd/codefit
           GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/codefit
 
-      - name: self-audit (codefit scans itself)
-        # No ANTHROPIC_API_KEY needed: --no-llm runs the static layers only.
-        # Fails the build if codefit finds critical findings in its own code.
-        run: |
-          go build -o bin/codefit ./cmd/codefit
-          ./bin/codefit scan --no-llm --fail-on critical
+      - name: self-audit (codefit audits its own code)
+        # MCP-first: there is no audit CLI. The dogfooding gate is a Go
+        # integration test that runs the real security sensor + Go provider over
+        # codefit's own source and fails on any unconsented critical finding.
+        # Runs with CGO_ENABLED=0 — the mode codefit ships in. Race coverage of
+        # this test already happens in the `go test -race ./...` step above.
+        env:
+          CGO_ENABLED: "0"
+        run: go test -run TestSelfAudit ./internal/sensors/security/
 
   lint:
     name: golangci-lint

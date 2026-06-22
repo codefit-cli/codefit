@@ -50,9 +50,6 @@ func TestIdentity(t *testing.T) {
 	if len(pc.Production) == 0 || len(pc.Test) == 0 {
 		t.Errorf("DefaultPathCriticality incomplete: %+v", pc)
 	}
-	if p.ReviewPromptContext() == "" {
-		t.Error("ReviewPromptContext should describe the Go ecosystem")
-	}
 }
 
 func TestParseErrorIsReturned(t *testing.T) {
