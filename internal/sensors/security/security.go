@@ -113,7 +113,55 @@ func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, []findings.Surfa
 	if err != nil {
 		return nil, nil, err
 	}
-	return out, surface, nil
+	return dedupeFindings(out), surface, nil
+}
+
+// dedupeFindings collapses the same finding reported twice — an identical
+// (File, Line, ID) — keeping the highest-severity copy. The layer-1 regex
+// (credential SHAPE) and a provider's layer-2 AST analysis (credential NAME)
+// both emit SEC-001 and can fire on the same line (e.g. apiKey = "sk-ant-…");
+// without this they would double-report. The criterion is deliberately STRICT:
+// only an identical (File, Line, ID) is a duplicate. Different IDs on one line
+// are different vulnerabilities and both survive — the sensor never decides that
+// two distinct findings are "the same".
+func dedupeFindings(in []findings.Finding) []findings.Finding {
+	type key struct {
+		file string
+		line int
+		id   string
+	}
+	seen := make(map[key]int, len(in)) // key -> index of the kept finding in out
+	out := make([]findings.Finding, 0, len(in))
+	for _, f := range in {
+		k := key{f.File, f.Line, f.ID}
+		if idx, ok := seen[k]; ok {
+			if severityRank(f.Severity) > severityRank(out[idx].Severity) {
+				out[idx] = f
+			}
+			continue
+		}
+		seen[k] = len(out)
+		out = append(out, f)
+	}
+	return out
+}
+
+// severityRank orders severities so dedupeFindings keeps the most severe copy.
+func severityRank(s findings.Severity) int {
+	switch s {
+	case findings.SeverityCritical:
+		return 5
+	case findings.SeverityHigh:
+		return 4
+	case findings.SeverityMedium:
+		return 3
+	case findings.SeverityLow:
+		return 2
+	case findings.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // apiKeyPatterns matches well-known credential shapes (layer 1).
