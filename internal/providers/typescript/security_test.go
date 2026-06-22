@@ -90,6 +90,32 @@ const password = `+"`${process.env.PASSWORD}`"+`;   // template literal: dynamic
 	}
 }
 
+func TestSecurity_DynamicEval(t *testing.T) {
+	// eval / new Function on a NON-constant argument is dynamic code execution.
+	// The danger is the dynamic argument; eval of a constant string literal is
+	// not the vulnerability (ADR 0004 keeps it local to the call).
+	vuln := analyze(t, "eval_vuln.ts", `
+function run(userInput: string, req: any) {
+  eval(userInput);
+  new Function(req.body.code);
+  eval("prefix" + userInput);
+}
+`)
+	if !hasRule(vuln, "SEC-014") {
+		t.Errorf("eval/new Function with a dynamic argument must fire SEC-014, got %+v", vuln)
+	}
+
+	// eval/new Function of a CONSTANT string literal is static code — unusual,
+	// but not the injection vulnerability — and must stay silent.
+	clean := analyze(t, "eval_clean.ts", `
+eval("1 + 1");
+new Function("return 42");
+`)
+	if hasRule(clean, "SEC-014") {
+		t.Errorf("eval/new Function of a constant string literal must NOT fire SEC-014, got %+v", clean)
+	}
+}
+
 func TestSecurity_InsecureRandom(t *testing.T) {
 	// Math.random() is not cryptographically secure; using it for a security
 	// value (token, nonce, salt…) is the vulnerability. The variable name is the
