@@ -12,8 +12,10 @@
 *.test
 
 # Code coverage profiles and other test artifacts
+# (specific extensions — NOT coverage.* which would swallow coverage.go source)
 *.out
-coverage.*
+coverage.html
+coverage.txt
 *.coverprofile
 profile.cov
 
