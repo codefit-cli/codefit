@@ -12,6 +12,11 @@ builds:
     binary: codefit
     env:
       - CGO_ENABLED=0
+    # Embed only the TypeScript/TSX grammars, not all ~205 (ADR 0002 caveat 1).
+    # Without this the released binary users download would ship every grammar.
+    # Keep in sync with the Makefile TAGS.
+    flags:
+      - -tags=grammar_subset,grammar_subset_typescript,grammar_subset_tsx
     goos:
       - linux
       - windows
