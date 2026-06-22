@@ -81,13 +81,27 @@ func compilePattern(src string, parse func(string) (syntax.Node, error)) (syntax
 	return unwrap(root), nil
 }
 
-// unwrap descends through single-child program/expression_statement wrappers to
-// the significant pattern node.
+// unwrap descends through single-child trivial wrappers to the significant
+// pattern node. program and expression_statement wrap any top-level pattern;
+// parenthesized_expression wraps a pattern written in parentheses, which lets a
+// rule isolate a sub-expression as its pattern (e.g. an object literal:
+// "({__html: $A + $B})" unwraps to the object so it matches that object wherever
+// it occurs, regardless of the syntax around it). Parentheses are semantically
+// transparent — "(expr)" is "expr" — so peeling them never changes meaning.
 func unwrap(n syntax.Node) syntax.Node {
-	for n != nil && (n.Type() == "program" || n.Type() == "expression_statement") && n.NamedChildCount() == 1 {
+	for n != nil && isTrivialWrapper(n.Type()) && n.NamedChildCount() == 1 {
 		n = n.NamedChild(0)
 	}
 	return n
+}
+
+func isTrivialWrapper(typ string) bool {
+	switch typ {
+	case "program", "expression_statement", "parenthesized_expression":
+		return true
+	default:
+		return false
+	}
 }
 
 // Match runs the compiled rules over the tree rooted at root and returns the
