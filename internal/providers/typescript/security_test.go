@@ -64,6 +64,32 @@ function fingerprint(data: string) {
 	}
 }
 
+func TestSecurity_HardcodedSecret(t *testing.T) {
+	// A credential-named variable assigned a static string literal is a hardcoded
+	// secret — conclusive over the declarator subtree (ADR 0004).
+	vuln := analyze(t, "secret_vuln.ts", `
+const apiKey = "sk-live-abc123def456";
+const password = 'hunter2';
+const authToken = "Bearer eyJhbGciOi";
+`)
+	if !hasRule(vuln, "SEC-001") {
+		t.Errorf("credential-named var assigned a string literal must fire SEC-001, got %+v", vuln)
+	}
+
+	// The four classic false positives of secret detection, all of which MUST
+	// stay silent — this is what separates a usable rule from a noisy one:
+	clean := analyze(t, "secret_clean.ts", `
+const apiKey = getApiKey();                       // value is a call, not a literal
+const secret = "";                                 // empty string, nothing to leak
+const token = process.env.TOKEN;                   // value is a member access
+const userName = "bob";                            // name is not credential-like
+const password = `+"`${process.env.PASSWORD}`"+`;   // template literal: dynamic, not hardcoded
+`)
+	if hasRule(clean, "SEC-001") {
+		t.Errorf("none of the clean secret cases (call, empty, member, non-credential name, interpolated template) may fire SEC-001, got %+v", clean)
+	}
+}
+
 func TestSecurity_InsecureRandom(t *testing.T) {
 	// Math.random() is not cryptographically secure; using it for a security
 	// value (token, nonce, salt…) is the vulnerability. The variable name is the
