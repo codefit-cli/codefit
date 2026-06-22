@@ -99,10 +99,33 @@ and a navigable AST.
    runtime. The provider **must** test against large real TS files to confirm the
    caps don't bite typical project code; if they do, fall back to the WASM approach.
 
+## Caveat resolution (Prompt 1.1)
+
+Both caveats were resolved when the parsing layer was built:
+
+1. **Binary size — accepted trade-off at ~5.4 MB.** The `grammar_subset`
+   build tags (`grammar_subset grammar_subset_typescript grammar_subset_tsx`,
+   wired into both the Makefile and goreleaser) bring a binary that imports the
+   provider from **30 MB → 5.4 MB** (stripped). It does **not** reach the
+   ~2.5 MB of today's binary, and that is understood: the `size`/`nm` breakdown
+   shows the residual is almost entirely **`text` (code), not `data`** — i.e. the
+   subset removed the other ~203 grammar blobs, and what remains is the
+   gotreesitter **runtime itself** (the GLR parser plus 116 external scanners,
+   all registered in a global `init()` map so dead-code elimination cannot drop
+   them). ~5 MB is the irreducible cost of a full TypeScript parser in pure Go
+   without forking gotreesitter. **Accepted**: the single, CGO-free,
+   cross-compiling binary is preserved; the size is the price of TS support.
+
+2. **Safety caps — passed on real code.** The exit-criterion stress tests parse
+   real project files with `HasError()==false`: microsoft/vscode `strings.ts`
+   (1411 lines), excalidraw `Actions.tsx` (1344 lines), and an ~80-level
+   deeply-nested file (stack cap). The caps do not bite typical project code, so
+   the WASM fallback is not needed.
+
 ## Consequences
 
 - The TypeScript provider can use gotreesitter without CGO; the single, clean
-  cross-compile guarantee holds.
+  cross-compile guarantee holds, at ~5.4 MB once the provider is wired in.
 - This audit is the first application of the project's
   [dependency policy](../../SECURITY.md#dependency-policy); future core
   dependencies follow the same checklist and get the same ADR treatment.
