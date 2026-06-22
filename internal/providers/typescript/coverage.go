@@ -16,11 +16,11 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 	return coverage.Manifest{
 		Language: "typescript",
 		Deterministic: []string{
-			"Hardcoded secrets: API keys, tokens, passwords and connection strings written as string literals, including variables named like a credential that are assigned a literal value.",
-			"Weak cryptography: MD5 or SHA-1 used for hashing, and Math.random() used to generate security tokens.",
-			"Dangerous code evaluation: eval() or new Function() called with a non-constant argument.",
-			"SQL injection built directly in the database call — a query assembled inline by template literal or string concatenation with a variable, such as db.query(`SELECT ... ${userInput}`).",
-			"Cross-site scripting through React's dangerouslySetInnerHTML when the HTML is built inline rather than from a constant.",
+			"Hardcoded secrets: a variable whose NAME looks like a credential (password, apiKey, token, secret, authToken, …) assigned a static string literal. codefit matches by the variable name plus a literal value — it does NOT scan values for the shape of an API key, a private key, or a connection string, so a hardcoded secret that is not tied to a credential-named variable is not caught here.",
+			"Weak cryptography: MD5 or SHA-1 hashing — called directly (md5(x), sha1(x)) or via createHash('md5'|'sha1'). These are flagged WHEREVER they appear; a non-security use such as a cache key or an ETag may therefore be a false positive, because deciding whether a hash is security-relevant requires following the data, which is surface. Also flagged: Math.random() assigned to a security-named variable (token, nonce, salt, …), which is not a cryptographically secure source.",
+			"Dangerous code evaluation: eval() or new Function() called with a non-constant argument — an identifier, a call, a concatenation, or an interpolated template. A constant string-literal argument is static code and is not flagged.",
+			"SQL injection built directly in the database call — a query passed to .query() or .execute() that is assembled inline by string concatenation or by an interpolated template literal, such as db.query(`SELECT ... ${userInput}`). When the query is assembled through an intermediate variable instead, that is surface (below), not here.",
+			"Cross-site scripting through React's dangerouslySetInnerHTML when the __html value is built inline — by concatenation or by an interpolated template. When __html is set from a plain variable, its safety depends on earlier sanitization, which is surface (below), not here; a constant __html is not flagged.",
 		},
 		Reasoning: []string{
 			"SQL injection where the query is assembled in steps through intermediate variables (for example: const q = \"...\" + input; db.query(q)) — codefit maps the database calls as surface so the agent can reason about where the query text came from.",

@@ -1,0 +1,17 @@
+rules:
+  # Dynamic code execution. eval($X)/new Function($X) match the call with any
+  # argument node; metavariable-regex then keeps only the dangerous case — the
+  # argument is NOT a plain string literal. A constant `eval("1+1")` is static
+  # code, not injection, so it stays silent. The regex excludes only the single-
+  # and double-quote openers, so identifiers, calls, concatenations and template
+  # literals (which can interpolate) all fire.
+  - id: SEC-014
+    message: "Dynamic code execution via eval / new Function"
+    suggestion: "Avoid eval/new Function on dynamic input; use JSON.parse, a lookup table, or a sandbox"
+    severity: high
+    dimension: security
+    pattern-either:
+      - "eval($X)"
+      - "new Function($X)"
+    metavariable-regex:
+      $X: "^[^\"']"

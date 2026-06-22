@@ -1,0 +1,25 @@
+rules:
+  # XSS via React dangerouslySetInnerHTML — INLINE concatenation case (ADR 0004).
+  # We match the {__html: $A + $B} object directly, not the JSX element: __html is
+  # React's unambiguous signal for raw-HTML injection, and matching the object
+  # makes the rule independent of how many other attributes the element carries.
+  # The pattern is written parenthesized so it isolates the object literal.
+  - id: SEC-079
+    message: "XSS: HTML concatenated inline into dangerouslySetInnerHTML"
+    suggestion: "Sanitize with DOMPurify before setting __html, or render escaped text instead of raw HTML"
+    severity: high
+    dimension: security
+    pattern: "({__html: $A + $B})"
+
+  # XSS via dangerouslySetInnerHTML — INLINE interpolated-template case.
+  # metavariable-regex keeps only a template literal (starts with a backtick) that
+  # actually interpolates (contains `${`). A plain variable __html is surface, not
+  # a rule, and stays silent.
+  - id: SEC-080
+    message: "XSS: interpolated template assigned inline to dangerouslySetInnerHTML"
+    suggestion: "Sanitize with DOMPurify before setting __html; never interpolate untrusted values into raw HTML"
+    severity: high
+    dimension: security
+    pattern: "({__html: $Q})"
+    metavariable-regex:
+      $Q: '^`.*\$\{'

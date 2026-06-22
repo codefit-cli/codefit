@@ -10,14 +10,17 @@ package typescript
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	ts "github.com/odvcencio/gotreesitter"
 	"github.com/odvcencio/gotreesitter/grammars"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/ruleengine"
 	"github.com/codefit-cli/codefit/internal/core/syntax"
 	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/rules"
 )
 
 // Provider implements providers.LanguageProvider for TypeScript and TSX.
@@ -60,11 +63,56 @@ func (*Provider) Parse(src providers.SourceFile) (syntax.Node, error) {
 	return tsNode{n: tree.RootNode(), lang: lang, src: src.Content}, nil
 }
 
-// --- Rules / surface: STUB (implemented in Prompts 1.2 / 1.3) ---
+// --- Security rules (Prompt 1.2) ---
 
-// AnalyzeSecurity is a stub; the deterministic security rules arrive in Prompt 1.2.
-func (*Provider) AnalyzeSecurity(providers.SourceFile) ([]findings.Finding, error) {
-	return nil, nil
+// securityRules compiles the embedded TypeScript security rules exactly once for
+// the process. Compilation parses each pattern with this provider, so the rules
+// and the analysed code share one parser; a malformed rule fails the whole load
+// loudly (it is a packaging bug, not a per-file condition).
+var (
+	secRulesOnce sync.Once
+	secRules     []ruleengine.CompiledRule
+	secRulesErr  error
+)
+
+func securityRules() ([]ruleengine.CompiledRule, error) {
+	secRulesOnce.Do(func() {
+		raw, err := ruleengine.LoadFS(rules.FS, "typescript/security")
+		if err != nil {
+			secRulesErr = fmt.Errorf("loading typescript security rules: %w", err)
+			return
+		}
+		compiled, err := ruleengine.Compile(raw, parsePattern)
+		if err != nil {
+			secRulesErr = fmt.Errorf("compiling typescript security rules: %w", err)
+			return
+		}
+		secRules = compiled
+	})
+	return secRules, secRulesErr
+}
+
+// parsePattern parses a rule's pattern string into a syntax.Node. Patterns are
+// TypeScript expressions; the .ts grammar is used (JSX patterns, needed only by
+// the XSS rule, are handled when that rule lands).
+func parsePattern(src string) (syntax.Node, error) {
+	return (&Provider{}).Parse(providers.SourceFile{Path: "pattern.ts", Content: []byte(src)})
+}
+
+// AnalyzeSecurity runs the embedded deterministic security rules over src and
+// returns the findings. The provider is a thin adapter: it loads/compiles the
+// rules (once), parses the file, and hands both to the language-agnostic
+// ruleengine — no detection logic lives here.
+func (p *Provider) AnalyzeSecurity(src providers.SourceFile) ([]findings.Finding, error) {
+	compiled, err := securityRules()
+	if err != nil {
+		return nil, err
+	}
+	root, err := p.Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	return ruleengine.Match(compiled, root, src.Path), nil
 }
 
 // AnalyzePractices is a stub; the best-practice rules arrive in Prompt 1.2.

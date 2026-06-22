@@ -1,0 +1,30 @@
+rules:
+  # SQL injection — INLINE concatenation case (ADR 0004). The query string is
+  # assembled with `+` right in the call argument. This is conclusive over the
+  # call subtree: the concatenation is visible without following any variable.
+  # The case where the query is built through an intermediate variable is surface,
+  # not a rule, and is mapped separately.
+  - id: SEC-010
+    message: "SQL query built by string concatenation in the call"
+    suggestion: "Use parameterized queries / prepared statements ($1, ? placeholders), never string concatenation"
+    severity: high
+    dimension: security
+    pattern-either:
+      - "$DB.query($A + $B)"
+      - "$DB.execute($A + $B)"
+
+  # SQL injection — INLINE interpolated-template case. metavariable-regex keeps
+  # only a template literal (starts with a backtick) that actually interpolates
+  # (contains `${`). A double-quoted "...$1..." is a static placeholder, not
+  # interpolation, so it stays silent; a backtick template with no `${` is a
+  # constant query and also stays silent.
+  - id: SEC-011
+    message: "SQL query built by an interpolated template literal in the call"
+    suggestion: "Use parameterized queries / prepared statements; do not interpolate values into the SQL string"
+    severity: high
+    dimension: security
+    pattern-either:
+      - "$DB.query($Q)"
+      - "$DB.execute($Q)"
+    metavariable-regex:
+      $Q: '^`.*\$\{'
