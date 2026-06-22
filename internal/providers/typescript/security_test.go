@@ -116,6 +116,37 @@ new Function("return 42");
 	}
 }
 
+func TestSecurity_SQLInjectionInline(t *testing.T) {
+	// Only the INLINE case is a rule (ADR 0004): the query is assembled right in
+	// the call, by string concatenation or by an interpolated template. When the
+	// query is built through an intermediate variable, that is surface, not a
+	// rule — and the clean side below proves the rule stays silent on it.
+	vuln := analyze(t, "sql_vuln.ts", `
+function load(db: any, userId: string) {
+  db.query("SELECT * FROM users WHERE id = " + userId);
+  db.execute(`+"`SELECT * FROM users WHERE id = ${userId}`"+`);
+}
+`)
+	if !hasRule(vuln, "SEC-010") {
+		t.Errorf("inline string-concatenation query must fire SEC-010, got %+v", vuln)
+	}
+	if !hasRule(vuln, "SEC-011") {
+		t.Errorf("inline interpolated-template query must fire SEC-011, got %+v", vuln)
+	}
+
+	clean := analyze(t, "sql_clean.ts", `
+function load(db: any, userId: string) {
+  db.query("SELECT * FROM users WHERE id = $1", [userId]);   // parameterized
+  db.query(`+"`SELECT * FROM users`"+`);                  // template, no interpolation
+  const q = "SELECT * FROM users WHERE id = " + userId;       // assembled in a variable...
+  db.query(q);                                                // ...so this is SURFACE, not a rule
+}
+`)
+	if hasRule(clean, "SEC-010") || hasRule(clean, "SEC-011") {
+		t.Errorf("parameterized / non-interpolated / variable-assembled queries must NOT fire inline SQL rules, got %+v", clean)
+	}
+}
+
 func TestSecurity_InsecureRandom(t *testing.T) {
 	// Math.random() is not cryptographically secure; using it for a security
 	// value (token, nonce, salt…) is the vulnerability. The variable name is the
