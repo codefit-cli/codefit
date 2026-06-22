@@ -38,4 +38,8 @@ func (w tsNode) ChildByField(name string) syntax.Node {
 
 func (w tsNode) StartLine() int { return int(w.n.StartPoint().Row) + 1 }
 
+func (w tsNode) StartByte() int { return int(w.n.StartByte()) }
+
+func (w tsNode) EndByte() int { return int(w.n.EndByte()) }
+
 func (w tsNode) HasError() bool { return w.n.HasError() }
