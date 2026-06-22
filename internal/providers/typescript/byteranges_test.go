@@ -20,7 +20,7 @@ func TestByteRanges(t *testing.T) {
 		t.Fatal("no name field")
 	}
 	// The name node must be contained within the function node by byte range.
-	if !(name.StartByte() >= fn.StartByte() && name.EndByte() <= fn.EndByte()) {
+	if name.StartByte() < fn.StartByte() || name.EndByte() > fn.EndByte() {
 		t.Errorf("name [%d,%d) not contained in function [%d,%d)",
 			name.StartByte(), name.EndByte(), fn.StartByte(), fn.EndByte())
 	}
