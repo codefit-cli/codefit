@@ -46,6 +46,18 @@ codefit is built test-first (TDD) and spec-first (SDD):
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`). No AI attribution lines.
 
+### Don't let `.gitignore` swallow source
+
+A broad `.gitignore` pattern like `coverage.*` matches `coverage.go` too, so a
+source file can silently never reach git (this happened once). CI rejects any
+`name.*` catch-all pattern. Optionally, check locally that no tracked-worthy
+`.go` is being ignored before you commit:
+
+```sh
+git ls-files --others --ignored --exclude-standard | grep '\.go$' && \
+  echo "A .go source file is being ignored — fix .gitignore" || echo "clean"
+```
+
 ## Running the test suite
 
 ```bash

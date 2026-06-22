@@ -78,5 +78,29 @@ the *provider interface convergence* waits for two parsers to validate it.
 - The Go provider is untouched this phase (self-audit stays green). Two provider
   shapes coexist temporarily (Go: analysis-internal; TS: `Parse` → `syntax.Node`
   + stubs) — an accepted, documented transient until 1.2+ unifies them.
-- `syntax.Node` will grow (e.g. `Parent()`) driven by real operators, not
-  speculation.
+- `syntax.Node` will grow driven by real operators, not speculation.
+
+## Addendum (Prompt 1.2) — the abstraction passed its first fire test
+
+The rule engine's `pattern-inside` operator became `syntax.Node`'s first
+demanding consumer, and it confirmed the byte-range choice **with code, not just
+the convergence table**:
+
+- `pattern-inside` is implemented purely as **byte-range containment**
+  (`B.StartByte ≤ A.StartByte && A.EndByte ≤ B.EndByte`), using the
+  `StartByte()/EndByte()` added in this phase. It discriminates correctly over
+  the real gotreesitter AST: the same base pattern matching twice, only the
+  contained occurrence is kept.
+- This is exactly why `Parent()` was **not** added: byte ranges are native to
+  both gotreesitter and go/ast, so the operator works identically for any parser
+  behind `syntax.Node`, with no per-parser parent-map. The boundary held without
+  leaking toward gotreesitter.
+- A real limit surfaced and is owned: without ellipsis (PRD §17 subset),
+  `pattern-inside`'s *expressiveness* is bounded — "inside a class with any
+  method" is not expressible because a bare `$M` parses as a field, not a method.
+  The byte-range *mechanism* is exact regardless; richer context waits for
+  ellipsis, reconsidered when a real rule needs it.
+
+The convergence to the PRD §16 interface is still deferred to when the Go
+provider also emits `syntax.Node` — but the boundary itself has now been
+validated by a non-trivial consumer.

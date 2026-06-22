@@ -7,10 +7,11 @@ import "github.com/codefit-cli/codefit/internal/core/findings"
 // operators; the operators are mutually composable (patterns = AND of its
 // members, PatternEither = OR, etc.).
 type Rule struct {
-	ID        string             `yaml:"id"`
-	Message   string             `yaml:"message"`
-	Severity  findings.Severity  `yaml:"severity"`
-	Dimension findings.Dimension `yaml:"dimension"`
+	ID         string             `yaml:"id"`
+	Message    string             `yaml:"message"`
+	Suggestion string             `yaml:"suggestion"`
+	Severity   findings.Severity  `yaml:"severity"`
+	Dimension  findings.Dimension `yaml:"dimension"`
 
 	// Operators (core subset). Exactly the set codefit's matcher supports.
 	Pattern           string            `yaml:"pattern,omitempty"`

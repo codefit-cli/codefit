@@ -22,6 +22,15 @@ type Node interface {
 	ChildByField(name string) Node
 	// StartLine is the 1-based line where the node begins, for findings.
 	StartLine() int
+	// StartByte and EndByte are the node's [start,end) byte range in the source.
+	// Byte ranges power pattern-inside via containment (A is inside B when
+	// B.StartByte <= A.StartByte && A.EndByte <= B.EndByte) and give findings a
+	// precise location. They were chosen over a Parent() pointer because both
+	// parsers expose them natively (gotreesitter directly; go/ast via Pos/End +
+	// FileSet) whereas go/ast has no native parent — so this extension converges
+	// cleanly across both parsers (ADR 0003).
+	StartByte() int
+	EndByte() int
 	// HasError reports whether this node (or its subtree, for the root) contains
 	// a syntax error — the runtime-level check for parse failures.
 	HasError() bool
