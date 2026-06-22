@@ -16,6 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: guard — .gitignore must not swallow source files
+        # A 'name.*' pattern in .gitignore matches name.go too. This already bit
+        # us once: 'coverage.*' (meant for coverage.out profiles) silently
+        # ignored coverage.go SOURCE, so it never reached git and the package
+        # shipped incomplete — invisible until something imported it. Catch the
+        # whole class cheaply: reject any 'name.*' pattern.
+        run: |
+          if bad=$(grep -nE '^[^#].*[A-Za-z0-9]\.\*$' .gitignore); then
+            echo "::error file=.gitignore::A 'name.*' pattern can swallow source files (e.g. 'coverage.*' matches coverage.go), which then never reaches git."
+            echo "Offending .gitignore line(s):"
+            echo "$bad"
+            echo "Fix: ignore specific extensions instead — e.g. 'coverage.out' and 'coverage.html', not 'coverage.*'."
+            exit 1
+          fi
+          echo "OK: no 'name.*' catch-all patterns in .gitignore"
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
