@@ -147,6 +147,38 @@ function load(db: any, userId: string) {
 	}
 }
 
+func TestSecurity_XSSInline(t *testing.T) {
+	// React's dangerouslySetInnerHTML injects raw HTML. The INLINE case is a rule
+	// (ADR 0004): the HTML is built right in the __html payload, by concatenation
+	// or by an interpolated template. We match the {__html: ...} object itself, so
+	// it fires regardless of how many other attributes the element carries.
+	vuln := analyze(t, "xss_vuln.tsx", `
+export const A = (userHtml: string, suffix: string) =>
+  <div dangerouslySetInnerHTML={{__html: userHtml + suffix}}/>;
+export const B = (name: string) =>
+  <span className="c" id="z" title="t" dangerouslySetInnerHTML={{__html: `+"`<b>${name}</b>`"+`}}/>;
+`)
+	if !hasRule(vuln, "SEC-079") {
+		t.Errorf("inline concatenated __html must fire SEC-079, got %+v", vuln)
+	}
+	if !hasRule(vuln, "SEC-080") {
+		t.Errorf("inline interpolated-template __html (with other attributes present) must fire SEC-080, got %+v", vuln)
+	}
+
+	// __html set from a plain variable is SURFACE, not a rule — its safety depends
+	// on whether it was sanitized earlier, which means following the data. And
+	// ordinary JSX children are auto-escaped by React. Both must stay silent.
+	clean := analyze(t, "xss_clean.tsx", `
+export const C = (sanitized: string) =>
+  <div dangerouslySetInnerHTML={{__html: sanitized}}/>;
+export const D = (userHtml: string) =>
+  <div title="safe">{userHtml}</div>;
+`)
+	if hasRule(clean, "SEC-079") || hasRule(clean, "SEC-080") {
+		t.Errorf("variable __html (surface) and auto-escaped JSX children must NOT fire inline XSS rules, got %+v", clean)
+	}
+}
+
 func TestSecurity_InsecureRandom(t *testing.T) {
 	// Math.random() is not cryptographically secure; using it for a security
 	// value (token, nonce, salt…) is the vulnerability. The variable name is the
