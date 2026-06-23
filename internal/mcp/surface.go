@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"path/filepath"
+	"sort"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/surface"
@@ -40,9 +41,23 @@ func HandleSurfaceIDOR(req SurfaceIDORRequest) (SurfaceResponse, error) {
 }
 
 // HandleSurfaceAuthz enumerates the broken-authorization surface across the given
-// files in the same contract.
+// files. It orders the items so the actionable ones — where no known authz helper
+// was detected — come FIRST, the rest after (where a check exists, the agent
+// verifies sufficiency). It does NOT reduce the list: the complete enumeration is
+// preserved, only reordered, so findings surface instead of being buried in
+// volume. Ordering by a fact is not a severity judgment — codefit does not say
+// "no check is worse", it just surfaces the fact for the agent.
 func HandleSurfaceAuthz(req SurfaceIDORRequest) (SurfaceResponse, error) {
-	return handleSurface(req, string(surface.CategoryAuthz))
+	resp, err := handleSurface(req, string(surface.CategoryAuthz))
+	if err != nil {
+		return resp, err
+	}
+	sort.SliceStable(resp.Surface, func(i, j int) bool {
+		// unchecked (known_authz_detected=false) before checked (true).
+		return !resp.Surface[i].StructuralFacts["known_authz_detected"] &&
+			resp.Surface[j].StructuralFacts["known_authz_detected"]
+	})
+	return resp, nil
 }
 
 // handleSurface runs the providers over the files and returns the surface items

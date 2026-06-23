@@ -72,6 +72,36 @@ export async function GET() { return Response.json({ ok: true }); }`}, // not se
 	}
 }
 
+// codefit-surface-authz orders the actionable items (no known authz detected)
+// FIRST, without reducing the list — the complete enumeration is preserved, only
+// reordered, so the findings surface to the top instead of being buried.
+func TestHandleSurfaceAuthzOrdersUncheckedFirst(t *testing.T) {
+	resp, err := mcp.HandleSurfaceAuthz(mcp.SurfaceIDORRequest{
+		Files: []mcp.FileInput{
+			{Path: "app/checked/route.ts", Content: `
+export async function GET() {
+  const s = await getServerSession();
+  return Response.json(await prisma.a.findMany());
+}`},
+			{Path: "app/unchecked/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.b.findMany()); }`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Surface) != 2 {
+		t.Fatalf("ordering must not drop items; want 2, got %d", len(resp.Surface))
+	}
+	if resp.Surface[0].StructuralFacts["known_authz_detected"] {
+		t.Errorf("the unchecked handler (no known authz) must be ordered first, got %s first",
+			resp.Surface[0].File)
+	}
+	if !resp.Surface[1].StructuralFacts["known_authz_detected"] {
+		t.Errorf("the checked handler must be ordered after the unchecked one")
+	}
+}
+
 // End-to-end: enumerate → the agent confirms the item by its id → codefit
 // integrates the verdict into a probabilistic, anchored finding.
 func TestSurfaceConfirmRoundTrip(t *testing.T) {

@@ -147,6 +147,7 @@ func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 		Line:              h.line,
 		Snippet:           h.snippet,
 		StructuralSignals: signals,
+		StructuralFacts:   map[string]bool{"local_access_detected": len(accesses) > 0},
 		ReasonToReview: "Does this handler verify that the authenticated caller is allowed to access " +
 			"the specific resource named by the incoming identifier, before reading or modifying it?",
 	}, true

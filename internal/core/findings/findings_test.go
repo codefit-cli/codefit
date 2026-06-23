@@ -18,6 +18,7 @@ func TestSurfaceItemJSON(t *testing.T) {
 		Line:              34,
 		Snippet:           "router.get('/plants/:id', ...)",
 		StructuralSignals: []string{"reads params.id", "accesses prisma.plant.findUnique"},
+		StructuralFacts:   map[string]bool{"local_access_detected": true},
 		ReasonToReview:    "Endpoint accesses a resource by ID; verify ownership.",
 	}
 	data, err := json.Marshal(item)
@@ -28,7 +29,7 @@ func TestSurfaceItemJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"id", "category", "file", "line", "snippet", "structural_signals", "reason_to_review"} {
+	for _, key := range []string{"id", "category", "file", "line", "snippet", "structural_signals", "structural_facts", "reason_to_review"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("surface item JSON missing key %q: %s", key, data)
 		}

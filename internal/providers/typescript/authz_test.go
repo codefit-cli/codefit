@@ -47,6 +47,24 @@ export async function GET() {
 	assertFactsNotJudgments(t, items[0])
 }
 
+// The queryable structural fact known_authz_detected mirrors the prose signal:
+// false when no known helper was found (the actionable case), true when one was.
+func TestAuthz_KnownAuthzDetectedFact(t *testing.T) {
+	noAuthz := authzSurface(t, "app/reports/route.ts", `
+export async function GET() { return Response.json(await prisma.report.findMany()); }`)
+	if len(noAuthz) != 1 || noAuthz[0].StructuralFacts["known_authz_detected"] {
+		t.Errorf("a handler with no known authz must have known_authz_detected=false, got %+v", noAuthz)
+	}
+	withAuthz := authzSurface(t, "app/posts/route.ts", `
+export async function POST(req: Request) {
+  const s = await getServerSession();
+  return Response.json(await prisma.post.create({ data: await req.json() }));
+}`)
+	if len(withAuthz) != 1 || !withAuthz[0].StructuralFacts["known_authz_detected"] {
+		t.Errorf("a handler with getServerSession must have known_authz_detected=true, got %+v", withAuthz)
+	}
+}
+
 // A mutation (Prisma write) with authz present → enumerated; the operation signal
 // says it mutates state, the authz signal reports the check was detected.
 func TestAuthz_MutationWithAuthz(t *testing.T) {
