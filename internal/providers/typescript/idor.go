@@ -21,11 +21,19 @@ var httpMethods = map[string]bool{
 	"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true,
 }
 
-// prismaMethods are the Prisma client operations that read or mutate a resource.
+// prismaMethods is the Prisma Client model-query method set (verified against
+// the Prisma Client API reference). Detection is by SHAPE — <x>.<model>.<method>
+// where method is one of these — not by the client being named "prisma", so an
+// aliased client (db, this.prisma, an imported db) is not an invisible blind
+// spot. We accept over-enumeration (a non-Prisma <x>.<y>.update slips in); the
+// agent discards it. A missed access would be an invisible vulnerability — the
+// asymmetry favors enumerating more.
 var prismaMethods = map[string]bool{
-	"findUnique": true, "findUniqueOrThrow": true, "findFirst": true,
-	"findFirstOrThrow": true, "findMany": true, "update": true,
-	"updateMany": true, "delete": true, "deleteMany": true, "upsert": true,
+	"findUnique": true, "findUniqueOrThrow": true, "findFirst": true, "findFirstOrThrow": true,
+	"findMany": true, "create": true, "createMany": true, "createManyAndReturn": true,
+	"update": true, "updateMany": true, "updateManyAndReturn": true, "upsert": true,
+	"delete": true, "deleteMany": true, "count": true, "aggregate": true,
+	"groupBy": true, "findRaw": true, "aggregateRaw": true,
 }
 
 // authzHelpers is the KNOWN, DECLARED set of authentication/authorization calls
@@ -123,7 +131,7 @@ func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 
 	signals := []string{
 		"Receives a client-controlled identifier: " + strings.Join(idInputs, ", "),
-		"Accesses a resource: " + strings.Join(accesses, ", "),
+		"Accesses a resource via a Prisma client method: " + strings.Join(accesses, ", "),
 		authzSignal(authz),
 	}
 	return findings.SurfaceItem{
@@ -165,28 +173,32 @@ func collectIDInputs(body syntax.Node) []string {
 	return out
 }
 
-// collectPrismaAccesses records prisma.<model>.<method>(...) calls as facts.
+// collectPrismaAccesses records resource accesses by SHAPE: a call whose callee
+// is <client>.<model>.<method> where method is a known Prisma method. <client>
+// is any identifier or member expression (db, prisma, this.prisma, ctx.db); the
+// fact names the real client seen, not an assumed "prisma".
 func collectPrismaAccesses(body syntax.Node) []string {
 	var out []string
 	walkTS(body, func(n syntax.Node) {
 		if n.Type() != "call_expression" {
 			return
 		}
-		fn := field(n, "function", 0)
+		fn := field(n, "function", 0) // expect <client>.<model>.<method>
 		if fn == nil || fn.Type() != "member_expression" {
 			return
 		}
 		method := field(fn, "property", 1)
-		obj := field(fn, "object", 0) // expected: member_expression prisma.<model>
-		if method == nil || obj == nil || !prismaMethods[string(method.Text())] || obj.Type() != "member_expression" {
+		clientModel := field(fn, "object", 0) // expect member_expression <client>.<model>
+		if method == nil || clientModel == nil || !prismaMethods[string(method.Text())] ||
+			clientModel.Type() != "member_expression" {
 			return
 		}
-		root := field(obj, "object", 0)
-		model := field(obj, "property", 1)
-		if root == nil || model == nil || root.Type() != "identifier" || string(root.Text()) != "prisma" {
+		client := field(clientModel, "object", 0) // any identifier or member expression
+		model := field(clientModel, "property", 1)
+		if client == nil || model == nil {
 			return
 		}
-		out = append(out, "prisma."+string(model.Text())+"."+string(method.Text()))
+		out = append(out, string(client.Text())+"."+string(model.Text())+"."+string(method.Text()))
 	})
 	return out
 }

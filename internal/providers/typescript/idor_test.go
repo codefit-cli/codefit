@@ -111,6 +111,50 @@ export const POST = async (req: Request) => {
 	}
 }
 
+// Prisma access is detected by SHAPE (<x>.<model>.<knownPrismaMethod>), not by
+// the client being literally named "prisma" — otherwise every project that
+// aliases the client (db, this.prisma, an imported db) would have INVISIBLE IDOR
+// surface, the exact blind spot surface mapping exists to prevent. The signal
+// names the real client it saw (a fact).
+func TestIDOR_AliasedPrismaClients(t *testing.T) {
+	cases := []struct{ name, path, src, wantAccess string }{
+		{"local-new-client", "app/users/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const db = new PrismaClient();
+  return Response.json(await db.user.findUnique({ where: { id: params.id } }));
+}`, "db.user.findUnique"},
+		{"imported-db", "app/tasks/[id]/route.ts", `
+import { db } from "@/lib/prisma";
+export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  await db.task.update({ where: { id: params.id }, data: {} });
+}`, "db.task.update"},
+		{"this-prisma", "app/orders/[id]/route.ts", `
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  await this.prisma.order.delete({ where: { id: params.id } });
+}`, "this.prisma.order.delete"},
+		// Honest over-enumeration: cache.session.update has the Prisma shape but is
+		// not Prisma. We enumerate it (completeness over noise); the agent discards
+		// it in a glance. We do NOT exclude it with fragile logic.
+		{"over-match-not-prisma", "app/sessions/[id]/route.ts", `
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  await cache.session.update({ where: { id: params.id } });
+}`, "cache.session.update"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			items := idorSurface(t, c.path, c.src)
+			if len(items) != 1 {
+				t.Fatalf("%s: aliased client must still be enumerated, got %d", c.name, len(items))
+			}
+			sig := signalsJoined(items[0])
+			if !strings.Contains(sig, c.wantAccess) {
+				t.Errorf("%s: access signal must name the real client %q, got %q", c.name, c.wantAccess, sig)
+			}
+			assertFactsNotJudgments(t, items[0])
+		})
+	}
+}
+
 // Honesty of the authz signal, inline: getServerSession IS in the body → signal
 // reports it was detected (never omitted).
 func TestIDOR_AuthzPresentInline(t *testing.T) {
