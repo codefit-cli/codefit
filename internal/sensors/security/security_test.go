@@ -163,9 +163,41 @@ func TestSensorTypeScriptEndToEnd(t *testing.T) {
 	if res.Score < 0 || res.Score >= 100 {
 		t.Errorf("security score should be computed and below 100 with findings, got %d", res.Score)
 	}
-	// Surface mapping is Fase 1.3 — still empty here.
+	// None of these files is a Next route handler, so there is no IDOR surface.
 	if len(res.Surface) != 0 {
-		t.Errorf("surface should be empty until Fase 1.3, got %d items", len(res.Surface))
+		t.Errorf("non-route TS files carry no surface, got %d items", len(res.Surface))
+	}
+}
+
+// TestSensorMapsIDORSurface is the surface close-out: the real sensor walk over
+// a Next App Router project produces IDOR surface in the SensorResult, with the
+// stable id stamped (so the agent can confirm it) and signals that are facts.
+func TestSensorMapsIDORSurface(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "app/users/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  return Response.json(await prisma.user.findUnique({ where: { id: params.id } }));
+}`)
+	writeFile(t, root, "app/health/route.ts", `export async function GET() { return Response.json({ ok: true }); }`)
+	writeFile(t, root, "lib/util.ts", `export const add = (a: number, b: number) => a + b;`)
+
+	res := runSensorProvider(t, root, "ts", "**/*", typescript.New())
+
+	var idor []findings.SurfaceItem
+	for _, it := range res.Surface {
+		if it.Category == "idor" {
+			idor = append(idor, it)
+		}
+	}
+	if len(idor) != 1 {
+		t.Fatalf("want exactly 1 IDOR surface item (only the [id] route), got %d: %+v", len(idor), res.Surface)
+	}
+	it := idor[0]
+	if it.ID == "" {
+		t.Error("surface item flowing through the sensor must carry a stable id for confirmation")
+	}
+	if len(it.StructuralSignals) != 3 || !strings.HasSuffix(strings.TrimSpace(it.ReasonToReview), "?") {
+		t.Errorf("IDOR item must carry 3 fact signals and a question, got %+v", it)
 	}
 }
 
