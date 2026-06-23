@@ -102,6 +102,28 @@ export async function GET() { return Response.json(await prisma.b.findMany()); }
 	}
 }
 
+// codefit-surface-overfetch orders the actionable items (no field limiting
+// detected) first, without dropping any — same mechanism as authz.
+func TestHandleSurfaceOverfetchOrdersUnlimitedFirst(t *testing.T) {
+	resp, err := mcp.HandleSurfaceOverfetch(mcp.SurfaceIDORRequest{
+		Files: []mcp.FileInput{
+			{Path: "app/limited/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.a.findMany({ select: { id: true } })); }`},
+			{Path: "app/unlimited/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.b.findMany()); }`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Surface) != 2 {
+		t.Fatalf("ordering must not drop items; want 2, got %d", len(resp.Surface))
+	}
+	if resp.Surface[0].StructuralFacts["field_limiting_detected"] {
+		t.Errorf("the unlimited find (no select) must be ordered first, got %s first", resp.Surface[0].File)
+	}
+}
+
 // End-to-end: enumerate → the agent confirms the item by its id → codefit
 // integrates the verdict into a probabilistic, anchored finding.
 func TestSurfaceConfirmRoundTrip(t *testing.T) {

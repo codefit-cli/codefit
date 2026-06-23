@@ -52,12 +52,29 @@ func HandleSurfaceAuthz(req SurfaceIDORRequest) (SurfaceResponse, error) {
 	if err != nil {
 		return resp, err
 	}
-	sort.SliceStable(resp.Surface, func(i, j int) bool {
-		// unchecked (known_authz_detected=false) before checked (true).
-		return !resp.Surface[i].StructuralFacts["known_authz_detected"] &&
-			resp.Surface[j].StructuralFacts["known_authz_detected"]
-	})
+	sortUncheckedFirst(resp.Surface, "known_authz_detected")
 	return resp, nil
+}
+
+// HandleSurfaceOverfetch enumerates the over-fetching surface and orders the
+// actionable items (no field limiting detected) first, the rest after — the same
+// fact-ordering as authz, no reduction, no severity.
+func HandleSurfaceOverfetch(req SurfaceIDORRequest) (SurfaceResponse, error) {
+	resp, err := handleSurface(req, string(surface.CategoryOverfetch))
+	if err != nil {
+		return resp, err
+	}
+	sortUncheckedFirst(resp.Surface, "field_limiting_detected")
+	return resp, nil
+}
+
+// sortUncheckedFirst stably orders items so those whose given structural fact is
+// false (the actionable case: no known check/limit detected) come before those
+// where it is true. Ordering by a fact is not a severity judgment.
+func sortUncheckedFirst(items []findings.SurfaceItem, fact string) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return !items[i].StructuralFacts[fact] && items[j].StructuralFacts[fact]
+	})
 }
 
 // handleSurface runs the providers over the files and returns the surface items
