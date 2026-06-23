@@ -76,26 +76,54 @@ func TestAggregateGroupsByEndpointAndCertainty(t *testing.T) {
 	}
 }
 
-// Endpoints are ordered by the count of CERTAIN concerns (deterministic +
-// confirmed), not by severity — more structural facts → higher.
-func TestAggregateOrdersEndpointsByFactCount(t *testing.T) {
-	a := "app/a/route.ts" // 1 confirmed concern
-	b := "app/b/route.ts" // 1 deterministic + 1 confirmed = 2 certain
+// Endpoints are ordered by ACTIONABLE structural facts, hardest gap first
+// (affirmed deterministic → missing access control → over-exposure), then by
+// certain-concern count — NOT by how instrumented an endpoint is, and never by
+// severity. The real findings come first, not the most-instrumented endpoints.
+func TestAggregateOrdersByActionableGap(t *testing.T) {
+	// "protected" — a fully checked, heavily instrumented handler whose only
+	// actionable fact is an over-fetch (no select). 3 concerns, all certain.
+	protectedFile := "app/protected/route.ts"
+	// "unguarded" — a single concern, but a MISSING access check (no authz).
+	unguardedFile := "app/unguarded/route.ts"
+	// "vuln" — an affirmed deterministic finding.
+	vulnFile := "app/vuln/route.ts"
+
 	fs := []findings.Finding{
-		{ID: "SEC-052", Dimension: "security", File: b, Line: 6, Title: "weak crypto", Confidence: 1.0},
+		{ID: "SEC-010", Dimension: "security", File: vulnFile, Line: 6, Title: "SQL injection", Confidence: 1.0},
 	}
 	surface := []findings.SurfaceItem{
-		surf("authz", a, 4, map[string]bool{"known_authz_detected": false, "local_access_detected": true}, "Handler GET accesses data via prisma.a.findMany"),
-		surf("authz", b, 4, map[string]bool{"known_authz_detected": false, "local_access_detected": true}, "Handler POST mutates state via prisma.b.create"),
+		// protected: authz checked, idor checked, over-fetch no select.
+		surf("authz", protectedFile, 4, map[string]bool{"known_authz_detected": true, "local_access_detected": true}, "Handler GET accesses data via prisma.p.findMany"),
+		surf("idor", protectedFile, 4, map[string]bool{"known_authz_detected": true, "local_access_detected": true}, "reads id"),
+		surf("overfetch", protectedFile, 7, map[string]bool{"local_access_detected": true, "field_limiting_detected": false}, "serializes prisma.p"),
+		// unguarded: a sensitive handler with NO authz detected — the access gap.
+		surf("authz", unguardedFile, 4, map[string]bool{"known_authz_detected": false, "local_access_detected": true}, "Handler GET accesses data via prisma.u.findMany"),
+		// vuln also carries an authz concern (checked).
+		surf("authz", vulnFile, 4, map[string]bool{"known_authz_detected": true, "local_access_detected": true}, "Handler POST mutates state via prisma.v.create"),
 	}
+
 	eps := report.AggregateEndpoints(fs, surface)
-	if len(eps) != 2 {
-		t.Fatalf("want 2 endpoints, got %d", len(eps))
+	if len(eps) != 3 {
+		t.Fatalf("want 3 endpoints, got %d", len(eps))
 	}
-	if eps[0].File != b {
-		t.Errorf("endpoint b (2 certain concerns) must rank first, got %s", eps[0].File)
+	// vuln (affirmed deterministic) first.
+	if eps[0].File != vulnFile {
+		t.Errorf("the affirmed deterministic endpoint must rank first, got %s", eps[0].File)
 	}
-	if eps[0].CertainConcerns != 2 || eps[1].CertainConcerns != 1 {
-		t.Errorf("certain-concern counts = %d, %d; want 2, 1", eps[0].CertainConcerns, eps[1].CertainConcerns)
+	// unguarded (missing access control, 1 concern) must rank ABOVE protected
+	// (checked, 3 certain concerns, only an over-exposure gap).
+	posUnguarded, posProtected := indexOf(eps, unguardedFile), indexOf(eps, protectedFile)
+	if posUnguarded > posProtected {
+		t.Errorf("the unguarded handler (missing access check) must rank above the protected-but-instrumented one; got unguarded@%d protected@%d", posUnguarded, posProtected)
 	}
+}
+
+func indexOf(eps []report.EndpointReport, file string) int {
+	for i := range eps {
+		if eps[i].File == file {
+			return i
+		}
+	}
+	return -1
 }

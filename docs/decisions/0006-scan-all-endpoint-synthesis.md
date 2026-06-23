@@ -39,14 +39,36 @@ finding is an assertion; a surface concern is a question. The agent must
 distinguish what codefit affirms from what it asks — that is what `certainty`,
 `affirms`, and `probabilistic`/`confidence` are for.
 
-### Ordering — by count of facts, never by severity
+### Ordering — by actionable gap, hardest kind first, never by severity
 
-Endpoints are ordered by how many concerns codefit can assert with certainty
-(deterministic + confirmed) — more structural facts → higher. This is ordering by
-**count of facts**, not danger: codefit does not say one endpoint is "worse". The
-agent judges severity in its verdict. IDOR is marked as a structural **refinement**
-of authz when an endpoint has both (the sensitive handler also receives a client
-id) — a fact, not a judgment.
+Endpoints are ordered by their **actionable structural gaps** — the missing or
+broken controls codefit detected — hardest kind first:
+
+1. **affirmed** — a deterministic finding (an asserted vulnerability),
+2. **access** — no authz/ownership check on a sensitive or id→resource handler,
+3. **exposure** — a serialization with no select/omit (over-fetch),
+
+then by certain-concern count. This is still ordering by **fact** (which control
+is missing), not by severity — codefit never says one endpoint is "worse"; the
+agent judges danger in its verdict.
+
+**Rejected: ordering by count of concerns.** The first design ranked endpoints by
+how many certain concerns they carried (more facts → higher). It is intuitively
+reasonable — and it was wrong, refuted by the Bitácora data. Over-fetch with no
+select is **ubiquitous** (every serialization of a Prisma find — 30/30 on
+Bitácora had no select), so almost every endpoint carries at least one actionable
+fact, and a count-only order then resurfaces the **most-instrumented** endpoints
+on the certain-concern tiebreak — including ones that are fully protected. The
+real findings did not come first: `debug/metrics-raw` (a sensitive endpoint with
+no authz) sat mid-low with its single concern, below protected-but-instrumented
+handlers like `admin/logbooks`. Ordering by the **kind** of gap (access before
+exposure) puts the missing-access-control findings on top, where a missing check
+means anyone can reach the endpoint — a structural fact about reachability, not a
+severity score. This is recorded because "order by count" will look reasonable
+again; the Bitácora datum (no-select is everywhere) is why it is rejected.
+
+IDOR is marked as a structural **refinement** of authz when an endpoint has both
+(the sensitive handler also receives a client id) — a fact, not a judgment.
 
 ### Agent-first; the human view is a later opt-in
 

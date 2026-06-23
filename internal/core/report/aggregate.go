@@ -43,7 +43,21 @@ type Concern struct {
 	// IDOR is the structural refinement of authz (the sensitive handler also
 	// receives a client id). A fact about structure, not a judgment.
 	RefinesAuthz bool `json:"refines_authz,omitempty"`
+	// Actionable is true when the concern is a missing/broken control codefit
+	// detected (an affirmed finding, no authz/ownership check, or no field limit).
+	Actionable bool `json:"actionable"`
+	// Gap names the KIND of missing control, hardest first: "affirmed" (a
+	// deterministic finding), "access" (no authz/ownership on a sensitive
+	// handler), "exposure" (a serialization with no select/omit). Empty when the
+	// concern is not an actionable gap (e.g. a checked handler, or the frontier).
+	Gap string `json:"gap,omitempty"`
 }
+
+const (
+	gapAffirmed = "affirmed"
+	gapAccess   = "access"
+	gapExposure = "exposure"
+)
 
 // EndpointReport is the complete picture of one handler: all its concerns from
 // both sources, ordered by certainty (deterministic → confirmed → frontier).
@@ -51,17 +65,20 @@ type EndpointReport struct {
 	File            string    `json:"file"`
 	Line            int       `json:"line"`             // handler anchor line (0 = module scope)
 	Method          string    `json:"method,omitempty"` // GET/POST/... when known
+	Actionable      int       `json:"actionable"`       // count of missing/broken-control concerns
 	CertainConcerns int       `json:"certain_concerns"` // deterministic + surface_confirmed
 	Concerns        []Concern `json:"concerns"`
 }
 
 // AggregateEndpoints groups deterministic findings and surface items by the
 // handler they belong to and assembles the per-endpoint picture: concerns ordered
-// by certainty within an endpoint, endpoints ordered by how many concerns codefit
-// can assert with certainty (more structural facts → higher). Ordering is by
-// COUNT OF FACTS, never by severity — codefit does not rank danger; the agent
-// judges that. It invents nothing: every concern comes from a real finding or
-// surface item with its id.
+// by certainty within an endpoint (deterministic → confirmed → frontier), and
+// endpoints ordered by their ACTIONABLE structural gaps, hardest kind first
+// (affirmed deterministic → missing access control → over-exposure), then by
+// certain-concern count. This surfaces the real findings, not the most
+// instrumented endpoints. Ordering is by FACT (which control is missing), never
+// by severity — the agent judges danger. It invents nothing: every concern comes
+// from a real finding or surface item with its id.
 func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) []EndpointReport {
 	anchors := map[string][]int{}
 	methodAt := map[string]map[int]string{}
@@ -123,21 +140,61 @@ func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) [
 		})
 		markRefinement(ep)
 		ep.CertainConcerns = countCertain(ep.Concerns)
+		ep.Actionable = countActionable(ep.Concerns)
 		out = append(out, *ep)
 	}
+	// Order by ACTIONABLE structural gaps, hardest kind first (affirmed →
+	// access → exposure), then by certain-concern count. This surfaces the real
+	// findings (a missing access check, an affirmed vulnerability) above
+	// endpoints that are merely heavily instrumented but protected. It is ordering
+	// by FACT (which control is missing), never by severity — the agent judges
+	// danger. Access gaps outrank exposure gaps because over-fetch with no select
+	// is ubiquitous (every serialization) and would otherwise drown the
+	// access-control findings (ADR 0006, validated on Bitácora).
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].CertainConcerns != out[j].CertainConcerns {
+		ai, ci, ei := gapCounts(out[i])
+		aj, cj, ej := gapCounts(out[j])
+		switch {
+		case ai != aj:
+			return ai > aj // affirmed deterministic
+		case ci != cj:
+			return ci > cj // missing access control
+		case ei != ej:
+			return ei > ej // over-exposure
+		case out[i].CertainConcerns != out[j].CertainConcerns:
 			return out[i].CertainConcerns > out[j].CertainConcerns
-		}
-		if len(out[i].Concerns) != len(out[j].Concerns) {
-			return len(out[i].Concerns) > len(out[j].Concerns)
-		}
-		if out[i].File != out[j].File {
+		case out[i].File != out[j].File:
 			return out[i].File < out[j].File
+		default:
+			return out[i].Line < out[j].Line
 		}
-		return out[i].Line < out[j].Line
 	})
 	return out
+}
+
+// gapCounts returns an endpoint's count of affirmed, access, and exposure gaps.
+func gapCounts(ep EndpointReport) (affirmed, access, exposure int) {
+	for _, c := range ep.Concerns {
+		switch c.Gap {
+		case gapAffirmed:
+			affirmed++
+		case gapAccess:
+			access++
+		case gapExposure:
+			exposure++
+		}
+	}
+	return affirmed, access, exposure
+}
+
+func countActionable(cs []Concern) int {
+	n := 0
+	for _, c := range cs {
+		if c.Actionable {
+			n++
+		}
+	}
+	return n
 }
 
 func concernFromFinding(f findings.Finding) Concern {
@@ -152,6 +209,8 @@ func concernFromFinding(f findings.Finding) Concern {
 		Line:          f.Line,
 		Confidence:    f.Confidence,
 		Probabilistic: f.Probabilistic,
+		Actionable:    true, // a deterministic finding is an affirmed, actionable problem
+		Gap:           gapAffirmed,
 	}
 }
 
@@ -160,6 +219,7 @@ func concernFromSurface(it findings.SurfaceItem) Concern {
 	if v, ok := it.StructuralFacts["local_access_detected"]; ok && !v {
 		certainty = SurfaceFrontier // the data left the body; codefit could not see the access
 	}
+	actionable, gap := surfaceGap(it)
 	return Concern{
 		Certainty:     certainty,
 		Affirms:       false, // surface is always a question
@@ -172,7 +232,27 @@ func concernFromSurface(it findings.SurfaceItem) Concern {
 		Line:          it.Line,
 		Confidence:    0,
 		Probabilistic: true,
+		Actionable:    actionable,
+		Gap:           gap,
 	}
+}
+
+// surfaceGap classifies the actionable structural gap of a surface concern, as a
+// fact: an idor/authz handler with no known authz check is an ACCESS gap; an
+// over-fetch with no select/omit is an EXPOSURE gap. A checked handler or a
+// limited query has no gap.
+func surfaceGap(it findings.SurfaceItem) (bool, string) {
+	switch it.Category {
+	case "idor", "authz":
+		if !it.StructuralFacts["known_authz_detected"] {
+			return true, gapAccess
+		}
+	case "overfetch":
+		if !it.StructuralFacts["field_limiting_detected"] {
+			return true, gapExposure
+		}
+	}
+	return false, ""
 }
 
 func certaintyRank(c CertaintyLevel) int {
