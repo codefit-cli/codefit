@@ -242,26 +242,61 @@ func collectIDInputs(body syntax.Node) (signals []string, idVars map[string]bool
 func collectIndirectUses(body syntax.Node, idVars map[string]bool) []string {
 	var out []string
 	walkTS(body, func(n syntax.Node) {
-		if n.Type() != "call_expression" || isPrismaCall(n) {
+		// A Prisma access is the local case; a schema validation (parse/safeParse)
+		// is not a resource access — neither is an indirect access callee.
+		if n.Type() != "call_expression" || isPrismaCall(n) || isValidationCall(n) {
 			return
 		}
 		args := field(n, "arguments", 1)
 		if args == nil {
 			return
 		}
-		hasID := false
-		walkTS(args, func(a syntax.Node) {
-			if isIDBearing(a, idVars) {
-				hasID = true
-			}
-		})
-		if hasID {
+		if containsIDArg(args, idVars) {
 			if c := calleeName(n); c != "" {
 				out = append(out, c)
 			}
 		}
 	})
 	return dedupe(out)
+}
+
+// isValidationCall reports whether a call is a schema validation (X.parse(...) /
+// X.safeParse(...)). Passing an id to a validator is not a resource access, so it
+// must not be reported as an indirect access callee (calibration after Bitácora).
+func isValidationCall(call syntax.Node) bool {
+	fn := field(call, "function", 0)
+	if fn == nil || fn.Type() != "member_expression" {
+		return false
+	}
+	p := field(fn, "property", 1)
+	return p != nil && (string(p.Text()) == "parse" || string(p.Text()) == "safeParse")
+}
+
+// containsIDArg reports whether an id-bearing expression is a DIRECT argument of
+// a call — it descends through wrappers (objects, awaits, members) but stops at
+// nested call_expressions, since an id used inside a nested call is consumed by
+// THAT call, not its enclosing one (so `Response.json(getById(id))` attributes
+// the id to getById, not Response.json).
+func containsIDArg(args syntax.Node, idVars map[string]bool) bool {
+	found := false
+	var visit func(n syntax.Node, depth int)
+	visit = func(n syntax.Node, depth int) {
+		if n == nil || found {
+			return
+		}
+		if isIDBearing(n, idVars) {
+			found = true
+			return
+		}
+		if depth > 0 && n.Type() == "call_expression" {
+			return // a nested call consumes the id itself; do not attribute upward
+		}
+		for i := 0; i < n.NamedChildCount(); i++ {
+			visit(n.NamedChild(i), depth+1)
+		}
+	}
+	visit(args, 0)
+	return found
 }
 
 // isParamsSource reports whether val reads the route params object: `await

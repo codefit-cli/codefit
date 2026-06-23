@@ -218,6 +218,41 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 	assertFactsNotJudgments(t, items[0])
 }
 
+// Calibration (1): a Zod schema validation call (schema.parse/safeParse) is NOT
+// a resource access — passing the id to it must not be reported as an indirect
+// access callee. An id that only reaches a validation call (and no real access)
+// is not enumerated.
+func TestIDOR_ZodParseIsNotAccess(t *testing.T) {
+	// Only a parse call → not surface (validation is not an access).
+	items := idorSurface(t, "app/notes/route.ts", `
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const filters = listNotesQuerySchema.parse({ unread: searchParams.get('unread') });
+  return Response.json(filters);
+}`)
+	if len(items) != 0 {
+		t.Errorf("an id that only flows to a Zod parse is not a resource access; must not enumerate, got %+v", items)
+	}
+
+	// parse AND a real service call → enumerated, naming the service, NOT parse.
+	items = idorSurface(t, "app/things/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const valid = idSchema.parse(id);
+  return Response.json(await ThingService.getById(id));
+}`)
+	if len(items) != 1 {
+		t.Fatalf("want 1 item, got %d", len(items))
+	}
+	sig := signalsJoined(items[0])
+	if strings.Contains(sig, ".parse") || strings.Contains(sig, "Schema") {
+		t.Errorf("the indirect callee must be the service, not the Zod parse: %q", sig)
+	}
+	if !strings.Contains(sig, "ThingService.getById") {
+		t.Errorf("the real service callee must be named: %q", sig)
+	}
+}
+
 // A handler that reads an id but does nothing with it (no access, no call taking
 // it) is not IDOR surface — the id goes nowhere.
 func TestIDOR_IdReadButUnused(t *testing.T) {

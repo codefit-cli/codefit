@@ -70,6 +70,34 @@ but silently misses whatever idiom we did not name. The honest move is to enumer
 on the reliable FINITE signal (a client id entered and left the body) and declare
 the rest.
 
+### Rejected: filtering id-input by name (and why it will keep tempting)
+
+Validating against Bitácora showed the enumeration treats every query parameter
+as a potential id, so filter/flag params (`date`, `includeTasks`, `limit`) inflate
+the surface as noise. The tempting fix is to only treat *id-named* params
+(`id`, `*Id`) as id-input. **We reject this.** Filtering id-input by name
+reintroduces exactly the name-fragility the shape-detection decision removed for
+Prisma clients (ADR 0004 follow-up): it would create a **silent blind spot** for
+every resource identifier with a non-standard name (`slug`, `code`, `ref`,
+`key`, a domain term) — an invisible miss, the worst failure mode for an auditor.
+The filter-param noise, by contrast, is **cheap and self-evident**: the signal
+names the key it read (`query parameter keys read: date`), so the agent discards
+it in a glance. The asymmetry that governs the whole mold applies: an over-
+enumerated filter is filtered by the agent in one look; an under-enumerated
+non-standard id is an invisible vulnerability. We accept the noise and keep
+id-input name-agnostic.
+
+This decision is recorded here because the same temptation will return for authz
+and over-fetching (e.g. "only protect handlers named `admin*`", "only flag
+serializations of `*Dto`"). The answer is the same: enumerate by the structural
+signal, not by the name; accept self-evident over-enumeration; never trade a
+silent blind spot for less noise.
+
+A calibration that IS accepted: a schema validation call (`schema.parse` /
+`safeParse`) is not a resource access, so an id passed only to a validator is not
+reported as an indirect access. That removes noise without creating a blind spot
+(a validator is never the access), unlike a name filter.
+
 ### Guidance for every category and language
 
 This principle governs IDOR, authz, over-fetching, and future stacks (Spring/JPA/
