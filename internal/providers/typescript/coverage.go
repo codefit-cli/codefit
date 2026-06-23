@@ -25,7 +25,7 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 		Reasoning: []string{
 			"SQL injection where the query is assembled in steps through intermediate variables (for example: const q = \"...\" + input; db.query(q)) — codefit maps the database calls as surface so the agent can reason about where the query text came from.",
 			"Cross-site scripting where dangerouslySetInnerHTML receives a variable whose safety depends on whether it was sanitized earlier — codefit maps these so the agent can judge whether the value is safe.",
-			"IDOR: endpoints that access a resource by an ID — mapped so the agent verifies that ownership is checked.",
+			"IDOR: Next.js App Router handlers that receive a client-controlled identifier (route param, query string, or request body) and reach a resource — mapped so the agent verifies ownership is checked. codefit enumerates the id-input idioms and the local Prisma access deterministically; when the id leaves the handler body (passed to a service/repository call), it is still enumerated with an honest signal saying the access may be indirect, and the agent follows the data. An id reached only after several intermediate revalidation steps may not be linked to its access — that deeper data-follow is the agent's, declared here (ADR 0005).",
 			"Broken authorization: protectable request handlers — mapped so the agent verifies authentication and authorization are enforced.",
 			"Over-fetching of sensitive data: serializations of domain objects that may expose more than intended.",
 		},

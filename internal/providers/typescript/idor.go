@@ -120,18 +120,24 @@ func handlersIn(exp syntax.Node) []tsHandler {
 }
 
 // idorItem builds the surface item for one handler, or reports ok=false when the
-// handler does not exhibit BOTH an incoming identifier and a resource access.
+// handler does not exhibit an incoming identifier that reaches a resource. Per
+// the frontier principle (ADR 0005): enumerate if a client id-input is present
+// AND the id reaches a resource — either a local Prisma access (FINITE,
+// enumerated) OR the id leaves the body as a call argument (INFINITE, handed to
+// the agent with an honest signal). An id that is read but goes nowhere is not
+// surface.
 func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
-	idInputs := dedupe(collectIDInputs(h.body))
+	idInputs, idVars := collectIDInputs(h.body)
 	accesses := dedupe(collectPrismaAccesses(h.body))
-	if len(idInputs) == 0 || len(accesses) == 0 {
+	indirect := collectIndirectUses(h.body, idVars)
+	if len(idInputs) == 0 || (len(accesses) == 0 && len(indirect) == 0) {
 		return findings.SurfaceItem{}, false
 	}
 	authz := dedupe(collectAuthzCalls(h.body))
 
 	signals := []string{
-		"Receives a client-controlled identifier: " + strings.Join(idInputs, ", "),
-		"Accesses a resource via a Prisma client method: " + strings.Join(accesses, ", "),
+		"Receives a client-controlled identifier: " + strings.Join(idInputs, "; "),
+		accessSignal(accesses, indirect),
 		authzSignal(authz),
 	}
 	return findings.SurfaceItem{
@@ -145,32 +151,273 @@ func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 	}, true
 }
 
+// accessSignal phrases the resource-access fact. A local Prisma access is named
+// directly. Otherwise the id leaves the body indirectly — codefit does not chase
+// where to (ADR 0005); it states honestly that the access may be in a service or
+// repository layer and lets the agent follow the data.
+func accessSignal(accesses, indirect []string) string {
+	if len(accesses) > 0 {
+		return "Accesses a resource via a Prisma client method: " + strings.Join(accesses, ", ")
+	}
+	return "No direct Prisma access detected in the handler body; the identifier is passed to " +
+		strings.Join(indirect, ", ") + " — the access may be in a service/repository layer (follow the identifier to confirm)"
+}
+
 // collectIDInputs records the client-controlled identifier inputs present in the
-// body, as facts: params.<x>, nextUrl.searchParams, req.json().
-func collectIDInputs(body syntax.Node) []string {
-	var out []string
+// body as facts, covering the FINITE set of Next 15/16 input idioms (ADR 0005):
+// route params (params.id AND `const {id} = await params`), query params
+// (req.nextUrl.searchParams AND `const {searchParams} = new URL(req.url)`, with
+// .get(key)), and the request body (req.json()/formData()). It also returns the
+// local variable names bound to those ids, so indirect use can be detected.
+func collectIDInputs(body syntax.Node) (signals []string, idVars map[string]bool) {
+	idVars = map[string]bool{}
+	seen := map[string]bool{}
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			signals = append(signals, s)
+		}
+	}
+	var queryKeys []string
+
 	walkTS(body, func(n syntax.Node) {
-		if n.Type() != "member_expression" {
-			return
-		}
-		obj := field(n, "object", 0)
-		prop := field(n, "property", 1)
-		if obj == nil || prop == nil {
-			return
-		}
-		propText := string(prop.Text())
-		switch {
-		case obj.Type() == "identifier" && string(obj.Text()) == "params" &&
-			(propText == "id" || idSuffix.MatchString(propText)):
-			out = append(out, "reads params."+propText)
-		case propText == "searchParams":
-			out = append(out, "reads a query parameter via nextUrl.searchParams")
-		case propText == "json" && obj.Type() == "identifier" &&
-			(string(obj.Text()) == "req" || string(obj.Text()) == "request"):
-			out = append(out, "reads the request body via req.json()")
+		switch n.Type() {
+		case "member_expression":
+			obj := field(n, "object", 0)
+			prop := field(n, "property", 1)
+			if obj == nil || prop == nil {
+				return
+			}
+			p := string(prop.Text())
+			switch {
+			case obj.Type() == "identifier" && string(obj.Text()) == "params" &&
+				(p == "id" || idSuffix.MatchString(p)):
+				add("reads route param params." + p)
+			case p == "searchParams":
+				add("reads query parameters (searchParams)")
+			case (p == "json" || p == "formData") && obj.Type() == "identifier" &&
+				(string(obj.Text()) == "req" || string(obj.Text()) == "request"):
+				add("reads the request body via " + string(obj.Text()) + "." + p + "()")
+			}
+		case "variable_declarator":
+			name := field(n, "name", 0)
+			val := field(n, "value", 1)
+			if name == nil || val == nil {
+				return
+			}
+			switch {
+			case name.Type() == "object_pattern" && isParamsSource(val):
+				names := patternNames(name)
+				add("reads route param(s) via destructured params: " + strings.Join(names, ", "))
+				for _, nm := range names {
+					idVars[nm] = true
+				}
+			case name.Type() == "object_pattern" && isBodySource(val):
+				names := patternNames(name)
+				add("reads request body field(s): " + strings.Join(names, ", "))
+				for _, nm := range names {
+					idVars[nm] = true
+				}
+			case name.Type() == "object_pattern" && patternHas(name, "searchParams"):
+				add("reads query parameters (destructured searchParams)")
+			case name.Type() == "identifier" && isIDBearing(val, idVars):
+				idVars[string(name.Text())] = true
+			}
+		case "call_expression":
+			if k, ok := searchParamKey(n); ok {
+				queryKeys = append(queryKeys, k)
+			}
 		}
 	})
+	if len(queryKeys) > 0 {
+		add("query parameter keys read: " + strings.Join(dedupe(queryKeys), ", "))
+	}
+	return signals, idVars
+}
+
+// collectIndirectUses records non-Prisma calls that receive an id as an argument
+// — the id leaving the body (ADR 0005). codefit does NOT identify the callee as
+// a service by name or shape; it only reports that the id is passed to it. The
+// agent follows the data from there.
+func collectIndirectUses(body syntax.Node, idVars map[string]bool) []string {
+	var out []string
+	walkTS(body, func(n syntax.Node) {
+		if n.Type() != "call_expression" || isPrismaCall(n) {
+			return
+		}
+		args := field(n, "arguments", 1)
+		if args == nil {
+			return
+		}
+		hasID := false
+		walkTS(args, func(a syntax.Node) {
+			if isIDBearing(a, idVars) {
+				hasID = true
+			}
+		})
+		if hasID {
+			if c := calleeName(n); c != "" {
+				out = append(out, c)
+			}
+		}
+	})
+	return dedupe(out)
+}
+
+// isParamsSource reports whether val reads the route params object: `await
+// params`, `await ctx.params`, `params`, or `ctx.params`.
+func isParamsSource(val syntax.Node) bool {
+	if val.Type() == "await_expression" && val.NamedChildCount() == 1 {
+		val = val.NamedChild(0)
+	}
+	switch val.Type() {
+	case "identifier":
+		return string(val.Text()) == "params"
+	case "member_expression":
+		p := field(val, "property", 1)
+		return p != nil && string(p.Text()) == "params"
+	}
+	return false
+}
+
+// isBodySource reports whether val reads the request body: `await req.json()`,
+// `req.json()`, `await req.formData()`, etc.
+func isBodySource(val syntax.Node) bool {
+	if val.Type() == "await_expression" && val.NamedChildCount() == 1 {
+		val = val.NamedChild(0)
+	}
+	if val.Type() != "call_expression" {
+		return false
+	}
+	fn := field(val, "function", 0)
+	if fn == nil || fn.Type() != "member_expression" {
+		return false
+	}
+	obj := field(fn, "object", 0)
+	prop := field(fn, "property", 1)
+	return obj != nil && prop != nil && obj.Type() == "identifier" &&
+		(string(obj.Text()) == "req" || string(obj.Text()) == "request") &&
+		(string(prop.Text()) == "json" || string(prop.Text()) == "formData")
+}
+
+// isIDBearing reports whether node is an id-bearing expression: an id variable,
+// a `params.<id>` access, or a `searchParams.get(...)` call.
+func isIDBearing(node syntax.Node, idVars map[string]bool) bool {
+	switch node.Type() {
+	case "identifier":
+		return idVars[string(node.Text())]
+	case "member_expression":
+		obj := field(node, "object", 0)
+		prop := field(node, "property", 1)
+		return obj != nil && prop != nil && obj.Type() == "identifier" &&
+			string(obj.Text()) == "params" &&
+			(string(prop.Text()) == "id" || idSuffix.MatchString(string(prop.Text())))
+	case "call_expression":
+		_, ok := searchParamKey(node)
+		return ok
+	}
+	return false
+}
+
+// searchParamKey returns the key string of a `searchParams.get("key")` call.
+func searchParamKey(call syntax.Node) (string, bool) {
+	fn := field(call, "function", 0)
+	if fn == nil || fn.Type() != "member_expression" {
+		return "", false
+	}
+	prop := field(fn, "property", 1)
+	obj := field(fn, "object", 0)
+	if prop == nil || obj == nil || string(prop.Text()) != "get" || !isSearchParamsRef(obj) {
+		return "", false
+	}
+	args := field(call, "arguments", 1)
+	if args == nil || args.NamedChildCount() == 0 || args.NamedChild(0).Type() != "string" {
+		return "", false
+	}
+	return strings.Trim(string(args.NamedChild(0).Text()), `"'`+"`"), true
+}
+
+// isSearchParamsRef reports whether node refers to a searchParams object — the
+// identifier `searchParams` or a `*.searchParams` member access.
+func isSearchParamsRef(node syntax.Node) bool {
+	if node.Type() == "identifier" {
+		return string(node.Text()) == "searchParams"
+	}
+	if node.Type() == "member_expression" {
+		p := field(node, "property", 1)
+		return p != nil && string(p.Text()) == "searchParams"
+	}
+	return false
+}
+
+// isPrismaCall reports whether a call is a <client>.<model>.<prismaMethod>(...)
+// access — the same shape collectPrismaAccesses records.
+func isPrismaCall(call syntax.Node) bool {
+	fn := field(call, "function", 0)
+	if fn == nil || fn.Type() != "member_expression" {
+		return false
+	}
+	method := field(fn, "property", 1)
+	clientModel := field(fn, "object", 0)
+	return method != nil && clientModel != nil && prismaMethods[string(method.Text())] &&
+		clientModel.Type() == "member_expression"
+}
+
+// calleeName returns a readable name for a call's callee (an identifier or the
+// `object.property` of a member expression).
+func calleeName(call syntax.Node) string {
+	fn := field(call, "function", 0)
+	if fn == nil {
+		return ""
+	}
+	switch fn.Type() {
+	case "identifier":
+		return string(fn.Text())
+	case "member_expression":
+		obj := field(fn, "object", 0)
+		prop := field(fn, "property", 1)
+		if obj != nil && prop != nil && obj.Type() == "identifier" {
+			return string(obj.Text()) + "." + string(prop.Text())
+		}
+		if prop != nil {
+			return string(prop.Text())
+		}
+	}
+	return ""
+}
+
+// patternNames returns the local names bound by an object_pattern (shorthand
+// `{id}` → "id"; aliased `{id: noteId}` → "noteId").
+func patternNames(pattern syntax.Node) []string {
+	var out []string
+	for i := 0; i < pattern.NamedChildCount(); i++ {
+		c := pattern.NamedChild(i)
+		switch c.Type() {
+		case "shorthand_property_identifier_pattern":
+			out = append(out, string(c.Text()))
+		case "pair_pattern":
+			if v := field(c, "value", 1); v != nil && v.Type() == "identifier" {
+				out = append(out, string(v.Text()))
+			}
+		}
+	}
 	return out
+}
+
+// patternHas reports whether an object_pattern binds the given shorthand name.
+func patternHas(pattern syntax.Node, name string) bool {
+	for i := 0; i < pattern.NamedChildCount(); i++ {
+		c := pattern.NamedChild(i)
+		if c.Type() == "shorthand_property_identifier_pattern" && string(c.Text()) == name {
+			return true
+		}
+		if c.Type() == "pair_pattern" {
+			if k := field(c, "key", 0); k != nil && string(k.Text()) == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // collectPrismaAccesses records resource accesses by SHAPE: a call whose callee
