@@ -52,6 +52,21 @@ then by certain-concern count. This is still ordering by **fact** (which control
 is missing), not by severity — codefit never says one endpoint is "worse"; the
 agent judges danger in its verdict.
 
+**Why access ranks before exposure — and what it is NOT.** Access ranks before
+exposure because of **structural reachability**, a fact about the endpoint: when
+no authz/ownership check is detected, the barrier to entry is *absent* — anyone
+can reach the handler — whereas an over-exposure gap sits on a handler whose
+barrier is *present*. "Barrier present vs absent" is a structural property codefit
+observes, not a judgment. This ordering does **NOT** assert that access problems
+are more severe, more dangerous, or more important than exposure problems. It is
+**not a severity ranking**: an exposure gap (e.g. a leaked password hash) may well
+be more severe than a given access gap, and codefit takes no position on that.
+Severity is the agent's to set in its verdict, per concern, with the domain
+context codefit does not have. codefit only orders by the structural fact of
+which control is missing — reachability barrier first — so the agent reviews the
+unguarded handlers before the guarded-but-over-exposing ones; it ranks the
+*review order*, not the *danger*.
+
 **Rejected: ordering by count of concerns.** The first design ranked endpoints by
 how many certain concerns they carried (more facts → higher). It is intuitively
 reasonable — and it was wrong, refuted by the Bitácora data. Over-fetch with no
