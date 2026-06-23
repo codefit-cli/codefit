@@ -18,6 +18,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/ruleengine"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/core/syntax"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/rules"
@@ -120,7 +121,19 @@ func (*Provider) AnalyzePractices(providers.SourceFile) ([]findings.Finding, err
 	return nil, nil
 }
 
-// AnalyzeSurface is a stub; surface mapping arrives in Prompt 1.3.
-func (*Provider) AnalyzeSurface(providers.SourceFile) ([]findings.SurfaceItem, error) {
-	return nil, nil
+// AnalyzeSurface maps the auditable structural surface of a TypeScript file by
+// running the provider's surface queries through the agnostic framework, which
+// stamps the stable ids. Today only IDOR (Next App Router) is wired; authz and
+// over-fetching are added as their queries land.
+func (p *Provider) AnalyzeSurface(src providers.SourceFile) ([]findings.SurfaceItem, error) {
+	root, err := p.Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	return surface.Run(p.surfaceQueries(), root, src.Path), nil
+}
+
+// surfaceQueries are the surface categories the TS provider can enumerate.
+func (*Provider) surfaceQueries() []surface.Query {
+	return []surface.Query{idorQuery{}}
 }
