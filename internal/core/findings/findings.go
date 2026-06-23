@@ -72,13 +72,23 @@ type ConsentRecord struct {
 // category (IDOR endpoints, protectable handlers, data serializations, ...) so
 // the agent reasons over each with its own LLM, with no blind spots.
 type SurfaceItem struct {
+	// ID is a stable anchor derived from (file, line, category) — see
+	// core/surface.StableID. The agent returns it in a verdict, and codefit
+	// recomputes it to validate the verdict statelessly.
+	ID string `json:"id"`
 	// Category is the surface class: "idor" | "authz" | "overfetch" | ...
 	Category string `json:"category"`
 	File     string `json:"file"`
 	Line     int    `json:"line"`
 	// Snippet is the relevant source fragment for the agent to read.
 	Snippet string `json:"snippet"`
-	// ReasonToReview tells the agent what to verify about this item.
+	// StructuralSignals are verifiable syntactic FACTS about the item ("reads
+	// params.id", "no call to a known authz helper was detected in the body"),
+	// never judgments ("is vulnerable", "missing authorization"). They are what
+	// the agent reasons over.
+	StructuralSignals []string `json:"structural_signals"`
+	// ReasonToReview is the QUESTION the agent must answer about this item, never
+	// a conclusion.
 	ReasonToReview string `json:"reason_to_review"`
 }
 
