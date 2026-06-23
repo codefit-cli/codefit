@@ -50,6 +50,28 @@ func TestHandleSurfaceIDOR(t *testing.T) {
 	}
 }
 
+// codefit-surface-authz: enumerates the broken-authorization surface (handlers
+// doing something sensitive) in the same §11 JSON contract.
+func TestHandleSurfaceAuthz(t *testing.T) {
+	resp, err := mcp.HandleSurfaceAuthz(mcp.SurfaceIDORRequest{
+		Files: []mcp.FileInput{
+			{Path: "app/reports/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.report.findMany()); }`},
+			{Path: "app/health/route.ts", Content: `
+export async function GET() { return Response.json({ ok: true }); }`}, // not sensitive
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Surface) != 1 {
+		t.Fatalf("want 1 authz item (only the data-touching handler), got %d", len(resp.Surface))
+	}
+	if resp.Surface[0].Category != "authz" || resp.Surface[0].ID == "" {
+		t.Errorf("authz surface item incomplete: %+v", resp.Surface[0])
+	}
+}
+
 // End-to-end: enumerate → the agent confirms the item by its id → codefit
 // integrates the verdict into a probabilistic, anchored finding.
 func TestSurfaceConfirmRoundTrip(t *testing.T) {

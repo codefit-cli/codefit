@@ -76,6 +76,7 @@ func (idorQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem
 // only scope the signals are searched in — searching wider would let authz in a
 // called helper masquerade as authz in the handler), and its location.
 type tsHandler struct {
+	method  string
 	body    syntax.Node
 	line    int
 	snippet string
@@ -94,7 +95,7 @@ func handlersIn(exp syntax.Node) []tsHandler {
 			name := field(child, "name", 0)
 			if name != nil && httpMethods[string(name.Text())] {
 				if body := bodyBlock(child); body != nil {
-					out = append(out, tsHandler{body: body, line: line, snippet: snippet})
+					out = append(out, tsHandler{method: string(name.Text()), body: body, line: line, snippet: snippet})
 				}
 			}
 		case "lexical_declaration", "variable_declaration":
@@ -110,7 +111,7 @@ func handlersIn(exp syntax.Node) []tsHandler {
 				}
 				if val.Type() == "arrow_function" || val.Type() == "function_expression" {
 					if body := bodyBlock(val); body != nil {
-						out = append(out, tsHandler{body: body, line: line, snippet: snippet})
+						out = append(out, tsHandler{method: string(name.Text()), body: body, line: line, snippet: snippet})
 					}
 				}
 			}

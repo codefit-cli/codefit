@@ -36,6 +36,18 @@ type SurfaceResponse struct {
 // returns it in the canonical JSON contract. Files that are not handled by a
 // provider (or carry no IDOR surface) contribute nothing.
 func HandleSurfaceIDOR(req SurfaceIDORRequest) (SurfaceResponse, error) {
+	return handleSurface(req, string(surface.CategoryIDOR))
+}
+
+// HandleSurfaceAuthz enumerates the broken-authorization surface across the given
+// files in the same contract.
+func HandleSurfaceAuthz(req SurfaceIDORRequest) (SurfaceResponse, error) {
+	return handleSurface(req, string(surface.CategoryAuthz))
+}
+
+// handleSurface runs the providers over the files and returns the surface items
+// of one category — the shared body of the codefit-surface-* tools.
+func handleSurface(req SurfaceIDORRequest, category string) (SurfaceResponse, error) {
 	items := make([]findings.SurfaceItem, 0)
 	for _, f := range req.Files {
 		p := providerFor(f.Path)
@@ -47,7 +59,7 @@ func HandleSurfaceIDOR(req SurfaceIDORRequest) (SurfaceResponse, error) {
 			return SurfaceResponse{}, err
 		}
 		for _, it := range all {
-			if it.Category == string(surface.CategoryIDOR) {
+			if it.Category == category {
 				items = append(items, it)
 			}
 		}

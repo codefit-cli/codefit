@@ -135,5 +135,5 @@ func (p *Provider) AnalyzeSurface(src providers.SourceFile) ([]findings.SurfaceI
 
 // surfaceQueries are the surface categories the TS provider can enumerate.
 func (*Provider) surfaceQueries() []surface.Query {
-	return []surface.Query{idorQuery{}}
+	return []surface.Query{idorQuery{}, authzQuery{}}
 }
