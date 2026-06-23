@@ -98,6 +98,27 @@ A calibration that IS accepted: a schema validation call (`schema.parse` /
 reported as an indirect access. That removes noise without creating a blind spot
 (a validator is never the access), unlike a name filter.
 
+### Order by structural certainty, do not filter the frontier
+
+When a category's frontier (the INFINITE zone) produces volume — over-fetching on
+Bitácora enumerated 8 local serializations and 22 frontier (service)
+serializations — the temptation is to filter the frontier down ("only enumerate a
+service call that looks like a data access"). **We reject this for the same reason
+as the name filter:** deciding a service "looks like a data access" is a filter by
+shape that would silently drop the services that DO over-fetch but are invisible
+from the handler. Instead, the tool ORDERS by structural certainty and keeps
+everything: items codefit can confirm from structure alone (a local Prisma find
+serialized with no `select` → a confirmed over-fetch) come first; the frontier
+(serialization through a service codefit cannot see into) comes last, present and
+marked with its honest "follow the data" signal. This is the same unchecked-first
+ordering used for authz (`known_authz_detected`), applied to the local/frontier
+axis via the queryable facts `local_access_detected` and `field_limiting_detected`.
+
+The order is by FACT (what codefit can assert with most certainty), never by
+severity — codefit does not say the confirmed eight are "worse", only that it is
+structurally sure of them and cannot see into the frontier. The agent judges
+severity in its verdict. Completeness is preserved; navigation is prioritized.
+
 ### Guidance for every category and language
 
 This principle governs IDOR, authz, over-fetching, and future stacks (Spring/JPA/

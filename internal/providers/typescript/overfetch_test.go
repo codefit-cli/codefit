@@ -46,6 +46,22 @@ export async function GET() {
 	assertFactsNotJudgments(t, it)
 }
 
+// over-fetch reuses local_access_detected (the IDOR fact): true when the
+// serialized value is a local Prisma find, false at the frontier (a service).
+// The two facts together let the tool order by structural certainty.
+func TestOverfetch_LocalAccessDetectedFact(t *testing.T) {
+	local := overfetchSurface(t, "app/users/route.ts", `
+export async function GET() { return Response.json(await prisma.user.findMany()); }`)
+	if len(local) != 1 || !local[0].StructuralFacts["local_access_detected"] {
+		t.Errorf("a local find serialization must set local_access_detected=true, got %+v", local)
+	}
+	frontier := overfetchSurface(t, "app/users/route.ts", `
+export async function GET() { return Response.json(await UserService.getAll()); }`)
+	if len(frontier) != 1 || frontier[0].StructuralFacts["local_access_detected"] {
+		t.Errorf("a frontier serialization must set local_access_detected=false, got %+v", frontier)
+	}
+}
+
 // An inline find WITH select limits fields → field_limiting_detected=true (still
 // enumerated, lower priority).
 func TestOverfetch_InlineFindWithSelect(t *testing.T) {

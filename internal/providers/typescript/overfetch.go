@@ -64,27 +64,25 @@ func overfetchItem(call, x syntax.Node, prismaVars map[string]prismaVar, service
 	xu := unwrapAwait(x)
 
 	var signals []string
-	var limited bool
+	var limited, local bool
 	var reason string
 
 	switch {
 	case xu.Type() == "call_expression" && isPrismaCall(xu):
 		model, method := prismaCallInfo(xu)
-		limited = hasSelectOrOmit(xu)
+		limited, local = hasSelectOrOmit(xu), true
 		signals = localOverfetchSignals(model, method, limited)
 		reason = overfetchModelReason(model)
 	case xu.Type() == "identifier" && inPrismaVars(xu, prismaVars):
 		pv := prismaVars[string(xu.Text())]
-		limited = pv.limited
+		limited, local = pv.limited, true
 		signals = localOverfetchSignals(pv.model, "find", limited)
 		reason = overfetchModelReason(pv.model)
 	case xu.Type() == "call_expression" && isServiceCall(xu):
 		signals = frontierOverfetchSignals(calleeName(xu))
-		limited = false
 		reason = overfetchFrontierReason()
 	case xu.Type() == "identifier" && inServiceVars(xu, serviceVars):
 		signals = frontierOverfetchSignals(serviceVars[string(xu.Text())])
-		limited = false
 		reason = overfetchFrontierReason()
 	default:
 		return findings.SurfaceItem{}, false
@@ -96,8 +94,11 @@ func overfetchItem(call, x syntax.Node, prismaVars map[string]prismaVar, service
 		Line:              call.StartLine(),
 		Snippet:           firstLine(string(call.Text())),
 		StructuralSignals: signals,
-		StructuralFacts:   map[string]bool{"field_limiting_detected": limited},
-		ReasonToReview:    reason,
+		StructuralFacts: map[string]bool{
+			"local_access_detected":   local,
+			"field_limiting_detected": limited,
+		},
+		ReasonToReview: reason,
 	}, true
 }
 
