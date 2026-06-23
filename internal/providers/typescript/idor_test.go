@@ -155,6 +155,27 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 	}
 }
 
+// The queryable structural fact local_access_detected: true when the resource
+// access is local (Prisma in the body), false when the id leaves the body (the
+// frontier to the agent). Additive — it does not change enumeration.
+func TestIDOR_LocalAccessDetectedFact(t *testing.T) {
+	local := idorSurface(t, "app/users/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  return Response.json(await prisma.user.findUnique({ where: { id: params.id } }));
+}`)
+	if len(local) != 1 || !local[0].StructuralFacts["local_access_detected"] {
+		t.Errorf("a local Prisma access must set local_access_detected=true, got %+v", local)
+	}
+	indirect := idorSurface(t, "app/notes/[id]/route.ts", `
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return Response.json(await NoteService.markAsRead(id));
+}`)
+	if len(indirect) != 1 || indirect[0].StructuralFacts["local_access_detected"] {
+		t.Errorf("an indirect access (id leaves the body) must set local_access_detected=false, got %+v", indirect)
+	}
+}
+
 // Blind spot A: Next 15 async params — `const { id } = await params` — read via
 // destructuring, not `params.id`. Must be enumerated (was a false negative).
 func TestIDOR_AsyncParamsDestructured(t *testing.T) {

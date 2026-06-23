@@ -87,6 +87,14 @@ type SurfaceItem struct {
 	// never judgments ("is vulnerable", "missing authorization"). They are what
 	// the agent reasons over.
 	StructuralSignals []string `json:"structural_signals"`
+	// StructuralFacts is the queryable form of the same facts: boolean detections
+	// a consumer can filter/sort by without parsing prose (e.g. authz →
+	// "known_authz_detected", idor → "local_access_detected"). They are FACTS
+	// ("a known pattern was/wasn't detected"), never judgments and never severity:
+	// known_authz_detected=false means "no known authz pattern was seen", NOT "this
+	// is unauthorized". Ordering by a fact is allowed; concluding from it is the
+	// agent's.
+	StructuralFacts map[string]bool `json:"structural_facts"`
 	// ReasonToReview is the QUESTION the agent must answer about this item, never
 	// a conclusion.
 	ReasonToReview string `json:"reason_to_review"`
