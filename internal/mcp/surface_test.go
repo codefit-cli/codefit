@@ -102,6 +102,46 @@ export async function GET() { return Response.json(await prisma.b.findMany()); }
 	}
 }
 
+// codefit-surface-overfetch orders by STRUCTURAL CERTAINTY, without filtering:
+//
+//	1st  local find, no select  (structurally confirmed over-fetch — actionable)
+//	2nd  local find, with select (limited)
+//	3rd  frontier (service — codefit cannot see the find; honest, kept last)
+//
+// All items are preserved; only ordered by what codefit can assert with most
+// certainty. This is the unchecked-first principle applied to the local/frontier
+// axis (ADR 0005) — never severity.
+func TestHandleSurfaceOverfetchOrdersByCertainty(t *testing.T) {
+	resp, err := mcp.HandleSurfaceOverfetch(mcp.SurfaceIDORRequest{
+		Files: []mcp.FileInput{
+			{Path: "app/frontier/route.ts", Content: `
+export async function GET() { return Response.json(await ThingService.getAll()); }`},
+			{Path: "app/limited/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.a.findMany({ select: { id: true } })); }`},
+			{Path: "app/confirmed/route.ts", Content: `
+export async function GET() { return Response.json(await prisma.b.findMany()); }`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Surface) != 3 {
+		t.Fatalf("ordering must not drop items; want 3, got %d", len(resp.Surface))
+	}
+	// 1st: confirmed (local, no select).
+	if !resp.Surface[0].StructuralFacts["local_access_detected"] || resp.Surface[0].StructuralFacts["field_limiting_detected"] {
+		t.Errorf("position 0 must be the confirmed over-fetch (local, no select), got %s", resp.Surface[0].File)
+	}
+	// 2nd: local with select.
+	if !resp.Surface[1].StructuralFacts["local_access_detected"] || !resp.Surface[1].StructuralFacts["field_limiting_detected"] {
+		t.Errorf("position 1 must be the limited local find, got %s", resp.Surface[1].File)
+	}
+	// 3rd: frontier (kept, not filtered).
+	if resp.Surface[2].StructuralFacts["local_access_detected"] {
+		t.Errorf("position 2 must be the frontier (local_access_detected=false), got %s", resp.Surface[2].File)
+	}
+}
+
 // End-to-end: enumerate → the agent confirms the item by its id → codefit
 // integrates the verdict into a probabilistic, anchored finding.
 func TestSurfaceConfirmRoundTrip(t *testing.T) {

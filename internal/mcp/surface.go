@@ -52,12 +52,52 @@ func HandleSurfaceAuthz(req SurfaceIDORRequest) (SurfaceResponse, error) {
 	if err != nil {
 		return resp, err
 	}
+	sortUncheckedFirst(resp.Surface, "known_authz_detected")
+	return resp, nil
+}
+
+// HandleSurfaceOverfetch enumerates the over-fetching surface and orders by
+// STRUCTURAL CERTAINTY, reusing the queryable facts — it does NOT filter:
+//
+//	1st  local find, no select   (structurally confirmed over-fetch — actionable)
+//	2nd  local find, with select (limited)
+//	3rd  frontier (service — codefit cannot see the find; kept last, honest)
+//
+// The complete enumeration is preserved; only the order changes, lowering the
+// uncertain (frontier) without dropping them — the unchecked-first principle on
+// the local/frontier axis (ADR 0005). Ordering by a fact is not severity:
+// codefit ranks by what it can assert with most certainty, the agent judges.
+func HandleSurfaceOverfetch(req SurfaceIDORRequest) (SurfaceResponse, error) {
+	resp, err := handleSurface(req, string(surface.CategoryOverfetch))
+	if err != nil {
+		return resp, err
+	}
 	sort.SliceStable(resp.Surface, func(i, j int) bool {
-		// unchecked (known_authz_detected=false) before checked (true).
-		return !resp.Surface[i].StructuralFacts["known_authz_detected"] &&
-			resp.Surface[j].StructuralFacts["known_authz_detected"]
+		return overfetchCertaintyRank(resp.Surface[i]) < overfetchCertaintyRank(resp.Surface[j])
 	})
 	return resp, nil
+}
+
+// overfetchCertaintyRank ranks an over-fetch item by how certainly codefit can
+// assert over-fetching from structure alone (lower = more certain, ordered first).
+func overfetchCertaintyRank(it findings.SurfaceItem) int {
+	switch {
+	case it.StructuralFacts["local_access_detected"] && !it.StructuralFacts["field_limiting_detected"]:
+		return 0 // local find with no select — structurally confirmed
+	case it.StructuralFacts["local_access_detected"]:
+		return 1 // local find that limits fields
+	default:
+		return 2 // frontier — codefit could not see the find
+	}
+}
+
+// sortUncheckedFirst stably orders items so those whose given structural fact is
+// false (the actionable case: no known check/limit detected) come before those
+// where it is true. Ordering by a fact is not a severity judgment.
+func sortUncheckedFirst(items []findings.SurfaceItem, fact string) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return !items[i].StructuralFacts[fact] && items[j].StructuralFacts[fact]
+	})
 }
 
 // handleSurface runs the providers over the files and returns the surface items
