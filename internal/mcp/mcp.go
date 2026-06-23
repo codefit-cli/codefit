@@ -16,6 +16,7 @@ const (
 	ToolSurfaceIDOR      Tool = "codefit-surface-idor"
 	ToolSurfaceAuthz     Tool = "codefit-surface-authz"
 	ToolSurfaceOverfetch Tool = "codefit-surface-overfetch"
+	ToolConfirmSurface   Tool = "codefit-confirm-surface"
 	ToolReviewCode       Tool = "codefit-review-code"
 	ToolScanAll          Tool = "codefit-scan-all"
 	ToolBaseline         Tool = "codefit-baseline"
