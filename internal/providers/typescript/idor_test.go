@@ -155,6 +155,117 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 	}
 }
 
+// Blind spot A: Next 15 async params — `const { id } = await params` — read via
+// destructuring, not `params.id`. Must be enumerated (was a false negative).
+func TestIDOR_AsyncParamsDestructured(t *testing.T) {
+	items := idorSurface(t, "app/accounts/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: accountId } = await params;
+  return Response.json(await prisma.account.findUnique({ where: { id: accountId } }));
+}`)
+	if len(items) != 1 {
+		t.Fatalf("async-params destructuring must be enumerated, got %d", len(items))
+	}
+	sig := signalsJoined(items[0])
+	if !strings.Contains(strings.ToLower(sig), "param") {
+		t.Errorf("id signal must name the route param input, got %q", sig)
+	}
+	assertFactsNotJudgments(t, items[0])
+}
+
+// Blind spot B: query params via `const { searchParams } = new URL(req.url)` —
+// the dominant idiom in real code. Must be enumerated (was a false negative).
+func TestIDOR_NewURLSearchParams(t *testing.T) {
+	items := idorSurface(t, "app/processes/route.ts", `
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const executionId = searchParams.get('executionId');
+  return Response.json(await prisma.processExecution.findMany({ where: { executionId } }));
+}`)
+	if len(items) != 1 {
+		t.Fatalf("new URL().searchParams must be enumerated, got %d", len(items))
+	}
+	sig := signalsJoined(items[0])
+	if !strings.Contains(sig, "searchParams") {
+		t.Errorf("id signal must name the query-param input, got %q", sig)
+	}
+	assertFactsNotJudgments(t, items[0])
+}
+
+// Blind spot C: indirect resource access. The id is read and passed to a service
+// call; no direct Prisma access in the body. codefit does NOT chase the service
+// — it enumerates with an HONEST signal that the access may be indirect, and the
+// question sends the agent to follow the data (the frontier, ADR 0005).
+func TestIDOR_IndirectAccessViaService(t *testing.T) {
+	items := idorSurface(t, "app/notes/[id]/route.ts", `
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: noteId } = await params;
+  const note = await NoteService.markAsRead(noteId);
+  return Response.json(note);
+}`)
+	if len(items) != 1 {
+		t.Fatalf("indirect access (id passed to a service) must be enumerated, got %d", len(items))
+	}
+	sig := strings.ToLower(signalsJoined(items[0]))
+	if !strings.Contains(sig, "service") && !strings.Contains(sig, "indirect") {
+		t.Errorf("access signal must honestly say the access may be indirect, got %q", sig)
+	}
+	// "prisma" may appear in the honest negative ("No direct Prisma access
+	// detected"), but codefit must not CLAIM a prisma access here.
+	if strings.Contains(sig, "accesses a resource via a prisma") {
+		t.Errorf("there is no Prisma access here — codefit must not claim one: %q", sig)
+	}
+	assertFactsNotJudgments(t, items[0])
+}
+
+// Calibration (1): a Zod schema validation call (schema.parse/safeParse) is NOT
+// a resource access — passing the id to it must not be reported as an indirect
+// access callee. An id that only reaches a validation call (and no real access)
+// is not enumerated.
+func TestIDOR_ZodParseIsNotAccess(t *testing.T) {
+	// Only a parse call → not surface (validation is not an access).
+	items := idorSurface(t, "app/notes/route.ts", `
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const filters = listNotesQuerySchema.parse({ unread: searchParams.get('unread') });
+  return Response.json(filters);
+}`)
+	if len(items) != 0 {
+		t.Errorf("an id that only flows to a Zod parse is not a resource access; must not enumerate, got %+v", items)
+	}
+
+	// parse AND a real service call → enumerated, naming the service, NOT parse.
+	items = idorSurface(t, "app/things/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const valid = idSchema.parse(id);
+  return Response.json(await ThingService.getById(id));
+}`)
+	if len(items) != 1 {
+		t.Fatalf("want 1 item, got %d", len(items))
+	}
+	sig := signalsJoined(items[0])
+	if strings.Contains(sig, ".parse") || strings.Contains(sig, "Schema") {
+		t.Errorf("the indirect callee must be the service, not the Zod parse: %q", sig)
+	}
+	if !strings.Contains(sig, "ThingService.getById") {
+		t.Errorf("the real service callee must be named: %q", sig)
+	}
+}
+
+// A handler that reads an id but does nothing with it (no access, no call taking
+// it) is not IDOR surface — the id goes nowhere.
+func TestIDOR_IdReadButUnused(t *testing.T) {
+	items := idorSurface(t, "app/echo/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return Response.json({ ok: true });
+}`)
+	if len(items) != 0 {
+		t.Errorf("an id that is read but never used as an access or argument is not surface, got %+v", items)
+	}
+}
+
 // Honesty of the authz signal, inline: getServerSession IS in the body → signal
 // reports it was detected (never omitted).
 func TestIDOR_AuthzPresentInline(t *testing.T) {
