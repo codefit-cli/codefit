@@ -93,7 +93,14 @@ func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 		Line:              h.line,
 		Snippet:           h.snippet,
 		StructuralSignals: signals,
-		StructuralFacts:   map[string]bool{"known_authz_detected": len(authz) > 0},
+		StructuralFacts: map[string]bool{
+			"known_authz_detected": len(authz) > 0,
+			// local_access_detected: the sensitive operation is a local Prisma
+			// access (true) vs only an indirect service/repository call (false, the
+			// frontier). Shared with IDOR/overfetch so the synthesis can rank by
+			// certainty uniformly.
+			"local_access_detected": len(accesses) > 0,
+		},
 		ReasonToReview: "Should this endpoint be public, or must it verify that the caller is " +
 			"permitted before performing this operation — and is the absence of a detected " +
 			"authorization check here intentional?",
