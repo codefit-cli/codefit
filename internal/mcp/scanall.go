@@ -18,17 +18,35 @@ type ScanAllRequest struct {
 }
 
 // ScanAllResponse is the agent-first synthesis as an ACTIONABLE summary, not the
-// raw item dump. Endpoints codefit resolved LOCALLY (≥1 deterministic or
-// surface_confirmed concern) are returned WHOLE in Actionable; the frontier-only
-// endpoints (every concern is surface_frontier — the data left the handler body)
-// are only NAMED in FrontierPending and fetched on demand via codefit-scan-
-// endpoint. This keeps the response small enough not to truncate, while declaring
-// exactly what was left out and why (ADR 0008). The split criterion is the FACT
-// local_access_detected, folded into CertainConcerns — not an arbitrary cut.
+// raw item dump. It has three buckets, one per resolution level, all decided by
+// facts codefit already computes (ADR 0008):
+//
+//   - Actionable      — resolved locally AND has a gap: full detail, the agent acts.
+//   - ResolvedClean   — resolved locally, NO gap: named + a verification fact;
+//     codefit checked and the controls are present.
+//   - FrontierPending — not resolved locally (the data left the handler body):
+//     named; the agent follows it in the code.
+//
+// ResolvedClean and FrontierPending are kept DISTINCT on purpose: one affirms
+// codefit verified the controls, the other states codefit could not conclude —
+// epistemological opposites the agent must distinguish (flattening them would be
+// the old frontier-wording error). Full detail of any named endpoint is always one
+// codefit-scan-endpoint call away.
 type ScanAllResponse struct {
 	Summary         ScanAllSummary          `json:"summary"`
 	Actionable      []report.EndpointReport `json:"actionable"`
+	ResolvedClean   ResolvedClean           `json:"resolved_clean"`
 	FrontierPending FrontierPending         `json:"frontier_pending"`
+}
+
+// ResolvedClean declares the endpoints codefit resolved locally and found clean
+// (controls present, no gap). They are NAMED with a verification fact, not
+// detailed. This is an affirmation — codefit looked and it is clean — not a
+// generic "not detailed" bucket; that is why it is separate from FrontierPending.
+type ResolvedClean struct {
+	Count     int                            `json:"count"`
+	Note      string                         `json:"note,omitempty"`
+	Endpoints []report.ResolvedCleanEndpoint `json:"endpoints,omitempty"`
 }
 
 // FrontierPending declares the endpoints codefit did NOT resolve locally: the data
@@ -62,11 +80,12 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	}
 
 	endpoints := report.AggregateEndpoints(res.Findings, res.Surface)
-	actionable, frontier := report.PartitionByResolution(endpoints)
+	actionable, clean, frontier := report.ClassifyEndpoints(endpoints)
 	certain := 0
 	for _, ep := range endpoints {
 		certain += ep.CertainConcerns
 	}
+	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Summary: ScanAllSummary{
 			Endpoints:             len(endpoints),
@@ -75,12 +94,31 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 			CertainConcerns:       certain,
 		},
 		Actionable: actionable,
+		ResolvedClean: ResolvedClean{
+			Count:     len(clean),
+			Note:      resolvedCleanNote(len(clean)),
+			Endpoints: clean,
+		},
 		FrontierPending: FrontierPending{
 			Count:     len(frontier),
-			Note:      frontierNote(len(frontier), len(actionable)),
+			Note:      frontierNote(len(frontier), resolvedLocally),
 			Endpoints: frontier,
 		},
 	}, nil
+}
+
+// resolvedCleanNote phrases the resolved-clean bucket as the affirmation it is:
+// codefit checked these locally and the controls are present, no gap. It must not
+// read as "ignore" — it is information (these are verified), and the full detail is
+// a codefit-scan-endpoint call away.
+func resolvedCleanNote(count int) string {
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d endpoint(s) codefit resolved locally and found clean: the controls are present "+
+		"(authorization and/or field selection) and no gap was detected in the handler body. They are named "+
+		"with the verification fact, not detailed — this is a positive check, not an absence of conclusion. "+
+		"Request %s with one of these files for its full detail.", count, ToolScanEndpoint)
 }
 
 // frontierNote phrases what the frontier-pending list means, honestly. When there
@@ -90,11 +128,11 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 // concluded nothing locally — this is NOT a clean result, every endpoint requires
 // following the data in the code — the same principle as the frontier signal
 // wording: absence of actionable items is not "clean".
-func frontierNote(frontierCount, actionableCount int) string {
+func frontierNote(frontierCount, resolvedLocallyCount int) string {
 	if frontierCount == 0 {
 		return ""
 	}
-	if actionableCount == 0 {
+	if resolvedLocallyCount == 0 {
 		return fmt.Sprintf("codefit concluded nothing locally: every one of these %d endpoint(s) is "+
 			"frontier — the data leaves the handler body, so no local analysis could resolve it. This is "+
 			"NOT a clean result; it means all of them require following the data in the code. Request "+

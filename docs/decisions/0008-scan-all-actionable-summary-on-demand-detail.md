@@ -20,42 +20,71 @@ the volume and add the least.
 
 ## Decision
 
-`codefit-scan-all` returns an **actionable summary**, with the frontier detail
-**on demand**. The split is decided by a FACT codefit already computes, not an
-arbitrary cut: did codefit **conclude locally** (`CertainConcerns>0` — at least one
-deterministic finding or a surface_confirmed concern, i.e. `local_access_detected=
-true`) or is **every** concern at the frontier.
+`codefit-scan-all` returns a **three-bucket summary**, one bucket per **resolution
+level**, with full detail only where the agent can act and everything else named
+on demand. Every split is decided by FACTS codefit already computes
+(`CertainConcerns`, the actionable gap), not an arbitrary cut:
 
-### In the summary (returned directly)
+### 1. `actionable` — resolved locally AND has a gap (full detail)
 
-- **Deterministic findings** (certainty 1.0): always.
-- **Endpoints with ≥1 confirmed concern** go **whole** — *all* their concerns
-  together (confirmed *and* any frontier concern of the **same** endpoint), because
-  the agent reasons the endpoint, not loose concerns. Returned as `actionable`.
+Endpoints codefit resolved locally (`CertainConcerns>0`) that carry **≥1
+unresolved gap** (`Actionable>0` — a deterministic finding, a missing access/
+ownership check, or a serialization with no select/omit). They go **whole** — all
+their concerns together (including any frontier concern of the **same** endpoint),
+because the agent reasons the endpoint, not loose concerns. Deterministic findings
+(certainty 1.0) always land here. These are what the agent acts on.
 
-### On demand (named, not detailed)
+### 2. `resolved_clean` — resolved locally, NO gap (named + verification fact)
 
-- **Frontier-only endpoints** (no confirmed concern, no deterministic finding): the
-  data escaped; the agent goes to the code anyway. They are **named** in
-  `frontier_pending` (file + categories, one line each), not detailed.
+Endpoints codefit resolved locally (`CertainConcerns>0`) with **no gap**
+(`Actionable==0`) — codefit **verified** the controls are present (an authorization
+check, and field selection where data is serialized). They are **named** (file,
+method) plus **one verification fact** per endpoint ("codefit verified locally: an
+authorization check is present and field selection is present — no gap found"). Not
+full detail, because there is nothing to act on; but **affirmed**, not hidden.
 
-### The summary DECLARES what it left out (honesty, not hiding)
+### 3. `frontier_pending` — not resolved locally (named)
 
-`frontier_pending` carries `count`, the named `endpoints`, and a `note` telling the
-agent how many there are, why they are not detailed (they are frontier, followed in
-the code), and how to fetch any of them (`codefit-scan-endpoint`). The agent knows
-the rest exists and how to get it. This is **prioritising while declaring**, not
-hiding.
+Endpoints where every concern is frontier (`CertainConcerns==0`): the data left the
+handler body, codefit concluded nothing locally. **Named** (file, method,
+categories); the agent follows the data in the code. An endpoint here stays here
+even if it carries a structural gap signal — `CertainConcerns==0` takes precedence,
+because codefit did not resolve it locally.
+
+### `resolved_clean` ≠ `frontier_pending` (the crux)
+
+These two are **named** but they are **epistemological opposites**, and flattening
+them into one "not detailed" bucket would repeat the very error of the old frontier
+wording — making a positive verification read as a non-conclusion:
+
+- `resolved_clean` is an **affirmation**: codefit looked locally and the controls
+  are present. Its verification fact says so.
+- `frontier_pending` is an **absence of conclusion**: codefit could not follow the
+  data, so it asserts nothing — the agent must.
+
+The agent must distinguish "codefit checked, it is clean" from "codefit could not
+check". The verification fact communicates the check; the frontier note communicates
+the limit. They are different on purpose.
+
+### The summary DECLARES every bucket (honesty, not hiding)
+
+`resolved_clean` and `frontier_pending` each carry `count`, their named `endpoints`,
+and a `note`. Nothing is dropped silently: the agent sees how many endpoints are in
+each state, why they are not detailed, and how to fetch any of them. This is
+**prioritising while declaring**, not hiding.
 
 ### Absence of actionables is NOT "clean"
 
-When **nothing** was resolved locally (all frontier, `actionable` empty), the note
-states it **emphatically**: codefit concluded nothing locally, this is **NOT a clean
-result**, every endpoint requires following the data in the code. Same principle as
-the frontier signal wording (ADR follow-up): an empty actionable set must never read
-as "codefit found nothing → clean", because that is exactly the misread that makes an
-agent discard real work. The genuinely empty project (no surface, no findings) is
-distinct and communicated by `summary.endpoints == 0`.
+When **nothing** was resolved locally (`actionable` and `resolved_clean` both empty,
+all frontier), the frontier note states it **emphatically**: codefit concluded
+nothing locally, this is **NOT a clean result**, every endpoint requires following
+the data in the code. Same principle as the frontier signal wording (ADR follow-up):
+an empty actionable set must never read as "codefit found nothing → clean", because
+that is exactly the misread that makes an agent discard real work. An empty
+`actionable` with a populated `resolved_clean` is also honest — codefit checked and
+those are clean (the verification facts say so), which is **not** the same as
+"nothing found". The genuinely empty project (no surface, no findings) is distinct
+and communicated by `summary.endpoints == 0`.
 
 ### New tool: `codefit-scan-endpoint`
 
@@ -70,16 +99,19 @@ it needs.
 
 ## Consequences
 
-- The scan-all response shrinks to the deterministic findings + the locally-resolved
-  endpoints + a named list of the rest — a fraction of the raw item dump. It fits in
-  an MCP response without truncation, so the agent reasons it inline.
-- The real findings (the locally-resolved endpoints and every deterministic finding)
-  are **always** in `actionable`, complete — the truncation never drops them.
-- One more round-trip to get a frontier endpoint's detail, by design: that detail is
-  low-value (the agent follows the data in the code anyway), so paying for it only
-  when asked is the right trade.
+- The scan-all response shrinks to the gap-bearing endpoints (full detail) + the
+  named clean and frontier lists — a fraction of the raw item dump. On the Bitácora
+  backend: **80807 → 23988 bytes (29.7%)**, buckets **10 actionable / 11
+  resolved_clean / 24 frontier_pending**. It fits in an MCP response without
+  truncation, so the agent reasons it inline.
+- The real findings (every gap-bearing endpoint and every deterministic finding) are
+  **always** in `actionable`, complete — the truncation never drops them.
+- One more round-trip to get a clean-or-frontier endpoint's detail, by design: that
+  detail is low-value (a clean endpoint has nothing to act on; a frontier one is
+  followed in the code anyway), so paying for it only when asked is the right trade.
 - **Breaking change** to the scan-all output contract: `Endpoints` is replaced by
-  `Actionable` + `FrontierPending`. Acceptable pre-release (Phase 1, no public tag).
+  `Actionable` + `ResolvedClean` + `FrontierPending`. Acceptable pre-release
+  (Phase 1, no public tag).
 
 ## Rejected alternatives
 

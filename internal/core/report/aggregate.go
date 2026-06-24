@@ -186,29 +186,84 @@ type FrontierEndpoint struct {
 	Categories []string `json:"categories"`
 }
 
-// PartitionByResolution splits aggregated endpoints into the ones codefit resolved
-// LOCALLY — at least one deterministic finding or surface_confirmed concern
-// (CertainConcerns>0) — and the frontier-only ones, where every concern is
-// surface_frontier. The criterion is the FACT local_access_detected, already
-// folded into CertainConcerns; it is not an arbitrary cut. Actionable endpoints
-// are returned WHOLE (all their concerns, including any frontier concern of the
-// same endpoint, because the agent reasons the endpoint, not loose concerns).
-// Frontier-only endpoints are reduced to FrontierEndpoint (named, not detailed).
-// Order is preserved from the aggregated input (hardest gap first).
-func PartitionByResolution(eps []EndpointReport) (actionable []EndpointReport, frontier []FrontierEndpoint) {
+// ResolvedCleanEndpoint names an endpoint codefit resolved LOCALLY and found
+// clean: it accessed data locally (CertainConcerns>0) and codefit verified the
+// controls are present — no gap. It is NAMED (file, method) plus one VERIFICATION
+// FACT that affirms what codefit checked ("an authorization check is present;
+// field selection is present — no gap found"). This is the crux of the three-
+// bucket split: resolved_clean is an AFFIRMATION (codefit looked and it is clean),
+// epistemologically OPPOSITE to a frontier endpoint (codefit could NOT conclude).
+// Flattening the two into a single "not detailed" bucket would be the same error
+// as the old frontier wording — so they are kept distinct on purpose.
+type ResolvedCleanEndpoint struct {
+	File         string `json:"file"`
+	Line         int    `json:"line,omitempty"`
+	Method       string `json:"method,omitempty"`
+	Verification string `json:"verification"`
+}
+
+// ClassifyEndpoints splits aggregated endpoints into three buckets, one per
+// resolution level — all by facts codefit already computes, no new judgment:
+//
+//   - actionable     — resolved locally AND has a gap (CertainConcerns>0,
+//     Actionable>0): full detail, the agent acts on these.
+//   - resolved_clean — resolved locally, NO gap (CertainConcerns>0, Actionable==0):
+//     named + a verification fact; codefit checked and it is clean.
+//   - frontier       — not resolved locally (CertainConcerns==0): named; the data
+//     left the body, the agent follows it in the code.
+//
+// The order matters: CertainConcerns==0 → frontier first, so a frontier-only
+// endpoint that happens to carry an access-gap signal is still named as frontier
+// (codefit did not resolve it locally), never promoted to actionable. Actionable
+// endpoints are returned WHOLE (all their concerns, including any frontier concern
+// of the same endpoint, because the agent reasons the endpoint). Input order
+// (hardest gap first) is preserved within each bucket.
+func ClassifyEndpoints(eps []EndpointReport) (actionable []EndpointReport, resolvedClean []ResolvedCleanEndpoint, frontier []FrontierEndpoint) {
 	for _, ep := range eps {
-		if ep.CertainConcerns > 0 {
+		switch {
+		case ep.CertainConcerns == 0:
+			frontier = append(frontier, FrontierEndpoint{
+				File:       ep.File,
+				Line:       ep.Line,
+				Method:     ep.Method,
+				Categories: categoriesOf(ep),
+			})
+		case ep.Actionable > 0:
 			actionable = append(actionable, ep)
-			continue
+		default:
+			resolvedClean = append(resolvedClean, ResolvedCleanEndpoint{
+				File:         ep.File,
+				Line:         ep.Line,
+				Method:       ep.Method,
+				Verification: verificationFact(ep),
+			})
 		}
-		frontier = append(frontier, FrontierEndpoint{
-			File:       ep.File,
-			Line:       ep.Line,
-			Method:     ep.Method,
-			Categories: categoriesOf(ep),
-		})
 	}
-	return actionable, frontier
+	return actionable, resolvedClean, frontier
+}
+
+// verificationFact phrases, as an affirmation, what codefit checked on a resolved-
+// clean endpoint. Because the endpoint has no gap, every authz/idor concern has an
+// authorization check present and every over-fetch concern has field-limiting
+// present — so the clauses are derived from the categories at play plus the no-gap
+// invariant, no prose parsing. It is a fact ("codefit verified locally: ..."), the
+// honest opposite of the frontier "could not conclude".
+func verificationFact(ep EndpointReport) string {
+	cats := map[string]bool{}
+	for _, c := range ep.Concerns {
+		cats[c.Category] = true
+	}
+	var parts []string
+	if cats["idor"] || cats["authz"] {
+		parts = append(parts, "an authorization check is present")
+	}
+	if cats["overfetch"] {
+		parts = append(parts, "field selection (select/omit) is present")
+	}
+	if len(parts) == 0 {
+		return "codefit resolved this endpoint locally — no gap found in the handler body"
+	}
+	return "codefit verified locally: " + strings.Join(parts, " and ") + " — no gap found in the handler body"
 }
 
 // categoriesOf returns the distinct concern categories of an endpoint, in first-

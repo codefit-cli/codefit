@@ -26,15 +26,18 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Changed — Phase 1: scan-all actionable summary
 
-- **`codefit-scan-all` returns an actionable summary instead of the full item
+- **`codefit-scan-all` returns a three-bucket summary instead of the full item
   dump** (ADR 0008). The response was large enough on a real backend (~101 surface
-  items) that MCP clients truncated it across 4 models. Now: deterministic findings
-  and the endpoints codefit resolved locally (`CertainConcerns>0`) go whole in
-  `actionable`; frontier-only endpoints (the data left the handler body) are named
-  in `frontier_pending` with a note and fetched on demand. The split is the fact
-  `local_access_detected`, not an arbitrary cut. When nothing resolved locally the
-  note states it is **not** a clean result. Breaking output change (`Endpoints` →
-  `actionable` + `frontier_pending`), acceptable pre-release.
+  items, ~80 KB) that MCP clients truncated it across 4 models. Now, split by facts
+  codefit already computes: `actionable` — endpoints resolved locally with a gap
+  (full detail); `resolved_clean` — endpoints resolved locally with no gap, controls
+  present (named with a verification fact, **not** flattened with frontier, because
+  a positive check is epistemologically opposite to a non-conclusion);
+  `frontier_pending` — endpoints whose data left the handler body (named). When
+  nothing resolved locally the frontier note states it is **not** a clean result. On
+  the Bitácora backend: 80 KB → 24 KB (29.7%), 10 / 11 / 24. Breaking output change
+  (`Endpoints` → `actionable` + `resolved_clean` + `frontier_pending`), acceptable
+  pre-release.
 - **New tool `codefit-scan-endpoint`** — re-analyses one file on demand and returns
   its endpoints' full concerns; stateless (re-runs the static analysis, stores
   nothing). Used to fetch the detail of a `frontier_pending` endpoint.

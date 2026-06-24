@@ -97,6 +97,45 @@ export async function POST(req: Request) {
 	}
 }
 
+// An endpoint codefit resolved locally and found clean (authz present + select
+// present → no gap) goes to resolved_clean: named with a verification fact, NOT in
+// actionable and NOT in frontier. The verification fact affirms what codefit
+// checked — distinct from a frontier "could not conclude".
+func TestHandleScanAll_ResolvedCleanBucket(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "app/users/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const session = await getServerSession();
+  return Response.json(await prisma.user.findUnique({ where: { id: params.id }, select: { id: true, name: true } }));
+}`)
+
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Actionable) != 0 {
+		t.Fatalf("a fully-checked endpoint must not be actionable, got %+v", resp.Actionable)
+	}
+	if resp.FrontierPending.Count != 0 {
+		t.Fatalf("a locally-resolved endpoint must not be frontier, got %+v", resp.FrontierPending)
+	}
+	if resp.ResolvedClean.Count != 1 || len(resp.ResolvedClean.Endpoints) != 1 {
+		t.Fatalf("the checked-clean endpoint must be in resolved_clean, got %+v", resp.ResolvedClean)
+	}
+	v := strings.ToLower(resp.ResolvedClean.Endpoints[0].Verification)
+	if !strings.Contains(v, "verified") || !strings.Contains(v, "no gap") {
+		t.Errorf("resolved_clean entry must carry a verification fact, got %q", resp.ResolvedClean.Endpoints[0].Verification)
+	}
+	if !strings.Contains(strings.ToLower(resp.ResolvedClean.Note), "positive check") {
+		t.Errorf("resolved_clean note must frame it as a positive check, not an absence, got %q", resp.ResolvedClean.Note)
+	}
+	// Named, not detailed: no embedded concern signals on the entry.
+	data, _ := json.Marshal(resp.ResolvedClean.Endpoints[0])
+	if strings.Contains(string(data), "structural_signals") {
+		t.Errorf("resolved_clean entries must be named, not detailed, got %s", data)
+	}
+}
+
 // All-frontier project: codefit concluded nothing locally. Actionable is empty and
 // every endpoint is in frontier_pending. The Note must communicate this as "could
 // not conclude locally", NOT as a clean/empty result — same principle as the
