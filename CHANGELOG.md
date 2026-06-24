@@ -16,13 +16,31 @@ All notable changes to codefit are documented here. The format is based on
 - **MCP stdio server** — `codefit mcp serve` exposes the engine over the Model
   Context Protocol (stdio), built on the official **MCP Go SDK** (`v1.6.1`,
   audited in ADR 0007). Tools registered: `codefit-scan-security`,
-  `codefit-scan-all`, `codefit-surface-idor` / `-authz` / `-overfetch`,
-  `codefit-confirm-surface`, `codefit-coverage`. Each is a thin adapter to the
+  `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-surface-idor` / `-authz` /
+  `-overfetch`, `codefit-confirm-surface`, `codefit-coverage`. Each is a thin adapter to the
   existing core handlers; no audit logic in the MCP layer. Verified by a
   client↔server protocol integration test (initialize → tools/list → tools/call).
   The HTTP/SSE transport (`--port`) is deferred.
 - Go toolchain pinned to `go1.25.11` (the SDK requires Go 1.25+); minimum Go
   bumped from 1.24 to 1.25.
+
+### Changed — Phase 1: scan-all actionable summary
+
+- **`codefit-scan-all` returns a three-bucket summary instead of the full item
+  dump** (ADR 0008). The response was large enough on a real backend (~101 surface
+  items, ~80 KB) that MCP clients truncated it across 4 models. Now, split by facts
+  codefit already computes: `actionable` — endpoints resolved locally with a gap
+  (full detail); `resolved_clean` — endpoints resolved locally with no gap, controls
+  present (named with a verification fact, **not** flattened with frontier, because
+  a positive check is epistemologically opposite to a non-conclusion);
+  `frontier_pending` — endpoints whose data left the handler body (named). When
+  nothing resolved locally the frontier note states it is **not** a clean result. On
+  the Bitácora backend: 80 KB → 24 KB (29.7%), 10 / 11 / 24. Breaking output change
+  (`Endpoints` → `actionable` + `resolved_clean` + `frontier_pending`), acceptable
+  pre-release.
+- **New tool `codefit-scan-endpoint`** — re-analyses one file on demand and returns
+  its endpoints' full concerns; stateless (re-runs the static analysis, stores
+  nothing). Used to fetch the detail of a `frontier_pending` endpoint.
 
 ### Added — Phase 1: TypeScript security + surface mapping
 

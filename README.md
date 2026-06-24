@@ -23,7 +23,12 @@ the audit tools and an agent can call them. What is **in `main` now**:
 - **Surface mapping** — three categories (IDOR, broken authorization,
   over-fetching) for Next.js / Prisma, **validated against a real backend**.
 - **`scan-all` synthesis** — the per-endpoint aggregation with three certainty
-  levels, exposed as an MCP tool.
+  levels, returned as a **three-bucket summary**: `actionable` (resolved locally
+  with a gap — full detail), `resolved_clean` (resolved locally, controls present,
+  no gap — named with a verification fact), and `frontier_pending` (the data left
+  the handler body — named). Full detail of any named endpoint is one
+  **`scan-endpoint`** call away. Keeps the response small enough not to truncate
+  (ADR 0008).
 - **MCP stdio server** — `codefit mcp serve` exposes the tools over the protocol
   (built on the official MCP Go SDK; verified by a client↔server integration
   test). The Go provider and the self-audit (codefit scans its own code in CI)

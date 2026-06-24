@@ -17,6 +17,7 @@ const (
 	ToolConfirmSurface   Tool = "codefit-confirm-surface"
 	ToolReviewCode       Tool = "codefit-review-code"
 	ToolScanAll          Tool = "codefit-scan-all"
+	ToolScanEndpoint     Tool = "codefit-scan-endpoint"
 	ToolBaseline         Tool = "codefit-baseline"
 	ToolCoverage         Tool = "codefit-coverage"
 )
