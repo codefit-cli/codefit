@@ -2,6 +2,13 @@
 
 **Status:** Accepted · **Date:** 2026-06-23 · **Phase:** 1 (surface synthesis)
 
+> **Superseded in part by [ADR 0008](0008-scan-all-actionable-summary-on-demand-detail.md).**
+> The per-endpoint aggregation, the three certainty levels, and the ordering by
+> actionable gap (below) still hold. What changed is the **delivery**: scan-all no
+> longer returns every endpoint with full detail in one response — it returns a
+> three-bucket summary (actionable / resolved_clean / frontier_pending), with the
+> named endpoints' detail fetched on demand via `codefit-scan-endpoint`. See ADR 0008.
+
 ## Context
 
 Running the three surface categories (IDOR, authz, over-fetching) over a real

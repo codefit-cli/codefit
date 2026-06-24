@@ -41,6 +41,15 @@ All notable changes to codefit are documented here. The format is based on
 - **New tool `codefit-scan-endpoint`** — re-analyses one file on demand and returns
   its endpoints' full concerns; stateless (re-runs the static analysis, stores
   nothing). Used to fetch the detail of a `frontier_pending` endpoint.
+- **Frontier surface signals reworded as unresolved candidates.** The IDOR, authz,
+  and over-fetching frontier signals (data left the handler body) were phrased
+  around what codefit did *not* find ("No direct Prisma access detected", "could not
+  check", "may be in a service/repository layer (follow … to confirm)"), which read
+  as a negative result — in real dogfooding the agent discarded them as probable
+  false positives. They now state the limit as an affirmation ("codefit does not
+  follow calls across functions, so this is NOT verified here") and make following
+  the data its own instruction. Detection is unchanged — the same items are
+  enumerated; only the wording changed.
 
 ### Added — Phase 1: TypeScript security + surface mapping
 
