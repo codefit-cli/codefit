@@ -6,7 +6,11 @@ BINARY      := codefit
 PKG         := ./cmd/codefit
 BIN_DIR     := bin
 DIST_DIR    := dist
-VERSION     ?= 0.1.0-dev
+# VERSION derives from the nearest git tag (SemVer + pre-releases, see VERSIONING.md):
+# exactly the tag on a tagged commit (e.g. v0.1.0-alpha.1), tag-N-gHASH after it,
+# the short hash when untagged, "-dirty" when the tree has uncommitted changes.
+# Falls back to 0.1.0-dev outside a git checkout (e.g. a source tarball).
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
 COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE  := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VPKG        := github.com/codefit-cli/codefit/internal/version
