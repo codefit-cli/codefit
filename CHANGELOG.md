@@ -5,11 +5,24 @@ All notable changes to codefit are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Pre-release.** No version has been tagged yet. codefit is in active
-> development (Phase 1) and is not yet usable end-to-end — the MCP server that
-> exposes the engine to agents is not wired yet. The first tagged release will
-> come once Phase 1 and the MCP server land.
+> development (Phase 1). It now runs over the MCP stdio transport
+> (`codefit mcp serve`); the HTTP/SSE transport and Phases 2–4 are still ahead.
+> The first tagged release will come once Phase 1 lands.
 
 ## [Unreleased]
+
+### Added — Phase 1: MCP stdio server
+
+- **MCP stdio server** — `codefit mcp serve` exposes the engine over the Model
+  Context Protocol (stdio), built on the official **MCP Go SDK** (`v1.6.1`,
+  audited in ADR 0007). Tools registered: `codefit-scan-security`,
+  `codefit-scan-all`, `codefit-surface-idor` / `-authz` / `-overfetch`,
+  `codefit-confirm-surface`, `codefit-coverage`. Each is a thin adapter to the
+  existing core handlers; no audit logic in the MCP layer. Verified by a
+  client↔server protocol integration test (initialize → tools/list → tools/call).
+  The HTTP/SSE transport (`--port`) is deferred.
+- Go toolchain pinned to `go1.25.11` (the SDK requires Go 1.25+); minimum Go
+  bumped from 1.24 to 1.25.
 
 ### Added — Phase 1: TypeScript security + surface mapping
 
@@ -54,8 +67,8 @@ All notable changes to codefit are documented here. The format is based on
   best-practice detectors.
 - **Security sensor** (regex + AST layers) with severity adjustment by path
   criticality.
-- Plumbing CLI built on cobra: `status` and `version` work today; `init`,
-  `update`, and `mcp serve` are scaffolding (the MCP server is the next slice).
+- Plumbing CLI built on cobra: `mcp serve`, `status`, and `version` work;
+  `init` and `update` are scaffolding.
 - Self-audit: codefit scans its own code in CI as a Go integration test.
 - CI/CD: GitHub Actions for test/lint/build, goreleaser config, and weekly
   dependency vulnerability scanning (`govulncheck` pinned to v1.1.4).

@@ -6,8 +6,10 @@ new language.
 
 ## Development setup
 
-Requirements: **Go 1.24+**. Docker is optional (only the complexity sensor needs
-it). No C toolchain is required — codefit builds with `CGO_ENABLED=0`.
+Requirements: **Go 1.25+** (the MCP SDK requires it; the build toolchain is
+pinned to a patch ≥ 1.25.2 in `go.mod`). Docker is optional (only the complexity
+sensor needs it). No C toolchain is required — codefit builds with
+`CGO_ENABLED=0`.
 
 ```bash
 git clone https://github.com/codefit-cli/codefit

@@ -1,15 +1,9 @@
 package mcp
 
 import (
-	"fmt"
-	"path/filepath"
-
-	"github.com/codefit-cli/codefit/internal/config"
-	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/report"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
-	"github.com/codefit-cli/codefit/internal/sensors/security"
 )
 
 // ScanAllRequest is the input to codefit-scan-all: a project root and language.
@@ -42,16 +36,9 @@ type ScanAllSummary struct {
 // three surface queries already run together there) and groups the result by
 // endpoint — it adds no detection, only the aggregation.
 func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
-	provider := providerForLanguage(req.Language)
-	if provider == nil {
-		return ScanAllResponse{}, fmt.Errorf("unsupported language %q", req.Language)
-	}
-	cfg, _ := config.Load(filepath.Join(req.Root, ".codefit.yaml")) // optional; nil → no criticality adjust
-	ctx := auditctx.AuditContext{ProjectRoot: req.Root, Language: req.Language, Config: cfg}
-
-	res, err := security.New(provider).Run(ctx)
+	res, err := runSecurity(req.Root, req.Language)
 	if err != nil {
-		return ScanAllResponse{}, fmt.Errorf("scan-all: %w", err)
+		return ScanAllResponse{}, err
 	}
 
 	endpoints := report.AggregateEndpoints(res.Findings, res.Surface)

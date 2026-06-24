@@ -1,7 +1,5 @@
 package mcp
 
-import "context"
-
 // Tool is the name of an MCP tool codefit exposes. All tools use the codefit-
 // prefix; the codefit-surface-* family enumerates surface for the agent to
 // reason about rather than detecting (PRD section 11).
@@ -23,15 +21,8 @@ const (
 	ToolCoverage         Tool = "codefit-coverage"
 )
 
-// Server exposes codefit's sensors as the MCP tools above over a transport. It
-// is stateless: each tool call is independent and carries everything it needs,
-// and is a thin adapter — it translates a tool call into a core invocation and
-// never reimplements audit logic (PRD section 15).
-//
-// Skeleton: the transport (stdio / HTTP-SSE) and the tool dispatch are
-// implemented in Fase 1.
-type Server interface {
-	// Serve starts the MCP server until ctx is cancelled. port == 0 selects the
-	// default stdio transport; a non-zero port selects HTTP/SSE.
-	Serve(ctx context.Context, port int) error
-}
+// The server that exposes these tools over a transport is built by NewServer and
+// run by Serve (server.go). It is stateless: each tool call is independent and
+// carries everything it needs, and each tool is a thin adapter that translates a
+// call into a core invocation and never reimplements audit logic (PRD §15).
+// Only the stdio transport is wired today; HTTP/SSE is deferred.

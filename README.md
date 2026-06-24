@@ -15,33 +15,30 @@ development, it is out of scope.
 
 ## ⚠️ Project status: in active development (Phase 1)
 
-codefit is **not yet usable end-to-end.** The audit **engine** is built and
-validated, but the **MCP server that exposes it to agents is not wired yet** — so
-you cannot connect codefit to your agent or audit a project from the binary
-today. This README documents **what exists in `main` now**, not what is planned.
-
-**What works today (exercised through the Go test suite, not yet a runnable
-audit):**
+codefit runs over the **MCP stdio transport** today: `codefit mcp serve` exposes
+the audit tools and an agent can call them. What is **in `main` now**:
 
 - **TypeScript provider** (gotreesitter, pure Go, no CGO).
 - **Deterministic security rules** for TypeScript — five categories (see below).
 - **Surface mapping** — three categories (IDOR, broken authorization,
   over-fetching) for Next.js / Prisma, **validated against a real backend**.
 - **`scan-all` synthesis** — the per-endpoint aggregation with three certainty
-  levels (in the engine; not yet exposed over MCP).
-- The **Go provider** and the **self-audit** (codefit scans its own code in CI).
+  levels, exposed as an MCP tool.
+- **MCP stdio server** — `codefit mcp serve` exposes the tools over the protocol
+  (built on the official MCP Go SDK; verified by a client↔server integration
+  test). The Go provider and the self-audit (codefit scans its own code in CI)
+  round it out.
 
-**Not yet in `main` (next slices):** the MCP server transport (stdio, then
-HTTP/SSE), and the plumbing commands `init` / `update`. Of the binary's commands,
-only `status` and `version` do anything today; `mcp serve`, `init`, and `update`
-are scaffolding. Phases 2–4 (DB, complexity, code review, knowledge packs) are
-on the roadmap.
+**Still in active development (Phase 1):** the HTTP/SSE transport (`--port`) is
+**not** wired yet — use stdio. The plumbing commands `init` / `update` are
+scaffolding (the tools work without them — config is optional). Phases 2–4 (DB,
+complexity, code review, knowledge packs) are on the roadmap.
 
-## How it will work: MCP-first, pure
+## MCP-first, pure
 
-codefit is designed to run **exclusively as an MCP server** that AI agents
-(Claude Code, OpenCode, Cursor, …) consume as a set of tools. **There is no audit
-CLI, and codefit never calls an LLM or manages any credentials.**
+codefit runs **exclusively as an MCP server** that AI agents (Claude Code,
+OpenCode, Cursor, …) consume as a set of tools. **There is no audit CLI, and
+codefit never calls an LLM or manages any credentials.**
 
 It runs the deterministic layers (patterns + AST), maps the structural
 **surface** of the vulnerability classes that require reasoning, and returns
@@ -55,8 +52,15 @@ agent generates code
         └─► agent reasons the surface with its own LLM → fixes or proceeds
 ```
 
-*(The MCP transport that would make the above runnable is the next slice — see
-the status note above.)*
+Connect it to your agent (stdio):
+
+```json
+{
+  "mcpServers": {
+    "codefit": { "command": "codefit", "args": ["mcp", "serve"], "cwd": "/path/to/project" }
+  }
+}
+```
 
 ## The differentiator: surface mapping
 
@@ -117,13 +121,13 @@ the core, the sensors, the MCP server, or the reporting (see
 ## Building from source
 
 ```bash
-go install github.com/codefit-cli/codefit/cmd/codefit@latest   # Go 1.24+
+go install github.com/codefit-cli/codefit/cmd/codefit@latest   # Go 1.25+
 ```
 
 codefit is a single static binary with no runtime dependencies (`CGO_ENABLED=0`),
 cross-compiling to linux/amd64, linux/arm64, windows/amd64, and darwin/arm64.
 There is no LLM or auth configuration — codefit manages no models and no
-credentials. (A runnable audit needs the MCP server — see the status note.)
+credentials. Run `codefit mcp serve` and point your agent at it (see above).
 
 ## Contributing
 
