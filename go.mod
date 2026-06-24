@@ -6,6 +6,7 @@ toolchain go1.25.11
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/odvcencio/gotreesitter v0.20.2
 	github.com/spf13/cobra v1.10.2
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
