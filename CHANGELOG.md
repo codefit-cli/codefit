@@ -16,13 +16,28 @@ All notable changes to codefit are documented here. The format is based on
 - **MCP stdio server** — `codefit mcp serve` exposes the engine over the Model
   Context Protocol (stdio), built on the official **MCP Go SDK** (`v1.6.1`,
   audited in ADR 0007). Tools registered: `codefit-scan-security`,
-  `codefit-scan-all`, `codefit-surface-idor` / `-authz` / `-overfetch`,
-  `codefit-confirm-surface`, `codefit-coverage`. Each is a thin adapter to the
+  `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-surface-idor` / `-authz` /
+  `-overfetch`, `codefit-confirm-surface`, `codefit-coverage`. Each is a thin adapter to the
   existing core handlers; no audit logic in the MCP layer. Verified by a
   client↔server protocol integration test (initialize → tools/list → tools/call).
   The HTTP/SSE transport (`--port`) is deferred.
 - Go toolchain pinned to `go1.25.11` (the SDK requires Go 1.25+); minimum Go
   bumped from 1.24 to 1.25.
+
+### Changed — Phase 1: scan-all actionable summary
+
+- **`codefit-scan-all` returns an actionable summary instead of the full item
+  dump** (ADR 0008). The response was large enough on a real backend (~101 surface
+  items) that MCP clients truncated it across 4 models. Now: deterministic findings
+  and the endpoints codefit resolved locally (`CertainConcerns>0`) go whole in
+  `actionable`; frontier-only endpoints (the data left the handler body) are named
+  in `frontier_pending` with a note and fetched on demand. The split is the fact
+  `local_access_detected`, not an arbitrary cut. When nothing resolved locally the
+  note states it is **not** a clean result. Breaking output change (`Endpoints` →
+  `actionable` + `frontier_pending`), acceptable pre-release.
+- **New tool `codefit-scan-endpoint`** — re-analyses one file on demand and returns
+  its endpoints' full concerns; stateless (re-runs the static analysis, stores
+  nothing). Used to fetch the detail of a `frontier_pending` endpoint.
 
 ### Added — Phase 1: TypeScript security + surface mapping
 

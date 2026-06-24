@@ -172,6 +172,59 @@ func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) [
 	return out
 }
 
+// FrontierEndpoint names a frontier-only endpoint — every one of its concerns is
+// surface_frontier (the data left the handler body, local_access_detected=false),
+// so codefit concluded nothing locally about it. It is NAMED, not detailed: the
+// agent goes to the code to follow the data regardless, so the concern detail
+// would not save it the trip (ADR 0008). It carries the file and the categories
+// at stake, one line, for the agent to know what is pending and request the full
+// detail on demand via codefit-scan-endpoint.
+type FrontierEndpoint struct {
+	File       string   `json:"file"`
+	Line       int      `json:"line,omitempty"`
+	Method     string   `json:"method,omitempty"`
+	Categories []string `json:"categories"`
+}
+
+// PartitionByResolution splits aggregated endpoints into the ones codefit resolved
+// LOCALLY — at least one deterministic finding or surface_confirmed concern
+// (CertainConcerns>0) — and the frontier-only ones, where every concern is
+// surface_frontier. The criterion is the FACT local_access_detected, already
+// folded into CertainConcerns; it is not an arbitrary cut. Actionable endpoints
+// are returned WHOLE (all their concerns, including any frontier concern of the
+// same endpoint, because the agent reasons the endpoint, not loose concerns).
+// Frontier-only endpoints are reduced to FrontierEndpoint (named, not detailed).
+// Order is preserved from the aggregated input (hardest gap first).
+func PartitionByResolution(eps []EndpointReport) (actionable []EndpointReport, frontier []FrontierEndpoint) {
+	for _, ep := range eps {
+		if ep.CertainConcerns > 0 {
+			actionable = append(actionable, ep)
+			continue
+		}
+		frontier = append(frontier, FrontierEndpoint{
+			File:       ep.File,
+			Line:       ep.Line,
+			Method:     ep.Method,
+			Categories: categoriesOf(ep),
+		})
+	}
+	return actionable, frontier
+}
+
+// categoriesOf returns the distinct concern categories of an endpoint, in first-
+// seen order, so a frontier entry names what is at stake without the full detail.
+func categoriesOf(ep EndpointReport) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range ep.Concerns {
+		if c.Category != "" && !seen[c.Category] {
+			seen[c.Category] = true
+			out = append(out, c.Category)
+		}
+	}
+	return out
+}
+
 // gapCounts returns an endpoint's count of affirmed, access, and exposure gaps.
 func gapCounts(ep EndpointReport) (affirmed, access, exposure int) {
 	for _, c := range ep.Concerns {

@@ -23,8 +23,11 @@ func NewServer() *mcpsdk.Server {
 		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language}. Returns findings + surface + score + blocked.",
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
-		"The complete picture aggregated per endpoint: deterministic findings and surface concerns of each handler together, with three certainty levels, ordered by actionable gap. Input: {root, language}.",
+		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Input: {root, language}.",
 		HandleScanAll)
+	addTool(s, string(ToolScanEndpoint),
+		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing. Use it to get the detail of a frontier_pending endpoint from codefit-scan-all. Input: {root, language, file}.",
+		HandleScanEndpoint)
 	addTool(s, string(ToolSurfaceIDOR),
 		"Enumerate the IDOR surface (id→resource endpoints) for the agent to reason about ownership checks. Input: {files:[{path, content}]}.",
 		HandleSurfaceIDOR)

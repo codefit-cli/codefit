@@ -76,7 +76,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if out.Summary.Endpoints == 0 || out.Summary.SurfaceItems == 0 {
 		t.Errorf("expected a per-endpoint report with surface, got %+v", out.Summary)
 	}
-	if len(out.Endpoints) == 0 || len(out.Endpoints[0].Concerns) == 0 {
-		t.Errorf("expected at least one endpoint with concerns, got %+v", out.Endpoints)
+	if len(out.Actionable) == 0 || len(out.Actionable[0].Concerns) == 0 {
+		t.Errorf("expected at least one actionable endpoint with concerns, got %+v", out.Actionable)
 	}
 }
