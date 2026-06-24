@@ -1,120 +1,135 @@
 # codefit
 
 [![ci](https://github.com/codefit-cli/codefit/actions/workflows/ci.yml/badge.svg)](https://github.com/codefit-cli/codefit/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/codefit-cli/codefit?include_prereleases&sort=semver)](https://github.com/codefit-cli/codefit/releases)
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-> **The AI code auditor that audits itself.**
+> **The MCP-first auditor for AI-generated code — codefit maps, the agent reasons.**
 
 codefit is an open-source tool, written in Go, that audits software written
-(partly or fully) by AI. It detects what a developer **never sees** during
-normal development: security vulnerabilities, algorithmic complexity that scales
-badly, structural database problems, regression risk, and quality issues that
-only surface under deep review. Its guiding principle: *codefit audits what the
+(partly or fully) by AI. It detects what a developer **never sees** during normal
+development: security vulnerabilities, algorithmic complexity that scales badly,
+structural database problems, regression risk, and quality issues that only
+surface under deep review. Its guiding principle: *codefit audits what the
 developer is never going to see* — if a dimension is visible during normal
 development, it is out of scope.
 
-It does not replace TDD, SDD, linters, or infra scanners. It is the independent
-audit layer that validates AI-generated code is secure, correct, and scalable
-**before** it merges to production. codefit runs in two modes over the same
-sensor core: a **CLI** (reactive, for the terminal and CI/CD) and a stateless
-**MCP server** (proactive, where AI agents call the sensors as tools while they
-generate code).
+## ⚠️ Project status: in active development (Phase 1)
 
-## Installation
+codefit is **not yet usable end-to-end.** The audit **engine** is built and
+validated, but the **MCP server that exposes it to agents is not wired yet** — so
+you cannot connect codefit to your agent or audit a project from the binary
+today. This README documents **what exists in `main` now**, not what is planned.
 
-**From source (Go 1.24+):**
+**What works today (exercised through the Go test suite, not yet a runnable
+audit):**
 
-```bash
-go install github.com/codefit-cli/codefit/cmd/codefit@latest
+- **TypeScript provider** (gotreesitter, pure Go, no CGO).
+- **Deterministic security rules** for TypeScript — five categories (see below).
+- **Surface mapping** — three categories (IDOR, broken authorization,
+  over-fetching) for Next.js / Prisma, **validated against a real backend**.
+- **`scan-all` synthesis** — the per-endpoint aggregation with three certainty
+  levels (in the engine; not yet exposed over MCP).
+- The **Go provider** and the **self-audit** (codefit scans its own code in CI).
+
+**Not yet in `main` (next slices):** the MCP server transport (stdio, then
+HTTP/SSE), and the plumbing commands `init` / `update`. Of the binary's commands,
+only `status` and `version` do anything today; `mcp serve`, `init`, and `update`
+are scaffolding. Phases 2–4 (DB, complexity, code review, knowledge packs) are
+on the roadmap.
+
+## How it will work: MCP-first, pure
+
+codefit is designed to run **exclusively as an MCP server** that AI agents
+(Claude Code, OpenCode, Cursor, …) consume as a set of tools. **There is no audit
+CLI, and codefit never calls an LLM or manages any credentials.**
+
+It runs the deterministic layers (patterns + AST), maps the structural
+**surface** of the vulnerability classes that require reasoning, and returns
+`findings + surface` to the agent, which reasons over the surface with **its own
+LLM**. The intelligence is the agent's. That is what democratizes auditing:
+anyone already coding with AI can audit without extra API keys or infrastructure.
+
+```
+agent generates code
+  └─► codefit (MCP tool): deterministic findings + mapped surface (JSON)
+        └─► agent reasons the surface with its own LLM → fixes or proceeds
 ```
 
-**Pre-built binaries** are attached to each [GitHub
-release](https://github.com/codefit-cli/codefit/releases) for linux/amd64,
-linux/arm64, windows/amd64, and darwin/arm64 (`.tar.gz` for Unix, `.zip` for
-Windows, with `checksums.txt`). Download, extract, and put `codefit` on your
-`PATH`.
+*(The MCP transport that would make the above runnable is the next slice — see
+the status note above.)*
 
-codefit is a single static binary with no runtime dependencies (built with
-`CGO_ENABLED=0`). Docker is optional and only needed for the complexity sensor.
+## The differentiator: surface mapping
 
-## Quick start
+Deterministic rules are what any linter does. The honest **surface mapping** that
+the agent reasons over is what makes codefit different.
 
-```bash
-codefit auth login                 # configure your LLM provider (keychain-backed)
-codefit init                       # detect the project, write .codefit.yaml
-codefit scan --no-llm              # fast, free, static-only audit
-codefit scan --since origin/main   # audit only what changed in your PR
-codefit status                     # provider, model, Docker availability
-```
+Classes like IDOR, broken authorization, and over-fetching cannot be caught by a
+fixed pattern — they need semantic understanding. So codefit does not mark
+candidates surgically (inheriting the AST's blind spot). It **enumerates the
+complete structural surface** of each class — every endpoint that reaches a
+resource by an id, every sensitive handler, every serialization of a domain
+object — and hands all of it to the agent, with **structural signals that are
+facts** ("reads `params.id`", "no known authz helper detected in the body") and a
+**reason-to-review that is a question** ("does this verify ownership before
+access?"). codefit never judges; the agent reasons each item.
 
-The static layers (`--no-llm`) need no API key and run in seconds — ideal for
-pre-commit hooks and CI.
+What codefit can confirm from structure it enumerates (FINITE); what requires
+following the data out of the handler it hands to the agent (the frontier); what
+it does not cover it **declares** in the coverage manifest
+([COVERAGE.md](COVERAGE.md)). The principle is recorded in
+[ADR 0005](docs/decisions/0005-surface-frontier-finite-vs-infinite.md); the
+per-endpoint synthesis with its three certainty levels in
+[ADR 0006](docs/decisions/0006-scan-all-endpoint-synthesis.md).
 
-## Modes: CLI and MCP
+## Deterministic security rules (TypeScript)
 
-**CLI** — you or a pipeline run it explicitly:
+Five categories, each a fact codefit asserts with certainty 1.0: hardcoded
+secrets, weak cryptography (MD5/SHA-1, insecure `Math.random` for tokens),
+dangerous `eval`/`new Function`, inline SQL injection, and inline XSS via
+`dangerouslySetInnerHTML`. Rules are declarative YAML in a Semgrep-format subset,
+matched by codefit's own pure-Go engine (no OCaml/OpenGrep embedded) — see
+[`rules/`](rules/). Their exact scope and known limits are in
+[COVERAGE.md](COVERAGE.md).
 
-```bash
-codefit scan --since origin/main --fail-on critical
-```
+## What codefit does NOT do (and why)
 
-**MCP** — an AI agent calls the sensors as tools while generating code, enabling
-an auto-correction loop before the code ever reaches you:
-
-```bash
-codefit mcp serve                  # stdio transport by default
-```
-
-```json
-{
-  "mcpServers": {
-    "codefit": { "command": "codefit", "args": ["mcp", "serve"] }
-  }
-}
-```
-
-Both modes share the exact same sensor core — any sensor available in one is
-available in the other.
+codefit **complements** linters and type-checkers; it does not replace them. An
+unused `any`, a style nit, an obvious type error — those are visible during normal
+development, so a linter already catches them and they are **out of scope**.
+codefit spends its effort on the invisible: a missing ownership check on an
+endpoint, a model serialized with every column to the client, a hash that is weak
+for security. It is the independent audit layer that validates AI-generated code
+is secure and correct **before** it merges — not another linter.
 
 ## Supported languages
 
-| Language / Ecosystem | Phase | Sensors |
-| --- | --- | --- |
-| **Go** | v1.0 (Phase 0) | Security, Code Review, Best Practices, Tests |
-| TypeScript / React / Next.js | v1.0 | Security, Code Review, DB, Complexity, Best Practices, Tests |
-| Java / Spring | v1.1 | Security, Code Review, DB, Complexity, Best Practices, Tests |
-| Python / FastAPI / Django | v1.2 | Security, Code Review, DB, Complexity, Best Practices, Tests |
+| Language / Ecosystem | Status |
+| --- | --- |
+| **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI. |
+| **TypeScript / Next.js / Prisma** | Deterministic security rules (5 categories) + surface mapping (IDOR, authz, over-fetching), validated against a real backend. |
+| Java / Spring | Roadmap |
+| Python / FastAPI / Django | Roadmap |
 
-Go ships first because codefit is written in Go and audits itself from day one.
-Adding a language means implementing one `LanguageProvider` interface — it never
-touches the core (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+Adding a language means implementing one `LanguageProvider` — it never touches
+the core, the sensors, the MCP server, or the reporting (see
+[CONTRIBUTING.md](CONTRIBUTING.md) and `docs/decisions/`).
 
-## Minimal configuration
+## Building from source
 
-`.codefit.yaml`, committed to your repo:
-
-```yaml
-version: "1"
-project:
-  name: "my-app"
-  language: "go"          # go | typescript | java | python
-  path_criticality:       # weights finding severity by location
-    production:
-      - "internal/**"
-      - "cmd/**"
-    test:
-      - "**/*_test.go"
+```bash
+go install github.com/codefit-cli/codefit/cmd/codefit@latest   # Go 1.24+
 ```
 
-Credentials are **never** written here — they live in your OS keychain or env
-vars (`ANTHROPIC_API_KEY`, etc.).
+codefit is a single static binary with no runtime dependencies (`CGO_ENABLED=0`),
+cross-compiling to linux/amd64, linux/arm64, windows/amd64, and darwin/arm64.
+There is no LLM or auth configuration — codefit manages no models and no
+credentials. (A runnable audit needs the MCP server — see the status note.)
 
 ## Contributing
 
-Contributions are welcome — new sensors, language providers, and false-positive
-reports especially. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the TDD
-workflow, and the concrete steps to add a language. Please follow our
+Contributions are welcome — new rules, surface categories, language providers,
+and false-positive reports especially. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[`rules/README.md`](rules/README.md). Please follow our
 [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues per our
 [Security Policy](SECURITY.md).
 
