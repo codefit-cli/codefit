@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/codefit-cli/codefit/internal/version"
@@ -50,13 +52,73 @@ func Serve(ctx context.Context) error {
 }
 
 // addTool registers a codefit core handler (func(In) (Out, error)) as an MCP
-// tool, wrapping it in the SDK's typed handler signature. The SDK derives the
-// input/output JSON schema from the In/Out types and marshals both sides — the
-// adapter only forwards.
+// tool, wrapping it in the SDK's typed handler signature. The adapter only
+// forwards. The input schema is derived from In and then normalized for the
+// strict subset Google/Gemini enforces (see geminiInputSchema).
 func addTool[In, Out any](s *mcpsdk.Server, name, desc string, h func(In) (Out, error)) {
-	mcpsdk.AddTool(s, &mcpsdk.Tool{Name: name, Description: desc},
+	mcpsdk.AddTool(s, &mcpsdk.Tool{Name: name, Description: desc, InputSchema: geminiInputSchema[In](name)},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
 			out, err := h(in)
 			return nil, out, err
 		})
+}
+
+// geminiInputSchema derives the JSON schema for In (exactly as the SDK would) and
+// normalizes it for Google/Gemini, which enforces a stricter schema subset than
+// other models: a node's `type` must be a single string, never a union like
+// ["null","array"]. Go slices/pointers infer to a nullable union by default,
+// which Gemini rejects ("$type == Type.ARRAY" / "items: missing field" on the
+// array). collapseNullable drops the "null" so every array is a plain `type:
+// array` with its `items`. Pre-setting Tool.InputSchema makes the SDK use this
+// instead of re-inferring.
+func geminiInputSchema[In any](tool string) *jsonschema.Schema {
+	schema, err := jsonschema.For[In](nil)
+	if err != nil {
+		// Our tool input types are plain structs that always infer cleanly; a
+		// failure here is a programming error, surfaced loudly at startup.
+		panic(fmt.Errorf("mcp: deriving input schema for tool %q: %w", tool, err))
+	}
+	collapseNullable(schema)
+	return schema
+}
+
+// collapseNullable recursively rewrites nullable union types ("null" + one real
+// type) into that single type, throughout the schema. Required fields are not
+// meaningfully nullable, and codefit's tool inputs are required.
+func collapseNullable(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+	if len(s.Types) > 0 {
+		nonNull := make([]string, 0, len(s.Types))
+		for _, t := range s.Types {
+			if t != "null" {
+				nonNull = append(nonNull, t)
+			}
+		}
+		switch len(nonNull) {
+		case 1:
+			s.Type, s.Types = nonNull[0], nil
+		case 0:
+			// degenerate (only "null"): leave as-is.
+		default:
+			s.Types = nonNull
+		}
+	}
+	for _, sub := range []*jsonschema.Schema{
+		s.Items, s.AdditionalItems, s.Contains, s.UnevaluatedItems,
+		s.AdditionalProperties, s.UnevaluatedProperties, s.Not,
+	} {
+		collapseNullable(sub)
+	}
+	for _, list := range [][]*jsonschema.Schema{s.PrefixItems, s.ItemsArray, s.AllOf, s.AnyOf, s.OneOf} {
+		for _, sub := range list {
+			collapseNullable(sub)
+		}
+	}
+	for _, m := range []map[string]*jsonschema.Schema{s.Properties, s.PatternProperties, s.Defs, s.Definitions} {
+		for _, sub := range m {
+			collapseNullable(sub)
+		}
+	}
 }
