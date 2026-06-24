@@ -71,9 +71,9 @@ go test -cover ./internal/... # with coverage
 Three layers (see PRD §13–14):
 
 ```
-core/      universal engine: pipeline, cache, scoring, report, llm  (language-agnostic)
-sensors/   audit logic per dimension: security, review, db, ...     (language-agnostic)
-providers/ one per language: parsing + ecosystem rules              (language-specific)
+core/      universal engine: pipeline, cache, scoring, report, surface  (language-agnostic)
+sensors/   audit logic per dimension: security, review, db, ...        (language-agnostic)
+providers/ one per language: parsing + ecosystem rules + surface       (language-specific)
 ```
 
 The core never depends on a language. A sensor asks the active provider for
@@ -82,8 +82,8 @@ language-specific findings; it never knows which parser the provider uses.
 ## Adding a new LanguageProvider
 
 This is the extensibility path (PRD §14): adding a language **must not touch the
-core, the sensors, the CLI, the MCP server, or the reporting**. You implement
-one interface.
+core, the sensors, the MCP server, or the reporting**. You implement one
+interface.
 
 1. Create `internal/providers/<lang>/` and a type implementing
    `providers.LanguageProvider`:
@@ -94,9 +94,9 @@ one interface.
        Frameworks() []string
        FileExtensions() []string
        DefaultPathCriticality() config.PathCriticality
-       ReviewPromptContext() string
        AnalyzeSecurity(src SourceFile) ([]findings.Finding, error)
        AnalyzePractices(src SourceFile) ([]findings.Finding, error)
+       AnalyzeSurface(src SourceFile) ([]findings.SurfaceItem, error)
    }
    ```
 
@@ -104,17 +104,22 @@ one interface.
    extensions, and sensible `path_criticality` defaults for the ecosystem.
 
 3. **Parsing**: the provider owns its parser. Go uses `go/ast`. For
-   TypeScript/Java/Python, use tree-sitter **pure Go, no CGO**.
+   TypeScript/Java/Python, use tree-sitter **pure Go, no CGO** — behind the
+   parser-agnostic `core/syntax.Node` boundary (ADR 0003).
 
-4. **Detection**: implement `AnalyzeSecurity` / `AnalyzePractices` to walk the
-   AST and return `findings.Finding` values with their natural (pre-path)
-   severity. The sensor applies path-criticality adjustments.
+4. **Detection**: implement `AnalyzeSecurity` / `AnalyzePractices` to return
+   deterministic `findings.Finding` values with their natural (pre-path)
+   severity; the sensor applies path-criticality. Implement `AnalyzeSurface` to
+   **enumerate** the structural surface (IDOR/authz/over-fetching, …) as
+   `findings.SurfaceItem` values — facts and a question, never a judgment. Detect
+   by structural shape, never by name; declare the frontier (ADR 0005).
 
-5. **Register** the provider for its language id (e.g. in the CLI's
-   `resolveProvider`).
+5. **Register** the provider for its language id in the MCP adapter (the single
+   place that maps language → provider).
 
 6. **Test it**: write table-driven tests with small source snippets asserting
-   the finding IDs each detector emits — and at least one clean-input test.
+   the finding IDs and surface signals each detector emits — and at least one
+   clean-input test. Calibration decisions are validated against real code.
 
 If adding your language requires changing the core, that is a design bug — open
 an issue so we fix the seam, not your provider.

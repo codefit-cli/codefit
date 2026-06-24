@@ -4,44 +4,78 @@ All notable changes to codefit are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Pre-release.** No version has been tagged yet. codefit is in active
+> development (Phase 1) and is not yet usable end-to-end — the MCP server that
+> exposes the engine to agents is not wired yet. The first tagged release will
+> come once Phase 1 and the MCP server land.
+
 ## [Unreleased]
 
-## [0.1.0] — pending release
+### Added — Phase 1: TypeScript security + surface mapping
 
-First public release: Phase 0 (Foundations) + the Go provider and the security
-sensor.
+- **TypeScript `LanguageProvider`** backed by gotreesitter (pure Go, no CGO —
+  ADR 0002), behind the parser-agnostic `core/syntax.Node` AST boundary
+  (ADR 0003).
+- **Deterministic TypeScript security rules** — five categories asserted with
+  certainty 1.0: hardcoded secrets, weak crypto (MD5/SHA-1, insecure
+  `Math.random` for tokens), dangerous `eval`/`new Function`, inline SQL
+  injection, inline XSS via `dangerouslySetInnerHTML`. Declarative YAML in a
+  Semgrep-format subset, matched by a pure-Go engine (`internal/core/ruleengine`)
+  — no OCaml/OpenGrep embedded. Scope and known limits in `COVERAGE.md`. (ADR 0004)
+- **Surface mapping framework** (`internal/core/surface`) — the product
+  differentiator: `SurfaceItem` with a stable id and queryable `StructuralFacts`,
+  the `Query` interface, and the stateless confirmation flow (the agent's verdicts
+  become probabilistic findings, confidence < 1.0).
+- **Three surface categories for TypeScript / Next.js / Prisma**, validated
+  against a real backend: **IDOR** (id→resource endpoints), **broken
+  authorization** (sensitive handlers), and **over-fetching** (domain-object
+  serializations). Detection is by structural shape, never by name; the
+  finite/infinite frontier is declared (ADR 0005).
+- **`scan-all` synthesis** (`report.AggregateEndpoints`) — the complete picture
+  aggregated per endpoint: deterministic findings and surface concerns of the same
+  handler together, with three certainty levels (deterministic → surface-confirmed
+  → frontier), the affirm/ask distinction preserved, ordered by actionable
+  structural gap (never by severity). Agent-first JSON; a human renderer
+  (`export-report`) is registered pending (PRD §27). (ADR 0006)
+- **Coverage manifest** per provider (`COVERAGE.md`, derived from the in-code
+  manifest) — declares what is audited deterministically vs reasoned over surface
+  vs not covered, including the known limits.
 
-### Added
+### Added — Phase 0: foundations
 
 - Three-layer architecture: `core/` (universal engine), `sensors/` (audit
   logic), `providers/` (per-language), so adding a language never touches the
   core.
 - Project config parser (`.codefit.yaml`) with located validation errors and
   `path_criticality` support (RF-11).
-- Global user config and LLM auth: OS keychain (go-keyring) with an AES-256-GCM
-  encrypted-file fallback, env-var resolution, and an interactive `auth login`
-  wizard.
-- Core engine: filtering pyramid, content-hash cache, scoring, the canonical
-  JSON report (`schema_version` 1.0) with JSON/plain renderers and TTY
-  detection, and an abstract LLM client with an Anthropic implementation
-  (prompt caching).
+- Core engine: filtering pyramid, content-hash cache, scoring, and the canonical
+  JSON report (`schema_version` 1.0).
 - **Go `LanguageProvider`** backed by `go/ast` (no CGO): static security and
   best-practice detectors.
 - **Security sensor** (regex + AST layers) with severity adjustment by path
   criticality.
-- CLI: `init`, `scan`, `bench`, `review`, `run`, `baseline`, `report`,
-  `mcp serve`, `auth`, `set`, `status` (skeletons where not yet implemented;
-  `scan`, `report`, `auth`, `set`, `status` functional).
-- Docker sandbox manager for the (upcoming) complexity sensor.
-- Self-audit: codefit scans its own code in CI (`scan --no-llm --fail-on
-  critical`).
-- CI/CD: GitHub Actions for test/lint/build, goreleaser releases, and weekly
-  dependency vulnerability scanning.
+- Plumbing CLI built on cobra: `status` and `version` work today; `init`,
+  `update`, and `mcp serve` are scaffolding (the MCP server is the next slice).
+- Self-audit: codefit scans its own code in CI as a Go integration test.
+- CI/CD: GitHub Actions for test/lint/build, goreleaser config, and weekly
+  dependency vulnerability scanning (`govulncheck` pinned to v1.1.4).
+
+### Changed
+
+- **Architecture is MCP-first, pure.** codefit has no audit CLI and never calls
+  or manages any LLM; the binary exposes only plumbing commands. The deterministic
+  layers run in-process and the surface is returned to the agent, which reasons
+  with its own model.
+
+### Fixed
+
+- Deduplicate overlapping layer-1 (regex) and layer-2 (AST) secret findings in
+  the security sensor — closing a latent double-report that affected the Go
+  provider too.
+- `.gitignore` `coverage.*` was swallowing `coverage.go` source; narrowed the
+  rule and added a CI guard against `.gitignore` swallowing source files.
 
 ### Notes
 
 - `CGO_ENABLED=0` everywhere; cross-compiles to linux/amd64, linux/arm64,
   windows/amd64, darwin/arm64.
-
-[Unreleased]: https://github.com/codefit-cli/codefit/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/codefit-cli/codefit/releases/tag/v0.1.0
