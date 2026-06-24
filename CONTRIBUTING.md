@@ -47,6 +47,9 @@ codefit is built test-first (TDD) and spec-first (SDD):
 - Each package has a `doc.go` describing its purpose.
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`). No AI attribution lines.
+- **Versioning** follows SemVer with pre-releases, mapped to the PRD phases — see
+  [VERSIONING.md](VERSIONING.md) for the Phase→MINOR map and what each pre-release
+  (`-alpha`/`-beta`/`-rc`) means. The build derives the version from the git tag.
 
 ### Don't let `.gitignore` swallow source
 
