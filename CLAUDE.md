@@ -152,6 +152,60 @@ nuevo sin que el enfoque esté acordado.
 
 ---
 
+## Documentación (reglas de honestidad — OBLIGATORIAS)
+
+La documentación refleja lo que codefit **HACE HOY en `main`**, no lo que hará al
+terminar una fase. Honestidad sobre el estado real, no promesas. Aplican cada vez
+que se actualiza cualquier doc (README, CHANGELOG, COVERAGE.md, CONTRIBUTING, ADRs).
+
+### Regla rectora: ¿se puede USAR hoy desde main?
+Antes de escribir **cualquier** afirmación de capacidad, preguntarse: *¿esto se
+puede usar hoy desde `main`?* Si la respuesta es "no, falta X" o "es del próximo
+slice", NO escribirlo como capacidad presente — marcarlo como *en desarrollo* o no
+incluirlo. Documentar lo que no existe es el mismo pecado que un manifiesto que
+sobre-promete: erosiona la confianza. codefit documenta lo que hace, no lo que hará.
+
+### Verificá, no asumas (contra el código, no contra la intención ni el PRD)
+Antes de afirmar que un comando o capacidad funciona, **verificar la implementación
+real** (¿es `notImplemented`/scaffolding, o corre de verdad?). Documentar desde lo
+que el código hace, no desde el diseño. (Así se cazó que `mcp serve` era scaffolding
+cuando el README decía "conectá codefit a tu agente".)
+
+### Marcá el estado real
+- Nota de estado visible cuando codefit —o una capacidad— no es usable end-to-end
+  ("en desarrollo activo, Fase N").
+- Separar **lo que funciona hoy** de **lo que está planeado**; el diseño/visión va
+  enmarcado como diseño, no como capacidad ejecutable.
+
+### Sin releases inventados
+- CHANGELOG: pre-release sigue pre-release. **No inventar una versión/tag que no
+  pasó** — verificar `git tag -l`. Sin compare-links a tags inexistentes.
+- Conventional commits / Keep-a-Changelog; entradas por lo realmente mergeado.
+
+### COVERAGE.md / manifiesto sincronizado
+- El manifiesto en código (`providers/<lang>/coverage.go`) es la fuente de verdad;
+  `COVERAGE.md` lo espeja para humanos.
+- Debe reflejar lo que las reglas y categorías **realmente** detectan, **incluidos
+  los límites conocidos** (md5 siempre-marca, reglas name-driven, frontera multi-hop
+  al agente, detección por forma no por nombre). Un manifiesto que sobre-promete es
+  un auditor en el que no se puede confiar.
+
+### Posicionamiento honesto
+- Documentar también **qué NO hace codefit y por qué** (complementa linters, no los
+  reemplaza: lo visible en desarrollo normal es del linter; codefit audita lo
+  invisible). Es honesto y posiciona.
+
+### Mantené la doc en sync con el cambio
+- Cuando el comportamiento cambia, actualizar en el **mismo cambio** la doc afectada:
+  capacidades del README, CHANGELOG, COVERAGE.md, y la interface/ejemplos de
+  CONTRIBUTING. Verificar que los links internos resuelven.
+
+### Gate de docs
+- Aun en cambios solo-doc, correr el gate (build + lint) por si se tocó algo embebido
+  (`go:embed`). Self-audit verde.
+
+---
+
 ## Comandos de desarrollo
 
 ```bash
