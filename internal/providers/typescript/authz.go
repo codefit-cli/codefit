@@ -109,7 +109,10 @@ func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 
 // operationSignal states, as a fact, what sensitive operation the handler
 // performs: reads and/or mutates data via Prisma, or — when no local access is
-// visible — that it calls application code where the operation may live.
+// visible — that it calls application code where the operation lives. The
+// frontier branch states the limit as an AFFIRMATION (codefit does not follow
+// calls, so authorization is an UNRESOLVED candidate here, not an absence) and
+// makes following the call its own instruction, so the agent pursues it.
 func operationSignal(method string, accesses, indirect []string) string {
 	if len(accesses) > 0 {
 		var reads, writes []string
@@ -129,8 +132,10 @@ func operationSignal(method string, accesses, indirect []string) string {
 		}
 		return strings.Join(parts, " ")
 	}
-	return "Handler " + method + " calls application code that may touch data or mutate state: " +
-		strings.Join(indirect, ", ") + " — the operation may be in a service/repository layer (follow the call to confirm)"
+	return "Handler " + method + " calls application code outside this handler: " +
+		strings.Join(indirect, ", ") + ", which may touch data or mutate state. codefit does not follow " +
+		"calls across functions, so authorization for this operation is NOT verified here — it runs in a " +
+		"service/repository layer. Follow the call there to confirm whether an authorization check exists."
 }
 
 // isPrismaWriteAccess reports whether a recorded access string

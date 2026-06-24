@@ -161,14 +161,18 @@ func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 
 // accessSignal phrases the resource-access fact. A local Prisma access is named
 // directly. Otherwise the id leaves the body indirectly — codefit does not chase
-// where to (ADR 0005); it states honestly that the access may be in a service or
-// repository layer and lets the agent follow the data.
+// where to (ADR 0005). The frontier signal states the limit as an AFFIRMATION
+// (codefit does not follow calls, so this access is an UNRESOLVED candidate, not
+// an absence) and makes following the data its own instruction, so the agent
+// pursues it instead of discarding it as a false positive.
 func accessSignal(accesses, indirect []string) string {
 	if len(accesses) > 0 {
 		return "Accesses a resource via a Prisma client method: " + strings.Join(accesses, ", ")
 	}
-	return "No direct Prisma access detected in the handler body; the identifier is passed to " +
-		strings.Join(indirect, ", ") + " — the access may be in a service/repository layer (follow the identifier to confirm)"
+	return "The identifier flows into " + strings.Join(indirect, ", ") + ", outside this handler. " +
+		"codefit does not follow calls across functions, so this resource access is NOT verified here — " +
+		"it runs in a service/repository layer. Follow the identifier there to determine whether ownership " +
+		"is checked before the resource is read or modified."
 }
 
 // collectIDInputs records the client-controlled identifier inputs present in the

@@ -114,11 +114,18 @@ func localOverfetchSignals(model, method string, limited bool) []string {
 	}
 }
 
+// frontierOverfetchSignals phrases an over-fetch whose serialized value is not a
+// local Prisma find. The limit is stated as an AFFIRMATION (codefit does not
+// follow the call, so the field selection is an UNRESOLVED candidate, not an
+// absence) and following the data is its own instruction, so the agent pursues it
+// instead of discarding it.
 func frontierOverfetchSignals(callee string) []string {
 	return []string{
 		"Serializes the result of " + callee,
-		"The serialized value is not a local Prisma find, so codefit could not check for a " +
-			"select/omit clause — the field selection may be in a service/repository layer (follow the data to confirm)",
+		"This is not a local Prisma find, so codefit does not follow it into the function that produced it — " +
+			"whether a select/omit limits the returned fields is NOT verified here; the selection lives in a " +
+			"service/repository layer. Follow the data to its source and check the Prisma schema to determine " +
+			"whether sensitive fields reach the client.",
 	}
 }
 
