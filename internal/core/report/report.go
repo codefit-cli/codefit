@@ -32,6 +32,12 @@ type AuditReport struct {
 	// Surface is the auditable structural surface the agent must reason about
 	// (PRD section 10), aggregated across sensors.
 	Surface []findings.SurfaceItem `json:"surface,omitempty"`
+	// Endpoints is the synthesis view (codefit-scan-all): the deterministic
+	// findings and the surface grouped by the handler they belong to, each
+	// endpoint's concerns ordered by certainty (deterministic → confirmed →
+	// frontier). It is the complete picture per endpoint for the agent to reason;
+	// the flat Findings/Surface remain for traceability.
+	Endpoints []EndpointReport `json:"endpoints,omitempty"`
 	// CoverageNote states which classes of problems were not audited (derived
 	// from the coverage manifest), so the report always informs its own limits
 	// (PRD section 21). Populated once the coverage manifest exists (Fase C).
