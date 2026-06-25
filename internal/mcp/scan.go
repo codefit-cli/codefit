@@ -52,7 +52,13 @@ func runSecurity(root, language string) (findings.SensorResult, error) {
 	if provider == nil {
 		return findings.SensorResult{}, fmt.Errorf("unsupported language %q", language)
 	}
-	cfg, _ := config.Load(filepath.Join(root, ".codefit.yaml")) // optional; nil → no criticality adjust
+	// A missing config is fine (nil → defaults); a PRESENT but invalid one is a
+	// hard error — scanning silently with no path_criticality would be a false
+	// "all good", the very anti-pattern codefit exists to catch.
+	cfg, err := config.LoadOptional(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		return findings.SensorResult{}, fmt.Errorf("loading project config: %w", err)
+	}
 	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg}
 	res, err := security.New(provider).Run(ctx)
 	if err != nil {

@@ -15,7 +15,17 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **The scan path no longer swallows an invalid `.codefit.yaml`.** `runSecurity`
+  did `cfg, _ := config.Load(...)`, so a *present but invalid* config (e.g.
+  `framework: "nextjs"` instead of `"next"`) was silently dropped to `nil` and
+  scans ran with **no `path_criticality`** — a false "all good", the very
+  swallowed-error anti-pattern codefit exists to catch. New `config.LoadOptional`
+  distinguishes the three states: **absent** → defaults (no error), **present but
+  invalid** → a loud, located, field-level error (`invalid framework "nextjs"
+  (allowed: …)`), **valid** → loads. The single swallowing call site
+  (`internal/mcp/scan.go`) now fails loudly on an invalid config.
 
 ## [0.1.0-alpha.2] — 2026-06-25
 
