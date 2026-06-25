@@ -7,13 +7,37 @@ All notable changes to codefit are documented here. The format is based on
 > **Pre-release.** The first tag is **`v0.1.0-alpha.1`** — the usable, dogfooded MCP
 > core (deterministic detection + three surface categories + the `scan-all`
 > three-bucket summary, over the MCP stdio transport `codefit mcp serve`). codefit is
-> still in active development (Phase 1): `codefit init`, baseline, and `update` are
-> stubs, and the HTTP/SSE transport plus Phases 2–4 are ahead. **`v0.1.0`** (no
-> suffix) is reserved for **Phase 1 complete**. See [VERSIONING.md](VERSIONING.md).
+> still in active development (Phase 1): baseline and `update` are stubs, and the
+> HTTP/SSE transport plus Phases 2–4 are ahead. **`v0.1.0`** (no suffix) is reserved
+> for **Phase 1 complete**. See [VERSIONING.md](VERSIONING.md).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added — Phase 1: `codefit init`
+
+- **`codefit init` is now functional** (was scaffolding). It does three jobs, all
+  deterministic and LLM-free:
+  - **Detect** the stack from marker files — language (`go.mod`, `package.json` /
+    `tsconfig.json`), framework (Next/React/Express from `package.json` deps), ORM
+    and database (Prisma schema + its datasource provider) — into a `.codefit.yaml`.
+  - **Generate** codefit's own **thin** `SKILL.md` (Anthropic Agent Skills spec:
+    `name` + `description`), with the detected language baked into the example
+    commands. It triggers and points at the MCP tools; it does not restate what
+    codefit already knows.
+  - **Place** the skill where each detected agent finds it — Claude Code
+    (`.claude/skills/codefit/`), OpenCode (`.opencode/skills/codefit/`), Codex
+    (`.agents/skills/codefit/`). Agents are detected by file **or** dir markers
+    (`CLAUDE.md` / `.claude`, `opencode.json` / `.opencode`, `.codex`). With no
+    agent detected it falls back to `.agents/skills/codefit/` and says so.
+- The agent → skill-path table lives in one place (`scaffold.AgentTargets`). The
+  existing `.codefit.yaml` is never overwritten without confirmation (`--force`),
+  and codefit never touches the user's `AGENTS.md` / `CLAUDE.md`. Every file
+  created is reported — nothing is written silently.
+- README gains a **Connect codefit** section with per-agent MCP server blocks
+  (Claude Code, OpenCode, Codex).
+- Validated end-to-end on a real Next.js/Prisma backend (Bitácora): detected
+  TypeScript / Next / Prisma / PostgreSQL and 27 route handlers, and placed the
+  skill for Claude Code and OpenCode.
 
 ## [0.1.0-alpha.1] — 2026-06-24
 

@@ -33,11 +33,15 @@ the audit tools and an agent can call them. What is **in `main` now**:
   (built on the official MCP Go SDK; verified by a client↔server integration
   test). The Go provider and the self-audit (codefit scans its own code in CI)
   round it out.
+- **`codefit init`** — inspects the project (language, framework, ORM, database
+  from marker files), writes a committed `.codefit.yaml`, and generates codefit's
+  own thin skill, placing it where each detected agent (Claude Code, OpenCode,
+  Codex) discovers it. It never touches your `AGENTS.md` / `CLAUDE.md` and never
+  writes anything silently — it reports every file it creates.
 
 **Still in active development (Phase 1):** the HTTP/SSE transport (`--port`) is
-**not** wired yet — use stdio. The plumbing commands `init` / `update` are
-scaffolding (the tools work without them — config is optional). Phases 2–4 (DB,
-complexity, code review, knowledge packs) are on the roadmap.
+**not** wired yet — use stdio. The plumbing command `update` is scaffolding.
+Phases 2–4 (DB, complexity, code review, knowledge packs) are on the roadmap.
 
 ## MCP-first, pure
 
@@ -57,14 +61,48 @@ agent generates code
         └─► agent reasons the surface with its own LLM → fixes or proceeds
 ```
 
-Connect it to your agent (stdio):
+## Connect codefit
+
+Two steps: register codefit as an MCP server for your agent, then run
+`codefit init` in your project to generate `.codefit.yaml` and install codefit's
+skill for the agents it detects.
+
+Use the **absolute path** to the binary (`which codefit`) if it is not on the
+agent process's `PATH`. codefit is stateless — the project root is passed per
+call as the `root` tool argument, so the MCP server itself needs no `cwd`.
+
+**Claude Code** — `.mcp.json` (project) or `claude mcp add`:
 
 ```json
 {
   "mcpServers": {
-    "codefit": { "command": "codefit", "args": ["mcp", "serve"], "cwd": "/path/to/project" }
+    "codefit": { "command": "/absolute/path/to/codefit", "args": ["mcp", "serve"] }
   }
 }
+```
+
+**OpenCode** — `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "codefit": { "type": "local", "command": ["/absolute/path/to/codefit", "mcp", "serve"], "enabled": true }
+  }
+}
+```
+
+**Codex** — `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.codefit]
+command = "/absolute/path/to/codefit"
+args = ["mcp", "serve"]
+```
+
+Then, in your project:
+
+```bash
+codefit init
 ```
 
 ## The differentiator: surface mapping
