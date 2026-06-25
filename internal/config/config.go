@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -108,6 +110,28 @@ type IgnoreFinding struct {
 	Reason     string `yaml:"reason"`
 	AcceptedBy string `yaml:"accepted_by"`
 	AcceptedAt string `yaml:"accepted_at"`
+}
+
+// LoadOptional loads a .codefit.yaml only when it exists, distinguishing the
+// three states callers must not conflate:
+//
+//   - ABSENT  → (nil, nil): no config is fine, the caller uses defaults.
+//   - PRESENT but INVALID → (nil, error): codefit must REFUSE to run silently
+//     with a broken config. Swallowing this is the very anti-pattern codefit
+//     exists to catch — a false "all good" that hides a real problem (e.g. an
+//     invalid framework silently disabling path_criticality).
+//   - VALID   → (cfg, nil): loaded normally.
+//
+// The returned error is the located, field-level message from Load/validate
+// (e.g. `invalid framework "nextjs" (allowed: …)`), useful enough to fix.
+func LoadOptional(path string) (*Config, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("checking config %q: %w", path, err)
+	}
+	return Load(path)
 }
 
 // Load reads, parses and validates a .codefit.yaml file from path. Validation
