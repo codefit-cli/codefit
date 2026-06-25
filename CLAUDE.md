@@ -52,11 +52,13 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 **Siempre decide el developer. Nunca pasamos por encima de sus decisiones.
 Siempre se informan las consecuencias.** Es transversal a todo el diseño:
 
-- El bloqueo de commit por crítico lo **configura el dev** al aceptar (o no) que
-  codefit enriquezca el `AGENT.md`. codefit propone; el dev dispone.
+- codefit **informa** `blocked` ante un crítico sin consentimiento, pero **no tiene
+  poder sobre el git**: la conducta de bloquear el commit es **política del dev**.
+  codefit propone; el dev dispone.
 - El consentimiento de seguridad siempre **informa la consecuencia** y deja
   registro auditable (`accepted_by`, `accepted_at`, `reason`).
-- codefit **modifica el `AGENT.md` solo con confirmación explícita** del dev.
+- codefit genera su **propia skill** (`codefit init`) y la coloca para los agentes
+  detectados; **nunca toca el `AGENT.md`/`CLAUDE.md` del usuario**.
 - Cuando codefit señala un bloqueo, explica *por qué* y *qué pasa si igual se
   avanza* — nunca un "no" sin fundamento.
 
@@ -120,8 +122,8 @@ nuevo sin que el enfoque esté acordado.
   tocar el núcleo, el diseño falló.
 - **El MCP server es un adapter delgado**, no reimplementa lógica: traduce las
   llamadas a las tools (`codefit-scan-security`, `codefit-surface-*`,
-  `codefit-scan-all`, `codefit-review-code`, `codefit-coverage`, etc.) a
-  invocaciones del núcleo. Stateless.
+  `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-confirm-surface`,
+  `codefit-coverage`) a invocaciones del núcleo. Stateless.
 - **Pirámide de filtrado: capa 0 (cambios) → capa 1 (regex) → capa 2 (AST +
   reglas + mapeo de superficie).** codefit nunca pasa de la capa 2; la capa 3
   (razonamiento) la ejecuta el agente sobre el `surface` devuelto. Nunca enviar
@@ -257,8 +259,8 @@ en `.github/workflows/security.yml`. Las versiones `>= ~v1.2` crashean
   archivos de test se degradan a `info` (configurable, PRD RF-10).
 - **El bloqueo NO es configurable:** `scoring.IsBlocked` (critical de seguridad
   sin consent ni baseline) fuerza `Blocked: true`. codefit **informa**
-  `blocked`; la conducta de bloqueo del commit la ejecuta el agente vía el
-  `AGENT.md` (codefit no tiene poder sobre el git del usuario).
+  `blocked`; la conducta de bloqueo del commit es **política del dev** (codefit no
+  tiene poder sobre el git del usuario; la skill no inyecta reglas de commit-block).
 
 **Decisiones de arquitectura** se registran como ADR en `docs/decisions/`.
 
@@ -285,13 +287,16 @@ Protocolo de sesión:
 
 - **Fase 0** — Foundations + núcleo + Go provider (self-audit).
 - **Fase 1** — TypeScript provider + sensor de seguridad completo (con mapeo de
-  superficie) + **MCP server funcional** + `codefit init` (enriquece `AGENT.md`
-  con confirmación) + baseline.
+  superficie) + **MCP server funcional** + `codefit init` (genera la skill de
+  codefit y la coloca para los agentes detectados; **no toca el `AGENT.md`**) +
+  baseline. **Estado: casi completa** — init ✅ (`v0.1.0-alpha.2`); falta baseline.
 - **Fase 2** — Sensor de DB (OLTP/OLAP, índices, vistas, procs, N+1).
 - **Fase 3** — Code review + best practices + tests + riesgo de regresión.
 - **Fase 4** — Knowledge packs + `codefit update` + manifiesto de cobertura
-  (`COVERAGE.md` + tool `codefit-coverage`) + release público v0.1.0.
-- **Post-v1.0** — Java (v1.1), Python (v1.2). El sensor de complejidad empírica
-  (sandbox Docker) se evalúa post-v1.0 por requerir ejecución de código.
+  (`COVERAGE.md` + tool `codefit-coverage`) + release pública `0.x`.
+- **Post-1.0.0** — Java (`1.1`), Python (`1.2`). El sensor de complejidad empírica
+  (sandbox Docker) se evalúa post-1.0 por requerir ejecución de código.
 
-Ver el rollout completo y los criterios de "done" en el PRD, sección 25.
+Versionado: SemVer, Fase→MINOR (Fase 1 = `0.1.0`, … Fase 4 = `0.4.0`, estable =
+`1.0.0`); `v0.1.0` se reserva para Fase 1 completa. Ver el rollout completo, los
+criterios de "done" y la tabla de versionado en el PRD §25 y `VERSIONING.md`.
