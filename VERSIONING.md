@@ -28,7 +28,7 @@ pieces of it are still stubs.
 
 | Version  | PRD phase | Meaning |
 |----------|-----------|---------|
-| `0.1.0`  | Phase 1   | TS provider + security sensor + surface mapping + **`init` (AGENTS.md), baseline, `update`** all functional |
+| `0.1.0`  | Phase 1   | TS provider + security sensor + surface mapping + **`init` (config + skill) and baseline** functional (`update` is Phase 4) |
 | `0.2.0`  | Phase 2   | DB sensor (OLTP/OLAP, indexes, views, procs, N+1) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
@@ -57,15 +57,19 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **`v0.1.0-alpha.1`** (tagged 2026-06-24) — the usable, dogfooded MCP core:
-  deterministic TypeScript security detection, the three surface categories (IDOR,
-  broken authorization, over-fetching), the `scan-all` three-bucket summary with
-  `scan-endpoint` on demand, all over the MCP stdio server (`codefit mcp serve`).
-  Validated in real use against a Next.js/Prisma backend with multiple agent models.
-- **`v0.1.0`** is **reserved** for Phase 1 complete — it ships once `codefit init`
-  (writes `.codefit.yaml` + enriches `AGENTS.md` with confirmation), baseline, and
-  `update` are functional. They are stubs today, so tagging `v0.1.0` now would
-  over-promise.
+- **`v0.1.0-alpha.2`** (tagged 2026-06-25) — the dogfooded MCP core (deterministic
+  TypeScript security detection, the three surface categories — IDOR, broken
+  authorization, over-fetching —, the `scan-all` three-bucket summary with
+  `scan-endpoint` on demand, all over the MCP stdio server) **plus `codefit init`**:
+  stack detection + `.codefit.yaml` generation + a thin self-discovering skill placed
+  for each detected agent. Validated against a Next.js/Prisma backend; the skill
+  trigger validated both ways.
+- **`v0.1.0-alpha.1`** (tagged 2026-06-24) — the first usable MCP core, before `init`.
+- **`v0.1.0`** is **reserved** for Phase 1 complete — it ships once **baseline** is
+  functional (it is a stub today, so tagging `v0.1.0` now would over-promise).
+  `codefit init` (writes `.codefit.yaml` + generates and places codefit's own skill;
+  it never touches the user's `AGENTS.md`/`CLAUDE.md`) already landed in `alpha.2`.
+  `codefit update` is a Phase 4 item, not a Phase 1 blocker.
 
 ## How to tag a release
 
