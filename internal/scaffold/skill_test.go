@@ -89,6 +89,15 @@ func TestSkillBakesLanguage(t *testing.T) {
 	}
 }
 
+// RenderSkill is exported and may be called with no detected language; it must
+// still produce valid, exact commands (defaulting the baked language).
+func TestSkillEmptyLanguageDefaults(t *testing.T) {
+	_, body := renderSkill(t, scaffold.ProjectInfo{Name: "x"})
+	if !strings.Contains(body, `"typescript"`) {
+		t.Errorf("empty language must default the baked command language, got:\n%s", body)
+	}
+}
+
 // HONESTY: resolved_clean must NOT claim codefit "verified it clean" (overstates
 // the guarantee). It says the expected check is present locally but its
 // sufficiency was not verified — same nuance as the verification facts.

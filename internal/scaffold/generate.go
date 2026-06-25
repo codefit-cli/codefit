@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/codefit-cli/codefit/internal/config"
 )
 
 // ConfigName is the project config file codefit reads and init writes.
@@ -75,6 +77,13 @@ func writeConfig(opts Options, info ProjectInfo) (ConfigAction, error) {
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("writing %s: %w", ConfigName, err)
+	}
+	// Backstop the honesty rule: never report a config as written if it does not
+	// load+validate. Values come from validated enums and the name is YAML-escaped,
+	// so this should never fire — but a success message over a broken file would be
+	// exactly the silent failure the project forbids.
+	if _, err := config.Load(path); err != nil {
+		return "", fmt.Errorf("generated %s failed validation: %w", ConfigName, err)
 	}
 	if existed {
 		return ConfigOverwritten, nil

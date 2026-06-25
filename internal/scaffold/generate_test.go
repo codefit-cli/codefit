@@ -107,6 +107,19 @@ func TestGenerateOverwritesWithPermission(t *testing.T) {
 	}
 }
 
+func TestConfigExists(t *testing.T) {
+	root := t.TempDir()
+	if scaffold.ConfigExists(root) {
+		t.Errorf("ConfigExists = true on an empty dir")
+	}
+	if err := os.WriteFile(filepath.Join(root, ".codefit.yaml"), []byte("version: \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !scaffold.ConfigExists(root) {
+		t.Errorf("ConfigExists = false after writing .codefit.yaml")
+	}
+}
+
 func TestGenerateFallbackWhenNoAgents(t *testing.T) {
 	root := copyTree(t, sampleNext) // no agent marker dirs
 

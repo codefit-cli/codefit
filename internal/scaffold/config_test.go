@@ -66,6 +66,23 @@ func TestRenderConfigNextPrismaRoundTrips(t *testing.T) {
 	}
 }
 
+// A project dir name with YAML-hostile characters (quotes, backslashes) must
+// still produce a config that loads, with the name preserved verbatim — not a
+// silent broken file reported as success.
+func TestRenderConfigEscapesHostileName(t *testing.T) {
+	for _, name := range []string{`my"weird`, `back\slash`, `with: colon`, `1leading`} {
+		info := scaffold.ProjectInfo{
+			Name:            name,
+			Language:        "go",
+			PathCriticality: config.PathCriticality{Production: []string{"**/*.go"}},
+		}
+		cfg := loadRendered(t, info)
+		if cfg.Project.Name != name {
+			t.Errorf("name round-trip: got %q, want %q", cfg.Project.Name, name)
+		}
+	}
+}
+
 // A Go project has no ORM/DB: the rendered config must omit the database section
 // and still round-trip.
 func TestRenderConfigGoRoundTrips(t *testing.T) {

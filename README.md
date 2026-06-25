@@ -105,6 +105,11 @@ Then, in your project:
 codefit init
 ```
 
+`init` detects Codex by a **project-local `.codex/`** dir, not the global
+`~/.codex/config.toml` above; if you only configure Codex globally, `init` writes
+the skill to the standard `.agents/skills/codefit/` location (which Codex reads)
+and tells you so.
+
 ## The differentiator: surface mapping
 
 Deterministic rules are what any linter does. The honest **surface mapping** that

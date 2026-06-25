@@ -71,7 +71,7 @@ func TestInitCommandEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := runInit(t, root, "--non-interactive")
+	out, err := runInit(t, root, "", "--non-interactive")
 	if err != nil {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
@@ -87,17 +87,81 @@ func TestInitCommandEndToEnd(t *testing.T) {
 }
 
 // runInit executes the root command with `init <root> <extra...>` and returns its
-// combined output.
-func runInit(t *testing.T, root string, extra ...string) (string, error) {
+// combined output. stdin is wired to the given reader for the interactive prompt.
+func runInit(t *testing.T, root string, stdin string, extra ...string) (string, error) {
 	t.Helper()
 	cmd := newRootCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetIn(strings.NewReader(""))
+	cmd.SetIn(strings.NewReader(stdin))
 	cmd.SetArgs(append([]string{"init", root}, extra...))
 	err := cmd.Execute()
 	return buf.String(), err
+}
+
+func TestConfirmOverwrite(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"y\n", true},
+		{"yes\n", true},
+		{"Y\n", true},
+		{"\n", false},  // empty → default NO
+		{"n\n", false}, // explicit no
+		{"", false},    // EOF → default NO
+		{"nope\n", false},
+	}
+	for _, c := range cases {
+		got, err := confirmOverwrite(&bytes.Buffer{}, strings.NewReader(c.in))
+		if err != nil {
+			t.Errorf("confirmOverwrite(%q): unexpected error %v", c.in, err)
+		}
+		if got != c.want {
+			t.Errorf("confirmOverwrite(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// The interactive flow: an existing config is regenerated on "y" and left alone
+// on an empty answer — the dev always decides.
+func TestInitInteractiveOverwriteDecision(t *testing.T) {
+	setup := func(t *testing.T) string {
+		root := t.TempDir()
+		writeTSProject(t, root)
+		if err := os.WriteFile(filepath.Join(root, ".codefit.yaml"), []byte("version: \"old\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	t.Run("yes regenerates", func(t *testing.T) {
+		root := setup(t)
+		out, err := runInit(t, root, "y\n")
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		data, _ := os.ReadFile(filepath.Join(root, ".codefit.yaml"))
+		if strings.Contains(string(data), `"old"`) {
+			t.Errorf("config was not regenerated on 'y':\n%s", data)
+		}
+	})
+
+	t.Run("empty keeps existing", func(t *testing.T) {
+		root := setup(t)
+		out, err := runInit(t, root, "\n")
+		if err != nil {
+			t.Fatalf("init: %v\n%s", err, out)
+		}
+		data, _ := os.ReadFile(filepath.Join(root, ".codefit.yaml"))
+		if !strings.Contains(string(data), `"old"`) {
+			t.Errorf("existing config was modified despite empty answer:\n%s", data)
+		}
+		if !strings.Contains(out, "left unchanged") {
+			t.Errorf("output should report the config was left unchanged:\n%s", out)
+		}
+	})
 }
 
 func writeTSProject(t *testing.T, root string) {

@@ -18,7 +18,6 @@ import (
 // ProjectInfo is the deterministic picture of a project that drives config and
 // skill generation. Every field is inferred from files on disk — never an LLM.
 type ProjectInfo struct {
-	Root            string
 	Name            string // the project directory's base name
 	Language        string // typescript | go | python | java
 	Framework       string // a value within config.allowedFrameworks, or ""
@@ -46,7 +45,7 @@ func Detect(root string) (ProjectInfo, error) {
 		return ProjectInfo{}, fmt.Errorf("resolving project root %q: %w", root, err)
 	}
 
-	info := ProjectInfo{Root: root, Name: filepath.Base(abs)}
+	info := ProjectInfo{Name: filepath.Base(abs)}
 
 	provider := detectLanguage(root)
 	if provider == nil {
@@ -57,16 +56,22 @@ func Detect(root string) (ProjectInfo, error) {
 	info.Language = provider.Language()
 	info.PathCriticality = provider.DefaultPathCriticality()
 
+	// Route-handler enrichment is a TypeScript/Next concern (route.ts files); for
+	// other languages it would be a wasted full-tree walk that can only count zero.
 	if info.Language == "typescript" {
 		enrichTypeScript(root, &info)
+		info.RouteHandlers = countRouteHandlers(root)
 	}
-	info.RouteHandlers = countRouteHandlers(root)
 	return info, nil
 }
 
 // detectLanguage resolves the project's language provider from marker files, in
 // priority order. Only TypeScript and Go have providers today; Python and Java
 // markers are recognized but unsupported, so they fall through to nil.
+//
+// go.mod wins over package.json: in a polyglot root with both, codefit detects
+// Go. A monorepo with separate per-language sub-projects should run init per
+// sub-project root rather than at the polyglot root.
 func detectLanguage(root string) providers.LanguageProvider {
 	switch {
 	case exists(root, "go.mod"):
