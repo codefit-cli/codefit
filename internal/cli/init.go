@@ -1,6 +1,14 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/codefit-cli/codefit/internal/scaffold"
+	"github.com/spf13/cobra"
+)
 
 func newInitCmd() *cobra.Command {
 	var (
@@ -10,13 +18,123 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [path]",
 		Short: "Analyze the project and generate an initial .codefit.yaml",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return notImplemented(cmd)
+		Long: "Analyze the project and generate codefit's setup: a committed .codefit.yaml,\n" +
+			"codefit's own thin skill, and that skill placed where each detected agent\n" +
+			"(Claude Code, OpenCode, Codex) discovers it. Nothing is written silently.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := "."
+			if len(args) == 1 {
+				root = args[0]
+			}
+			return runInitCmd(cmd, root, force, nonInteractive)
 		},
 	}
 	f := cmd.Flags()
 	f.BoolVar(&nonInteractive, "non-interactive", false, "skip the wizard and write sensible defaults")
 	f.BoolVar(&force, "force", false, "overwrite an existing .codefit.yaml")
 	return cmd
+}
+
+// runInitCmd resolves the overwrite decision (the dev always decides), runs the
+// scaffold, and prints the full report. The .codefit.yaml is shared project
+// config, so an existing one is never replaced without explicit consent.
+func runInitCmd(cmd *cobra.Command, root string, force, nonInteractive bool) error {
+	out := cmd.OutOrStdout()
+
+	overwrite := force
+	if !force && scaffold.ConfigExists(root) {
+		if nonInteractive {
+			overwrite = false
+		} else {
+			ok, err := confirmOverwrite(out, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			overwrite = ok
+		}
+	}
+
+	res, err := scaffold.Generate(scaffold.Options{Root: root, OverwriteConfig: overwrite})
+	if err != nil {
+		return fmt.Errorf("codefit init: %w", err)
+	}
+	fmt.Fprint(out, formatReport(res))
+	return nil
+}
+
+// confirmOverwrite asks the dev whether to regenerate an existing config and
+// returns their decision, defaulting to NO on an empty answer.
+func confirmOverwrite(out io.Writer, in io.Reader) (bool, error) {
+	fmt.Fprint(out, ".codefit.yaml already exists. Regenerate it? [y/N]: ")
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, fmt.Errorf("reading confirmation: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// formatReport renders the human-facing account of what init did. It declares
+// every detected fact and every file written — codefit never acts silently.
+func formatReport(res scaffold.Result) string {
+	var b strings.Builder
+	info := res.Info
+
+	fmt.Fprintf(&b, "codefit init — %s\n\n", info.Name)
+
+	fmt.Fprintln(&b, "Detected:")
+	fmt.Fprintf(&b, "  language    %s\n", info.Language)
+	if info.Framework != "" {
+		fmt.Fprintf(&b, "  framework   %s\n", info.Framework)
+	}
+	if info.ORM != "" {
+		db := info.ORM
+		if len(info.SchemaPaths) > 0 && info.DBType != "" {
+			db = fmt.Sprintf("%s  (%s → %s)", info.ORM, info.SchemaPaths[0], info.DBType)
+		}
+		fmt.Fprintf(&b, "  orm         %s\n", db)
+	}
+	if info.RouteHandlers > 0 {
+		fmt.Fprintf(&b, "  endpoints   %d route handler(s)\n", info.RouteHandlers)
+	}
+
+	fmt.Fprintln(&b, "\nConfig:")
+	switch res.ConfigAction {
+	case scaffold.ConfigCreated:
+		fmt.Fprintf(&b, "  %s  (project config — commit this)\n", res.ConfigPath)
+	case scaffold.ConfigOverwritten:
+		fmt.Fprintf(&b, "  %s  (regenerated — commit this)\n", res.ConfigPath)
+	case scaffold.ConfigSkipped:
+		fmt.Fprintf(&b, "  %s already exists; left unchanged (use --force to regenerate)\n", res.ConfigPath)
+	}
+
+	if res.UsedFallback {
+		fmt.Fprintln(&b, "\nNo known agents detected. Skill written to the standard location:")
+		for _, s := range res.Skills {
+			fmt.Fprintf(&b, "  %s\n", s.Path)
+		}
+		fmt.Fprintln(&b, "Install it manually for your agent, or with `npx skills`.")
+	} else {
+		fmt.Fprintf(&b, "\nAgents detected: %s\n", strings.Join(agentNames(res.Skills), ", "))
+		fmt.Fprintln(&b, "Skill written to:")
+		for _, s := range res.Skills {
+			fmt.Fprintf(&b, "  %s\n", s.Path)
+		}
+	}
+
+	fmt.Fprintln(&b, "\nNext: connect codefit over MCP (see README → \"Connect codefit\").")
+	return b.String()
+}
+
+func agentNames(skills []scaffold.SkillWrite) []string {
+	out := make([]string, len(skills))
+	for i, s := range skills {
+		out[i] = s.Agent
+	}
+	return out
 }
