@@ -41,7 +41,7 @@ intercambiables, de modo que incorporar un lenguaje nuevo no toca el núcleo.
 - **Licencia:** Apache 2.0
 - **Binario / config:** binario `codefit`, config de proyecto `.codefit.yaml`.
   (No hay config global de LLM ni de auth — codefit no gestiona modelos.)
-- **Fuente de verdad:** `docs/PRD-codefit-v1.3.md`. Ante **cualquier** duda de
+- **Fuente de verdad:** `docs/PRD-codefit-v1.4.md`. Ante **cualquier** duda de
   scope o diseño, consultarlo **antes** de decidir. El análisis cuantitativo
   (tokens, costos, tiempos) vive en `docs/codefit-analisis-tokens-costos.md`.
 
