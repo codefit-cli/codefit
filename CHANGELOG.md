@@ -4,14 +4,20 @@ All notable changes to codefit are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Pre-release.** The first tag is **`v0.1.0-alpha.1`** — the usable, dogfooded MCP
-> core (deterministic detection + three surface categories + the `scan-all`
-> three-bucket summary, over the MCP stdio transport `codefit mcp serve`). codefit is
-> still in active development (Phase 1): baseline and `update` are stubs, and the
-> HTTP/SSE transport plus Phases 2–4 are ahead. **`v0.1.0`** (no suffix) is reserved
-> for **Phase 1 complete**. See [VERSIONING.md](VERSIONING.md).
+> **Pre-release.** The latest tag is **`v0.1.0-alpha.2`** — the dogfooded MCP core
+> (deterministic detection + three surface categories + the `scan-all` three-bucket
+> summary, over the MCP stdio transport `codefit mcp serve`) plus **`codefit init`**
+> (stack detection + config generation + a self-discovering thin skill placed for
+> each detected agent). codefit is still in active development (Phase 1): **baseline
+> is the last Phase-1 piece pending**, and the HTTP/SSE transport plus Phases 2–4 are
+> ahead. **`v0.1.0`** (no suffix) is reserved for **Phase 1 complete**. See
+> [VERSIONING.md](VERSIONING.md).
 
 ## [Unreleased]
+
+_Nothing yet._
+
+## [0.1.0-alpha.2] — 2026-06-25
 
 ### Added — Phase 1: `codefit init`
 
