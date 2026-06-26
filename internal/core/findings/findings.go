@@ -1,5 +1,28 @@
 package findings
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
+
+// Fingerprint is the BASELINE identity of a finding or surface item: a short hash
+// of (category, file, normalized content), deliberately WITHOUT the line so it is
+// stable when code moves (e.g. an import added above) and re-detects only when the
+// item's own content changes. The content is hashed, never stored, so a fingerprint
+// of a hardcoded-secret finding can be committed to .codefit-baseline without
+// leaking the secret. Whitespace is normalized so re-indentation does not churn it.
+func Fingerprint(category, file, content string) string {
+	h := sha256.Sum256([]byte(category + "\x00" + file + "\x00" + normalizeContent(content)))
+	return hex.EncodeToString(h[:])[:12]
+}
+
+// normalizeContent collapses runs of whitespace to a single space and trims, so a
+// reformat that only changes spacing does not change the fingerprint.
+func normalizeContent(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // Severity ranks how serious a finding is. Higher severities can block a deploy
 // (see the report's blocked field and the --fail-on flag).
 type Severity string
@@ -56,6 +79,9 @@ type Finding struct {
 	// Suppressed, when non-nil, holds the consent under which a finding was
 	// accepted and silenced.
 	Suppressed *ConsentRecord `json:"suppressed,omitempty"`
+	// Fingerprint is the content identity used by the baseline (see Fingerprint).
+	// It is a one-way hash, safe to commit. Empty until stamped at the scan boundary.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // ConsentRecord is the committed record that a critical security finding was
@@ -98,6 +124,9 @@ type SurfaceItem struct {
 	// ReasonToReview is the QUESTION the agent must answer about this item, never
 	// a conclusion.
 	ReasonToReview string `json:"reason_to_review"`
+	// Fingerprint is the content identity used by the baseline (see Fingerprint).
+	// Empty until stamped at the scan boundary.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // SensorResult is what a single sensor returns after a run: its deterministic
