@@ -51,6 +51,12 @@ type Concern struct {
 	// handler), "exposure" (a serialization with no select/omit). Empty when the
 	// concern is not an actionable gap (e.g. a checked handler, or the frontier).
 	Gap string `json:"gap,omitempty"`
+	// Fingerprint is the concern's baseline content identity (findings.Fingerprint).
+	// The agent passes it to codefit-baseline-accept / -prune.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Baseline is the concern's delta vs the previous baseline, set by the scan-all
+	// handler: "new" | "changed" | "known" | "acknowledged" (empty when no baseline).
+	Baseline string `json:"baseline,omitempty"`
 }
 
 const (
@@ -319,6 +325,7 @@ func concernFromFinding(f findings.Finding) Concern {
 		Probabilistic: f.Probabilistic,
 		Actionable:    true, // a deterministic finding is an affirmed, actionable problem
 		Gap:           gapAffirmed,
+		Fingerprint:   f.Fingerprint,
 	}
 }
 
@@ -342,6 +349,7 @@ func concernFromSurface(it findings.SurfaceItem) Concern {
 		Probabilistic: true,
 		Actionable:    actionable,
 		Gap:           gap,
+		Fingerprint:   it.Fingerprint,
 	}
 }
 
