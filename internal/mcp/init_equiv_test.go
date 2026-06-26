@@ -41,6 +41,9 @@ func copyFixture(t *testing.T) string {
 // a scan-all run.
 func buckets(t *testing.T, root string) (actionable, clean, frontier []string) {
 	t.Helper()
+	// Remove any baseline so each call is a first scan (everything new, nothing
+	// silenced) — this test compares raw classification, not baseline filtering.
+	_ = os.Remove(filepath.Join(root, ".codefit-baseline"))
 	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
 	if err != nil {
 		t.Fatalf("HandleScanAll(%s): %v", root, err)
