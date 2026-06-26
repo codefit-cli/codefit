@@ -51,6 +51,20 @@ For each ` + "`frontier_pending`" + ` entry, call ` + "`codefit-scan-endpoint`" 
 Then reason over the returned surface to decide if the concern is real. Each surface
 item names WHAT to check (an id→resource lookup, an authz decision, a returned object)
 and WHERE — codefit does not decide if it's a vuln; you do.
+
+## Baseline (don't re-review what's already tracked)
+codefit records the audited surface in ` + "`.codefit-baseline`" + ` (committed). ` + "`codefit-scan-all`" + `
+manages it and reports a delta — act on what's new:
+- Focus on ` + "`baseline.new`" + ` and ` + "`baseline.changed`" + `. ` + "`known`" + ` surface is already tracked — don't re-review it.
+- Deterministic findings (confidence 1.0, e.g. a hardcoded secret) are NOT auto-silenced:
+  they show on every scan until accepted. ` + "`baseline.affirmations_shown`" + ` counts them.
+- When the HUMAN decides an item is a false positive or accepted debt, call
+  ` + "`codefit-baseline-accept`" + ` with its ` + "`fingerprint`" + ` and the human's reason. ONLY when the
+  human said so in the conversation — NEVER accept an item on your own.
+- After a refactor, items the fix removed appear in ` + "`baseline.gone_candidates`" + `. Confirm with
+  ` + "`codefit-scan-all`" + `, then call ` + "`codefit-baseline-prune`" + ` to drop them.
+Narrate every baseline operation to the human (what you accepted or pruned, and why).
+codefit never edits code — only its baseline.
 `))
 
 // RenderSkill renders codefit's SKILL.md for the detected project, baking in the
