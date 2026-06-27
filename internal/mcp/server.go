@@ -23,7 +23,7 @@ func NewServer() *mcpsdk.Server {
 		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language}. Returns findings + surface + score + blocked.",
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
-		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Input: {root, language}.",
+		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language}.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing. Use it to get the detail of a frontier_pending endpoint from codefit-scan-all. Input: {root, language, file}.",
@@ -40,6 +40,12 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolConfirmSurface),
 		"Integrate the agent's verdicts on surface items: vulnerable ones become probabilistic findings (confidence < 1.0) anchored to the item. Stateless: codefit recomputes the id to validate.",
 		func(in ConfirmSurfaceRequest) (ConfirmSurfaceResponse, error) { return HandleConfirmSurface(in), nil })
+	addTool(s, string(ToolBaselineAccept),
+		"Mark baseline item(s) as acknowledged by a human (false positive or accepted debt): they stop appearing as actionable but stay counted with the reason. SAFETY: call ONLY when the human decided so in the conversation — NEVER on your own. A reason is required. Input: {root, fingerprints, reason}.",
+		HandleBaselineAccept)
+	addTool(s, string(ToolBaselinePrune),
+		"Remove baseline item(s) that no longer exist in the code (resolved by a refactor). Re-scans to confirm they are gone before removing. Input: {root, language, fingerprints?}. Without fingerprints, prunes all confirmed-gone items.",
+		HandleBaselinePrune)
 	addTool(s, string(ToolCoverage),
 		"Return the coverage manifest for a language: what codefit audits deterministically vs reasons over surface vs does not cover. Input: {language}.",
 		HandleCoverage)

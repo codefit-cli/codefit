@@ -18,7 +18,8 @@ const (
 	ToolReviewCode       Tool = "codefit-review-code"
 	ToolScanAll          Tool = "codefit-scan-all"
 	ToolScanEndpoint     Tool = "codefit-scan-endpoint"
-	ToolBaseline         Tool = "codefit-baseline"
+	ToolBaselineAccept   Tool = "codefit-baseline-accept"
+	ToolBaselinePrune    Tool = "codefit-baseline-prune"
 	ToolCoverage         Tool = "codefit-coverage"
 )
 

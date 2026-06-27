@@ -113,7 +113,46 @@ func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, []findings.Surfa
 	if err != nil {
 		return nil, nil, err
 	}
-	return dedupeFindings(out), surface, nil
+
+	deduped := dedupeFindings(out)
+	stampFingerprints(rel, content, deduped, surface)
+	return deduped, surface, nil
+}
+
+// stampFingerprints sets the baseline content identity of every finding and
+// surface item. A finding is hashed from the SOURCE LINE at its position (findings
+// carry no snippet); a surface item from its own snippet. The content is hashed,
+// never stored, so a secret's line never reaches the committed baseline. This is
+// the single boundary where identity is assigned, so no provider needs to know
+// about the baseline.
+func stampFingerprints(rel string, content []byte, fs []findings.Finding, surface []findings.SurfaceItem) {
+	for i := range fs {
+		if fs[i].Fingerprint == "" {
+			// Include the rule ID in the identity: two distinct rules firing on the
+			// SAME source line must never share a fingerprint, or accepting one would
+			// silence the other — a deterministic affirmation suppressed without its
+			// own human consent. The line itself stays OUT (move-robust, like surface).
+			fs[i].Fingerprint = findings.Fingerprint(string(fs[i].Dimension)+"/"+fs[i].ID, rel, lineAt(content, fs[i].Line))
+		}
+	}
+	for i := range surface {
+		if surface[i].Fingerprint == "" {
+			surface[i].Fingerprint = findings.Fingerprint(surface[i].Category, rel, surface[i].Snippet)
+		}
+	}
+}
+
+// lineAt returns the 1-based n-th line of content (empty when out of range). Used
+// as the hashed content of a finding — it never leaves codefit unhashed.
+func lineAt(content []byte, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	if n > len(lines) {
+		return ""
+	}
+	return lines[n-1]
 }
 
 // dedupeFindings collapses the same finding reported twice — an identical

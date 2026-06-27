@@ -32,8 +32,14 @@ type ScanAllRequest struct {
 // epistemological opposites the agent must distinguish (flattening them would be
 // the old frontier-wording error). Full detail of any named endpoint is always one
 // codefit-scan-endpoint call away.
+// Note on the baseline layer: when a baseline exists, the three buckets are
+// FILTERED to what is not yet tracked (new/changed surface, and unaccepted
+// deterministic affirmations). So on an unchanged re-scan all three buckets can be
+// empty even though Summary.CertainConcerns (computed before filtering) is > 0 —
+// the difference is exactly the "known" surface the baseline is silencing.
 type ScanAllResponse struct {
 	Summary         ScanAllSummary          `json:"summary"`
+	Baseline        BaselineDelta           `json:"baseline"`
 	Actionable      []report.EndpointReport `json:"actionable"`
 	ResolvedClean   ResolvedClean           `json:"resolved_clean"`
 	FrontierPending FrontierPending         `json:"frontier_pending"`
@@ -80,11 +86,20 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	}
 
 	endpoints := report.AggregateEndpoints(res.Findings, res.Surface)
-	actionable, clean, frontier := report.ClassifyEndpoints(endpoints)
 	certain := 0
 	for _, ep := range endpoints {
 		certain += ep.CertainConcerns
 	}
+
+	// Baseline layer (ADR/RF-08): read the committed baseline, record the delta,
+	// persist the updated baseline, and filter the view to what changed. Known
+	// surface is silenced; unaccepted deterministic affirmations always stay shown.
+	delta, shown, err := applyBaseline(req.Root, res, endpoints)
+	if err != nil {
+		return ScanAllResponse{}, err
+	}
+
+	actionable, clean, frontier := report.ClassifyEndpoints(shown)
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Summary: ScanAllSummary{
@@ -93,6 +108,7 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 			SurfaceItems:          len(res.Surface),
 			CertainConcerns:       certain,
 		},
+		Baseline:   delta,
 		Actionable: actionable,
 		ResolvedClean: ResolvedClean{
 			Count:     len(clean),

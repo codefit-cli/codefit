@@ -89,6 +89,29 @@ func TestSkillBakesLanguage(t *testing.T) {
 	}
 }
 
+// The skill must teach the baseline loop, including the human-only safeguard for
+// accept and the rule that deterministic findings are not auto-silenced.
+func TestSkillTeachesBaselineLoop(t *testing.T) {
+	_, body := renderSkill(t, tsInfo())
+	for _, must := range []string{
+		"codefit-baseline-accept",
+		"codefit-baseline-prune",
+		".codefit-baseline",
+		"gone_candidates",
+	} {
+		if !strings.Contains(body, must) {
+			t.Errorf("skill must mention %q", must)
+		}
+	}
+	low := strings.ToLower(body)
+	if !strings.Contains(low, "never accept an item on your own") {
+		t.Errorf("skill must carry the human-only safeguard for accept")
+	}
+	if !strings.Contains(low, "not auto-silenced") {
+		t.Errorf("skill must say deterministic findings are not auto-silenced")
+	}
+}
+
 // RenderSkill is exported and may be called with no detected language; it must
 // still produce valid, exact commands (defaulting the baked language).
 func TestSkillEmptyLanguageDefaults(t *testing.T) {
