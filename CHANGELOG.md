@@ -4,16 +4,43 @@ All notable changes to codefit are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Pre-release.** The latest tag is **`v0.1.0-alpha.2`** — the dogfooded MCP core
-> (deterministic detection + three surface categories + the `scan-all` three-bucket
-> summary, over the MCP stdio transport `codefit mcp serve`) plus **`codefit init`**
-> (stack detection + config generation + a self-discovering thin skill placed for
-> each detected agent). codefit is still in active development (Phase 1): **baseline
-> is the last Phase-1 piece pending**, and the HTTP/SSE transport plus Phases 2–4 are
-> ahead. **`v0.1.0`** (no suffix) is reserved for **Phase 1 complete**. See
-> [VERSIONING.md](VERSIONING.md).
+> **`v0.1.0` — Phase 1 complete.** codefit is usable end-to-end from `main`: the MCP
+> stdio server, deterministic TypeScript security rules, surface mapping (IDOR /
+> broken authz / over-fetching), the `scan-all` three-bucket synthesis, `codefit init`
+> (config + self-discovering skill), and the **baseline** (a committed audit memory
+> with list / accept / prune). Validated in real use against a Next.js/Prisma backend.
+> Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
+> see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
 ## [Unreleased]
+
+_Nothing yet._
+
+## [0.1.0] — 2026-06-27
+
+**Phase 1 complete.** The pieces below close Phase 1; the earlier `v0.1.0-alpha.*`
+entries cover the rest of the phase (security sensor, surface mapping, MCP server,
+`scan-all`, `init`).
+
+### Added — Phase 1: baseline (RF-08)
+
+- **Baseline** — a committed `.codefit-baseline` (repo root, shared like
+  `.codefit.yaml`) recording codefit's view of the audited surface so a re-scan only
+  surfaces what changed. Identity is **by content** (category + file + normalized
+  snippet, no line), robust to code moves; the content is hashed, never stored, so a
+  secret's text never reaches the committed file (ADR 0009).
+- **`codefit-scan-all` is baseline-aware** — it reads the baseline, reports the delta
+  (`new` / `changed` / `known` / `gone`), persists the updated baseline, and filters
+  the buckets to what is not yet tracked. `known` surface is silenced but counted; a
+  **deterministic affirmation is never auto-silenced** — it shows on every scan until a
+  human accepts it with a reason (the certainty-graduated safeguard, ADR 0011).
+- **`codefit-baseline-list`** — read-only view of tracked items (fingerprint, file,
+  category, state, and reason/date if acknowledged); `filter: known | acknowledged`.
+  Lets the agent reference items for accept/prune without reading the file.
+- **`codefit-baseline-accept`** — record a human's decision to accept an item (false
+  positive / accepted debt) with a mandatory reason; recorded as a human decision.
+- **`codefit-baseline-prune`** — drop items a refactor resolved (re-scans to confirm
+  they are gone first). codefit never edits code — only its baseline (ADR 0010, 0012).
 
 ### Fixed
 

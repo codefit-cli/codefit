@@ -122,8 +122,9 @@ nuevo sin que el enfoque esté acordado.
   tocar el núcleo, el diseño falló.
 - **El MCP server es un adapter delgado**, no reimplementa lógica: traduce las
   llamadas a las tools (`codefit-scan-security`, `codefit-surface-*`,
-  `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-confirm-surface`,
-  `codefit-coverage`) a invocaciones del núcleo. Stateless.
+  `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-baseline-list` / `-accept` /
+  `-prune`, `codefit-confirm-surface`, `codefit-coverage`) a invocaciones del núcleo.
+  Stateless.
 - **Pirámide de filtrado: capa 0 (cambios) → capa 1 (regex) → capa 2 (AST +
   reglas + mapeo de superficie).** codefit nunca pasa de la capa 2; la capa 3
   (razonamiento) la ejecuta el agente sobre el `surface` devuelto. Nunca enviar
@@ -286,10 +287,11 @@ Protocolo de sesión:
 ## Rollout (PRD §25)
 
 - **Fase 0** — Foundations + núcleo + Go provider (self-audit).
-- **Fase 1** — TypeScript provider + sensor de seguridad completo (con mapeo de
-  superficie) + **MCP server funcional** + `codefit init` (genera la skill de
-  codefit y la coloca para los agentes detectados; **no toca el `AGENT.md`**) +
-  baseline. **Estado: casi completa** — init ✅ (`v0.1.0-alpha.2`); falta baseline.
+- **Fase 1** ✅ **COMPLETA (`v0.1.0`)** — TypeScript provider + sensor de seguridad
+  completo (con mapeo de superficie) + **MCP server funcional** + `codefit init`
+  (genera la skill de codefit y la coloca para los agentes detectados; **no toca el
+  `AGENT.md`**) + **baseline** (memoria del proyecto: `scan-all` con delta +
+  `baseline-list`/`-accept`/`-prune`). Dogfoodeado en un backend real.
 - **Fase 2** — Sensor de DB (OLTP/OLAP, índices, vistas, procs, N+1).
 - **Fase 3** — Code review + best practices + tests + riesgo de regresión.
 - **Fase 4** — Knowledge packs + `codefit update` + manifiesto de cobertura
