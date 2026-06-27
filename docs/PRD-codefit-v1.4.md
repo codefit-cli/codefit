@@ -11,6 +11,10 @@
 > se sincroniza la **lista real de tools** y su estado implementada/stub (§11); y el **versionado
 > SemVer** con el estado real de Fase 1 (§25, §30). Cada cambio está anclado en un ADR
 > (`docs/decisions/0001`–`0008`). El v1.3 quedó en `docs/archive/PRD-codefit-v1.3.md`.
+>
+> **Enmienda (Fase 1 completa, `v0.1.0`):** se incorporó el **baseline** (RF-08) —
+> `scan-all` con delta + `baseline-list`/`-accept`/`-prune`, identidad por contenido y
+> salvaguarda graduada por certeza (§11, §25, §29; ADR 0009–0012). Fase 1 cerrada.
 
 ---
 
@@ -543,13 +547,15 @@ no debe confundir una stub con una tool usable.
 | `codefit-surface-authz` | Superficie | ✅ Fase 1 | Enumera la superficie de autorización (handlers sensibles) |
 | `codefit-surface-overfetch` | Superficie | ✅ Fase 1 | Enumera la superficie de over-fetching (serializaciones) |
 | `codefit-confirm-surface` | Cierre | ✅ Fase 1 | Integra los veredictos del agente: un item vulnerable pasa a finding probabilístico (confidence < 1.0) |
+| `codefit-baseline-list` | Baseline | ✅ Fase 1 | Lista los items rastreados (fp, file, category, state; razón/fecha si acknowledged). `filter: known \| acknowledged`. Read-only |
+| `codefit-baseline-accept` | Baseline | ✅ Fase 1 | Registra la decisión humana de aceptar item(s) (falso positivo / deuda asumida) con razón obligatoria |
+| `codefit-baseline-prune` | Baseline | ✅ Fase 1 | Saca del baseline los items que un refactor resolvió (re-escanea para confirmar que están `gone`) |
 | `codefit-coverage` | Metadata | ✅ Fase 1 | Devuelve el manifiesto de cobertura para el lenguaje |
 | `codefit-scan-db` | Determinístico | 🔲 Fase 2 | Estructura de DB (OLTP/OLAP, índices, vistas, procs) |
 | `codefit-check-cves` | Determinístico | 🔲 Fase (RF-09) | Consulta OSV.dev por las dependencias |
 | `codefit-check-practices` | Determinístico | 🔲 Fase 3 | Best practices del lenguaje |
 | `codefit-scan-tests` | Determinístico | 🔲 Fase 3 | Calidad de suite + riesgo de regresión |
 | `codefit-review-code` | Combinada | 🔲 Fase 3 | Code review: determinístico + superficie, razonado por el agente |
-| `codefit-baseline` | Utilidad | 🔲 Fase 1 (pendiente) | Toma/actualiza la línea base (RF-08) |
 
 Las `codefit-surface-*` son una familia conceptualmente distinta: no detectan, **enumeran superficie** para que el agente razone. Por eso llevan el segundo nivel `surface`.
 
@@ -609,6 +615,15 @@ En un backend real el dump completo de superficie era tan grande (~101 items, ~8
 - **`frontier_pending`** — `CertainConcerns == 0`: el dato salió del handler, codefit no concluyó localmente. Nombrado, no detallado. **No es un resultado limpio**: requiere que el agente lo siga.
 
 `codefit-scan-endpoint {root, language, file}` re-analiza ese archivo (stateless, sin estado guardado) y devuelve el `EndpointReport` completo de un endpoint `frontier_pending`. Misma pipeline → el detalle es idéntico al que `scan-all` habría mostrado.
+
+### El modelo de baseline (RF-08) — `scan-all` con delta + `list` / `accept` / `prune`
+
+El baseline es un archivo commiteado (`.codefit-baseline`, raíz del repo — conocimiento compartido como `.codefit.yaml`) con la vista de codefit de la superficie auditada, para que un re-scan **solo muestre lo que cambió**. Propiedades clave:
+
+- **Identidad por contenido, no por línea.** Cada item se fingerprintea por su contenido (categoría + file + snippet normalizado, **sin línea**), robusto a mover código; se re-detecta solo cuando el contenido cambia. El contenido se **hashea, nunca se guarda** → el texto de un secreto nunca llega al archivo commiteado (ADR 0009).
+- **Foto del estado actual, no una lista de aceptados.** `scan-all` lee el baseline, reporta el delta — `new` / `changed` / `known` / `gone` —, persiste el baseline actualizado y filtra los buckets a lo no-rastreado. Lo `known` se silencia pero se cuenta (ADR 0010).
+- **Salvaguarda graduada por certeza.** Una **pregunta** (superficie) pasa a `known` automático. Una **afirmación** (determinístico, certeza 1.0) **nunca se auto-silencia**: se muestra en cada scan hasta que un humano la acepta con razón. Silenciar una afirmación es más grave que silenciar una pregunta — el corazón de la decisión (ADR 0011).
+- **Operado por el agente vía la skill, el humano decide.** `codefit-baseline-list` (ver pendientes), `-accept` (decisión humana, razón obligatoria, registra `by: human`), `-prune` (saca lo `gone`, re-escanea para confirmar). **codefit nunca toca el código ni el git** — solo su baseline (ADR 0012).
 
 ### Cómo el agente devuelve hallazgos de superficie (`codefit-confirm-surface`)
 
@@ -1327,10 +1342,11 @@ honestidad que README/CHANGELOG: no se anuncia una fase como hecha con piezas en
 | `0.4.0` | Fase 4 | Knowledge packs + manifiesto + release pública `0.x` |
 | `1.0.0` | — | API estable; post-1.0 trae Java (`1.1`), Python (`1.2`) |
 
-**Estado actual: `v0.1.0-alpha.2`** — el core MCP dogfoodeado (detección de seguridad TS, las tres
-categorías de superficie, el resumen de tres buckets de `scan-all` con `scan-endpoint` on-demand, todo
-sobre stdio) **más `codefit init`**. `v0.1.0` (sin sufijo) queda **reservado para Fase 1 completa**:
-falta **baseline**. (`codefit update` es Fase 4, no Fase 1.)
+**Estado actual: `v0.1.0` — Fase 1 COMPLETA.** El core MCP dogfoodeado (detección de seguridad TS,
+las tres categorías de superficie, el resumen de tres buckets de `scan-all` con `scan-endpoint`
+on-demand, todo sobre stdio), **`codefit init`** (config + skill) y el **baseline** (memoria del
+proyecto: `scan-all` con delta + `baseline-list`/`-accept`/`-prune`). Validado en uso real sobre un
+backend Next.js/Prisma. (`codefit update` es Fase 4, no Fase 1.)
 
 ### Fase 0 — Foundations + Núcleo + Go Provider ✅ `(~2 semanas)`
 - Repo Go, estructura de tres capas (`core/`, `sensors/`, `providers/`), CI propio.
@@ -1345,16 +1361,16 @@ falta **baseline**. (`codefit update` es Fase 4, no Fase 1.)
 
 **Done cuando:** binario único compila sin CGO y cross-compila a Windows. El Go provider implementa `LanguageProvider`. El self-audit corre como `go test` y no hay críticos en el código de codefit. La estructura núcleo+providers está sólida.
 
-### Fase 1 — TypeScript Provider + Sensor de Seguridad + MCP 🟢 *casi completa* `(~3 semanas)` *(prioridad máxima)*
+### Fase 1 — TypeScript Provider + Sensor de Seguridad + MCP ✅ **COMPLETA** `(~3 semanas)` *(prioridad máxima)*
 - ✅ **TypeScript `LanguageProvider`**: `gotreesitter` (puro Go), reglas formato-Semgrep, defaults de criticidad.
 - ✅ Sensor de seguridad: capa 1 (secretos), capa 2 (reglas + **mapeo de superficie** IDOR/authz/overfetch) con tres niveles de certeza.
 - ✅ Consentimiento explícito para critical security; `path_criticality` activo.
 - ✅ **MCP server funcional (SDK oficial, stdio)**: `codefit-scan-security`, `codefit-surface-idor/authz/overfetch`, `codefit-confirm-surface`, `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-coverage`.
 - ✅ **`codefit init`**: genera `.codefit.yaml` + la skill de codefit y la coloca para los agentes detectados (no toca el `AGENT.md`). Dogfoodeado en un backend real; trigger de la skill validado en ambos sentidos.
-- 🔲 **`codefit-baseline` (RF-08)** — **única pieza de Fase 1 pendiente**.
+- ✅ **Baseline (RF-08)**: `.codefit-baseline` commiteado, identidad por contenido, delta en `scan-all`, salvaguarda graduada por certeza, y `baseline-list`/`-accept`/`-prune` (ADR 0009–0012). Dogfoodeado sobre Bitácora.
 - ⏳ CVEs vía OSV.dev (RF-09): el cliente `core/cve` existe; la tool `codefit-check-cves` aún no se expone.
 
-**Done cuando:** un agente (OpenCode/Claude Code) corre `codefit-scan-all`, recibe el resumen de tres buckets, sigue un `frontier_pending` con `codefit-scan-endpoint`, razona la superficie con su LLM, y baseline permite adoptar un proyecto existente sin ruido. Detecta ≥3 categorías de vulnerabilidades con cero falsos positivos en secretos. Corre sobre Go (self-audit) y TypeScript. **`v0.1.0` se cuta acá** (hoy `v0.1.0-alpha.2`; falta baseline).
+**Done cuando:** ✅ un agente (OpenCode/Claude Code) corre `codefit-scan-all`, recibe el resumen de tres buckets, sigue un `frontier_pending` con `codefit-scan-endpoint`, razona la superficie con su LLM, y el baseline permite adoptar un proyecto existente sin ruido (re-scan silencia lo `known`). Detecta ≥3 categorías de vulnerabilidades con cero falsos positivos en secretos. Corre sobre Go (self-audit) y TypeScript. **Fase 1 cerrada → se cuta `v0.1.0`.**
 
 ### Fase 2 — Sensor de DB `(~2 semanas)`
 - `ParseSchema` del TS provider (`schema.prisma`, SQL).
@@ -1494,7 +1510,11 @@ Generar borradores de packs desde changelogs de frameworks, revisados por humano
 | 30 | Frontera del mapeo | ✅ Finito (enumerado) / infinito (handoff al agente, wording afirmativo) / no cubierto (declarado) (ADR 0005) |
 | 31 | Certeza | ✅ Tres niveles: `deterministic` / `surface_confirmed` / `surface_frontier` + campo-hecho `StructuralFacts` (ADR 0005/0006) |
 | 32 | Reporte de `scan-all` | ✅ Resumen de tres buckets + detalle on-demand `codefit-scan-endpoint` (ADR 0006/0008) |
-| 33 | Versionado | ✅ SemVer, Fase→MINOR; estado `v0.1.0-alpha.2`; `v0.1.0` reservado para Fase 1 completa (`VERSIONING.md`) |
+| 33 | Versionado | ✅ SemVer, Fase→MINOR; **`v0.1.0` = Fase 1 completa** (`VERSIONING.md`) |
+| 34 | Identidad del baseline | ✅ Por **contenido** (categoría+file+snippet, sin línea); contenido hasheado, nunca guardado (ADR 0009) |
+| 35 | Modelo del baseline | ✅ Foto del **estado actual** (delta new/changed/known/gone), no lista de aceptados; `gone` retenido hasta `prune` (ADR 0010) |
+| 36 | Salvaguarda graduada | ✅ Superficie (pregunta) → known auto; determinístico (afirmación 1.0) → nunca auto-silenciado, accept humano explícito (ADR 0011) |
+| 37 | Operación del baseline | ✅ Tools que opera el agente vía skill (`list`/`accept`/`prune`); el humano decide; codefit nunca toca el código (ADR 0012) |
 
 ---
 
@@ -1540,8 +1560,8 @@ Según el versionado de la sección 25 (`VERSIONING.md`):
 
 | Milestone | Contenido |
 |---|---|
-| `v0.1.0-alpha.x` | Core MCP + `init` dogfoodeados (estado actual: `alpha.2`) |
-| `v0.1.0` | Fase 1 completa (Núcleo + Go + TS + Security + MCP + `init` + baseline) |
+| `v0.1.0-alpha.x` | Pre-releases en el camino (alpha.1 core MCP, alpha.2 + `init`) |
+| `v0.1.0` | **Fase 1 completa (actual)** — Núcleo + Go + TS + Security + MCP + `init` + baseline |
 | `v0.2.0` | Fase 2 (DB) |
 | `v0.3.0` | Fase 3 (Review + Practices + Tests) |
 | `v0.4.0` | Fase 4 (Conocimiento + manifiesto) — primera release pública `0.x` |

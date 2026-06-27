@@ -57,27 +57,24 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **`v0.1.0-alpha.2`** (tagged 2026-06-25) — the dogfooded MCP core (deterministic
-  TypeScript security detection, the three surface categories — IDOR, broken
-  authorization, over-fetching —, the `scan-all` three-bucket summary with
-  `scan-endpoint` on demand, all over the MCP stdio server) **plus `codefit init`**:
-  stack detection + `.codefit.yaml` generation + a thin self-discovering skill placed
-  for each detected agent. Validated against a Next.js/Prisma backend; the skill
-  trigger validated both ways.
-- **`v0.1.0-alpha.1`** (tagged 2026-06-24) — the first usable MCP core, before `init`.
-- **`v0.1.0`** is **reserved** for Phase 1 complete — it ships once **baseline** is
-  functional (it is a stub today, so tagging `v0.1.0` now would over-promise).
-  `codefit init` (writes `.codefit.yaml` + generates and places codefit's own skill;
-  it never touches the user's `AGENTS.md`/`CLAUDE.md`) already landed in `alpha.2`.
-  `codefit update` is a Phase 4 item, not a Phase 1 blocker.
+- **`v0.1.0` — Phase 1 complete.** Usable end-to-end from `main`: the MCP stdio
+  server, deterministic TypeScript security rules, surface mapping (IDOR / broken
+  authz / over-fetching), the `scan-all` three-bucket synthesis with `scan-endpoint`
+  on demand, `codefit init` (config + self-discovering skill), and the **baseline**
+  (committed audit memory with list / accept / prune). Validated in real use against a
+  Next.js/Prisma backend. Cut from `main` as part of the documentation-sync release
+  that closes Phase 1.
+- On the way to it: **`v0.1.0-alpha.2`** (2026-06-25, added `codefit init`) and
+  **`v0.1.0-alpha.1`** (2026-06-24, the first usable MCP core).
+- `codefit update` is a Phase 4 item (`0.4.0`), not a Phase 1 blocker.
 
 ## How to tag a release
 
 ```bash
 # Annotated tag on a clean main with the gate green:
-git tag -a v0.1.0-alpha.2 -m "codefit v0.1.0-alpha.2 — <milestone>"
-git push origin v0.1.0-alpha.2
+git tag -a v0.1.0 -m "codefit v0.1.0 — Phase 1 complete"
+git push origin v0.1.0
 
 # Verify the build embeds it:
-make build && ./bin/codefit version   # → codefit v0.1.0-alpha.2 (commit …, built …)
+make build && ./bin/codefit version   # → codefit v0.1.0 (commit …, built …)
 ```
