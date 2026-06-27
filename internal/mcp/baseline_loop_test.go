@@ -188,6 +188,62 @@ func TestBaselineDeterministicShownUntilAccepted(t *testing.T) {
 	}
 }
 
+// baseline-list lets the agent get fingerprints without reading the file: it
+// reproduces the dogfooding flow (accept a false positive via list → accept).
+func TestBaselineListNoFileIsEmptyNote(t *testing.T) {
+	root := copyFixture(t) // no scan yet → no baseline
+	resp, err := mcp.HandleBaselineList(mcp.BaselineListRequest{Root: root})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(resp.Items) != 0 || !strings.Contains(resp.Note, "no baseline yet") {
+		t.Errorf("missing baseline must return empty + a clear note, got %+v", resp)
+	}
+}
+
+func TestBaselineListFiltersKnownAndAcknowledged(t *testing.T) {
+	root := copyFixture(t)
+	first := scanAll(t, root) // creates baseline, everything new→stored as known
+	fp := anyActionableFP(first, false)
+	if fp == "" {
+		t.Fatal("need an actionable surface fingerprint")
+	}
+	if _, err := mcp.HandleBaselineAccept(mcp.BaselineAcceptRequest{
+		Root: root, Fingerprints: []string{fp}, Reason: "internal endpoint, reviewed",
+	}); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	all, _ := mcp.HandleBaselineList(mcp.BaselineListRequest{Root: root})
+	known, _ := mcp.HandleBaselineList(mcp.BaselineListRequest{Root: root, Filter: "known"})
+	acked, _ := mcp.HandleBaselineList(mcp.BaselineListRequest{Root: root, Filter: "acknowledged"})
+
+	if all.Count != known.Count+acked.Count {
+		t.Errorf("all (%d) must equal known (%d) + acknowledged (%d)", all.Count, known.Count, acked.Count)
+	}
+	// the accepted fp is in acknowledged (with reason), NOT in known.
+	inKnown, inAcked := false, false
+	for _, e := range known.Items {
+		if e.Fingerprint == fp {
+			inKnown = true
+		}
+	}
+	for _, e := range acked.Items {
+		if e.Fingerprint == fp {
+			inAcked = true
+			if e.Reason == "" || e.At == "" {
+				t.Errorf("acknowledged entry must carry reason+date, got %+v", e)
+			}
+		}
+	}
+	if inKnown {
+		t.Errorf("an accepted item must NOT appear under filter=known")
+	}
+	if !inAcked {
+		t.Errorf("an accepted item must appear under filter=acknowledged")
+	}
+}
+
 func TestBaselineGoneThenPrune(t *testing.T) {
 	root := copyFixture(t)
 	scanAll(t, root)

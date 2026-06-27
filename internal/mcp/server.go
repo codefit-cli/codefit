@@ -40,6 +40,9 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolConfirmSurface),
 		"Integrate the agent's verdicts on surface items: vulnerable ones become probabilistic findings (confidence < 1.0) anchored to the item. Stateless: codefit recomputes the id to validate.",
 		func(in ConfirmSurfaceRequest) (ConfirmSurfaceResponse, error) { return HandleConfirmSurface(in), nil })
+	addTool(s, string(ToolBaselineList),
+		"List the baseline's tracked items so you can reference them in accept/prune WITHOUT reading the .codefit-baseline file. Returns per item: fingerprint, file, category, state (known|acknowledged), and the reason+date if acknowledged. Filter with {filter:\"known\"} for items still pending (not yet accepted) or {filter:\"acknowledged\"}. Read-only. Input: {root, filter?}.",
+		HandleBaselineList)
 	addTool(s, string(ToolBaselineAccept),
 		"Mark baseline item(s) as acknowledged by a human (false positive or accepted debt): they stop appearing as actionable but stay counted with the reason. SAFETY: call ONLY when the human decided so in the conversation — NEVER on your own. A reason is required. Input: {root, fingerprints, reason}.",
 		HandleBaselineAccept)

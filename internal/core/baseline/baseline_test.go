@@ -2,6 +2,7 @@ package baseline_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
@@ -172,6 +173,74 @@ func TestAcceptUnknownFingerprintErrors(t *testing.T) {
 	b := &baseline.Baseline{Version: "1", Items: []baseline.Item{{FP: "a"}}}
 	if _, err := b.Accept([]string{"zzz"}, "x", "2026-06-26"); err == nil {
 		t.Errorf("accept of an unknown fingerprint must error")
+	}
+}
+
+func TestListAllKnownAcknowledged(t *testing.T) {
+	b := &baseline.Baseline{Version: "1", Items: []baseline.Item{
+		{FP: "k1", Category: "overfetch", File: "a.ts"},
+		{FP: "k2", Category: "idor", File: "b.ts"},
+		{FP: "a1", Category: "authz", File: "c.ts", Snippet: "GET()", Ack: &baseline.Ack{Reason: "public", At: "2026-06-26", By: "human"}},
+	}}
+
+	all, err := b.List("")
+	if err != nil || len(all) != 3 {
+		t.Fatalf("list all: got %d (%v)", len(all), err)
+	}
+
+	known, err := b.List("known")
+	if err != nil || len(known) != 2 {
+		t.Fatalf("list known: got %d (%v)", len(known), err)
+	}
+	for _, e := range known {
+		if e.State != baseline.StateKnown {
+			t.Errorf("known filter returned state %q", e.State)
+		}
+		if e.Fingerprint == "" || e.File == "" || e.Category == "" {
+			t.Errorf("entry must carry fp+file+category, got %+v", e)
+		}
+	}
+
+	acked, err := b.List("acknowledged")
+	if err != nil || len(acked) != 1 {
+		t.Fatalf("list acknowledged: got %d (%v)", len(acked), err)
+	}
+	e := acked[0]
+	if e.State != baseline.StateAcked || e.Reason != "public" || e.At != "2026-06-26" {
+		t.Errorf("acknowledged entry must carry reason+date, got %+v", e)
+	}
+}
+
+// List must NOT leak the snippet (the agent doesn't need it; keeps the response small).
+func TestListOmitsSnippet(t *testing.T) {
+	b := &baseline.Baseline{Version: "1", Items: []baseline.Item{
+		{FP: "k1", Category: "overfetch", File: "a.ts", Snippet: "prisma.user.findMany()"},
+	}}
+	all, _ := b.List("")
+	// Entry has no Snippet field — assert via the struct shape by checking the
+	// known fields are present and nothing else is needed.
+	if all[0].Fingerprint != "k1" {
+		t.Errorf("unexpected entry %+v", all[0])
+	}
+}
+
+// A long acknowledged reason is truncated in the list (the full one stays in the
+// file) so the response stays small for baselines with many accepted items.
+func TestListTruncatesLongReason(t *testing.T) {
+	long := strings.Repeat("x", 500)
+	b := &baseline.Baseline{Version: "1", Items: []baseline.Item{
+		{FP: "a", Category: "authz", File: "c.ts", Ack: &baseline.Ack{Reason: long, At: "2026-06-26", By: "human"}},
+	}}
+	got, _ := b.List("acknowledged")
+	if len([]rune(got[0].Reason)) > 220 {
+		t.Errorf("reason must be truncated in list, got %d runes", len([]rune(got[0].Reason)))
+	}
+}
+
+func TestListInvalidFilterErrors(t *testing.T) {
+	b := &baseline.Baseline{Version: "1"}
+	if _, err := b.List("bogus"); err == nil {
+		t.Errorf("an invalid filter must error")
 	}
 }
 

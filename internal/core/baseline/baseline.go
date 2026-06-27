@@ -258,6 +258,61 @@ func (b *Baseline) Accept(fps []string, reason, at string) (accepted []string, e
 	return accepted, nil
 }
 
+// Entry is a read-only projection of a baseline item for codefit-baseline-list:
+// just what the agent needs to reference an item in accept/prune. It omits the
+// snippet on purpose (the agent supplies the reasoning; this keeps the list small).
+type Entry struct {
+	Fingerprint string `json:"fingerprint"`
+	File        string `json:"file"`
+	Category    string `json:"category"`
+	State       State  `json:"state"` // known | acknowledged
+	Reason      string `json:"reason,omitempty"`
+	At          string `json:"at,omitempty"`
+}
+
+// List returns the baseline items as Entries, filtered by state: "" (all),
+// "known" (not acknowledged), or "acknowledged". An unknown filter is an error.
+func (b *Baseline) List(filter string) ([]Entry, error) {
+	switch filter {
+	case "", "known", "acknowledged":
+	default:
+		return nil, fmt.Errorf("invalid filter %q (allowed: known, acknowledged, or empty for all)", filter)
+	}
+	out := make([]Entry, 0, len(b.Items))
+	for _, it := range b.Items {
+		acked := it.Ack != nil
+		if filter == "known" && acked {
+			continue
+		}
+		if filter == "acknowledged" && !acked {
+			continue
+		}
+		e := Entry{Fingerprint: it.FP, File: it.File, Category: it.Category, State: StateKnown}
+		if acked {
+			e.State = StateAcked
+			e.Reason = truncateReason(it.Ack.Reason)
+			e.At = it.Ack.At
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// maxReasonLen bounds the reason in a list Entry so a baseline with many
+// acknowledged items (each with a long justification) cannot grow the list
+// response into MCP truncation territory (the anti-truncation principle of ADR
+// 0008). The FULL reason always lives in the committed .codefit-baseline; the list
+// shows enough to glance at why an item was accepted.
+const maxReasonLen = 200
+
+func truncateReason(s string) string {
+	r := []rune(s)
+	if len(r) <= maxReasonLen {
+		return s
+	}
+	return string(r[:maxReasonLen]) + "…"
+}
+
 // Prune removes the given fingerprints from the baseline (used for gone items the
 // caller has confirmed no longer exist in the code). Returns the removed fps.
 func (b *Baseline) Prune(fps []string) (pruned []string) {

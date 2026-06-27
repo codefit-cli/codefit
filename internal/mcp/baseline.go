@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -123,6 +124,46 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return strings.TrimSpace(s)
+}
+
+// BaselineListRequest reads the current baseline so the agent can reference items
+// in accept/prune WITHOUT reading the raw .codefit-baseline file. Filter is "" (all),
+// "known" (not yet accepted), or "acknowledged". Language is accepted for tool
+// uniformity but unused — listing reads the file, it does not scan code.
+type BaselineListRequest struct {
+	Root     string `json:"root"`
+	Language string `json:"language,omitempty"`
+	Filter   string `json:"filter,omitempty"`
+}
+
+// BaselineListResponse is the projected baseline: per item just fp+file+category+
+// state (+reason/date if acknowledged), small enough not to truncate.
+type BaselineListResponse struct {
+	Items []baseline.Entry `json:"items"`
+	Count int              `json:"count"`
+	Note  string           `json:"note"`
+}
+
+// HandleBaselineList returns the baseline entries. A missing baseline is NOT an
+// error: it returns an empty list with a note pointing to scan-all. Read-only.
+func HandleBaselineList(req BaselineListRequest) (BaselineListResponse, error) {
+	path := filepath.Join(req.Root, baseline.Name)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return BaselineListResponse{Items: []baseline.Entry{}, Note: "no baseline yet — run codefit-scan-all first"}, nil
+	}
+	b, err := baseline.Load(path)
+	if err != nil {
+		return BaselineListResponse{}, fmt.Errorf("loading baseline: %w", err)
+	}
+	entries, err := b.List(req.Filter)
+	if err != nil {
+		return BaselineListResponse{}, err
+	}
+	note := fmt.Sprintf("%d item(s)", len(entries))
+	if req.Filter != "" {
+		note += " (filter: " + req.Filter + ")"
+	}
+	return BaselineListResponse{Items: entries, Count: len(entries), Note: note}, nil
 }
 
 // BaselineAcceptRequest marks baseline items as acknowledged by a human (a false
