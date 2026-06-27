@@ -20,29 +20,27 @@ between you, your agent, and codefit — each with a distinct job. **codefit rea
 and analyzes (no LLM, never edits code); your agent reasons with its own LLM; you
 decide.**
 
+**The three roles — who does what.** Each color marks a role; you will see the
+same colors again in the loop below.
+
 ```mermaid
-flowchart TB
-  subgraph DEV["Developer — talks and decides"]
-    D1["asks in plain language:<br/>'audit these endpoints'"]
-    D2{"decides:<br/>false positive? fix? resolved?"}
-  end
+flowchart LR
+  DEV["DEVELOPER<br/>talks &amp; decides"]
+  AGENT["AGENT<br/>orchestrates &amp; reasons<br/>(its own LLM)"]
+  CF["CODEFIT<br/>static analysis · NO LLM<br/>never edits code"]
+  BL[("baseline<br/>audit memory")]
 
-  subgraph AGENT["Agent — orchestrates and REASONS, with its own LLM"]
-    A1["calls codefit's MCP tools"]
-    A2["reasons the buckets<br/>WITH project context<br/>(middleware, domain model)"]
-    A3["acts: accept · fix code · prune"]
-  end
+  DEV -->|"'audit this project / these endpoints / this function'"| AGENT
+  AGENT -->|calls MCP tools| CF
+  CF -->|"structural FACTS<br/>3 buckets + delta"| AGENT
+  AGENT -->|"buckets + project context"| DEV
+  CF <-.->|reads/writes| BL
+  DEV -.->|"fix code → re-audit"| AGENT
+  AGENT -.->|accept / prune| BL
 
-  subgraph CF["codefit — reads and ANALYZES: NO LLM, never edits code"]
-    C1["static analysis (patterns + AST)<br/>returns structural FACTS, never a judgment"]
-    C2["3 buckets + baseline delta"]
-    BL[("baseline file<br/>the project's audit memory")]
-  end
-
-  D1 --> A1 --> C1 --> C2 --> A2 --> D2 --> A3
-  A3 -->|accept / prune| BL
-  A3 -->|fix code, then re-audit| A1
-  C1 <-->|reads code, reads/writes baseline| BL
+  style DEV stroke:#c89a4a,stroke-width:3px
+  style AGENT stroke:#5a8cd8,stroke-width:3px
+  style CF stroke:#2d9e54,stroke-width:3px
 ```
 
 The boundary is the whole point: **codefit never calls an LLM.** It runs the
@@ -52,6 +50,29 @@ authz helper in the body") — never a verdict. The agent you already use suppli
 the intelligence, reasoning each item with the project's context. That is what
 democratizes auditing: anyone already coding with AI can audit without extra API
 keys or infrastructure.
+
+**One full pass through the loop.** Same actors, same order as above — the
+developer asks, the agent orchestrates, codefit reports facts, the developer
+decides, and a fix re-enters the loop.
+
+```mermaid
+sequenceDiagram
+  actor Dev as Developer
+  participant Agent as Agent (its own LLM)
+  participant CF as codefit (NO LLM)
+  participant BL as baseline
+
+  Dev->>Agent: "audit this project / these endpoints / this function"
+  Agent->>CF: calls MCP tools
+  CF->>BL: reads code + baseline
+  CF-->>Agent: structural FACTS — 3 buckets + delta
+  Note over CF: never judges, never edits code
+  Agent->>Agent: reasons buckets WITH project context
+  Agent-->>Dev: findings + recommendation
+  Dev->>Agent: decides — false positive / fix / resolved
+  Agent->>BL: accept / prune
+  Note over Dev,BL: fix code → re-audit (loop repeats)
+```
 
 ## What problem it solves (and what it is NOT)
 
