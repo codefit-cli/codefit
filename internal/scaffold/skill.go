@@ -58,6 +58,8 @@ manages it and reports a delta — act on what's new:
 - Focus on ` + "`baseline.new`" + ` and ` + "`baseline.changed`" + `. ` + "`known`" + ` surface is already tracked — don't re-review it.
 - Deterministic findings (confidence 1.0, e.g. a hardcoded secret) are NOT auto-silenced:
   they show on every scan until accepted. ` + "`baseline.affirmations_shown`" + ` counts them.
+- To act on items, get their fingerprints from ` + "`codefit-baseline-list`" + ` (use
+  ` + "`filter: \"known\"`" + ` for items not yet accepted) — do NOT read the ` + "`.codefit-baseline`" + ` file.
 - When the HUMAN decides an item is a false positive or accepted debt, call
   ` + "`codefit-baseline-accept`" + ` with its ` + "`fingerprint`" + ` and the human's reason. ONLY when the
   human said so in the conversation — NEVER accept an item on your own.

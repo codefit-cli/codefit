@@ -94,6 +94,7 @@ func TestSkillBakesLanguage(t *testing.T) {
 func TestSkillTeachesBaselineLoop(t *testing.T) {
 	_, body := renderSkill(t, tsInfo())
 	for _, must := range []string{
+		"codefit-baseline-list",
 		"codefit-baseline-accept",
 		"codefit-baseline-prune",
 		".codefit-baseline",
