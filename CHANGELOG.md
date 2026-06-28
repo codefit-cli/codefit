@@ -16,6 +16,51 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.1.1] — 2026-06-28
+
+**Phase 1.1 — Next.js Server Actions surface.** Coverage expansion within Phase 1
+(stays in the `0.1.x` band; `0.2.0` is reserved for Phase 2 — see
+[VERSIONING.md](VERSIONING.md)).
+
+### Added — Phase 1.1: Server Actions
+
+- **codefit now audits Next.js Server Actions** (`"use server"`) for **IDOR**,
+  **broken authorization**, and **over-fetching** — alongside App Router route
+  handlers. Server Actions are POST endpoints in disguise (they receive client
+  input and reach resources) but have no `route.ts`, so the previous path gate
+  missed them entirely.
+- **Detection is by shape, never by filename** (ADR 0005). An async function under
+  a `"use server"` directive is enumerated whether the directive is **file-level**
+  (every exported async function in the module) or **function-level** (an inline
+  action in a Server Component, or a non-exported one) — in `actions.ts`, `lib/`,
+  or inline, no blind spot. `isNextRouteFile` is untouched; no filename was added
+  to any list.
+- **The client input is the action's arguments** (or a `FormData`), mapped to the
+  same id-input mold as a route handler. An **object-shaped argument is covered**:
+  the parameter binding is seeded as the id-var, so a nested `data.id` flows to the
+  access. For over-fetching the serialization sink is the action's **return value**
+  (the framework serializes it; an action has no `Response.json`).
+- **New queryable structural fact `server_action`** (true when the entry is a
+  Server Action, not a route handler) — a fact, not a judgment.
+
+### Changed
+
+- **`COVERAGE.md` / coverage manifest** — Server Actions move from
+  implicitly-not-covered to **covered**. The honesty contract now declares two
+  things explicitly: the **non-Next.js JS frameworks** (Express, Fastify, NestJS)
+  are **not yet covered** (a known gap, not silent), and the one Server Action
+  edge — an inline `formData.get('key')` passed directly into a service with no
+  intermediate variable and no local access — may not link.
+
+### Notes
+
+- Validated against a real Next.js/Prisma app (salonpro): **297 Server Action
+  surfaces across 29 files** that were previously invisible (they live in
+  `lib/actions/`, not `route.ts`), with **0 parse errors over 223 files**. The
+  shape detection surfaces custom auth helpers honestly — an action guarded by a
+  project-specific `getAuthenticatedUserSalonId()` is reported as "no known authz
+  helper detected, verify" rather than a false positive.
+
 ## [0.1.0] — 2026-06-27
 
 **Phase 1 complete.** The pieces below close Phase 1; the earlier `v0.1.0-alpha.*`
