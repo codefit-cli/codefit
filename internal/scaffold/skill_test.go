@@ -113,6 +113,36 @@ func TestSkillTeachesBaselineLoop(t *testing.T) {
 	}
 }
 
+// The skill must be IMPERATIVE about using codefit rather than auditing by hand —
+// density of signal, so even a small model triggers the tool instead of reading
+// files manually.
+func TestSkillIsImperative(t *testing.T) {
+	_, body := renderSkill(t, tsInfo())
+	low := strings.ToLower(body)
+	if !strings.Contains(low, "must call") || !strings.Contains(low, "codefit-scan-all") {
+		t.Errorf("skill must imperatively tell the agent to call codefit-scan-all first, got:\n%s", body)
+	}
+	if !strings.Contains(low, "do not audit by reading files") && !strings.Contains(low, "not audit by reading files") {
+		t.Errorf("skill must tell the agent NOT to audit by reading files manually, got:\n%s", body)
+	}
+}
+
+// The skill must teach the custom authz-helper registration, with the human-only
+// safeguard and the fact-not-verdict nuance (clears authz, not IDOR/ownership).
+func TestSkillTeachesCustomAuthzHelpers(t *testing.T) {
+	_, body := renderSkill(t, tsInfo())
+	low := strings.ToLower(body)
+	if !strings.Contains(body, "codefit-baseline-register-authz-helper") {
+		t.Errorf("skill must mention the register-authz-helper tool")
+	}
+	if !strings.Contains(low, "never register a helper") {
+		t.Errorf("skill must carry the human-only safeguard for registering helpers")
+	}
+	if !strings.Contains(low, "ownership") {
+		t.Errorf("skill must say registering clears authz but not the IDOR/ownership gap, got:\n%s", body)
+	}
+}
+
 // RenderSkill is exported and may be called with no detected language; it must
 // still produce valid, exact commands (defaulting the baked language).
 func TestSkillEmptyLanguageDefaults(t *testing.T) {

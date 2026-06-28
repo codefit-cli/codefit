@@ -49,6 +49,12 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolBaselinePrune),
 		"Remove baseline item(s) that no longer exist in the code (resolved by a refactor). Re-scans to confirm they are gone before removing. Input: {root, language, fingerprints?}. Without fingerprints, prunes all confirmed-gone items.",
 		HandleBaselinePrune)
+	addTool(s, string(ToolBaselineRegisterAuthzHelper),
+		"Register a PROJECT-SPECIFIC authorization helper (e.g. requirePermission, getAuthenticatedUserSalonId) so codefit recognizes it on later scans: known_authz_detected becomes true for handlers that call it, clearing the AUTHZ gap WITHOUT the agent re-reasoning. SAFETY: this silences the authz gap on EVERY item calling the helper (far more reach than accepting one) — call ONLY when the HUMAN approved registering it; NEVER on your own. It does NOT clear the IDOR/ownership gap: an IDOR endpoint stays actionable. A reason is required. Input: {root, language, helper_name, reason}.",
+		HandleBaselineRegisterAuthzHelper)
+	addTool(s, string(ToolBaselineUnregisterAuthzHelper),
+		"Remove a previously registered project authz helper (reverses register-authz-helper). The next scan stops recognizing it. Input: {root, language, helper_name}.",
+		HandleBaselineUnregisterAuthzHelper)
 	addTool(s, string(ToolCoverage),
 		"Return the coverage manifest for a language: what codefit audits deterministically vs reasons over surface vs does not cover. Input: {language}.",
 		HandleCoverage)

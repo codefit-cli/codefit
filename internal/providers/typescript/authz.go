@@ -16,7 +16,7 @@ import (
 // resource; authz asks "is the caller permitted?" and only needs a sensitive
 // operation — it is broader, and does NOT require an id. It implements
 // surface.Query.
-type authzQuery struct{}
+type authzQuery struct{ recognized map[string]bool }
 
 // prismaWriteMethods are the Prisma operations that mutate state (vs read).
 var prismaWriteMethods = map[string]bool{
@@ -51,13 +51,13 @@ var frameworkMethods = map[string]bool{
 	"formData": true, "next": true, "redirect": true,
 }
 
-func (authzQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
+func (q authzQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
 	if root == nil {
 		return nil
 	}
 	var out []findings.SurfaceItem
 	for _, h := range auditTargets(root, file) {
-		if item, ok := authzItem(h, file); ok {
+		if item, ok := authzItem(h, file, q.recognized); ok {
 			out = append(out, item)
 		}
 	}
@@ -70,17 +70,17 @@ func (authzQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceIte
 // (read or write — FINITE, enumerated) OR an indirect application call (the
 // operation may be in a service/repository layer — INFINITE, handed to the
 // agent with an honest signal).
-func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
+func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.SurfaceItem, bool) {
 	accesses := dedupe(collectPrismaAccesses(h.body))
 	indirect := collectAppCalls(h.body)
 	if len(accesses) == 0 && len(indirect) == 0 {
 		return findings.SurfaceItem{}, false
 	}
-	authz := dedupe(collectAuthzCalls(h.body))
+	authz := dedupe(collectAuthzCalls(h.body, recognized))
 
 	signals := []string{
 		operationSignal(h, accesses, indirect),
-		authzSignal(authz),
+		authzSignal(authz, recognized),
 	}
 	return findings.SurfaceItem{
 		Category:          "authz",

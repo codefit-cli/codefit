@@ -25,10 +25,43 @@ import (
 )
 
 // Provider implements providers.LanguageProvider for TypeScript and TSX.
-type Provider struct{}
+// authzHelpers holds the project's registered custom authz helpers (in addition to
+// the built-in NextAuth-style set), so surface recognition reflects per-project
+// knowledge without the agent re-reasoning (ADR 0013). Empty for the stateless
+// file-level surface tools; populated by the project-scan path from the baseline.
+type Provider struct {
+	authzHelpers map[string]bool
+}
 
-// New returns a TypeScript language provider.
-func New() *Provider { return &Provider{} }
+// Option configures a Provider at construction.
+type Option func(*Provider)
+
+// WithAuthzHelpers registers project-specific authorization helper names the
+// provider recognizes in addition to the built-in set. The names come from the
+// committed baseline (a human-approved decision), never from guessing.
+func WithAuthzHelpers(names []string) Option {
+	return func(p *Provider) {
+		if len(names) == 0 {
+			return
+		}
+		if p.authzHelpers == nil {
+			p.authzHelpers = make(map[string]bool, len(names))
+		}
+		for _, n := range names {
+			p.authzHelpers[n] = true
+		}
+	}
+}
+
+// New returns a TypeScript language provider. With no options it recognizes only
+// the built-in authz helpers (the stateless default).
+func New(opts ...Option) *Provider {
+	p := &Provider{}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
+}
 
 // compile-time check that Provider satisfies the contract.
 var _ providers.LanguageProvider = (*Provider)(nil)
@@ -133,7 +166,13 @@ func (p *Provider) AnalyzeSurface(src providers.SourceFile) ([]findings.SurfaceI
 	return surface.Run(p.surfaceQueries(), root, src.Path), nil
 }
 
-// surfaceQueries are the surface categories the TS provider can enumerate.
-func (*Provider) surfaceQueries() []surface.Query {
-	return []surface.Query{idorQuery{}, authzQuery{}, overfetchQuery{}}
+// surfaceQueries are the surface categories the TS provider can enumerate. The
+// recognized authz-helper set is threaded into the IDOR and authz queries so the
+// known_authz_detected fact reflects this project's registered helpers.
+func (p *Provider) surfaceQueries() []surface.Query {
+	return []surface.Query{
+		idorQuery{recognized: p.authzHelpers},
+		authzQuery{recognized: p.authzHelpers},
+		overfetchQuery{},
+	}
 }
