@@ -346,16 +346,35 @@ export async function GET() {
 	}
 }
 
-// Path discipline: the same code outside app/**/route.ts is not a Next route
-// handler and must not be enumerated.
-func TestIDOR_OnlyNextRouteFiles(t *testing.T) {
-	src := `
+// Path discipline: a route HANDLER (HTTP-method export) is enumerated only in
+// app/**/route.ts; the same code elsewhere is not a route handler. But a Server
+// Action ("use server") IS enumerated anywhere, by shape — so the discipline is
+// now "route files AND server actions, NOT arbitrary functions", not "only route
+// files".
+func TestIDOR_RouteHandlersOnlyInRouteFiles(t *testing.T) {
+	// A route-handler-shaped export with NO "use server" directive: enumerated
+	// inside a route file, ignored everywhere else (it is not an action).
+	routeSrc := `
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   return prisma.user.findUnique({ where: { id: params.id } });
 }`
+	if items := idorSurface(t, "app/users/[id]/route.ts", routeSrc); len(items) != 1 {
+		t.Fatalf("a route handler in an app/**/route.ts file must enumerate, got %d", len(items))
+	}
 	for _, path := range []string{"lib/users.ts", "app/users/[id]/page.tsx", "src/handlers/users.ts"} {
-		if items := idorSurface(t, path, src); len(items) != 0 {
-			t.Errorf("%s is not an app/**/route.ts file; must not enumerate, got %d", path, len(items))
+		if items := idorSurface(t, path, routeSrc); len(items) != 0 {
+			t.Errorf("%s: a route handler outside app/**/route.ts (and with no \"use server\") must not enumerate, got %d", path, len(items))
 		}
+	}
+
+	// The SAME code as a Server Action (file-level directive) IS enumerated in a
+	// non-route file — the new capability, not a regression of the rule above.
+	actionSrc := `
+"use server";
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  return prisma.user.findUnique({ where: { id: params.id } });
+}`
+	if items := idorSurface(t, "lib/users.ts", actionSrc); len(items) != 1 {
+		t.Errorf("a \"use server\" action in a non-route file must enumerate, got %d", len(items))
 	}
 }

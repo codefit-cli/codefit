@@ -16,18 +16,13 @@ import (
 type overfetchQuery struct{}
 
 func (overfetchQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
-	if root == nil || !isNextRouteFile(file) {
+	if root == nil {
 		return nil
 	}
 	var out []findings.SurfaceItem
-	walkTS(root, func(n syntax.Node) {
-		if n.Type() != "export_statement" {
-			return
-		}
-		for _, h := range handlersIn(n) {
-			out = append(out, overfetchItems(h, file)...)
-		}
-	})
+	for _, h := range auditTargets(root, file) {
+		out = append(out, overfetchItems(h, file)...)
+	}
 	return out
 }
 
@@ -46,7 +41,7 @@ func overfetchItems(h tsHandler, file string) []findings.SurfaceItem {
 	serviceVars := collectServiceVars(h.body)
 	var out []findings.SurfaceItem
 	walkTS(h.body, func(n syntax.Node) {
-		x, ok := serializationArg(n)
+		x, ok := serializationSink(h, n)
 		if !ok {
 			return
 		}
@@ -55,6 +50,22 @@ func overfetchItems(h tsHandler, file string) []findings.SurfaceItem {
 		}
 	})
 	return out
+}
+
+// serializationSink reports whether n is a point where a value is serialized to
+// the client, returning the serialized value. For a route handler that is an
+// explicit Response.json / NextResponse.json / JSON.stringify call. A Server
+// Action has no such call: its RETURN value is serialized by the framework and
+// sent to the client, so the return statement's argument is the sink (the
+// explicit-call forms still count, e.g. an action that builds a Response).
+func serializationSink(h tsHandler, n syntax.Node) (syntax.Node, bool) {
+	if x, ok := serializationArg(n); ok {
+		return x, true
+	}
+	if h.kind == "action" && n.Type() == "return_statement" && n.NamedChildCount() > 0 {
+		return n.NamedChild(0), true
+	}
+	return nil, false
 }
 
 // overfetchItem classifies one serialized value and builds the item, or reports

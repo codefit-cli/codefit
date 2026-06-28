@@ -52,20 +52,15 @@ var frameworkMethods = map[string]bool{
 }
 
 func (authzQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
-	if root == nil || !isNextRouteFile(file) {
+	if root == nil {
 		return nil
 	}
 	var out []findings.SurfaceItem
-	walkTS(root, func(n syntax.Node) {
-		if n.Type() != "export_statement" {
-			return
+	for _, h := range auditTargets(root, file) {
+		if item, ok := authzItem(h, file); ok {
+			out = append(out, item)
 		}
-		for _, h := range handlersIn(n) {
-			if item, ok := authzItem(h, file); ok {
-				out = append(out, item)
-			}
-		}
-	})
+	}
 	return out
 }
 
@@ -84,7 +79,7 @@ func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 	authz := dedupe(collectAuthzCalls(h.body))
 
 	signals := []string{
-		operationSignal(h.method, accesses, indirect),
+		operationSignal(h, accesses, indirect),
 		authzSignal(authz),
 	}
 	return findings.SurfaceItem{
@@ -100,6 +95,9 @@ func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 			// frontier). Shared with IDOR/overfetch so the synthesis can rank by
 			// certainty uniformly.
 			"local_access_detected": len(accesses) > 0,
+			// server_action: structural fact — this sensitive operation runs in a
+			// Server Action, not a route handler (see idorItem).
+			"server_action": h.kind == "action",
 		},
 		ReasonToReview: "Should this endpoint be public, or must it verify that the caller is " +
 			"permitted before performing this operation — and is the absence of a detected " +
@@ -113,7 +111,8 @@ func authzItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 // frontier branch states the limit as an AFFIRMATION (codefit does not follow
 // calls, so authorization is an UNRESOLVED candidate here, not an absence) and
 // makes following the call its own instruction, so the agent pursues it.
-func operationSignal(method string, accesses, indirect []string) string {
+func operationSignal(h tsHandler, accesses, indirect []string) string {
+	subject := entrySubject(h)
 	if len(accesses) > 0 {
 		var reads, writes []string
 		for _, a := range accesses {
@@ -123,7 +122,7 @@ func operationSignal(method string, accesses, indirect []string) string {
 				reads = append(reads, a)
 			}
 		}
-		parts := []string{"Handler " + method}
+		parts := []string{subject}
 		if len(writes) > 0 {
 			parts = append(parts, "mutates state via "+strings.Join(writes, ", "))
 		}
@@ -132,10 +131,23 @@ func operationSignal(method string, accesses, indirect []string) string {
 		}
 		return strings.Join(parts, " ")
 	}
-	return "Handler " + method + " calls application code outside this handler: " +
+	return subject + " calls application code outside its body: " +
 		strings.Join(indirect, ", ") + ", which may touch data or mutate state. codefit does not follow " +
 		"calls across functions, so authorization for this operation is NOT verified here — it runs in a " +
 		"service/repository layer. Follow the call there to confirm whether an authorization check exists."
+}
+
+// entrySubject phrases the auditable entry as a sentence subject: "Handler GET"
+// for a route handler, "Server Action updateInvoice" (or just "Server Action"
+// when anonymous) for a Server Action.
+func entrySubject(h tsHandler) string {
+	if h.kind == "action" {
+		if h.method == "" {
+			return "Server Action"
+		}
+		return "Server Action " + h.method
+	}
+	return "Handler " + h.method
 }
 
 // isPrismaWriteAccess reports whether a recorded access string
