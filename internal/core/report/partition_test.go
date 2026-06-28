@@ -18,17 +18,20 @@ import (
 // controls locally vs codefit could NOT conclude. They must never be flattened.
 func TestClassifyEndpoints_ThreeBuckets(t *testing.T) {
 	gapFile := "app/admin/tasks/route.ts"      // local access, no authz → access gap
-	cleanFile := "app/users/[id]/route.ts"     // local access, authz present → no gap
+	cleanFile := "app/account/route.ts"        // authz: local access, permission check present → no gap
 	frontierFile := "app/admin/audit/route.ts" // operation left the body → frontier
 
 	surface := []findings.SurfaceItem{
 		surf("idor", gapFile, 10,
 			map[string]bool{"local_access_detected": true, "known_authz_detected": false},
 			"reads params.id", "accesses prisma.task.findUnique"),
-		surf("idor", cleanFile, 10,
+		// resolved_clean must be an AUTHZ endpoint: the authz question ("is the
+		// caller permitted?") IS answered by a known helper. An IDOR (ownership)
+		// would NOT be clean even with authz present — that is a separate test.
+		surf("authz", cleanFile, 10,
 			map[string]bool{"local_access_detected": true, "known_authz_detected": true},
-			"reads params.id", "accesses prisma.user.findUnique",
-			"An authorization helper call was detected in the handler body: getServerSession"),
+			"Handler POST mutates state via prisma.user.update",
+			"An authorization helper call was detected in the body: getServerSession"),
 		surf("authz", frontierFile, 5,
 			map[string]bool{"local_access_detected": false, "known_authz_detected": false},
 			"Handler POST calls AuditService.record"),
@@ -65,16 +68,19 @@ func TestClassifyEndpoints_ThreeBuckets(t *testing.T) {
 }
 
 // resolved_clean entries are NAMED, not detailed: no signals/reason embedded, just
-// file/method + the verification fact. Keeps the response small.
+// file/method + the verification fact. Keeps the response small. Uses an AUTHZ +
+// over-fetch endpoint with both controls present (an IDOR would not be clean even
+// with authz — ownership is unverifiable).
 func TestClassifyEndpoints_ResolvedCleanIsNamedNotDetailed(t *testing.T) {
-	file := "app/things/[id]/route.ts"
+	file := "app/things/route.ts"
 	surface := []findings.SurfaceItem{
-		surf("idor", file, 10,
+		surf("authz", file, 10,
 			map[string]bool{"local_access_detected": true, "known_authz_detected": true},
-			"reads params.id", "An authorization helper call was detected in the handler body: auth"),
+			"Handler GET accesses data via prisma.thing.findMany",
+			"An authorization helper call was detected in the body: auth"),
 		surf("overfetch", file, 12,
 			map[string]bool{"local_access_detected": true, "field_limiting_detected": true},
-			"Serializes the result of prisma.thing.findUnique", "The query limits the returned fields with a select/omit clause"),
+			"Serializes the result of prisma.thing.findMany", "The query limits the returned fields with a select/omit clause"),
 	}
 	eps := report.AggregateEndpoints(nil, surface)
 	actionable, clean, frontier := report.ClassifyEndpoints(eps)
@@ -92,17 +98,44 @@ func TestClassifyEndpoints_ResolvedCleanIsNamedNotDetailed(t *testing.T) {
 	}
 }
 
+// THE corrected model (ADR 0006 amended): IDOR is about resource OWNERSHIP, which
+// codefit cannot verify from structure. A present authz helper proves
+// authentication/permission, NOT that the caller owns THIS resource — so an IDOR
+// with a local access stays ACTIONABLE even when known_authz_detected=true.
+// Previously it was wrongly cleared to resolved_clean (the latent bug this fixes).
+// This is the foundation Safeguard 2 of the custom-helper feature rests on: a
+// registered helper clears the AUTHZ gap, never the IDOR/ownership gap.
+func TestClassifyEndpoints_IDORWithAuthzStaysActionable(t *testing.T) {
+	file := "app/orders/[id]/route.ts"
+	surface := []findings.SurfaceItem{
+		surf("idor", file, 10,
+			map[string]bool{"local_access_detected": true, "known_authz_detected": true},
+			"reads params.id", "accesses prisma.order.findUnique",
+			"An authorization helper call was detected in the body: getServerSession"),
+	}
+	eps := report.AggregateEndpoints(nil, surface)
+	actionable, clean, frontier := report.ClassifyEndpoints(eps)
+	if len(actionable) != 1 || len(clean) != 0 || len(frontier) != 0 {
+		t.Fatalf("an IDOR with authz present must stay actionable (ownership unverified), got actionable=%d clean=%d frontier=%d",
+			len(actionable), len(clean), len(frontier))
+	}
+	if g := actionable[0].Concerns[0].Gap; g != "access" {
+		t.Errorf("the IDOR concern must carry the access gap (ownership), got %q", g)
+	}
+}
+
 // All-clean project: every endpoint resolved locally with no gap. actionable empty,
 // resolved_clean has them all, frontier empty. Honest: codefit checked, controls
-// present — not "nothing found".
+// present — not "nothing found". Uses AUTHZ endpoints (an authz check answers the
+// permission question); IDOR endpoints would not be clean even with authz present.
 func TestClassifyEndpoints_AllClean(t *testing.T) {
 	surface := []findings.SurfaceItem{
-		surf("idor", "app/a/[id]/route.ts", 10,
+		surf("authz", "app/a/route.ts", 10,
 			map[string]bool{"local_access_detected": true, "known_authz_detected": true},
-			"reads params.id", "authz detected: getServerSession"),
-		surf("idor", "app/b/[id]/route.ts", 10,
+			"Handler POST mutates state via prisma.a.update", "authz detected: getServerSession"),
+		surf("authz", "app/b/route.ts", 10,
 			map[string]bool{"local_access_detected": true, "known_authz_detected": true},
-			"reads params.id", "authz detected: requireAuth"),
+			"Handler POST mutates state via prisma.b.update", "authz detected: requireAuth"),
 	}
 	eps := report.AggregateEndpoints(nil, surface)
 	actionable, clean, frontier := report.ClassifyEndpoints(eps)

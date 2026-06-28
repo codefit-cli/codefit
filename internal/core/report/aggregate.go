@@ -354,12 +354,29 @@ func concernFromSurface(it findings.SurfaceItem) Concern {
 }
 
 // surfaceGap classifies the actionable structural gap of a surface concern, as a
-// fact: an idor/authz handler with no known authz check is an ACCESS gap; an
-// over-fetch with no select/omit is an EXPOSURE gap. A checked handler or a
-// limited query has no gap.
+// fact. IDOR and authz are DIFFERENT questions with DIFFERENT gates (ADR 0006
+// amended):
+//
+//   - authz asks "is the caller PERMITTED to do this?" — a known authz helper
+//     answers it, so known_authz_detected=true clears the authz gap.
+//   - IDOR asks "does the caller OWN this specific resource?" — codefit cannot
+//     verify ownership from structure (it sees the local access, not whether the
+//     where-clause is owner-scoped). A present authz helper proves authentication/
+//     permission, NOT ownership, so it does NOT clear the IDOR gap. An id that
+//     reaches a local resource is actionable until a reviewer confirms ownership
+//     (ADR 0005: codefit reports a fact, never a "clean" verdict it cannot prove —
+//     a false green is worse than an honest red).
+//
+// An over-fetch with no select/omit is an EXPOSURE gap. A frontier IDOR (the id
+// left the body, local_access_detected=false) is not a local gap — the endpoint is
+// classified as frontier and the agent follows the data.
 func surfaceGap(it findings.SurfaceItem) (bool, string) {
 	switch it.Category {
-	case "idor", "authz":
+	case "idor":
+		if it.StructuralFacts["local_access_detected"] {
+			return true, gapAccess
+		}
+	case "authz":
 		if !it.StructuralFacts["known_authz_detected"] {
 			return true, gapAccess
 		}
