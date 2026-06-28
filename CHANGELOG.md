@@ -16,6 +16,61 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.1.2] — 2026-06-28
+
+**Phase 1.2 — custom authz helpers + the IDOR/authz decoupling.** Coverage
+expansion and a model correction within Phase 1 (stays in the `0.1.x` band;
+`0.2.0` is reserved for Phase 2 — see [VERSIONING.md](VERSIONING.md)).
+
+### Added — Phase 1.2: project authz helper registry
+
+- **codefit learns a project's own authorization helpers.** It knew only
+  NextAuth-style names (`getServerSession`, `auth`, …), so every project with a
+  custom helper (`requirePermission`, `getAuthenticatedUserSalonId`, …) hit a
+  false-negative: `known_authz_detected: false` on handlers that ARE checked. Now
+  the **agent reasons** which functions are the project's authz helpers, a
+  **human approves**, and codefit **persists** the helper in the committed
+  `.codefit-baseline` and recognizes it on later scans — without the agent
+  re-reasoning. The fix is neither a config list (rots) nor a heuristic
+  (name-fragile, ADR 0005) but human-approved project knowledge (ADR 0013).
+- **New tools** `codefit-baseline-register-authz-helper` and
+  `codefit-baseline-unregister-authz-helper` (`{root, language, helper_name,
+  reason}`; reason mandatory, recorded `by: "human"`), with the registered helpers
+  surfaced read-only in `codefit-baseline-list`. **Safeguard:** registering
+  silences the authz gap on EVERY item that calls the helper (far more reach than
+  accepting one item), so it is a human decision — the agent proposes, never
+  registers on its own (ADR 0011). The `codefit-surface-*` file-level tools keep
+  the built-in set; the registry applies to the project-scan tools.
+
+### Changed — Phase 1.2
+
+- **IDOR is decoupled from authz (a model correction, ADR 0006 amended).** The
+  endpoint classifier cleared BOTH the authz and the IDOR access gap on
+  `known_authz_detected=true`, conflating two questions: **authz** asks "is the
+  caller *permitted*?" (a known helper answers it), **IDOR** asks "does the caller
+  *own this resource*?" — which codefit cannot verify from structure. An IDOR with
+  a local access now stays **actionable** even when an authz helper is present;
+  `known_authz_detected` gates only the authz gap. This fixes a **latent bug** that
+  affected built-in helpers too (`getServerSession` on an IDOR was wrongly cleared)
+  — a false `resolved_clean` on an unverified IDOR is worse than an honest
+  `actionable` (ADR 0005). This is also what makes the helper registry safe: a
+  registered helper clears the authz gap, never the IDOR/ownership one.
+- **codefit's skill is more imperative.** It now states plainly that to audit you
+  MUST call `codefit-scan-all` first and must not audit by reading files manually —
+  density of signal, same length, so even a small model triggers the tool instead
+  of hand-auditing. It also teaches the human-approved helper registration.
+- **`COVERAGE.md` / coverage manifest** updated: the recognized authz helper set is
+  now built-in **plus** project-registered; IDOR's actionability is independent of
+  authz presence.
+
+### Notes
+
+- Validated on a real Next.js app (salonpro): registering its two helpers flips
+  **+119 authz items** to recognized and moves **22 endpoints** to `resolved_clean`,
+  while keeping all **89 IDOR items** guarded by the helper **actionable** — under
+  the previous (buggy) model those 89 would have been silenced. Not one real IDOR
+  was hidden.
+
 ## [0.1.1] — 2026-06-28
 
 **Phase 1.1 — Next.js Server Actions surface.** Coverage expansion within Phase 1
