@@ -55,31 +55,50 @@ var authzHelperSet = func() map[string]bool {
 var idSuffix = regexp.MustCompile(`Id$`)
 
 func (idorQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
-	if root == nil || !isNextRouteFile(file) {
+	if root == nil {
 		return nil
 	}
 	var out []findings.SurfaceItem
-	walkTS(root, func(n syntax.Node) {
-		if n.Type() != "export_statement" {
-			return
+	for _, h := range auditTargets(root, file) {
+		if item, ok := idorItem(h, file); ok {
+			out = append(out, item)
 		}
-		for _, h := range handlersIn(n) {
-			if item, ok := idorItem(h, file); ok {
-				out = append(out, item)
-			}
-		}
-	})
+	}
 	return out
 }
 
-// tsHandler is an exported route handler: its HTTP method, its body subtree (the
-// only scope the signals are searched in — searching wider would let authz in a
-// called helper masquerade as authz in the handler), and its location.
+// tsHandler is an auditable entry point — a Next.js route handler OR a Server
+// Action. kind distinguishes them ("route" | "action"); the downstream mold
+// (Prisma detection, the authz-helper signal, the frontier to the agent) is
+// shared. method holds the HTTP verb for a route handler and the function name
+// for a Server Action; params is the formal_parameters node (Server Actions only
+// — their client input is the arguments, not req.params/query). body is the only
+// scope the signals are searched in — searching wider would let authz in a called
+// helper masquerade as authz in the entry.
 type tsHandler struct {
+	kind    string
 	method  string
+	params  syntax.Node
 	body    syntax.Node
 	line    int
 	snippet string
+}
+
+// auditTargets returns every auditable entry in this file: Next.js route handlers
+// (HTTP-method exports under app/**/route.ts) AND Next.js Server Actions ("use
+// server", detected by shape, in any file). Route handlers and Server Actions
+// feed the same per-category item builders; only discovery and the id-input mold
+// differ (ADR 0005 — enumerate by shape, never by filename).
+func auditTargets(root syntax.Node, file string) []tsHandler {
+	var out []tsHandler
+	if isNextRouteFile(file) {
+		walkTS(root, func(n syntax.Node) {
+			if n.Type() == "export_statement" {
+				out = append(out, handlersIn(n)...)
+			}
+		})
+	}
+	return append(out, serverActionsIn(root)...)
 }
 
 // handlersIn extracts the route handlers declared by an export_statement, in
@@ -95,7 +114,7 @@ func handlersIn(exp syntax.Node) []tsHandler {
 			name := field(child, "name", 0)
 			if name != nil && httpMethods[string(name.Text())] {
 				if body := bodyBlock(child); body != nil {
-					out = append(out, tsHandler{method: string(name.Text()), body: body, line: line, snippet: snippet})
+					out = append(out, tsHandler{kind: "route", method: string(name.Text()), body: body, line: line, snippet: snippet})
 				}
 			}
 		case "lexical_declaration", "variable_declaration":
@@ -111,7 +130,7 @@ func handlersIn(exp syntax.Node) []tsHandler {
 				}
 				if val.Type() == "arrow_function" || val.Type() == "function_expression" {
 					if body := bodyBlock(val); body != nil {
-						out = append(out, tsHandler{method: string(name.Text()), body: body, line: line, snippet: snippet})
+						out = append(out, tsHandler{kind: "route", method: string(name.Text()), body: body, line: line, snippet: snippet})
 					}
 				}
 			}
@@ -128,7 +147,7 @@ func handlersIn(exp syntax.Node) []tsHandler {
 // the agent with an honest signal). An id that is read but goes nowhere is not
 // surface.
 func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
-	idInputs, idVars := collectIDInputs(h.body)
+	idInputs, idVars := collectInputs(h)
 	accesses := dedupe(collectPrismaAccesses(h.body))
 	indirect := collectIndirectUses(h.body, idVars)
 	if len(idInputs) == 0 || (len(accesses) == 0 && len(indirect) == 0) {
@@ -153,6 +172,11 @@ func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
 			// in the body. False on an id→resource handler is the actionable access
 			// gap. Shared with authz so the synthesis classifies the gap as a fact.
 			"known_authz_detected": len(authz) > 0,
+			// server_action: a structural fact (not a judgment) — this entry is a
+			// Next.js Server Action ("use server"), not a route handler. It lets the
+			// agent weigh the heightened risk (actions are POST endpoints devs often
+			// do not treat as endpoints) and the baseline filter by entry kind.
+			"server_action": h.kind == "action",
 		},
 		ReasonToReview: "Does this handler verify that the authenticated caller is allowed to access " +
 			"the specific resource named by the incoming identifier, before reading or modifying it?",
@@ -173,6 +197,18 @@ func accessSignal(accesses, indirect []string) string {
 		"codefit does not follow calls across functions, so this resource access is NOT verified here — " +
 		"it runs in a service/repository layer. Follow the identifier there to determine whether ownership " +
 		"is checked before the resource is read or modified."
+}
+
+// collectInputs returns the client-controlled identifier inputs (signals) and the
+// local variable names bound to them (idVars), dispatching on the entry kind: a
+// route handler reads them from the request (params/query/body idioms), a Server
+// Action receives them as its arguments (or a FormData). The two molds differ
+// only in where the input enters; the downstream access/authz logic is shared.
+func collectInputs(h tsHandler) (signals []string, idVars map[string]bool) {
+	if h.kind == "action" {
+		return collectActionInputs(h)
+	}
+	return collectIDInputs(h.body)
 }
 
 // collectIDInputs records the client-controlled identifier inputs present in the
@@ -530,9 +566,9 @@ func collectAuthzCalls(body syntax.Node) []string {
 // that none was — with the searched set declared. Never a judgment.
 func authzSignal(found []string) string {
 	if len(found) > 0 {
-		return "An authorization helper call was detected in the handler body: " + strings.Join(found, ", ")
+		return "An authorization helper call was detected in the body: " + strings.Join(found, ", ")
 	}
-	return "No call to a known authorization helper was detected in the handler body (searched: " +
+	return "No call to a known authorization helper was detected in the body (searched: " +
 		strings.Join(authzHelpers, ", ") + ")"
 }
 

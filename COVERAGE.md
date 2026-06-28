@@ -39,33 +39,45 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 ### Reasoning — codefit maps surface, the agent judges
 
-- **IDOR.** Next.js App Router handlers that receive a client-controlled
-  identifier (route param, query string, or request body) and reach a resource —
-  mapped so the agent verifies ownership is checked. codefit enumerates the
-  id-input idioms and the local Prisma access; when the id leaves the handler body
-  (passed to a service/repository), it is still enumerated with an honest "the
-  access may be indirect" signal and the agent follows the data. **Known limit:**
-  an id reached only after several revalidation steps may not be linked to its
-  access — that deeper data-follow is the agent's. id-input is matched by
-  structure, not by name, so a filter query param (`date`, `limit`) may be
-  over-enumerated; the signal names the key so the agent dismisses it at a glance —
-  accepted to avoid a name-based blind spot for non-standard id names.
-- **Broken authorization.** Handlers that perform a sensitive operation — touch
-  data or mutate state (a Prisma read/write, or an indirect service call) — mapped
-  with a signal stating the operation and whether a known authz helper was detected
-  in the body. Broader than IDOR (needs no client id), so it enumerates more
-  handlers. Matched by the structural operation, **never by route name** (a path
-  without `admin` may still need authorization). The queryable fact
-  `known_authz_detected=false` means "no known authz pattern was detected here",
-  **never** "this is unauthorized".
-- **Over-fetching.** Points where a domain object is serialized to the response
-  (`Response.json` / `NextResponse.json` / `JSON.stringify`) from a Prisma find —
-  mapped with the fact `field_limiting_detected` (a `select`/`omit` clause present
-  or not). codefit does **not** judge whether the exposed fields are sensitive —
-  it doesn't know `passwordHash` is sensitive and `name` is not; that needs the
-  schema and is the agent's. Serialization through a service is the frontier
-  (codefit can't see the field selection). Matched by the serialization, never by
-  model name.
+- **IDOR.** Next.js App Router **route handlers AND Server Actions** (`"use
+  server"`) that receive a client-controlled identifier and reach a resource —
+  mapped so the agent verifies ownership is checked. For a route handler the
+  id-input is read from the request (route param, query string, request body); for
+  a **Server Action** it arrives as the function's **arguments** (or a `FormData`),
+  because an action is a POST endpoint whose input *is* its arguments. Server
+  Actions are detected **by shape** — an async function under a `"use server"`
+  directive at file level (every exported async function) or at function level (an
+  inline action in a Server Component, or a non-exported one) — **never by
+  filename**, so an action in `actions.ts`, `lib/`, or inline is not a blind spot.
+  An **object-shaped argument** is covered: the parameter binding is the id-var, so
+  a nested `data.id` flows to the access. When the id leaves the body (passed to a
+  service/repository), it is still enumerated with an honest "the access may be
+  indirect" signal and the agent follows the data. **Known limit:** an id reached
+  only after several revalidation steps may not be linked to its access — the
+  agent's. id-input is matched by structure, not by name, so a filter query param
+  or a non-id action argument (`date`, `limit`) may be over-enumerated; the signal
+  names what it read so the agent dismisses it at a glance. Facts:
+  `local_access_detected` and `server_action` (true = the entry is a Server Action).
+- **Broken authorization.** Route handlers **and Server Actions** that perform a
+  sensitive operation — touch data or mutate state (a Prisma read/write, or an
+  indirect service call) — mapped with a signal stating the operation and whether a
+  known authz helper was detected in the body. Broader than IDOR (needs no client
+  id), so it enumerates more entries — and a **Server Action that mutates with no
+  detected authz helper** is exactly the case worth surfacing (actions are POST
+  endpoints devs often don't guard like endpoints). Matched by the structural
+  operation, **never by route name** (a path without `admin` may still need
+  authorization). The queryable fact `known_authz_detected=false` means "no known
+  authz pattern was detected here", **never** "this is unauthorized".
+- **Over-fetching.** Points where a domain object is serialized from a Prisma find
+  — for a route handler the sink is an explicit `Response.json` /
+  `NextResponse.json` / `JSON.stringify`; for a **Server Action** it is the
+  **return value**, which the framework serializes to the client (an action has no
+  `Response.json`). Mapped with the fact `field_limiting_detected` (a
+  `select`/`omit` clause present or not). codefit does **not** judge whether the
+  exposed fields are sensitive — it doesn't know `passwordHash` is sensitive and
+  `name` is not; that needs the schema and is the agent's. Serialization through a
+  service is the frontier (codefit can't see the field selection). Matched by the
+  serialization, never by model name.
 
 ### Not covered (declared, not silent)
 
@@ -74,6 +86,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - Business-logic correctness (not a security property).
 - Deep static taint analysis — covered by surface mapping + agent reasoning, not
   deterministically.
+- **Non-Next.js JS frameworks.** The TypeScript surface is **Next.js-specific**
+  (App Router route handlers + Server Actions). Express, Fastify, NestJS and other
+  JS server frameworks are **not yet covered** — a known gap, not a silent one.
+- **Inline FormData → service frontier.** A Server Action input read inline as
+  `formData.get('key')` and passed **directly** into a service call (no
+  intermediate variable, no local Prisma access) may not link to that indirect
+  access; bound to a variable first, it links. The local-access case always
+  enumerates.
 
 ## Go
 
