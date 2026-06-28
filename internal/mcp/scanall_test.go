@@ -103,10 +103,14 @@ export async function POST(req: Request) {
 // checked — distinct from a frontier "could not conclude".
 func TestHandleScanAll_ResolvedCleanBucket(t *testing.T) {
 	root := t.TempDir()
-	mustWrite(t, root, "app/users/[id]/route.ts", `
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+	// A sensitive handler with NO client identifier (so no IDOR/ownership question),
+	// authz present, and a field-limited serialization → both the authz and the
+	// over-fetch controls are answered, no gap → resolved_clean. An IDOR endpoint
+	// could not be resolved_clean: ownership is unverifiable from structure.
+	mustWrite(t, root, "app/stats/route.ts", `
+export async function GET() {
   const session = await getServerSession();
-  return Response.json(await prisma.user.findUnique({ where: { id: params.id }, select: { id: true, name: true } }));
+  return Response.json(await prisma.stats.findMany({ select: { count: true } }));
 }`)
 
 	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})

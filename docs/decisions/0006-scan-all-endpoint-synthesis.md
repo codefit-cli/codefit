@@ -9,6 +9,21 @@
 > three-bucket summary (actionable / resolved_clean / frontier_pending), with the
 > named endpoints' detail fetched on demand via `codefit-scan-endpoint`. See ADR 0008.
 
+> **Amended (2026-06-28): IDOR and authz are decoupled gaps.** The original
+> `surfaceGap` cleared BOTH the authz and the IDOR access gap on
+> `known_authz_detected=true` — treating a present authz helper as resolving both
+> questions. This was wrong: **authz** asks "is the caller *permitted*?" (a known
+> helper answers it), but **IDOR** asks "does the caller *own this specific
+> resource*?", which codefit cannot verify from structure (it sees the local
+> access, not whether the where-clause is owner-scoped). A present authz helper
+> proves authentication/permission, **not** ownership. So an IDOR with a local
+> access now stays **actionable** even when an authz helper is present —
+> `known_authz_detected` gates only the **authz** gap, never the IDOR gap. A false
+> "resolved_clean" on an unverified IDOR is worse than an honest "actionable"
+> (ADR 0005: report a fact, never a clean verdict codefit cannot prove). This is
+> the foundation [ADR 0013](0013-custom-authz-helper-registry.md) (custom helper
+> registry) rests on: registering a helper clears the authz gap, never the IDOR one.
+
 ## Context
 
 Running the three surface categories (IDOR, authz, over-fetching) over a real

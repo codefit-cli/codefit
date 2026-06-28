@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
@@ -14,7 +15,7 @@ import (
 // follow the data from the id to the where clause — that is the agent's job. It
 // enumerates by structural PRESENCE, accepting over-enumeration; completeness
 // beats noise (PRD §10, ADR 0004). It implements surface.Query.
-type idorQuery struct{}
+type idorQuery struct{ recognized map[string]bool }
 
 // httpMethods are the Next App Router route handler exports.
 var httpMethods = map[string]bool{
@@ -54,13 +55,13 @@ var authzHelperSet = func() map[string]bool {
 
 var idSuffix = regexp.MustCompile(`Id$`)
 
-func (idorQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
+func (q idorQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceItem {
 	if root == nil {
 		return nil
 	}
 	var out []findings.SurfaceItem
 	for _, h := range auditTargets(root, file) {
-		if item, ok := idorItem(h, file); ok {
+		if item, ok := idorItem(h, file, q.recognized); ok {
 			out = append(out, item)
 		}
 	}
@@ -146,19 +147,19 @@ func handlersIn(exp syntax.Node) []tsHandler {
 // enumerated) OR the id leaves the body as a call argument (INFINITE, handed to
 // the agent with an honest signal). An id that is read but goes nowhere is not
 // surface.
-func idorItem(h tsHandler, file string) (findings.SurfaceItem, bool) {
+func idorItem(h tsHandler, file string, recognized map[string]bool) (findings.SurfaceItem, bool) {
 	idInputs, idVars := collectInputs(h)
 	accesses := dedupe(collectPrismaAccesses(h.body))
 	indirect := collectIndirectUses(h.body, idVars)
 	if len(idInputs) == 0 || (len(accesses) == 0 && len(indirect) == 0) {
 		return findings.SurfaceItem{}, false
 	}
-	authz := dedupe(collectAuthzCalls(h.body))
+	authz := dedupe(collectAuthzCalls(h.body, recognized))
 
 	signals := []string{
 		"Receives a client-controlled identifier: " + strings.Join(idInputs, "; "),
 		accessSignal(accesses, indirect),
-		authzSignal(authz),
+		authzSignal(authz, recognized),
 	}
 	return findings.SurfaceItem{
 		Category:          "idor",
@@ -536,7 +537,7 @@ func collectPrismaAccesses(body syntax.Node) []string {
 // collectAuthzCalls records calls to KNOWN authz helpers found in the body. It
 // searches the body only — a helper called from the body that itself calls
 // getServerSession is NOT followed, so it is honestly reported as not detected.
-func collectAuthzCalls(body syntax.Node) []string {
+func collectAuthzCalls(body syntax.Node, recognized map[string]bool) []string {
 	var out []string
 	walkTS(body, func(n syntax.Node) {
 		if n.Type() != "call_expression" {
@@ -555,7 +556,8 @@ func collectAuthzCalls(body syntax.Node) []string {
 				name = string(prop.Text())
 			}
 		}
-		if authzHelperSet[name] {
+		// Built-in (NextAuth-style) OR a helper the project registered (ADR 0013).
+		if authzHelperSet[name] || recognized[name] {
 			out = append(out, name)
 		}
 	})
@@ -563,13 +565,40 @@ func collectAuthzCalls(body syntax.Node) []string {
 }
 
 // authzSignal phrases the authz fact: either which known helper was detected, or
-// that none was — with the searched set declared. Never a judgment.
-func authzSignal(found []string) string {
+// that none was — with the searched set declared. A project-registered helper is
+// labelled as such (traceability: the agent/human sees WHY codefit now recognizes
+// it). Never a judgment.
+func authzSignal(found []string, recognized map[string]bool) string {
 	if len(found) > 0 {
-		return "An authorization helper call was detected in the body: " + strings.Join(found, ", ")
+		labelled := make([]string, len(found))
+		for i, n := range found {
+			if recognized[n] && !authzHelperSet[n] {
+				labelled[i] = n + " (registered for this project)"
+			} else {
+				labelled[i] = n
+			}
+		}
+		return "An authorization helper call was detected in the body: " + strings.Join(labelled, ", ")
+	}
+	searched := authzHelpers
+	if extra := registeredOnly(recognized); len(extra) > 0 {
+		searched = append(append([]string{}, authzHelpers...), extra...)
 	}
 	return "No call to a known authorization helper was detected in the body (searched: " +
-		strings.Join(authzHelpers, ", ") + ")"
+		strings.Join(searched, ", ") + ")"
+}
+
+// registeredOnly returns the recognized helper names that are NOT built-in, sorted
+// for a stable signal.
+func registeredOnly(recognized map[string]bool) []string {
+	var out []string
+	for n := range recognized {
+		if !authzHelperSet[n] {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // --- small AST helpers ---

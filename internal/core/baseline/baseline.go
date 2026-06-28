@@ -45,10 +45,27 @@ type Item struct {
 	Ack      *Ack   `yaml:"acknowledged,omitempty"`
 }
 
-// Baseline is the committed set of known items.
+// AuthzHelper is a project-specific authorization helper the AGENT identified by
+// reasoning over the code and a HUMAN approved registering — so codefit recognizes
+// it on later scans without the agent re-reasoning (it augments the built-in
+// NextAuth-style set per project). It is project knowledge, like an acknowledged
+// item: persisted, committed, recorded by:"human". Registering a helper changes a
+// FACT (known_authz_detected for the authz concern), never a verdict — it clears
+// the AUTHZ gap, never the IDOR/ownership gap (ADR 0013, ADR 0006 amended).
+type AuthzHelper struct {
+	Name     string `yaml:"name"`
+	Language string `yaml:"language"`
+	Reason   string `yaml:"reason"`
+	At       string `yaml:"at"`
+	By       string `yaml:"by"` // always "human": codefit never registers on its own
+}
+
+// Baseline is the committed set of known items plus the project's registered authz
+// helpers.
 type Baseline struct {
-	Version string `yaml:"version"`
-	Items   []Item `yaml:"items"`
+	Version      string        `yaml:"version"`
+	Items        []Item        `yaml:"items"`
+	AuthzHelpers []AuthzHelper `yaml:"authz_helpers,omitempty"`
 }
 
 // Observed is one item seen in the current scan. Affirms is true for a
@@ -158,7 +175,9 @@ func Diff(prev *Baseline, observed []Observed) DiffResult {
 		observedFP[o.FP] = true
 	}
 
-	res := DiffResult{State: map[string]State{}, Shown: map[string]bool{}, Next: &Baseline{Version: "1"}}
+	// Next carries forward the registered authz helpers: they are project knowledge,
+	// not per-scan observations, so a scan must never drop them.
+	res := DiffResult{State: map[string]State{}, Shown: map[string]bool{}, Next: &Baseline{Version: "1", AuthzHelpers: prev.AuthzHelpers}}
 
 	// Gone = previous items not observed now (prune candidates). Index them by
 	// (file, category) so a new item at the same spot can be paired as "changed".
@@ -311,6 +330,65 @@ func truncateReason(s string) string {
 		return s
 	}
 	return string(r[:maxReasonLen]) + "…"
+}
+
+// RegisterAuthzHelper records a project-specific authz helper as recognized,
+// by:"human". A name, language, and reason are mandatory (the reason is the
+// human's justification, as for Accept). Idempotent: registering an already-known
+// (language, name) is a no-op that returns added=false. codefit never registers on
+// its own — the agent proposes, the human decides (the skill enforces it; codefit
+// records the decision).
+func (b *Baseline) RegisterAuthzHelper(name, language, reason, at string) (added bool, err error) {
+	name = strings.TrimSpace(name)
+	language = strings.TrimSpace(language)
+	reason = strings.TrimSpace(reason)
+	if name == "" {
+		return false, fmt.Errorf("register requires a helper name")
+	}
+	if language == "" {
+		return false, fmt.Errorf("register requires a language")
+	}
+	if reason == "" {
+		return false, fmt.Errorf("register requires a reason (a human's justification)")
+	}
+	for _, h := range b.AuthzHelpers {
+		if h.Language == language && h.Name == name {
+			return false, nil // already recognized — idempotent
+		}
+	}
+	b.AuthzHelpers = append(b.AuthzHelpers, AuthzHelper{Name: name, Language: language, Reason: reason, At: at, By: "human"})
+	return true, nil
+}
+
+// UnregisterAuthzHelper removes a registered helper (the reversal of
+// RegisterAuthzHelper — the developer's decision is always reversible). Returns
+// whether a helper was removed.
+func (b *Baseline) UnregisterAuthzHelper(name, language string) bool {
+	name = strings.TrimSpace(name)
+	language = strings.TrimSpace(language)
+	kept := b.AuthzHelpers[:0]
+	removed := false
+	for _, h := range b.AuthzHelpers {
+		if h.Name == name && h.Language == language {
+			removed = true
+			continue
+		}
+		kept = append(kept, h)
+	}
+	b.AuthzHelpers = kept
+	return removed
+}
+
+// RecognizedAuthzHelpers returns the names of the helpers registered for a
+// language — the set a scan adds to the built-in authz helpers for that project.
+func (b *Baseline) RecognizedAuthzHelpers(language string) []string {
+	var out []string
+	for _, h := range b.AuthzHelpers {
+		if h.Language == language {
+			out = append(out, h.Name)
+		}
+	}
+	return out
 }
 
 // Prune removes the given fingerprints from the baseline (used for gone items the

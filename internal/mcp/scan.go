@@ -33,7 +33,7 @@ type ScanResponse struct {
 // sensor (the deterministic rules + the surface queries, already wired there),
 // and returns its result — no detection logic lives here.
 func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
-	res, err := runSecurity(req.Root, req.Language)
+	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language))
 	if err != nil {
 		return ScanResponse{}, err
 	}
@@ -45,10 +45,11 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 	}, nil
 }
 
-// runSecurity resolves the provider and runs the security sensor over the project
-// root — the shared body of codefit-scan-security and codefit-scan-all.
-func runSecurity(root, language string) (findings.SensorResult, error) {
-	provider := providerForLanguage(language)
+// runSecurity resolves the provider (recognizing the project's registered authz
+// helpers) and runs the security sensor over the project root — the shared body of
+// codefit-scan-security, -scan-all, and -scan-endpoint.
+func runSecurity(root, language string, helpers []string) (findings.SensorResult, error) {
+	provider := providerForLanguage(language, helpers)
 	if provider == nil {
 		return findings.SensorResult{}, fmt.Errorf("unsupported language %q", language)
 	}
@@ -81,7 +82,7 @@ type CoverageResponse struct {
 // HandleCoverage returns the coverage manifest for the language. Thin adapter:
 // the manifest is the provider's single source of truth.
 func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
-	p := providerForLanguage(req.Language)
+	p := providerForLanguage(req.Language, nil)
 	if cm, ok := p.(interface {
 		CoverageManifest() coverage.Manifest
 	}); ok {

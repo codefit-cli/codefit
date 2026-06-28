@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/codefit-cli/codefit/internal/core/baseline"
 	"github.com/codefit-cli/codefit/internal/core/report"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
@@ -80,7 +81,16 @@ type ScanAllSummary struct {
 // there), groups the result by endpoint, and partitions by the local-resolution
 // fact — it adds no detection, only the aggregation and the split.
 func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
-	res, err := runSecurity(req.Root, req.Language)
+	// Load the committed baseline ONCE: it provides both the project's registered
+	// authz helpers (recognized during the scan) and the previous items the delta
+	// is computed against (applyBaseline reuses this same load — no double read).
+	path := filepath.Join(req.Root, baseline.Name)
+	prev, err := baseline.Load(path)
+	if err != nil {
+		return ScanAllResponse{}, fmt.Errorf("loading baseline: %w", err)
+	}
+
+	res, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language))
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
@@ -91,10 +101,10 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 		certain += ep.CertainConcerns
 	}
 
-	// Baseline layer (ADR/RF-08): read the committed baseline, record the delta,
+	// Baseline layer (ADR/RF-08): diff against the loaded baseline, record the delta,
 	// persist the updated baseline, and filter the view to what changed. Known
 	// surface is silenced; unaccepted deterministic affirmations always stay shown.
-	delta, shown, err := applyBaseline(req.Root, res, endpoints)
+	delta, shown, err := applyBaseline(prev, path, res, endpoints)
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
@@ -187,7 +197,7 @@ type ScanEndpointResponse struct {
 // analysis is cheap, and re-running the same pipeline guarantees the detail here is
 // identical to what scan-all would have shown for that endpoint (ADR 0008).
 func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
-	res, err := runSecurity(req.Root, req.Language)
+	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language))
 	if err != nil {
 		return ScanEndpointResponse{}, err
 	}
@@ -211,11 +221,13 @@ func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
 }
 
 // providerForLanguage resolves a provider by language name — the MCP adapter is
-// the single place that maps language → provider (the core never does).
-func providerForLanguage(lang string) providers.LanguageProvider {
+// the single place that maps language → provider (the core never does). The
+// project's registered authz helpers (from the baseline) are passed to the
+// provider so surface recognition reflects per-project knowledge (ADR 0013).
+func providerForLanguage(lang string, authzHelpers []string) providers.LanguageProvider {
 	switch lang {
 	case "typescript", "ts", "tsx":
-		return typescript.New()
+		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
 	default:
 		return nil
 	}

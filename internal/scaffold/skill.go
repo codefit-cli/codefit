@@ -22,8 +22,9 @@ description: Audit AI-generated code for security flaws agents miss — IDOR, br
 
 # codefit — audit AI-generated code
 
-codefit runs deterministic security analysis and maps the auditable surface of the
-code, then hands it back for you to reason over. It does NOT call an LLM — you do the
+To audit code you MUST call ` + "`codefit-scan-all`" + ` FIRST. Do NOT audit by reading files
+manually — codefit maps the surface (IDOR, broken authorization, over-fetching) and your
+job is to REASON over its output, not to replace it. It does NOT call an LLM — you do the
 reasoning. Drive it through its MCP tools.
 
 ## When to run
@@ -67,6 +68,19 @@ manages it and reports a delta — act on what's new:
   ` + "`codefit-scan-all`" + `, then call ` + "`codefit-baseline-prune`" + ` to drop them.
 Narrate every baseline operation to the human (what you accepted or pruned, and why).
 codefit never edits code — only its baseline.
+
+## Custom authz helpers (teach codefit your project's auth)
+codefit knows NextAuth-style helpers (` + "`getServerSession`" + `, ` + "`auth`" + `) but NOT your project's own
+(e.g. ` + "`requirePermission`" + `, ` + "`getCurrentUser`" + `). When many authz items show ` + "`known_authz_detected:\nfalse`" + ` yet they DO call a project auth function, reason about whether that function is a
+real authz helper, then PROPOSE registering it to the human ("N items call ` + "`X`" + `, which looks
+like your authz helper — register it?"). ONLY when the human approves, call
+` + "`codefit-baseline-register-authz-helper`" + ` (` + "`{root, language, helper_name, reason}`" + `); reverse with
+` + "`codefit-baseline-unregister-authz-helper`" + `. NEVER register a helper on your own — registering
+silences the authz gap on EVERY item that calls it (dozens at once), far more reach than
+accepting one. Registering changes a FACT ("this helper is present"), not a verdict: it
+clears the AUTHZ gap (permission), NOT the IDOR/ownership gap. An IDOR endpoint stays
+actionable — the helper proves "is the caller permitted?", never "does the caller own
+THIS resource?". Keep reviewing those.
 `))
 
 // RenderSkill renders codefit's SKILL.md for the detected project, baking in the

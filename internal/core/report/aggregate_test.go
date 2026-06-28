@@ -93,9 +93,11 @@ func TestAggregateOrdersByActionableGap(t *testing.T) {
 		{ID: "SEC-010", Dimension: "security", File: vulnFile, Line: 6, Title: "SQL injection", Confidence: 1.0},
 	}
 	surface := []findings.SurfaceItem{
-		// protected: authz checked, idor checked, over-fetch no select.
+		// protected: authz checked (permission answered), over-fetch no select (an
+		// exposure gap only). No IDOR concern — an IDOR with a local access is always
+		// an actionable access gap (ownership unverifiable), so it could not stand in
+		// for a "protected" endpoint under the corrected model.
 		surf("authz", protectedFile, 4, map[string]bool{"known_authz_detected": true, "local_access_detected": true}, "Handler GET accesses data via prisma.p.findMany"),
-		surf("idor", protectedFile, 4, map[string]bool{"known_authz_detected": true, "local_access_detected": true}, "reads id"),
 		surf("overfetch", protectedFile, 7, map[string]bool{"local_access_detected": true, "field_limiting_detected": false}, "serializes prisma.p"),
 		// unguarded: a sensitive handler with NO authz detected — the access gap.
 		surf("authz", unguardedFile, 4, map[string]bool{"known_authz_detected": false, "local_access_detected": true}, "Handler GET accesses data via prisma.u.findMany"),

@@ -58,6 +58,11 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   or a non-id action argument (`date`, `limit`) may be over-enumerated; the signal
   names what it read so the agent dismisses it at a glance. Facts:
   `local_access_detected` and `server_action` (true = the entry is a Server Action).
+  **IDOR is about ownership, not permission:** an IDOR with a local access stays
+  **actionable even when an authz helper is present** — a session/permission check
+  does not prove the caller owns *this* resource, which codefit cannot verify from
+  structure (ADR 0006 amended). `known_authz_detected` gates the authz concern, never
+  the IDOR one.
 - **Broken authorization.** Route handlers **and Server Actions** that perform a
   sensitive operation — touch data or mutate state (a Prisma read/write, or an
   indirect service call) — mapped with a signal stating the operation and whether a
@@ -67,7 +72,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   endpoints devs often don't guard like endpoints). Matched by the structural
   operation, **never by route name** (a path without `admin` may still need
   authorization). The queryable fact `known_authz_detected=false` means "no known
-  authz pattern was detected here", **never** "this is unauthorized".
+  authz pattern was detected here", **never** "this is unauthorized". The recognized
+  helper set is **built-in (NextAuth-style) PLUS the project's own helpers**: the
+  agent identifies a custom helper (`requirePermission`, `getCurrentUser`, …) by
+  reasoning over the code, a human approves, and codefit persists it in the committed
+  baseline (`codefit-baseline-register-authz-helper`) and recognizes it on later scans
+  without re-reasoning (ADR 0013). Registering clears the **authz** gap, never the
+  **IDOR/ownership** one.
 - **Over-fetching.** Points where a domain object is serialized from a Prisma find
   — for a route handler the sink is an explicit `Response.json` /
   `NextResponse.json` / `JSON.stringify`; for a **Server Action** it is the
