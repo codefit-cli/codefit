@@ -110,8 +110,51 @@ See the [PRD](docs/PRD-codefit-v1.4.md) §25 and [VERSIONING.md](VERSIONING.md).
 
 ## Install
 
+Two ways to install. **Option A (the release binary) is recommended** — it reports the
+correct version and needs no Go toolchain.
+
+### Option A — download the release binary (recommended)
+
+Grab the archive for your platform from the
+[latest release](https://github.com/codefit-cli/codefit/releases/latest). This is the
+tagged build, so `codefit version` reports the real version, and it needs no Go.
+
+**Linux / macOS** (pick your target: `linux_amd64`, `linux_arm64`, `darwin_arm64`):
+
 ```bash
-go install github.com/codefit-cli/codefit/cmd/codefit@latest   # Go 1.25+
+tar -xzf codefit_0.1.0_linux_amd64.tar.gz
+sudo mv codefit /usr/local/bin/        # a directory on your PATH
+chmod +x /usr/local/bin/codefit
+```
+
+**Windows** (`windows_amd64`): download `codefit_0.1.0_windows_amd64.zip`, extract it,
+and put `codefit.exe` in a stable folder (e.g. `C:\tools\codefit\`). Optionally add
+that folder to your `PATH`.
+
+Verify the download against `checksums.txt` from the release —
+`sha256sum -c checksums.txt` (Linux), `shasum -a 256 -c checksums.txt` (macOS), or
+`Get-FileHash codefit_0.1.0_windows_amd64.zip -Algorithm SHA256` (Windows PowerShell).
+
+### Option B — `go install` (needs Go 1.25+)
+
+```bash
+go install github.com/codefit-cli/codefit/cmd/codefit@latest
+```
+
+Heads up: this reports its version as `0.1.0-dev (commit none, built unknown)` because
+`go install` does not embed release metadata — the version is injected by ldflags only
+in the release build (GoReleaser) and in `make build`. The binary is **functionally
+identical** to the release. For the tagged version, download from
+[Releases](https://github.com/codefit-cli/codefit/releases/latest) or build from a
+checkout with `make build`.
+
+### Verify the install
+
+```bash
+codefit version
+# example output — your commit and date will differ:
+# release binary →  codefit 0.1.0 (commit <commit>, built <date>)
+# go install     →  codefit 0.1.0-dev (commit none, built unknown)
 ```
 
 A single static binary, no runtime dependencies (`CGO_ENABLED=0`), cross-compiling
@@ -138,36 +181,99 @@ codefit never touches your code.
 
 ## Connect codefit
 
-Register codefit as a local (stdio) MCP server. Use the **absolute path** to the
-binary if it is not on the agent process's `PATH`. codefit is stateless — the
-project root is passed per call as the `root` tool argument, so the server needs no
+Register codefit as a local (stdio) MCP server. The config blocks need the **absolute
+path** to the binary unless it is on the agent process's `PATH`. codefit is stateless —
+the project root is passed per call as the `root` tool argument, so the server needs no
 `cwd`.
 
+### Finding the binary path
+
+**Linux / macOS:**
+
+```bash
+which codefit                        # if it's on your PATH
+echo "$(go env GOPATH)/bin/codefit"  # if you used `go install`
+```
+
+**Windows (PowerShell):**
+
+```powershell
+where.exe codefit                    # if it's on your PATH
+Write-Output "$(go env GOPATH)\bin\codefit.exe"   # if you used `go install`
+```
+
+With the release binary, the path is wherever you placed it (e.g.
+`C:\tools\codefit\codefit.exe`).
+
+> **Windows path gotcha (this is the one that bites):** in JSON (`.mcp.json`,
+> `opencode.json`) a Windows path must use **double backslashes**
+> (`"C:\\Users\\you\\go\\bin\\codefit.exe"`) or **forward slashes**
+> (`"C:/Users/you/go/bin/codefit.exe"`). A single backslash is an invalid JSON escape
+> and silently breaks the config. The same applies to TOML basic strings (Codex), or
+> use a single-quoted literal string there: `'C:\Users\you\go\bin\codefit.exe'`.
+
+In every Windows example below, **replace `you` with your Windows username** and point
+the path at wherever codefit actually lives.
+
 **Claude Code** — `.mcp.json` (project) or `claude mcp add`:
+
+Linux / macOS:
 
 ```json
 {
   "mcpServers": {
-    "codefit": { "command": "/absolute/path/to/codefit", "args": ["mcp", "serve"] }
+    "codefit": { "type": "stdio", "command": "/usr/local/bin/codefit", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+Windows:
+
+```json
+{
+  "mcpServers": {
+    "codefit": { "type": "stdio", "command": "C:\\Users\\you\\go\\bin\\codefit.exe", "args": ["mcp", "serve"] }
   }
 }
 ```
 
 **OpenCode** — `opencode.json`:
 
+Linux / macOS:
+
 ```json
 {
   "mcp": {
-    "codefit": { "type": "local", "command": ["/absolute/path/to/codefit", "mcp", "serve"], "enabled": true }
+    "codefit": { "type": "local", "command": ["/usr/local/bin/codefit", "mcp", "serve"], "enabled": true }
+  }
+}
+```
+
+Windows:
+
+```json
+{
+  "mcp": {
+    "codefit": { "type": "local", "command": ["C:\\Users\\you\\go\\bin\\codefit.exe", "mcp", "serve"], "enabled": true }
   }
 }
 ```
 
 **Codex** — `~/.codex/config.toml`:
 
+Linux / macOS:
+
 ```toml
 [mcp_servers.codefit]
-command = "/absolute/path/to/codefit"
+command = "/usr/local/bin/codefit"
+args = ["mcp", "serve"]
+```
+
+Windows (single-quoted literal string — no backslash escaping needed):
+
+```toml
+[mcp_servers.codefit]
+command = 'C:\Users\you\go\bin\codefit.exe'
 args = ["mcp", "serve"]
 ```
 
