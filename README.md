@@ -130,6 +130,11 @@ Concretely, on `main` — so you know exactly what to expect without reading
   or name. When a handler reaches a resource through a service in another file,
   codefit flags it (`indirect_access`) and names the call — it does not follow it
   across files; the agent does.
+- **Dependency CVEs.** `codefit-check-cves` checks dependencies against
+  [OSV.dev](https://osv.dev) (free, no API key) using the **exact** versions from
+  `package-lock.json` / `go.mod` — never guessed from `package.json` ranges (no
+  lockfile → an honest note, not a guess). codefit keeps no vuln DB of its own and
+  surfaces OSV's severity rather than recomputing CVSS.
 - **Not covered (declared, not silent).** NestJS (routes via TypeScript decorators,
   not yet read) and other JS frameworks; deep taint analysis; business-logic
   correctness; architectural and race-condition classes. An Express/Fastify handler
@@ -322,6 +327,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | `codefit-scan-endpoint` | Full detail of one file on demand (to follow a `frontier_pending` endpoint). |
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
+| `codefit-check-cves` | Check the project's dependencies against OSV.dev (free, no API key). Reads exact versions from lockfiles / `go.mod`; reports the vulnerable deps with id, severity and fixed version. |
 
 **Baseline** — the project's audit memory (see below).
 

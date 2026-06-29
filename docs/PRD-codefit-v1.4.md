@@ -552,7 +552,7 @@ no debe confundir una stub con una tool usable.
 | `codefit-baseline-prune` | Baseline | ✅ Fase 1 | Saca del baseline los items que un refactor resolvió (re-escanea para confirmar que están `gone`) |
 | `codefit-coverage` | Metadata | ✅ Fase 1 | Devuelve el manifiesto de cobertura para el lenguaje |
 | `codefit-scan-db` | Determinístico | 🔲 Fase 2 | Estructura de DB (OLTP/OLAP, índices, vistas, procs) |
-| `codefit-check-cves` | Determinístico | 🔲 Fase (RF-09) | Consulta OSV.dev por las dependencias |
+| `codefit-check-cves` | Determinístico | ✅ Fase 1 (RF-09) | Consulta OSV.dev por las dependencias (versiones exactas de lockfile/go.mod) |
 | `codefit-check-practices` | Determinístico | 🔲 Fase 3 | Best practices del lenguaje |
 | `codefit-scan-tests` | Determinístico | 🔲 Fase 3 | Calidad de suite + riesgo de regresión |
 | `codefit-review-code` | Combinada | 🔲 Fase 3 | Code review: determinístico + superficie, razonado por el agente |
@@ -1365,10 +1365,10 @@ backend Next.js/Prisma. (`codefit update` es Fase 4, no Fase 1.)
 - ✅ **TypeScript `LanguageProvider`**: `gotreesitter` (puro Go), reglas formato-Semgrep, defaults de criticidad.
 - ✅ Sensor de seguridad: capa 1 (secretos), capa 2 (reglas + **mapeo de superficie** IDOR/authz/overfetch) con tres niveles de certeza.
 - ✅ Consentimiento explícito para critical security; `path_criticality` activo.
-- ✅ **MCP server funcional (SDK oficial, stdio)**: `codefit-scan-security`, `codefit-surface-idor/authz/overfetch`, `codefit-confirm-surface`, `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-coverage`.
+- ✅ **MCP server funcional (SDK oficial, stdio)**: `codefit-scan-security`, `codefit-surface-idor/authz/overfetch`, `codefit-confirm-surface`, `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-coverage`, `codefit-check-cves`.
 - ✅ **`codefit init`**: genera `.codefit.yaml` + la skill de codefit y la coloca para los agentes detectados (no toca el `AGENT.md`). Dogfoodeado en un backend real; trigger de la skill validado en ambos sentidos.
 - ✅ **Baseline (RF-08)**: `.codefit-baseline` commiteado, identidad por contenido, delta en `scan-all`, salvaguarda graduada por certeza, y `baseline-list`/`-accept`/`-prune` (ADR 0009–0012). Dogfoodeado sobre Bitácora.
-- ⏳ CVEs vía OSV.dev (RF-09): el cliente `core/cve` existe; la tool `codefit-check-cves` aún no se expone.
+- ✅ **CVEs vía OSV.dev (RF-09)**: `codefit-check-cves` lee versiones exactas de los lockfiles (`package-lock.json`) y `go.mod`, consulta OSV.dev (gratis, sin API key) y reporta las dependencias vulnerables con id, severidad (la que da OSV — codefit no recomputa CVSS), versión corregida y referencias. Sin lockfile no adivina: lo informa como nota. Validado contra OSV real (npm + Go).
 
 **Done cuando:** ✅ un agente (OpenCode/Claude Code) corre `codefit-scan-all`, recibe el resumen de tres buckets, sigue un `frontier_pending` con `codefit-scan-endpoint`, razona la superficie con su LLM, y el baseline permite adoptar un proyecto existente sin ruido (re-scan silencia lo `known`). Detecta ≥3 categorías de vulnerabilidades con cero falsos positivos en secretos. Corre sobre Go (self-audit) y TypeScript. **Fase 1 cerrada → se cuta `v0.1.0`.**
 

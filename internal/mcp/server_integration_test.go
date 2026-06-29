@@ -49,7 +49,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	for _, tool := range lt.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"codefit-scan-all", "codefit-surface-idor", "codefit-coverage", "codefit-confirm-surface"} {
+	for _, want := range []string{"codefit-scan-all", "codefit-surface-idor", "codefit-coverage", "codefit-confirm-surface", "codefit-check-cves"} {
 		if !names[want] {
 			t.Errorf("tool %q not advertised; got %v", want, names)
 		}

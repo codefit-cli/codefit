@@ -58,6 +58,9 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolCoverage),
 		"Return the coverage manifest for a language: what codefit audits deterministically vs reasons over surface vs does not cover. Input: {language}.",
 		HandleCoverage)
+	addTool(s, string(ToolCheckCVEs),
+		"Check the project's dependencies for known vulnerabilities via OSV.dev (free, no API key). Reads EXACT versions from lockfiles (package-lock.json) and go.mod — it does NOT resolve package.json ranges; a manifest present without its lockfile is reported as a note, never guessed. Input: {root}. Returns the vulnerable dependencies with each vulnerability's CVE/GHSA id, severity, fixed version and references.",
+		HandleCheckCVEs)
 
 	return s
 }

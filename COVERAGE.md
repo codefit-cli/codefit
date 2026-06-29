@@ -132,6 +132,44 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   access; bound to a variable first, it links. The local-access case always
   enumerates.
 
+## Dependency CVEs (OSV.dev)
+
+Cross-ecosystem, language-independent: `codefit-check-cves` reads the project's
+dependency manifests and queries [OSV.dev](https://osv.dev) (free, no API key,
+aggregating the GitHub Advisory Database, Go vuln DB, distro feeds and more) for
+known vulnerabilities affecting the exact installed versions. codefit keeps **no
+vulnerability database of its own** — the data is always fresh.
+
+### What it reads — EXACT versions only
+
+- **npm** — `package-lock.json` (lockfileVersion 1, 2, 3). The resolved, pinned
+  versions.
+- **Go** — `go.mod` (the `require` graph, direct + `// indirect`; Go pins exact
+  versions via MVS).
+
+It does **not** resolve the ranges in `package.json` (`^1.2.0`): a range is not a
+version, and OSV queries an exact version. When a manifest is present without its
+lockfile, codefit reports an **honest note** and checks nothing for that
+ecosystem — it never guesses an installed version.
+
+### What it reports
+
+Per vulnerable dependency: the OSV/GHSA/CVE id, a summary, the **severity as
+OSV reports it**, the first fixed version, and references.
+
+### Not covered (declared, not silent)
+
+- **codefit does not recompute the CVSS score.** It surfaces OSV's severity — the
+  GHSA label (`LOW`/`MODERATE`/`HIGH`/`CRITICAL`) when present, else the CVSS
+  vector string, else `UNKNOWN`. Computing a numeric base score from the vector is
+  out of scope.
+- **No lockfile → no check** for that ecosystem (reported as a note, never guessed).
+- **Only `package-lock.json` and `go.mod` at the project root.** yarn/pnpm
+  lockfiles and nested/monorepo manifests are not yet read.
+- A Go **`replace`** redirecting to another version is not applied (the required
+  version is reported); a pre-1.17 `go.mod` may under-list indirect deps (resolving
+  the full graph would need the Go toolchain at runtime).
+
 ## Go
 
 The Go provider audits codefit itself (self-audit in CI): static security
