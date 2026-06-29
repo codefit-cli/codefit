@@ -1,3 +1,5 @@
+![codefit](media/banner.webp)
+
 # codefit
 
 [![ci](https://github.com/codefit-cli/codefit/actions/workflows/ci.yml/badge.svg)](https://github.com/codefit-cli/codefit/actions/workflows/ci.yml)
