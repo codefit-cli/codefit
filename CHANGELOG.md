@@ -14,7 +14,57 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+**Phase 1.3 — Express & Fastify surface.** Coverage expansion within Phase 1
+(stays in the `0.1.x` band; `0.2.0` is reserved for Phase 2 — see
+[VERSIONING.md](VERSIONING.md)).
+
+### Added — Phase 1.3: non-Next.js framework surface
+
+- **codefit now maps the IDOR, broken-authorization, and over-fetching surface for
+  Express and Fastify**, alongside Next.js App Router route handlers and Server
+  Actions. The deterministic security rules already ran on any TypeScript file (no
+  framework gate); this slice extends the **surface mapping**, which was the only
+  Next.js-specific layer.
+- **Discovery is by shape, never by path** (ADR 0005). An Express
+  `router.<verb>('/path', …middleware, handler)` call and Fastify's options-object
+  form `.<verb>('/path', { handler, preHandler })` are recognized; a same-named
+  non-route call (`map.get('/k', v)`, `arr.get(0, cb)`) is rejected because a route
+  needs a **string-literal path AND an inline function**.
+- **Inputs and sinks are keyed off the handler's parameters, not hardcoded names.**
+  The client id-input is read from `req.params`/`query`/`body` (keyed off the
+  **first** parameter, so `request` works as well as `req`, and a non-standard route
+  param like `slug` is not a blind spot); the over-fetch sink is `.json()`/`.send()`
+  on the **second** parameter (`res`/`reply`).
+- **The authorization guard is read as route middleware**, not a body call —
+  Express positional middleware (`router.post('/x', auth.required, handler)`) and
+  Fastify `preHandler`/`onRequest` — so `known_authz_detected` reflects a guard
+  applied at the route, and the signal states honestly whether it looked in the body
+  or also the route middleware.
+- **Cross-file accesses are signalled, not followed (option C).** When a handler
+  reaches the resource through a service in another file (the common
+  controller→service split), codefit emits the queryable fact `indirect_access=true`
+  and names the callee in the new `indirect_call` field — it does **not** follow the
+  call across files; the agent reasons over the named function.
+
+### Changed — Phase 1.3
+
+- **`Frameworks()`** for the TypeScript provider now lists `fastify` and no longer
+  lists `nestjs` — codefit does not declare a framework it does not cover (NestJS
+  routes via decorators, not yet read).
+- **`COVERAGE.md` / coverage manifest** updated: Express and Fastify move from
+  *not covered* to the reasoning (surface) section with their honest limits; only
+  **NestJS** (and frameworks beyond it) remain declared as not covered. A new limit
+  is declared: an Express/Fastify handler passed by reference (not inline) is not
+  enumerated.
+
+### Notes
+
+- Validated against the real RealWorld Express + Prisma backend
+  (`gothinkster/node-express-prisma-v1-official-app`, vendored verbatim as a test
+  fixture): codefit surfaces both confirmed IDORs — `PUT` and `DELETE
+  /articles/:slug`, which reach the article by a client slug through a service with
+  no ownership check — as `indirect_access` items naming `updateArticle` /
+  `deleteArticle`.
 
 ## [0.1.2] — 2026-06-28
 

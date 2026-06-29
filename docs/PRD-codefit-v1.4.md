@@ -1254,7 +1254,7 @@ El versionado sigue SemVer con Fase→MINOR (ver sección 25 y `VERSIONING.md`).
 | Lenguaje | Fase / versión | Nota |
 |---|---|---|
 | **Go** | Fase 0 (`0.1.0`) | Provider de arranque: codefit se audita a sí mismo desde el primer commit |
-| TypeScript / React / Next | Fase 1 (`0.1.0`) | Primer target de producto completo |
+| TypeScript / React / Next / Express / Fastify | Fase 1 (`0.1.x`) | Primer target de producto completo; la superficie (IDOR/authz/over-fetching) cubre Next.js App Router + Server Actions, Express y Fastify (acceso cross-file señalado, no seguido — opción C). NestJS (rutas por decoradores) aún no |
 | Java / Spring | post-`1.0.0` (`1.1`) | Solo el provider; el núcleo no cambia |
 | Python / FastAPI / Django | post-`1.0.0` (`1.2`) | Idem |
 

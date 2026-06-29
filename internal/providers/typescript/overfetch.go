@@ -62,10 +62,48 @@ func serializationSink(h tsHandler, n syntax.Node) (syntax.Node, bool) {
 	if x, ok := serializationArg(n); ok {
 		return x, true
 	}
+	if h.framework == "express" || h.framework == "fastify" {
+		if x, ok := responseSinkArg(h, n); ok {
+			return x, true
+		}
+	}
 	if h.kind == "action" && n.Type() == "return_statement" && n.NamedChildCount() > 0 {
 		return n.NamedChild(0), true
 	}
 	return nil, false
+}
+
+// responseSinkArg reports whether call serializes a value to the client through
+// the handler's response object — <res>.json(X) or <res>.send(X), where <res> is
+// the handler's second formal parameter (Express `res`, Fastify `reply`).
+// Returns X. Keyed off the actual parameter name, so a renamed response object is
+// not a blind spot; .json and .send are the field-returning sinks (.sendStatus,
+// .end and friends carry no domain object).
+func responseSinkArg(h tsHandler, call syntax.Node) (syntax.Node, bool) {
+	if call.Type() != "call_expression" {
+		return nil, false
+	}
+	res := paramName(h.params, 1)
+	if res == "" {
+		return nil, false
+	}
+	fn := field(call, "function", 0)
+	if fn == nil || fn.Type() != "member_expression" {
+		return nil, false
+	}
+	obj := field(fn, "object", 0)
+	prop := field(fn, "property", 1)
+	if obj == nil || prop == nil || obj.Type() != "identifier" || string(obj.Text()) != res {
+		return nil, false
+	}
+	if p := string(prop.Text()); p != "json" && p != "send" {
+		return nil, false
+	}
+	args := field(call, "arguments", 1)
+	if args == nil || args.NamedChildCount() == 0 {
+		return nil, false
+	}
+	return args.NamedChild(0), true
 }
 
 // overfetchItem classifies one serialized value and builds the item, or reports

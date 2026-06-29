@@ -8,6 +8,19 @@ fixtures pulled from third parties get their provenance recorded.
 - `example.ts`  — import, typed async function, template literal.
 - `example.tsx` — React component with hooks and JSX.
 
+## Express / Fastify surface fixtures — authored here
+Minimal hand-written cases for the non-Next.js framework surface (IDOR, authz,
+over-fetching). Each isolates one behaviour:
+- `express_idor_indirect.ts` — handler delegates to a service in another file →
+  `indirect_access` + `indirect_call` (cross-file option C).
+- `express_idor_local.ts` — inline Prisma access by a client route param.
+- `express_authz.ts` — guarded route (`auth.required` middleware) vs unguarded.
+- `express_overfetch.ts` — `res.json`/`res.send` sink: whole model, field-limited,
+  and service-sourced (frontier).
+- `express_discovery_negatives.ts` — same-named non-route calls (`map.get`,
+  `array.get`, `cache.get`) that must NOT be enumerated (shape discriminator).
+- `fastify_handler_object.ts` — Fastify options-object form (`{ handler, preHandler }`).
+
 ## Stress fixtures (safety-cap exit criterion) — real project code
 Real TypeScript from open-source projects, pinned to an exact commit and
 spot-checked as legitimate TS (no network/exec/eval shenanigans):
@@ -18,6 +31,18 @@ spot-checked as legitimate TS (no network/exec/eval shenanigans):
 | `real_excalidraw_actions.tsx` (1344 lines) | excalidraw/excalidraw `packages/excalidraw/components/Actions.tsx` | `28a9b1711dc0625b8ab5d643dc871810ee13642f` | MIT |
 
 These cover the **size/iteration cap** (large real files).
+
+## Dogfood fixture (Express surface, done criterion) — real project code
+Real TypeScript from an open-source project, pinned to an exact commit and
+spot-checked as legitimate TS (no network/exec/eval). Vendored verbatim so the
+surface mapping runs against real-world code, not a hand-tailored sample.
+
+| File | Source | Commit | License |
+|---|---|---|---|
+| `real_realworld_article_controller.ts` (251 lines) | gothinkster/node-express-prisma-v1-official-app `src/controllers/article.controller.ts` | `6ac99ea5aeadc4e001dd4d6933c2e269f878a969` | MIT |
+
+This is the Express slice's done criterion: codefit must surface the two
+confirmed IDORs (`PUT` and `DELETE /articles/:slug`) — see `TestExpressIDOR_Dogfood`.
 
 ## Generated stress fixture
 - `deeply_nested.tsx` — ~80 levels of nested ternary/JSX, generated to stress the

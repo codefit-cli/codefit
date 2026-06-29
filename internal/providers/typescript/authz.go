@@ -76,11 +76,12 @@ func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.S
 	if len(accesses) == 0 && len(indirect) == 0 {
 		return findings.SurfaceItem{}, false
 	}
-	authz := dedupe(collectAuthzCalls(h.body, recognized))
+	bodyAuthz := dedupe(collectAuthzCalls(h.body, recognized))
+	mwAuthz := dedupe(middlewareAuthz(h, recognized))
 
 	signals := []string{
 		operationSignal(h, accesses, indirect),
-		authzSignal(authz, recognized),
+		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h)),
 	}
 	return findings.SurfaceItem{
 		Category:          "authz",
@@ -89,7 +90,7 @@ func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.S
 		Snippet:           h.snippet,
 		StructuralSignals: signals,
 		StructuralFacts: map[string]bool{
-			"known_authz_detected": len(authz) > 0,
+			"known_authz_detected": len(bodyAuthz)+len(mwAuthz) > 0,
 			// local_access_detected: the sensitive operation is a local Prisma
 			// access (true) vs only an indirect service/repository call (false, the
 			// frontier). Shared with IDOR/overfetch so the synthesis can rank by
@@ -172,6 +173,69 @@ func collectAppCalls(body syntax.Node) []string {
 		}
 	})
 	return dedupe(out)
+}
+
+// authzScope names where codefit looked for an authorization helper, so the
+// "none detected" signal is honest about its coverage: a handler's body only
+// (Next.js, Server Actions) or the body PLUS the route middleware
+// (Express/Fastify, where the guard is usually middleware, not a body call).
+func authzScope(h tsHandler) string {
+	if h.framework == "express" || h.framework == "fastify" {
+		return "the body or its route middleware"
+	}
+	return "the body"
+}
+
+// middlewareAuthz returns the known authorization helpers applied as route
+// middleware (Express/Fastify) — e.g. auth.required or requireAuth in
+// router.post('/x', auth.required, handler). It is empty for Next.js handlers and
+// Server Actions, which carry no middleware.
+func middlewareAuthz(h tsHandler, recognized map[string]bool) []string {
+	var out []string
+	for _, mw := range h.middleware {
+		if name, ok := authzMiddlewareName(mw, recognized); ok {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// authzMiddlewareName reports the helper name a middleware reference resolves to,
+// when it is a built-in or project-registered authz helper. It matches a bare
+// identifier (requireAuth), a member reference by its object OR property
+// (auth.required → "auth" is known), and a factory call (authorize('admin')).
+func authzMiddlewareName(node syntax.Node, recognized map[string]bool) (string, bool) {
+	known := func(n string) bool { return authzHelperSet[n] || recognized[n] }
+	switch node.Type() {
+	case "identifier":
+		if n := string(node.Text()); known(n) {
+			return n, true
+		}
+	case "member_expression":
+		obj := field(node, "object", 0)
+		prop := field(node, "property", 1)
+		var oName, pName string
+		if obj != nil && obj.Type() == "identifier" {
+			oName = string(obj.Text())
+		}
+		if prop != nil {
+			pName = string(prop.Text())
+		}
+		if known(oName) {
+			if pName != "" {
+				return oName + "." + pName, true
+			}
+			return oName, true
+		}
+		if known(pName) {
+			return pName, true
+		}
+	case "call_expression":
+		if fn := field(node, "function", 0); fn != nil {
+			return authzMiddlewareName(fn, recognized)
+		}
+	}
+	return "", false
 }
 
 // isFrameworkCall reports whether a call is an obvious framework/utility call
