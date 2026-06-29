@@ -122,7 +122,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   frontier (option C). **Known limit:** a service method whose name collides with a
   Prisma method (`create`/`update`/`delete`/…) is reported as a *local* Prisma
   access, not an indirect call (still surfaced, with the real callee named); a
-  handler returning through an explicit `@Res()` is not mapped.
+  handler returning through an explicit `@Res()` is not mapped. **Guards:** codefit
+  detects `@UseGuards` (method- and class-level) only — NestJS auth applied as
+  **module-bound middleware** (`consumer.apply(AuthMiddleware)` in a module's
+  `configure()`) or a **global guard** (`APP_GUARD` / `app.useGlobalGuards`) is not
+  detected, so an app that guards via middleware reads `known_authz_detected: false`
+  across the board (a conservative *verify*, never a false *secure*).
 
 ### Not covered (declared, not silent)
 
