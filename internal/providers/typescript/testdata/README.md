@@ -40,9 +40,12 @@ surface mapping runs against real-world code, not a hand-tailored sample.
 | File | Source | Commit | License |
 |---|---|---|---|
 | `real_realworld_article_controller.ts` (251 lines) | gothinkster/node-express-prisma-v1-official-app `src/controllers/article.controller.ts` | `6ac99ea5aeadc4e001dd4d6933c2e269f878a969` | MIT |
+| `real_realworld_nest_article_controller.ts` (105 lines) | lujakob/nestjs-realworld-example-app (branch `prisma`) `src/article/article.controller.ts` | `034bd650cd8b9afaca77d09872f4e40b853f142a` | ISC |
 
-This is the Express slice's done criterion: codefit must surface the two
-confirmed IDORs (`PUT` and `DELETE /articles/:slug`) — see `TestExpressIDOR_Dogfood`.
+These are the Express and NestJS slices' done criteria: codefit must surface the
+IDORs in the real controllers — `PUT`/`DELETE /articles/:slug` for Express
+(`TestExpressIDOR_Dogfood`), and the service-delegated `@Param` slug handlers for
+NestJS (`TestNestIDOR_Dogfood`).
 
 ## Generated stress fixture
 - `deeply_nested.tsx` — ~80 levels of nested ternary/JSX, generated to stress the

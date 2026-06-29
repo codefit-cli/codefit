@@ -67,7 +67,10 @@ func serializationSink(h tsHandler, n syntax.Node) (syntax.Node, bool) {
 			return x, true
 		}
 	}
-	if h.kind == "action" && n.Type() == "return_statement" && n.NamedChildCount() > 0 {
+	// A Server Action and a NestJS handler have no explicit response call: they
+	// RETURN the value and the framework serializes it to the client, so the return
+	// statement's argument is the sink.
+	if (h.kind == "action" || h.framework == "nestjs") && n.Type() == "return_statement" && n.NamedChildCount() > 0 {
 		return n.NamedChild(0), true
 	}
 	return nil, false

@@ -98,9 +98,9 @@ independent audit layer that validates AI-generated code is secure and correct
 - **Deterministic security rules (TypeScript)** — five categories, each a fact at
   certainty 1.0 (see [COVERAGE.md](COVERAGE.md)).
 - **Surface mapping** — three categories (IDOR, broken authorization,
-  over-fetching) for Next.js (App Router + Server Actions), **Express, and Fastify**,
-  enumerated completely for the agent to reason. Resource access in another file is
-  signalled (`indirect_access`), not followed across files.
+  over-fetching) for Next.js (App Router + Server Actions), **Express, Fastify, and
+  NestJS**, enumerated completely for the agent to reason. Resource access in another
+  file is signalled (`indirect_access`), not followed across files.
 - **`scan-all` three-bucket synthesis** + on-demand `scan-endpoint` detail.
 - **Baseline** — a committed, content-addressed memory of the audited surface, with
   `baseline-list` / `-accept` / `-prune`, so a re-scan only surfaces what changed.
@@ -126,19 +126,19 @@ Concretely, on `main` — so you know exactly what to expect without reading
   framework.
 - **Surface mapping — the agent reasons.** IDOR, broken authorization, and
   over-fetching, for **Next.js** (App Router route handlers + Server Actions),
-  **Express**, and **Fastify**. Handlers are found by structural shape, never by path
-  or name. When a handler reaches a resource through a service in another file,
-  codefit flags it (`indirect_access`) and names the call — it does not follow it
-  across files; the agent does.
+  **Express**, **Fastify**, and **NestJS**. Handlers are found by structural shape,
+  never by path or name. When a handler reaches a resource through a service in
+  another file, codefit flags it (`indirect_access`) and names the call — it does not
+  follow it across files; the agent does.
 - **Dependency CVEs.** `codefit-check-cves` checks dependencies against
   [OSV.dev](https://osv.dev) (free, no API key) using the **exact** versions from
   `package-lock.json` / `go.mod` — never guessed from `package.json` ranges (no
   lockfile → an honest note, not a guess). codefit keeps no vuln DB of its own and
   surfaces OSV's severity rather than recomputing CVSS.
-- **Not covered (declared, not silent).** NestJS (routes via TypeScript decorators,
-  not yet read) and other JS frameworks; deep taint analysis; business-logic
-  correctness; architectural and race-condition classes. An Express/Fastify handler
-  passed by reference (not inline) is not enumerated. Full list and limits in
+- **Not covered (declared, not silent).** JS server frameworks beyond
+  Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
+  architectural and race-condition classes. An Express/Fastify handler passed by
+  reference (not inline) is not enumerated. Full list and limits in
   [COVERAGE.md](COVERAGE.md).
 
 ## Install
@@ -392,7 +392,7 @@ data left the handler) it hands off at the *frontier*; what it does not cover it
 | Language / Ecosystem | Status |
 | --- | --- |
 | **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI. |
-| **TypeScript / Next.js / Express / Fastify / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, and Fastify. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js and Express/Prisma backends. |
+| **TypeScript / Next.js / Express / Fastify / NestJS / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, Fastify, and NestJS. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js, Express/Prisma, and NestJS/Prisma backends. |
 | Java / Spring | Roadmap |
 | Python / FastAPI / Django | Roadmap |
 
