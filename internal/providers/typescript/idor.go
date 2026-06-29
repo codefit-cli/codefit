@@ -77,12 +77,24 @@ func (q idorQuery) Enumerate(root syntax.Node, file string) []findings.SurfaceIt
 // scope the signals are searched in — searching wider would let authz in a called
 // helper masquerade as authz in the entry.
 type tsHandler struct {
-	kind    string
-	method  string
-	params  syntax.Node
-	body    syntax.Node
-	line    int
-	snippet string
+	kind   string
+	method string
+	// framework distinguishes the route-handler dialect ("next" | "express" |
+	// "fastify"); it is empty/"next" for Next.js and irrelevant for Server Actions
+	// (kind == "action"). It selects the id-input mold (where the client input
+	// enters) and, later, the response sink — the downstream access/authz logic is
+	// shared across frameworks.
+	framework string
+	params    syntax.Node
+	body      syntax.Node
+	// middleware holds the route-registration arguments between the path and the
+	// handler (Express/Fastify), where the auth guard lives as a reference like
+	// auth.required — NOT a call in the body. Empty for Next.js handlers and Server
+	// Actions. The authz signal reads it so a middleware guard sets
+	// known_authz_detected.
+	middleware []syntax.Node
+	line       int
+	snippet    string
 }
 
 // auditTargets returns every auditable entry in this file: Next.js route handlers
@@ -99,6 +111,12 @@ func auditTargets(root syntax.Node, file string) []tsHandler {
 			}
 		})
 	}
+	// Express/Fastify route handlers are detected by SHAPE anywhere (not
+	// path-gated): a router/app `.<verb>('/path', ...middleware, handler)` call
+	// (expressHandlersIn) or the Fastify options-object form `.<verb>('/path',
+	// { handler })` (fastifyHandlersIn). ADR 0005.
+	out = append(out, expressHandlersIn(root)...)
+	out = append(out, fastifyHandlersIn(root)...)
 	return append(out, serverActionsIn(root)...)
 }
 
@@ -154,12 +172,23 @@ func idorItem(h tsHandler, file string, recognized map[string]bool) (findings.Su
 	if len(idInputs) == 0 || (len(accesses) == 0 && len(indirect) == 0) {
 		return findings.SurfaceItem{}, false
 	}
-	authz := dedupe(collectAuthzCalls(h.body, recognized))
+	bodyAuthz := dedupe(collectAuthzCalls(h.body, recognized))
+	mwAuthz := dedupe(middlewareAuthz(h, recognized))
 
 	signals := []string{
 		"Receives a client-controlled identifier: " + strings.Join(idInputs, "; "),
 		accessSignal(accesses, indirect),
-		authzSignal(authz, recognized),
+		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h)),
+	}
+	// Cross-file option C: when the id reaches the resource only through a call
+	// that leaves the body (no local Prisma access), expose the queryable fact
+	// indirect_access and name the callee in IndirectCall, so a consumer can
+	// filter/route on it without parsing the prose frontier signal. codefit does
+	// NOT follow the call across files — the agent reasons over the named function.
+	indirectAccess := len(accesses) == 0 && len(indirect) > 0
+	indirectCall := ""
+	if indirectAccess {
+		indirectCall = strings.Join(indirect, ", ")
 	}
 	return findings.SurfaceItem{
 		Category:          "idor",
@@ -167,12 +196,19 @@ func idorItem(h tsHandler, file string, recognized map[string]bool) (findings.Su
 		Line:              h.line,
 		Snippet:           h.snippet,
 		StructuralSignals: signals,
+		IndirectCall:      indirectCall,
 		StructuralFacts: map[string]bool{
 			"local_access_detected": len(accesses) > 0,
+			// indirect_access: the resource access is NOT local to the body — the id
+			// flows into a call resolved elsewhere (a service/repository), named by
+			// IndirectCall. The complement of local_access_detected for an id→resource
+			// handler; the agent follows the named call (ADR 0005, option C).
+			"indirect_access": indirectAccess,
 			// known_authz_detected: whether a known authz/ownership helper was seen
-			// in the body. False on an id→resource handler is the actionable access
-			// gap. Shared with authz so the synthesis classifies the gap as a fact.
-			"known_authz_detected": len(authz) > 0,
+			// in the body OR as route middleware (Express/Fastify). False on an
+			// id→resource handler is the actionable access gap. Shared with authz so
+			// the synthesis classifies the gap as a fact.
+			"known_authz_detected": len(bodyAuthz)+len(mwAuthz) > 0,
 			// server_action: a structural fact (not a judgment) — this entry is a
 			// Next.js Server Action ("use server"), not a route handler. It lets the
 			// agent weigh the heightened risk (actions are POST endpoints devs often
@@ -209,7 +245,12 @@ func collectInputs(h tsHandler) (signals []string, idVars map[string]bool) {
 	if h.kind == "action" {
 		return collectActionInputs(h)
 	}
-	return collectIDInputs(h.body)
+	switch h.framework {
+	case "express", "fastify":
+		return collectRequestInputs(h)
+	default:
+		return collectIDInputs(h.body)
+	}
 }
 
 // collectIDInputs records the client-controlled identifier inputs present in the
@@ -391,6 +432,9 @@ func isIDBearing(node syntax.Node, idVars map[string]bool) bool {
 	case "identifier":
 		return idVars[string(node.Text())]
 	case "member_expression":
+		if isRequestIDAccess(node) {
+			return true
+		}
 		obj := field(node, "object", 0)
 		prop := field(node, "property", 1)
 		return obj != nil && prop != nil && obj.Type() == "identifier" &&
@@ -568,24 +612,39 @@ func collectAuthzCalls(body syntax.Node, recognized map[string]bool) []string {
 // that none was — with the searched set declared. A project-registered helper is
 // labelled as such (traceability: the agent/human sees WHY codefit now recognizes
 // it). Never a judgment.
-func authzSignal(found []string, recognized map[string]bool) string {
-	if len(found) > 0 {
-		labelled := make([]string, len(found))
-		for i, n := range found {
-			if recognized[n] && !authzHelperSet[n] {
-				labelled[i] = n + " (registered for this project)"
-			} else {
-				labelled[i] = n
-			}
+func authzSignal(bodyFound, mwFound []string, recognized map[string]bool, scope string) string {
+	if len(bodyFound)+len(mwFound) > 0 {
+		var parts []string
+		if len(bodyFound) > 0 {
+			parts = append(parts, "An authorization helper call was detected in the body: "+
+				strings.Join(labelHelpers(bodyFound, recognized), ", "))
 		}
-		return "An authorization helper call was detected in the body: " + strings.Join(labelled, ", ")
+		if len(mwFound) > 0 {
+			parts = append(parts, "An authorization helper was applied as route middleware: "+
+				strings.Join(labelHelpers(mwFound, recognized), ", "))
+		}
+		return strings.Join(parts, " ")
 	}
 	searched := authzHelpers
 	if extra := registeredOnly(recognized); len(extra) > 0 {
 		searched = append(append([]string{}, authzHelpers...), extra...)
 	}
-	return "No call to a known authorization helper was detected in the body (searched: " +
+	return "No call to a known authorization helper was detected in " + scope + " (searched: " +
 		strings.Join(searched, ", ") + ")"
+}
+
+// labelHelpers annotates a project-registered (non-built-in) helper so the agent
+// or human sees WHY codefit recognizes it (traceability, ADR 0013).
+func labelHelpers(found []string, recognized map[string]bool) []string {
+	labelled := make([]string, len(found))
+	for i, n := range found {
+		if recognized[n] && !authzHelperSet[n] {
+			labelled[i] = n + " (registered for this project)"
+		} else {
+			labelled[i] = n
+		}
+	}
+	return labelled
 }
 
 // registeredOnly returns the recognized helper names that are NOT built-in, sorted

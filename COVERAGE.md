@@ -11,7 +11,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 > `codefit-coverage` generates it. Today only the **TypeScript** provider has a
 > full manifest.
 
-## TypeScript / Next.js / Prisma
+## TypeScript / Next.js / Express / Fastify / Prisma
 
 ### Deterministic — codefit affirms (certainty 1.0)
 
@@ -89,6 +89,26 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `name` is not; that needs the schema and is the agent's. Serialization through a
   service is the frontier (codefit can't see the field selection). Matched by the
   serialization, never by model name.
+- **Express & Fastify.** The same IDOR / broken-authorization / over-fetching
+  surface above is mapped for these non-Next.js frameworks. Handlers are discovered
+  **by shape, never by path** — an Express `router.<verb>('/path', …middleware,
+  handler)` call, and Fastify's options-object form `.<verb>('/path', { handler,
+  preHandler })` — so a same-named non-route call (`map.get('/k', v)`,
+  `arr.get(0, cb)`) is not mistaken for a route (a handler needs a string-literal
+  path **and** an inline function). The client id-input is read from
+  `req.params`/`query`/`body` (Express) or `request.*` (Fastify), keyed off the
+  handler's **first parameter** (the name is the developer's, not assumed `req`), so
+  a non-standard route param like `slug` is not a blind spot. The over-fetch sink is
+  the response object's `.json()`/`.send()` (Express `res`, Fastify `reply`), keyed
+  off the **second parameter**. The authorization guard here is **route middleware**,
+  not a body call: codefit reads Express positional middleware
+  (`router.post('/x', auth.required, handler)`) and Fastify `preHandler`/`onRequest`
+  hooks, and the signal states honestly whether it looked in the body or also the
+  route middleware. **Cross-file (option C):** when the access/operation is not local
+  to the handler body — the id is passed to a service in another file (the common
+  controller→service split) — codefit emits `indirect_access=true` and names the
+  callee in `indirect_call`; it does **not** follow the call across files, the agent
+  reasons over the named function.
 
 ### Not covered (declared, not silent)
 
@@ -97,9 +117,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - Business-logic correctness (not a security property).
 - Deep static taint analysis — covered by surface mapping + agent reasoning, not
   deterministically.
-- **Non-Next.js JS frameworks.** The TypeScript surface is **Next.js-specific**
-  (App Router route handlers + Server Actions). Express, Fastify, NestJS and other
-  JS server frameworks are **not yet covered** — a known gap, not a silent one.
+- **NestJS and other JS frameworks** beyond Next.js, Express, and Fastify — **not
+  yet covered**, a known gap, not a silent one. NestJS in particular declares routes
+  through TypeScript **decorators** (`@Controller` / `@Get` / `@Body`), which the
+  surface does not yet read.
+- **Express/Fastify handler passed by reference.** A handler that is a named
+  identifier rather than an inline function (`router.get('/x', listUsers)`, with
+  `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
+  bodies; a body in another scope is a cross-file case for the agent. (An auth
+  **guard** by reference is unaffected — it is matched by name in the registration.)
 - **Inline FormData → service frontier.** A Server Action input read inline as
   `formData.get('key')` and passed **directly** into a service call (no
   intermediate variable, no local Prisma access) may not link to that indirect

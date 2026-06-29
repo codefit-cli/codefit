@@ -121,6 +121,13 @@ type SurfaceItem struct {
 	// is unauthorized". Ordering by a fact is allowed; concluding from it is the
 	// agent's.
 	StructuralFacts map[string]bool `json:"structural_facts"`
+	// IndirectCall names the external function a handler delegates to when the
+	// resource access is NOT local to the body (e.g. an Express controller calling
+	// a service that owns the Prisma query). It is paired with the structural fact
+	// indirect_access=true. codefit does NOT follow the call across files — it
+	// names the callee so the agent can reason about where the access happens
+	// (cross-file option C). Empty when the access is local.
+	IndirectCall string `json:"indirect_call,omitempty"`
 	// ReasonToReview is the QUESTION the agent must answer about this item, never
 	// a conclusion.
 	ReasonToReview string `json:"reason_to_review"`

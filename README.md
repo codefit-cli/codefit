@@ -96,7 +96,9 @@ independent audit layer that validates AI-generated code is secure and correct
 - **Deterministic security rules (TypeScript)** — five categories, each a fact at
   certainty 1.0 (see [COVERAGE.md](COVERAGE.md)).
 - **Surface mapping** — three categories (IDOR, broken authorization,
-  over-fetching) for Next.js / Prisma, enumerated completely for the agent to reason.
+  over-fetching) for Next.js (App Router + Server Actions), **Express, and Fastify**,
+  enumerated completely for the agent to reason. Resource access in another file is
+  signalled (`indirect_access`), not followed across files.
 - **`scan-all` three-bucket synthesis** + on-demand `scan-endpoint` detail.
 - **Baseline** — a committed, content-addressed memory of the audited surface, with
   `baseline-list` / `-accept` / `-prune`, so a re-scan only surfaces what changed.
@@ -107,6 +109,30 @@ independent audit layer that validates AI-generated code is secure and correct
 **On the roadmap (not yet in `main`):** the HTTP/SSE transport; Phase 2 DB sensor;
 Phase 3 code review / best practices / tests; Phase 4 knowledge packs + `update`.
 See the [PRD](docs/PRD-codefit-v1.4.md) §25 and [VERSIONING.md](VERSIONING.md).
+
+## What codefit covers today
+
+Concretely, on `main` — so you know exactly what to expect without reading
+[COVERAGE.md](COVERAGE.md) in full:
+
+- **Languages.** TypeScript / TSX (full rules + surface) and Go (the CI self-audit).
+- **Deterministic rules (TypeScript, certainty 1.0).** Hardcoded secrets, weak
+  crypto (MD5/SHA-1, insecure `Math.random` for tokens), dangerous
+  `eval`/`new Function`, inline SQL injection, and inline XSS via
+  `dangerouslySetInnerHTML` (React-specific by its pattern). These run on **any**
+  `.ts`/`.tsx` file — no framework gate; which ones fire depends on the code, not the
+  framework.
+- **Surface mapping — the agent reasons.** IDOR, broken authorization, and
+  over-fetching, for **Next.js** (App Router route handlers + Server Actions),
+  **Express**, and **Fastify**. Handlers are found by structural shape, never by path
+  or name. When a handler reaches a resource through a service in another file,
+  codefit flags it (`indirect_access`) and names the call — it does not follow it
+  across files; the agent does.
+- **Not covered (declared, not silent).** NestJS (routes via TypeScript decorators,
+  not yet read) and other JS frameworks; deep taint analysis; business-logic
+  correctness; architectural and race-condition classes. An Express/Fastify handler
+  passed by reference (not inline) is not enumerated. Full list and limits in
+  [COVERAGE.md](COVERAGE.md).
 
 ## Install
 
@@ -358,7 +384,7 @@ data left the handler) it hands off at the *frontier*; what it does not cover it
 | Language / Ecosystem | Status |
 | --- | --- |
 | **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI. |
-| **TypeScript / Next.js / Prisma** | Deterministic security rules (5 categories) + surface mapping (IDOR, authz, over-fetching), validated against a real backend. |
+| **TypeScript / Next.js / Express / Fastify / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, and Fastify. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js and Express/Prisma backends. |
 | Java / Spring | Roadmap |
 | Python / FastAPI / Django | Roadmap |
 
