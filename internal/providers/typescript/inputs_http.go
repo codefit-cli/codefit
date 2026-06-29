@@ -67,6 +67,62 @@ func collectRequestInputs(h tsHandler) (signals []string, idVars map[string]bool
 	return signals, idVars
 }
 
+// nestParamSources maps a NestJS parameter decorator to the client-input source
+// it injects. Route params and query strings are client-controlled by definition;
+// the body carries client data too — all are id-input candidates (matched by
+// structure, not by the parameter's name, so a non-`id` route param is not a blind
+// spot — ADR 0005).
+var nestParamSources = map[string]string{
+	"Param": "route param",
+	"Query": "query parameter",
+	"Body":  "request body",
+}
+
+// collectNestInputs records the client-controlled inputs of a NestJS handler from
+// its PARAMETER DECORATORS (@Param('id') id, @Body() dto, @Query() q) — there is
+// no request object as in Express; each decorator injects the value directly into a
+// named parameter. It binds each such parameter to idVars so the shared downstream
+// (collectIndirectUses, isIDBearing, containsIDArg) links an id passed onward to its
+// access, exactly as for the other frameworks.
+func collectNestInputs(h tsHandler) (signals []string, idVars map[string]bool) {
+	idVars = map[string]bool{}
+	if h.params == nil {
+		return nil, idVars
+	}
+	seen := map[string]bool{}
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			signals = append(signals, s)
+		}
+	}
+	for i := 0; i < h.params.NamedChildCount(); i++ {
+		p := h.params.NamedChild(i)
+		if p.Type() != "required_parameter" && p.Type() != "optional_parameter" {
+			continue
+		}
+		dec := childOfType(p, "decorator")
+		if dec == nil {
+			continue
+		}
+		src, ok := nestParamSources[decoratorCallee(dec)]
+		if !ok {
+			continue
+		}
+		name := childOfType(p, "identifier")
+		if name == nil {
+			continue
+		}
+		idVars[string(name.Text())] = true
+		if key := decoratorStringArg(dec); key != "" {
+			add("reads " + src + " " + decoratorCallee(dec) + "('" + key + "') as " + string(name.Text()))
+		} else {
+			add("reads " + src + " via " + decoratorCallee(dec) + "() as " + string(name.Text()))
+		}
+	}
+	return signals, idVars
+}
+
 // firstParamName returns the name of a handler's first formal parameter — the
 // request object of an Express/Fastify handler (`req`, `request`).
 func firstParamName(params syntax.Node) string { return paramName(params, 0) }

@@ -14,7 +14,49 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+**Phase 1.5 — NestJS surface.** Coverage expansion within Phase 1 (stays in the
+`0.1.x` band; `0.2.0` is reserved for Phase 2 — see [VERSIONING.md](VERSIONING.md)).
+
+### Added — Phase 1.5: NestJS surface
+
+- **codefit now maps the IDOR, broken-authorization, and over-fetching surface for
+  NestJS**, completing the TypeScript framework set (Next.js, Express, Fastify,
+  NestJS). NestJS routes are decorated class methods, so the discovery and three
+  decorator-driven readers are new; everything downstream (Prisma detection, the
+  indirect/option-C frontier, the surface item builders) is reused unchanged.
+- **Handlers detected by HTTP-verb decorator, never by `@Controller`** (ADR 0005). A
+  method carrying `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/… is a route handler; a
+  class without `@Controller` can still expose routes, and a method without a verb
+  decorator is not enumerated.
+- **Client inputs from parameter decorators** — `@Param('id')`, `@Query()`,
+  `@Body()` each bind the parameter as an id-input the downstream follows. A
+  `@User`-style injected principal is not treated as a resource id.
+- **Guards detected by presence of `@UseGuards`** — on the method or inherited from
+  the class. Guard class names are arbitrary, so codefit reports the guard's
+  presence (the decorator is the mechanism) and names it, rather than matching a
+  known set; a class-level guard applies to every method.
+- **Over-fetching sink is the return value** — NestJS serializes the returned value
+  to the client (there is no `res.json`), exactly like a Server Action. A service
+  call in another file is the cross-file frontier (option C).
+
+### Changed — Phase 1.5
+
+- **`Frameworks()`** for the TypeScript provider now lists `nestjs`.
+- **`COVERAGE.md` / coverage manifest** — NestJS moves from *not covered* to the
+  reasoning (surface) section with its honest limits; only JS frameworks **beyond**
+  Next.js/Express/Fastify/NestJS remain declared as not covered.
+
+### Notes
+
+- Validated against the real RealWorld NestJS + Prisma backend
+  (`lujakob/nestjs-realworld-example-app`, branch `prisma`, vendored verbatim as a
+  test fixture): codefit surfaces the article controller's IDORs — the
+  service-delegated `@Param` slug handlers (`findOne`, `findComments`, …) as
+  `indirect_access` (option C).
+- Known limit (declared in [COVERAGE.md](COVERAGE.md)): a NestJS service method
+  whose name collides with a Prisma method (`create`/`update`/`delete`/…) is
+  reported as a *local* Prisma access rather than an indirect call — still surfaced
+  with the real callee named (the accepted Prisma-by-shape over-enumeration).
 
 ## [0.1.4] — 2026-06-29
 

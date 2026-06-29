@@ -117,6 +117,7 @@ func auditTargets(root syntax.Node, file string) []tsHandler {
 	// { handler })` (fastifyHandlersIn). ADR 0005.
 	out = append(out, expressHandlersIn(root)...)
 	out = append(out, fastifyHandlersIn(root)...)
+	out = append(out, nestHandlersIn(root)...)
 	return append(out, serverActionsIn(root)...)
 }
 
@@ -178,7 +179,7 @@ func idorItem(h tsHandler, file string, recognized map[string]bool) (findings.Su
 	signals := []string{
 		"Receives a client-controlled identifier: " + strings.Join(idInputs, "; "),
 		accessSignal(accesses, indirect),
-		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h)),
+		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h), authzMwPrefix(h)),
 	}
 	// Cross-file option C: when the id reaches the resource only through a call
 	// that leaves the body (no local Prisma access), expose the queryable fact
@@ -248,6 +249,8 @@ func collectInputs(h tsHandler) (signals []string, idVars map[string]bool) {
 	switch h.framework {
 	case "express", "fastify":
 		return collectRequestInputs(h)
+	case "nestjs":
+		return collectNestInputs(h)
 	default:
 		return collectIDInputs(h.body)
 	}
@@ -612,7 +615,7 @@ func collectAuthzCalls(body syntax.Node, recognized map[string]bool) []string {
 // that none was — with the searched set declared. A project-registered helper is
 // labelled as such (traceability: the agent/human sees WHY codefit now recognizes
 // it). Never a judgment.
-func authzSignal(bodyFound, mwFound []string, recognized map[string]bool, scope string) string {
+func authzSignal(bodyFound, mwFound []string, recognized map[string]bool, scope, mwPrefix string) string {
 	if len(bodyFound)+len(mwFound) > 0 {
 		var parts []string
 		if len(bodyFound) > 0 {
@@ -620,8 +623,7 @@ func authzSignal(bodyFound, mwFound []string, recognized map[string]bool, scope 
 				strings.Join(labelHelpers(bodyFound, recognized), ", "))
 		}
 		if len(mwFound) > 0 {
-			parts = append(parts, "An authorization helper was applied as route middleware: "+
-				strings.Join(labelHelpers(mwFound, recognized), ", "))
+			parts = append(parts, mwPrefix+": "+strings.Join(labelHelpers(mwFound, recognized), ", "))
 		}
 		return strings.Join(parts, " ")
 	}

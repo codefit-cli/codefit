@@ -11,7 +11,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 > `codefit-coverage` generates it. Today only the **TypeScript** provider has a
 > full manifest.
 
-## TypeScript / Next.js / Express / Fastify / Prisma
+## TypeScript / Next.js / Express / Fastify / NestJS / Prisma
 
 ### Deterministic — codefit affirms (certainty 1.0)
 
@@ -109,6 +109,20 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   controller→service split) — codefit emits `indirect_access=true` and names the
   callee in `indirect_call`; it does **not** follow the call across files, the agent
   reasons over the named function.
+- **NestJS.** Same IDOR / authz / over-fetching surface, for routes declared as
+  decorated class methods. A handler is a method with an **HTTP-verb decorator**
+  (`@Get`/`@Post`/…), detected by that shape, never by `@Controller`. The client
+  id-input comes from the method's **parameter decorators** (`@Param('id')`,
+  `@Query()`, `@Body()`) — a `@User`-style injected principal is not treated as a
+  resource id. The authorization guard is **`@UseGuards`**, on the method or
+  inherited from the class, detected by **presence** (the decorator is the
+  mechanism; guard names are arbitrary, so codefit names the guard but does not
+  match a known set). The over-fetch sink is the **return value** (NestJS serializes
+  it, like a Server Action). A service call in another file is the cross-file
+  frontier (option C). **Known limit:** a service method whose name collides with a
+  Prisma method (`create`/`update`/`delete`/…) is reported as a *local* Prisma
+  access, not an indirect call (still surfaced, with the real callee named); a
+  handler returning through an explicit `@Res()` is not mapped.
 
 ### Not covered (declared, not silent)
 
@@ -117,10 +131,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - Business-logic correctness (not a security property).
 - Deep static taint analysis — covered by surface mapping + agent reasoning, not
   deterministically.
-- **NestJS and other JS frameworks** beyond Next.js, Express, and Fastify — **not
-  yet covered**, a known gap, not a silent one. NestJS in particular declares routes
-  through TypeScript **decorators** (`@Controller` / `@Get` / `@Body`), which the
-  surface does not yet read.
+- **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** — **not yet
+  covered**, a known gap, not a silent one.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler

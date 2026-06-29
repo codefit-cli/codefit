@@ -81,7 +81,7 @@ func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.S
 
 	signals := []string{
 		operationSignal(h, accesses, indirect),
-		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h)),
+		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h), authzMwPrefix(h)),
 	}
 	return findings.SurfaceItem{
 		Category:          "authz",
@@ -180,17 +180,35 @@ func collectAppCalls(body syntax.Node) []string {
 // (Next.js, Server Actions) or the body PLUS the route middleware
 // (Express/Fastify, where the guard is usually middleware, not a body call).
 func authzScope(h tsHandler) string {
-	if h.framework == "express" || h.framework == "fastify" {
+	switch h.framework {
+	case "nestjs":
+		return "the body or its @UseGuards guards"
+	case "express", "fastify":
 		return "the body or its route middleware"
+	default:
+		return "the body"
 	}
-	return "the body"
 }
 
-// middlewareAuthz returns the known authorization helpers applied as route
-// middleware (Express/Fastify) — e.g. auth.required or requireAuth in
-// router.post('/x', auth.required, handler). It is empty for Next.js handlers and
-// Server Actions, which carry no middleware.
+// authzMwPrefix is the found-signal lead for the middleware/guard layer, phrased
+// per framework so the signal is honest about WHERE the authorization came from.
+func authzMwPrefix(h tsHandler) string {
+	if h.framework == "nestjs" {
+		return "A guard was applied via @UseGuards"
+	}
+	return "An authorization helper was applied as route middleware"
+}
+
+// middlewareAuthz returns the authorization applied outside the body. For
+// Express/Fastify it is the known helpers used as route middleware (matched by
+// name). For NestJS the guard mechanism is the @UseGuards decorator itself, so
+// detection is by PRESENCE — every guard class is reported regardless of a known
+// set (guard names are arbitrary; the decorator IS the signal). Empty for Next.js
+// and Server Actions.
 func middlewareAuthz(h tsHandler, recognized map[string]bool) []string {
+	if h.framework == "nestjs" {
+		return nestGuardNames(h)
+	}
 	var out []string
 	for _, mw := range h.middleware {
 		if name, ok := authzMiddlewareName(mw, recognized); ok {
@@ -198,6 +216,25 @@ func middlewareAuthz(h tsHandler, recognized map[string]bool) []string {
 		}
 	}
 	return out
+}
+
+// nestGuardNames returns a readable name for each guard in h.middleware (the args
+// of the class- and method-level @UseGuards decorators), by presence — no
+// name-set filtering.
+func nestGuardNames(h tsHandler) []string {
+	var out []string
+	for _, g := range h.middleware {
+		if g.Type() == "identifier" {
+			out = append(out, string(g.Text()))
+			continue
+		}
+		if fn := field(g, "function", 0); fn != nil && (g.Type() == "call_expression" || g.Type() == "new_expression") {
+			out = append(out, string(fn.Text()))
+			continue
+		}
+		out = append(out, firstLine(string(g.Text())))
+	}
+	return dedupe(out)
 }
 
 // authzMiddlewareName reports the helper name a middleware reference resolves to,

@@ -69,7 +69,7 @@ var _ providers.LanguageProvider = (*Provider)(nil)
 func (*Provider) Language() string { return "typescript" }
 
 func (*Provider) Frameworks() []string {
-	return []string{"react", "next", "express", "fastify", "node"}
+	return []string{"react", "next", "express", "fastify", "nestjs", "node"}
 }
 
 func (*Provider) FileExtensions() []string { return []string{".ts", ".tsx"} }
