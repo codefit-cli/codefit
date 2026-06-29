@@ -14,6 +14,10 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.1.4] — 2026-06-29
+
 **Phase 1.4 — dependency CVEs via OSV.dev (RF-09).** Coverage expansion within
 Phase 1 (stays in the `0.1.x` band; `0.2.0` is reserved for Phase 2 — see
 [VERSIONING.md](VERSIONING.md)).
