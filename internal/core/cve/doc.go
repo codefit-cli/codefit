@@ -4,6 +4,7 @@
 // GitHub Advisory Database, Linux distro feeds and more), so the data is always
 // fresh and maintained by infrastructure the whole world already runs.
 //
-// Status: SKELETON. This declares the [Dependency] and [Vulnerability] types and
-// the [Client] contract. The OSV.dev HTTP client is implemented in Fase 1.
+// Status: SKELETON — implementation pending (RF-09). This declares the
+// [Dependency] and [Vulnerability] types and the [Client] contract only; the
+// OSV.dev HTTP client and the dependency-manifest parsing are not implemented yet.
 package cve

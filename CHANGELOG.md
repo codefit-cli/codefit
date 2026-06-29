@@ -14,7 +14,41 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+**Phase 1.4 — dependency CVEs via OSV.dev (RF-09).** Coverage expansion within
+Phase 1 (stays in the `0.1.x` band; `0.2.0` is reserved for Phase 2 — see
+[VERSIONING.md](VERSIONING.md)).
+
+### Added — Phase 1.4: `codefit-check-cves`
+
+- **codefit now checks project dependencies for known vulnerabilities** via
+  OSV.dev (free, no API key, aggregating the GitHub Advisory Database, the Go vuln
+  DB and more). codefit keeps **no vulnerability database of its own** — the data
+  is always fresh. The skeleton `core/cve` (types + `Client` contract) is now a
+  working OSV.dev client and the `codefit-check-cves` MCP tool is registered.
+- **Exact versions only, from lockfiles — never guessed** (RF-09 decision). npm
+  versions come from `package-lock.json` (lockfileVersion 1/2/3), Go versions from
+  `go.mod` (`require` graph, direct + `// indirect`). The ranges in `package.json`
+  (`^1.2.0`) are **not** resolved: when a manifest is present without its lockfile,
+  codefit reports an honest note and checks nothing for that ecosystem rather than
+  guess an installed version.
+- **Reports OSV's severity, does not recompute CVSS.** Per vulnerable dependency:
+  the OSV/GHSA/CVE id, summary, severity (the GHSA label or the CVSS vector OSV
+  provides, else `UNKNOWN`), first fixed version, and references.
+- **Parsers live in `core/cve`, not in `LanguageProvider`** — dependency manifests
+  are ecosystem-scoped (package-lock.json, go.mod), not an AST/provider concern, so
+  the audit engine and the provider interface are untouched. The tool input is just
+  `{root}`; manifests are auto-detected.
+
+### Notes
+
+- Validated against the real `api.osv.dev` (an opt-in `osvlive` test, not run in
+  CI): npm `lodash@4.17.4` and Go `github.com/dgrijalva/jwt-go@v3.2.0+incompatible`
+  both return their advisories with severity and fixed version — confirming the
+  wire format and the Go version normalization (the `v`-prefix strip). CI tests
+  mock OSV and never hit the network.
+- Known limits (declared in [COVERAGE.md](COVERAGE.md)): only `package-lock.json`
+  and `go.mod` at the project root (no yarn/pnpm, no monorepo nesting); a Go
+  `replace` is not applied; CVSS is surfaced, not recomputed.
 
 ## [0.1.3] — 2026-06-29
 

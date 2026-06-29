@@ -20,10 +20,8 @@ type Vulnerability struct {
 	References []string
 }
 
-// Client queries OSV.dev for the vulnerabilities affecting a set of
-// dependencies.
-//
-// Skeleton: no implementation yet (Fase 1).
+// Client queries OSV.dev for the vulnerabilities affecting a set of dependencies,
+// keyed by "name@version". The default implementation is [NewOSVClient].
 type Client interface {
 	Query(ctx context.Context, deps []Dependency) (map[string][]Vulnerability, error)
 }
