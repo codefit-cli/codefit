@@ -1,0 +1,30 @@
+// maps_and_limits.prisma — authored fixture that deliberately packs the
+// constructs the dogfood did NOT surface, to lock them as contract:
+//   - @@map (table) and @map (column) — real DB-name remapping (modeled as DBName).
+//   - @default(now()/autoincrement()/cuid()) and @updatedAt — ignored, must not break.
+//   - @relation(..., onDelete: Cascade) — referential action ignored, FK still modeled.
+//   - an implicit many-to-many (@relation with references: but no fields:, both sides)
+//     — must produce NO foreign key on either side (declared limit, ADR 0014).
+
+model Account {
+  id        Int      @id @default(autoincrement())
+  ref       String   @map("reference_code")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ownerId   Int
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tags      Tag[]    @relation("AccountTags", references: [id])
+
+  @@map("accounts")
+}
+
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+}
+
+model Tag {
+  id       Int       @id @default(autoincrement())
+  label    String
+  accounts Account[] @relation("AccountTags", references: [id])
+}
