@@ -1,0 +1,38 @@
+// blog.prisma — authored test fixture for the Prisma schema parser.
+// Exercises: simple & composite PK, FK via @relation, single & composite
+// @unique, composite @@index, nullable, list, and an enum column (two-pass).
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id    Int      @id          // simple PK
+  email String   @unique      // single unique index
+  name  String                // non-null
+  bio   String?               // nullable
+  tags  String[]              // list / multivalued
+  posts Post[]                // back-relation: not a column, no FK
+}
+
+model Post {
+  id       Int    @id
+  title    String
+  authorId Int                // real FK column
+  author   User   @relation(fields: [authorId], references: [id])
+  @@index([authorId, title])  // composite index
+}
+
+model Membership {
+  userId  Int
+  groupId Int
+  role    Role               /// enum column — must not be mistaken for a relation
+  @@id([userId, groupId])     // composite PK
+  @@unique([groupId, role])   // composite unique
+}

@@ -63,9 +63,13 @@ type Sensors struct {
 	Tests      SensorToggle `yaml:"tests"`
 }
 
-// SensorToggle is the minimal per-sensor config common to every sensor.
+// SensorToggle is the minimal per-sensor config common to every sensor. Enabled
+// is a *bool to carry a THREE-STATE meaning: nil (unset in .codefit.yaml) lets a
+// sensor apply its own default (the DB sensor treats unset as on — opt-out); an
+// explicit true/false overrides it. A plain bool could not tell "unset" from
+// "explicitly false".
 type SensorToggle struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled *bool `yaml:"enabled,omitempty"`
 }
 
 // Report configures output format and the per-dimension score weights (which

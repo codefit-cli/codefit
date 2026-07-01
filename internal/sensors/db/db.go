@@ -1,0 +1,145 @@
+package db
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/codefit-cli/codefit/internal/config"
+	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	"github.com/codefit-cli/codefit/internal/core/dbrules"
+	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scoring"
+	"github.com/codefit-cli/codefit/internal/core/surface"
+	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/internal/sensors"
+)
+
+// Sensor audits the database structure, driven by a provider that can parse a
+// schema. The rule logic lives in the core (dbrules); the sensor only resolves
+// and reads the schema files and stamps identity.
+type Sensor struct {
+	provider providers.LanguageProvider
+}
+
+// New builds a DB sensor backed by a language provider.
+func New(p providers.LanguageProvider) *Sensor { return &Sensor{provider: p} }
+
+// compile-time check: the DB sensor satisfies the shared Sensor identity.
+var _ sensors.Sensor = (*Sensor)(nil)
+
+func (*Sensor) Name() string                  { return "db" }
+func (*Sensor) Dimension() findings.Dimension { return findings.DimensionDB }
+
+// Result is the DB audit outcome, including whether the DB was measured at all.
+// Measured=false with a Note is the honest "not audited" state (disabled, no
+// schema_paths, provider without a schema parser) — distinct from "audited, 0
+// findings".
+type Result struct {
+	Measured bool
+	Note     string
+	Res      findings.SensorResult
+}
+
+// Run adapts Audit to the sensors.Sensor interface (for future aggregate use in
+// scan-all). The standalone tool calls Audit directly to get Measured/Note.
+func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
+	r, err := s.Audit(ctx)
+	return r.Res, err
+}
+
+// Audit resolves the schema, runs the core DB rules, and stamps fingerprints.
+// It returns Measured=false + a Note (never an error) for the honest not-measured
+// cases; a hard error only for a configured-but-missing schema file or a parse
+// failure — silently skipping those would be the false "all good" codefit exists
+// to catch.
+func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
+	start := time.Now()
+
+	if !enabled(ctx.Config) {
+		return notMeasured("db sensor disabled in .codefit.yaml (sensors.db.enabled=false)"), nil
+	}
+	parser, ok := s.provider.(providers.SchemaParser)
+	if !ok {
+		return notMeasured(fmt.Sprintf("provider %q does not parse database schemas", s.provider.Language())), nil
+	}
+	if ctx.Config == nil || len(ctx.Config.Database.SchemaPaths) == 0 {
+		return notMeasured("no database.schema_paths configured in .codefit.yaml"), nil
+	}
+
+	sources := make([]providers.SourceFile, 0, len(ctx.Config.Database.SchemaPaths))
+	content := map[string][]byte{}
+	for _, rel := range ctx.Config.Database.SchemaPaths {
+		rel = filepath.ToSlash(rel)
+		data, err := os.ReadFile(filepath.Join(ctx.ProjectRoot, rel))
+		if err != nil {
+			// Configured but unreadable: a real misconfiguration, not "no DB".
+			return Result{}, fmt.Errorf("reading schema %q: %w", rel, err)
+		}
+		sources = append(sources, providers.SourceFile{Path: rel, Content: data})
+		content[rel] = data
+	}
+
+	schema, err := parser.ParseSchema(sources)
+	if err != nil {
+		return Result{}, fmt.Errorf("parsing database schema: %w", err)
+	}
+
+	fs, surf := dbrules.Run(schema)
+	stampFingerprints(fs, surf, content)
+
+	return Result{Measured: true, Res: findings.SensorResult{
+		Sensor:     "db",
+		Score:      scoring.DimensionScore(fs),
+		Findings:   fs,
+		Surface:    surf,
+		DurationMs: time.Since(start).Milliseconds(),
+	}}, nil
+}
+
+func notMeasured(note string) Result { return Result{Measured: false, Note: note} }
+
+// enabled applies the three-state toggle: unset (nil) → on (opt-out default),
+// explicit true/false overrides.
+func enabled(cfg *config.Config) bool {
+	if cfg == nil || cfg.Sensors.DB.Enabled == nil {
+		return true
+	}
+	return *cfg.Sensors.DB.Enabled
+}
+
+// stampFingerprints assigns baseline identity at the single sensor boundary (as the
+// security sensor does): a finding is hashed from its rule ID + the source line at
+// its position; a surface item from its snippet (filled from the source line when
+// the rule left it empty). It also stamps the stable surface IDs. The schema
+// content never leaves codefit unhashed.
+func stampFingerprints(fs []findings.Finding, surf []findings.SurfaceItem, content map[string][]byte) {
+	for i := range fs {
+		if fs[i].Fingerprint == "" {
+			fs[i].Fingerprint = findings.Fingerprint(string(fs[i].Dimension)+"/"+fs[i].ID, fs[i].File, lineAt(content[fs[i].File], fs[i].Line))
+		}
+	}
+	for i := range surf {
+		if surf[i].Snippet == "" {
+			surf[i].Snippet = strings.TrimSpace(lineAt(content[surf[i].File], surf[i].Line))
+		}
+		if surf[i].Fingerprint == "" {
+			surf[i].Fingerprint = findings.Fingerprint(surf[i].Category, surf[i].File, surf[i].Snippet)
+		}
+	}
+	surface.StampIDs(surf)
+}
+
+// lineAt returns the 1-based n-th line of content (empty when out of range).
+func lineAt(content []byte, n int) string {
+	if n <= 0 || len(content) == 0 {
+		return ""
+	}
+	lines := strings.Split(string(content), "\n")
+	if n > len(lines) {
+		return ""
+	}
+	return lines[n-1]
+}

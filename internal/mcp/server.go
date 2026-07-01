@@ -58,6 +58,9 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolCoverage),
 		"Return the coverage manifest for a language: what codefit audits deterministically vs reasons over surface vs does not cover. Input: {language}.",
 		HandleCoverage)
+	addTool(s, string(ToolScanDB),
+		"Audit the database STRUCTURE from the schema (Prisma today): tables without a primary key (deterministic), and — as surface to reason about — foreign keys with no covering index, exact duplicate indexes, and multivalued (array) columns. Reads database.schema_paths from .codefit.yaml; returns measured=false with a note when there is no schema/parser (never a false 'clean'). Input: {root, language}.",
+		HandleScanDB)
 	addTool(s, string(ToolCheckCVEs),
 		"Check the project's dependencies for known vulnerabilities via OSV.dev (free, no API key). Reads EXACT versions from lockfiles (package-lock.json) and go.mod — it does NOT resolve package.json ranges; a manifest present without its lockfile is reported as a note, never guessed. Input: {root}. Returns the vulnerable dependencies with each vulnerability's CVE/GHSA id, severity, fixed version and references.",
 		HandleCheckCVEs)

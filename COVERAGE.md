@@ -36,6 +36,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - **XSS — inline.** React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
+- **Table without a primary key (DB-050).** A model with no `@id`/`@@id`, read from
+  the Prisma schema (`database.schema_paths`). A table with no primary key is
+  structurally undeniable, so it is **affirmed**. The DB dimension covers only what
+  the schema states — no query analysis.
+  > **Scalability note:** the DB rules are **language-neutral** (they reason over
+  > the neutral schema model, not TypeScript), so this DB coverage prose is
+  > duplicated per-provider today. It should move to a neutral DB-coverage source
+  > when a second ORM provider lands.
 
 ### Reasoning — codefit maps surface, the agent judges
 
@@ -128,6 +136,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `configure()`) or a **global guard** (`APP_GUARD` / `app.useGlobalGuards`) is not
   detected, so an app that guards via middleware reads `known_authz_detected: false`
   across the board (a conservative *verify*, never a false *secure*).
+- **Database structure (from the schema, no query analysis).**
+  - **FK with no covering index (DB-001).** A foreign key is *covered* when some
+    index's **leading columns** match it — the **primary key counts as an implicit
+    index**, a `@unique` as an index. Whether an un-indexed FK matters depends on the
+    table's size/access pattern, so codefit states the fact (`fk_columns`,
+    `existing_indexes`, `covering_index_detected: false`) and the agent judges.
+  - **Exact duplicate index (DB-011).** Two indexes on the same columns, same order,
+    same uniqueness — a pure write/storage cost; which to drop is the human's call.
+    Prefix-redundancy (`[a]` subsumed by `[a,b]`) is **not yet detected** (later slice).
+  - **Multivalued (array) column (DB-002).** An array violates 1NF, but a native
+    array (Postgres) is legitimate sometimes — surfaced, not affirmed.
 
 ### Not covered (declared, not silent)
 
