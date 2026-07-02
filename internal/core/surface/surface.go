@@ -17,4 +17,10 @@ const (
 	CategoryDBFKNoIndex   Category = "db-fk-no-index"        // DB-001: FK with no covering index
 	CategoryDBDupIndex    Category = "db-duplicate-index"    // DB-011: exact duplicate index
 	CategoryDBMultivalued Category = "db-multivalued-column" // DB-002: multivalued (array) column
+
+	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
+	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
+	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
+	CategoryDBSensitiveUnencrypted Category = "db-sensitive-unencrypted" // DB-053: sensitive-looking column stored in the clear
+	CategoryDBRepeatingGroups      Category = "db-repeating-groups"      // DB-003: repeating groups (1NF smell)
 )

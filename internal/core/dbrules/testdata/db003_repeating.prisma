@@ -1,0 +1,21 @@
+// DB-003 fixture: repeating groups (1NF smell).
+model Contact {
+  id     Int    @id
+  phone1 String // POS group "phone"
+  phone2 String
+  phone3 String
+  email  String // NEG: no numeric suffix
+  addr1  String // POS group "addr"
+  addr2  String
+}
+
+model Solo {
+  id     Int    @id
+  phone1 String // NEG: single-member group
+}
+
+model Mixed {
+  id    Int    @id
+  code1 String
+  code2 Int // NEG: same base but non-uniform type
+}
