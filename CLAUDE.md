@@ -142,6 +142,34 @@ nuevo sin que el enfoque esté acordado.
 
 ---
 
+## Modelo de dimensiones de auditoría (doctrina — ver ADR 0016)
+
+Cada dimensión (security, db, review, complexity, tests) sigue el mismo ciclo de
+vida. **Fuente de verdad:**
+`docs/decisions/0016-dimension-lifecycle-standalone-then-wired-to-scan-all.md`.
+**ADRs fundacionales a leer al tocar la dimensión DB (o cualquier dimensión nueva):
+0014 (modelo neutro), 0015 (reglas en el núcleo), 0016 (este ciclo de vida).** Los
+ADRs no se cargan solos en sesión — leerlos explícitamente antes de empezar.
+
+- Una dimensión = **sensor + reglas/parser/superficie + tool MCP standalone
+  permanente** (`codefit-scan-<dim>`). La tool standalone no es andamiaje: se usa
+  para auditar una sola dimensión on-demand.
+- Se desarrolla **standalone** (slice por slice, TDD, dogfood) sin tocar `scan-all`
+  hasta estar COMPLETA. El **cierre obligatorio (DoD) es cablearla a `scan-all`**:
+  una dimensión no está lista hasta que `scan-all` la corre. Se diseña desde el
+  slice 1 pensando en ese cableado.
+- `scan-all` corre TODAS las dimensiones terminadas y cableadas. Que hoy corra solo
+  security es el estado fiel (es lo único cerrado), no un bug.
+- Dimensiones no-endpoint (DB): al cablear requieren **bucket propio** en `scan-all`
+  (no el modelo endpoint-céntrico de ADR 0006) y encienden **`by_dimension`** como
+  parte del cierre.
+- **Lente permanente:** la lógica de reglas razona sobre el modelo neutro del núcleo
+  y vive en el NÚCLEO (el provider solo parsea); si una regla necesita un dato
+  específico del ORM/lenguaje, se enriquece el núcleo, no la regla; cada límite se
+  lockea como test.
+
+---
+
 ## Convenciones de código
 
 - **Errores:** siempre envueltos con contexto — `fmt.Errorf("...: %w", err)`.

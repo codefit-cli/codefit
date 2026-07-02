@@ -129,11 +129,44 @@ interface.
 If adding your language requires changing the core, that is a design bug — open
 an issue so we fix the seam, not your provider.
 
+## Adding a new dimension
+
+An audit dimension (security, db, review, complexity, tests) is built and closed
+the same way every time. The doctrine is **ADR 0016**; this is the short version.
+
+1. A dimension is a **sensor + its rule(s)/parser(s)/surface + a permanent
+   standalone MCP tool** (`codefit-scan-<dim>`). The standalone tool is not
+   scaffolding — it lets a developer or agent audit that one dimension on demand,
+   for good.
+
+2. **Rule logic lives in the core, over the neutral model** (e.g.
+   `core/db.Schema`), so every future provider inherits it — the provider ONLY
+   parses (ADR 0015). If a rule needs an ORM/language-specific fact, that means the
+   neutral model is incomplete: enrich the core once, never put specific logic in
+   the rule (ADR 0014).
+
+3. **Develop it standalone** — slice by slice, TDD, dogfood on a real project —
+   until every rule/parser/surface it owns is complete. Do **not** touch `scan-all`
+   during this phase. Lock each parser/rule limit as a test (a contract), not an
+   assumption.
+
+4. **Definition of Done = wire it into `scan-all`.** A dimension is not "ready"
+   until `scan-all` runs it; that is why `scan-all` running only security today is
+   the honest state, not a bug. Design every slice toward this wiring from slice 1.
+
+5. **Non-endpoint dimensions** (e.g. DB — a table without a primary key does not
+   hang off an HTTP route) get their **own section/bucket** in the `scan-all`
+   response; do not force them into the endpoint-centric bucketing (ADR 0006). The
+   `by_dimension` per-dimension score is switched on as part of this close wiring.
+
 ## Pull requests
 
 - Keep PRs focused. Large changes should be split into reviewable slices.
 - Ensure `make test`, `make lint`, and `CGO_ENABLED=0 go build ./...` pass.
-- The self-audit (`codefit scan --no-llm --fail-on critical`) must stay green.
+- The self-audit — a Go integration test (`TestSelfAudit` in
+  `internal/sensors/security`) that runs the real sensors over codefit's own source
+  tree — must stay green. It runs as part of `make test` (there is no audit CLI in
+  the MCP-first model).
 - Describe what changed and why; link related issues.
 
 ## License
