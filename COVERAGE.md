@@ -147,6 +147,28 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     Prefix-redundancy (`[a]` subsumed by `[a,b]`) is **not yet detected** (later slice).
   - **Multivalued (array) column (DB-002).** An array violates 1NF, but a native
     array (Postgres) is legitimate sometimes — surfaced, not affirmed.
+- **Database structure — name-heuristic checks (schema-only).** These read meaning
+  from column names, so they are **never affirmed** — codefit states the fact, the
+  agent judges. Names are matched **by component** (camelCase/snake_case), never raw
+  substring.
+  - **FK typed as text (DB-051).** A `String`/`Text` FK whose referenced key is
+    **numeric**, or an unbounded `@db.Text` key. A `String` FK to a `String`
+    uuid/cuid key does **not** fire (it is a structural type-mismatch check, not a
+    name guess); an unresolvable reference does not fire. Facts: `type_mismatch`,
+    `text_key`, `referenced_type_resolved`.
+  - **Missing audit timestamps (DB-052).** A table with **neither** `createdAt`
+    **nor** `updatedAt`. `looks_like_join_table` is exposed so link tables can be
+    dismissed. "Only one missing" is a **deferred candidate**, not fired yet.
+  - **Sensitive column in the clear (DB-053).** A column whose name matches a
+    sensitive token (`password`, `token`, `apiKey`, `ssn`, …) held in a
+    `String`/`Text`/`Bytes` type. It **always emits**; an encryption hint in the
+    name (`passwordHash`, `encrypted`…) is reported as `encryption_hint_in_name`,
+    **not** used to suppress — a name is not a guarantee, and hiding a possible
+    plaintext secret would be a silent false negative. `passwordChangedAt`
+    (DateTime) and `passwordResetCount` (Int) do not fire (type filter).
+  - **Repeating groups (DB-003).** Two or more same-typed columns sharing a base
+    name with numeric suffixes (`phone1/phone2/phone3`) — a 1NF smell weighed
+    against an intentional fixed set (address line 1/2).
 
 ### Not covered (declared, not silent)
 

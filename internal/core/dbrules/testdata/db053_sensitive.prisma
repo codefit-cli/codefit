@@ -1,0 +1,11 @@
+// DB-053 fixture: sensitive-looking columns stored in the clear.
+model Account {
+  id                Int      @id
+  password          String   // POS
+  passwordHash      String   // POS now (emits) with encryption_hint_in_name=true
+  passwordChangedAt DateTime // NEG: wrong type
+  isPublic          Boolean  // NEG: no sensitive token
+  apiKey            String   // POS (apikey)
+  refreshToken      String   // POS (token)
+  bio               String   // NEG: no sensitive token
+}

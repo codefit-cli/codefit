@@ -17,7 +17,10 @@ type Rule interface {
 // All is the enumerated rule set of this slice (schema-only OLTP). Instantiated by
 // hand, like the sensors — no registry (YAGNI until there are many rules).
 func All() []Rule {
-	return []Rule{db050{}, db001{}, db011{}, db002{}}
+	return []Rule{
+		db050{}, db001{}, db011{}, db002{}, // slice 2 — structural
+		db051{}, db052{}, db053{}, db003{}, // slice 2b — name heuristics (surface)
+	}
 }
 
 // Run executes every rule over the schema and returns the union of their findings

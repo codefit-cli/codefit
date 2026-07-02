@@ -1,0 +1,22 @@
+// DB-052 fixture: missing audit timestamps.
+model WithBoth {
+  id        Int      @id
+  createdAt DateTime
+  updatedAt DateTime
+}
+
+model MissingBoth {
+  id   Int    @id
+  name String
+}
+
+model OnlyCreated {
+  id        Int      @id
+  createdAt DateTime
+}
+
+model LinkTable {
+  postId Int
+  tagId  Int
+  @@id([postId, tagId])
+}

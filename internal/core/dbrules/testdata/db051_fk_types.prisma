@@ -1,0 +1,30 @@
+// DB-051 fixture: FK typed as text vs a numeric/uuid key.
+model User {
+  id   Int    @id
+  name String
+}
+
+model Org {
+  id   String @id
+  name String
+}
+
+model Post {
+  id       Int    @id
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id]) // POS: String FK -> User.id Int (mismatch)
+  orgId    String
+  org      Org    @relation(fields: [orgId], references: [id])     // NEG: String FK -> Org.id String (uuid, match)
+}
+
+model Comment {
+  id     Int  @id
+  postId Int
+  post   Post @relation(fields: [postId], references: [id])        // NEG: Int -> Int
+}
+
+model Doc {
+  id     Int    @id
+  orgRef String @db.Text
+  org    Org    @relation(fields: [orgRef], references: [id])      // POS: @db.Text key (text_key), String->String no mismatch
+}
