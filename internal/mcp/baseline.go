@@ -35,17 +35,30 @@ type GoneItem struct {
 	Snippet     string `json:"snippet,omitempty"`
 }
 
-// applyBaseline loads the project's baseline, diffs it against this scan, persists
-// the updated baseline, annotates each concern with its delta, and returns the
-// delta plus only the endpoints that have something to show (new/changed surface,
-// or an unaccepted deterministic affirmation). It never edits code — only the
-// baseline file.
-func applyBaseline(prev *baseline.Baseline, path string, res findings.SensorResult, endpoints []report.EndpointReport, scanned map[string]bool) (BaselineDelta, []report.EndpointReport, error) {
-	diff := baseline.Diff(prev, observedFrom(res), scanned)
+// diffBaseline computes the UNIFIED baseline diff over the observed union (across
+// the sensors that ran), persists the next baseline once, and builds the delta.
+// It is scoped by the categories of the sensors that ran (ADR 0019), so a sensor
+// that did not run never marks another dimension's items gone. Presentation
+// (endpoints for security, a flat section for db) is layered on top of the same
+// diff — the seam declared in ADR 0019, now used by two consumers.
+func diffBaseline(prev *baseline.Baseline, path string, observed []baseline.Observed, scanned map[string]bool) (baseline.DiffResult, BaselineDelta, error) {
+	diff := baseline.Diff(prev, observed, scanned)
 	if err := diff.Next.Save(path); err != nil {
-		return BaselineDelta{}, nil, fmt.Errorf("saving baseline: %w", err)
+		return baseline.DiffResult{}, BaselineDelta{}, fmt.Errorf("saving baseline: %w", err)
 	}
+	delta := BaselineDelta{
+		New: diff.Counts.New, Changed: diff.Counts.Changed, Known: diff.Counts.Known,
+		Acknowledged: diff.Counts.Acknowledged, Gone: diff.Counts.Gone,
+		AffirmationsShown: diff.Counts.AffirmationsShown,
+		GoneCandidates:    goneItems(diff.Gone),
+		Note:              baselineNote(diff.Counts),
+	}
+	return diff, delta, nil
+}
 
+// filterEndpointsByBaseline is security's presentation: keep the endpoints with a
+// shown concern and annotate each concern's baseline state. Unchanged from before.
+func filterEndpointsByBaseline(endpoints []report.EndpointReport, diff baseline.DiffResult) []report.EndpointReport {
 	var shown []report.EndpointReport
 	for _, ep := range endpoints {
 		keep := false
@@ -62,15 +75,26 @@ func applyBaseline(prev *baseline.Baseline, path string, res findings.SensorResu
 			shown = append(shown, ep)
 		}
 	}
+	return shown
+}
 
-	delta := BaselineDelta{
-		New: diff.Counts.New, Changed: diff.Counts.Changed, Known: diff.Counts.Known,
-		Acknowledged: diff.Counts.Acknowledged, Gone: diff.Counts.Gone,
-		AffirmationsShown: diff.Counts.AffirmationsShown,
-		GoneCandidates:    goneItems(diff.Gone),
-		Note:              baselineNote(diff.Counts),
+// filterDBByBaseline is the db dimension's NON-endpoint presentation: keep the
+// findings and surface the baseline shows (new/changed surface, and unaccepted
+// affirmations), filtered by diff.Shown directly (the ADR 0019 seam iii).
+func filterDBByBaseline(res findings.SensorResult, diff baseline.DiffResult) ([]findings.Finding, []findings.SurfaceItem) {
+	var fs []findings.Finding
+	for _, f := range res.Findings {
+		if diff.Shown[f.Fingerprint] {
+			fs = append(fs, f)
+		}
 	}
-	return delta, shown, nil
+	var surf []findings.SurfaceItem
+	for _, it := range res.Surface {
+		if diff.Shown[it.Fingerprint] {
+			surf = append(surf, it)
+		}
+	}
+	return fs, surf
 }
 
 // observedFrom turns a scan result into baseline observations: deterministic
