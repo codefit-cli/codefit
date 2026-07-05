@@ -19,7 +19,9 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/internal/sensors"
 )
 
 // Sensor runs the security dimension against a project, driven by a language
@@ -33,6 +35,21 @@ func New(p providers.LanguageProvider) *Sensor { return &Sensor{provider: p} }
 
 func (*Sensor) Name() string                  { return "security" }
 func (*Sensor) Dimension() findings.Dimension { return findings.DimensionSecurity }
+
+// compile-time check that the security sensor satisfies the Sensor contract.
+var _ sensors.Sensor = (*Sensor)(nil)
+
+// OwnedCategories are the baseline Item categories the security sensor produces:
+// its finding dimension ("security") plus its surface categories (idor/authz/
+// overfetch). They scope the unified baseline (ADR 0019).
+func (*Sensor) OwnedCategories() []string {
+	return []string{
+		string(findings.DimensionSecurity),
+		string(surface.CategoryIDOR),
+		string(surface.CategoryAuthz),
+		string(surface.CategoryOverfetch),
+	}
+}
 
 // skipDirs are directories never walked.
 var skipDirs = map[string]bool{

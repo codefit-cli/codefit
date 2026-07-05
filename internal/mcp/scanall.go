@@ -104,7 +104,10 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	// Baseline layer (ADR/RF-08): diff against the loaded baseline, record the delta,
 	// persist the updated baseline, and filter the view to what changed. Known
 	// surface is silenced; unaccepted deterministic affirmations always stay shown.
-	delta, shown, err := applyBaseline(prev, path, res, endpoints)
+	// The diff is scoped to the categories the sensors that ran own — here, only
+	// security — so items from a sensor that did not run are carried forward, never
+	// marked gone (ADR 0019).
+	delta, shown, err := applyBaseline(prev, path, res, endpoints, securityScope(req.Language))
 	if err != nil {
 		return ScanAllResponse{}, err
 	}

@@ -68,6 +68,15 @@ func runSecurity(root, language string, helpers []string) (findings.SensorResult
 	return res, nil
 }
 
+// securityScope is the baseline category scope of a security-only run: the
+// categories the security sensor owns, unioned by the adapter (ADR 0019). It is
+// passed to the unified baseline diff/prune so items from a sensor that did not
+// run are never marked gone. The provider is irrelevant to OwnedCategories, so a
+// default resolution is enough.
+func securityScope(language string) map[string]bool {
+	return scannedCategories(security.New(providerForLanguage(language, nil)))
+}
+
 // CoverageRequest is the input to codefit-coverage.
 type CoverageRequest struct {
 	Language string `json:"language"`

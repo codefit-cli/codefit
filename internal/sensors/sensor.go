@@ -17,4 +17,10 @@ type Sensor interface {
 	Dimension() findings.Dimension
 	// Run executes the sensor against the audit context and returns its result.
 	Run(ctx auditctx.AuditContext) (findings.SensorResult, error)
+	// OwnedCategories returns the baseline Item categories this sensor produces —
+	// its finding dimension plus its surface categories. It is the sensor's scope
+	// for the unified multi-sensor baseline: a run marks an item "gone" only within
+	// the categories of the sensors that ran (ADR 0019). Categories MUST be disjoint
+	// across sensors (each category owned by exactly one sensor).
+	OwnedCategories() []string
 }
