@@ -7,6 +7,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/providers"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
@@ -34,19 +35,27 @@ type ScanDBResponse struct {
 // and delegates to the DB sensor (which reads the schema, runs the core rules, and
 // stamps identity). Standalone — it touches nothing in scan-all.
 func HandleScanDB(req ScanDBRequest) (ScanDBResponse, error) {
-	provider := providerForLanguage(req.Language, nil)
-	if provider == nil {
-		return ScanDBResponse{Measured: false, Note: fmt.Sprintf("unsupported language %q", req.Language)}, nil
-	}
 	// A missing config is fine (no schema_paths → not measured); a present-but-invalid
 	// one is a hard error, the same rule as the security scan path.
 	cfg, err := config.LoadOptional(filepath.Join(req.Root, ".codefit.yaml"))
 	if err != nil {
 		return ScanDBResponse{}, fmt.Errorf("loading project config: %w", err)
 	}
+
+	// Resolve the schema parser by the INPUT's shape (.prisma / .sql), not the app
+	// language (ADR 0018). If schema_paths name a type with no parser, that is a
+	// not-measured note. With no schema_paths at all, the sensor reports it.
+	var parser providers.SchemaParser
+	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
+		p, note := schemaParserForPaths(req.Root, cfg.Database.SchemaPaths)
+		if p == nil {
+			return ScanDBResponse{Measured: false, Note: note}, nil
+		}
+		parser = p
+	}
 	ctx := auditctx.AuditContext{ProjectRoot: req.Root, Language: req.Language, Config: cfg}
 
-	r, err := dbsensor.New(provider).Audit(ctx)
+	r, err := dbsensor.New(parser).Audit(ctx)
 	if err != nil {
 		return ScanDBResponse{}, err
 	}
