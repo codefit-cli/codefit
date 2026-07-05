@@ -88,6 +88,21 @@ func Compute(measured []findings.Dimension, fs []findings.Finding, weights map[f
 	return ScoreSummary{Global: global, ByDimension: byDim}
 }
 
+// MissingWeights returns the measured dimensions that have NO weight. Compute
+// iterates the weights map, so such a dimension would be silently dropped (no
+// by_dimension entry, no global contribution). A caller runs this guard before
+// Compute and fails loudly on a non-empty result: a measured dimension without a
+// weight is a codefit wiring bug, never a silently incomplete score (ADR 0021).
+func MissingWeights(measured []findings.Dimension, weights map[findings.Dimension]int) []findings.Dimension {
+	var missing []findings.Dimension
+	for _, d := range measured {
+		if _, ok := weights[d]; !ok {
+			missing = append(missing, d)
+		}
+	}
+	return missing
+}
+
 // findingsFor returns the findings belonging to a dimension.
 func findingsFor(fs []findings.Finding, dim findings.Dimension) []findings.Finding {
 	var out []findings.Finding

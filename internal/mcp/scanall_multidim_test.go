@@ -66,12 +66,19 @@ func TestScanAll_NoDB_Regression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleScanAll: %v", err)
 	}
+	// The DB *section* (findings/surface) is still omitted with no database.
 	if resp.DB != nil {
 		t.Errorf("a project with no schema_paths must have DB==nil, got %+v", resp.DB)
 	}
+	// The score object is now always present; the "db" string legitimately appears
+	// inside by_dimension (declared null), so the section-omission is asserted via
+	// resp.DB above, not by scanning the JSON.
 	data, _ := json.Marshal(resp)
-	if strings.Contains(string(data), "\"db\"") {
-		t.Errorf("no-regression: the response must not contain a \"db\" key, got: %s", data)
+	if !strings.Contains(string(data), "\"score\"") {
+		t.Errorf("the response must always carry a score object: %s", data)
+	}
+	if resp.Score.ByDimension == nil {
+		t.Error("score.by_dimension must always be present")
 	}
 }
 
