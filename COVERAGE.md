@@ -37,9 +37,11 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
 - **Table without a primary key (DB-050).** A model with no `@id`/`@@id`, read from
-  the Prisma schema (`database.schema_paths`). A table with no primary key is
-  structurally undeniable, so it is **affirmed**. The DB dimension covers only what
-  the schema states — no query analysis.
+  the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
+  (Flyway PostgreSQL) migrations reconstructed to their final state
+  (`database.schema_paths`). A table with no primary key is structurally undeniable,
+  so it is **affirmed**. The DB dimension covers only what the schema states — no query
+  analysis.
   > **Scalability note:** the DB rules are **language-neutral** (they reason over
   > the neutral schema model, not TypeScript), so this DB coverage prose is
   > duplicated per-provider today. It should move to a neutral DB-coverage source
@@ -179,6 +181,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   deterministically.
 - **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** — **not yet
   covered**, a known gap, not a silent one.
+- **Database query behaviour** — N+1 access patterns and index-vs-query analysis
+  (whether an index serves the queries the code runs) are **not** covered; the DB
+  dimension is schema-only, it does not read the application's queries.
+- **Database views, procedures/functions, and triggers (DB-020..041)** — the SQL-DDL
+  parser records their names, but there are **no rules** auditing them yet — a known
+  gap, not a silent one.
+- **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
+  columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler

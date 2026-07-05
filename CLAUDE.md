@@ -320,7 +320,12 @@ Protocolo de sesión:
   (genera la skill de codefit y la coloca para los agentes detectados; **no toca el
   `AGENT.md`**) + **baseline** (memoria del proyecto: `scan-all` con delta +
   `baseline-list`/`-accept`/`-prune`). Dogfoodeado en un backend real.
-- **Fase 2** — Sensor de DB (OLTP/OLAP, índices, vistas, procs, N+1).
+- **Fase 2** ✅ **COMPLETA (`v0.2.0`)** — dimensión DB: modelo neutro + parsers Prisma
+  y SQL-DDL (Flyway), 8 reglas schema-only OLTP (DB-050/001/011/002 estructurales +
+  DB-051/052/053/003 heurísticas por nombre), `codefit-scan-db`, dimensión en `scan-all`
+  (sección DB + baseline unificado) y `by_dimension`. Dogfoodeada en Prisma real y
+  SQL-DDL/Postgres real. **Diferido:** N+1, índice-vs-query, reglas de vistas/procs/
+  triggers, y OLAP.
 - **Fase 3** — Code review + best practices + tests + riesgo de regresión.
 - **Fase 4** — Knowledge packs + `codefit update` + manifiesto de cobertura
   (`COVERAGE.md` + tool `codefit-coverage`) + release pública `0.x`.

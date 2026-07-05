@@ -16,6 +16,47 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.2.0] — unreleased
+
+**Phase 2 — the database dimension.** codefit now audits database structure from the
+schema, standalone and inside `scan-all`, scored beside security. Schema-only OLTP
+rules; query-driven rules (N+1, index-vs-query), view/procedure/trigger rules, and
+OLAP are deferred. ADRs 0014–0021. _(Date set at tag time.)_
+
+### Added
+
+- **Neutral schema model** (`internal/core/db`) — a format-agnostic
+  Tables/Columns/Indexes/ForeignKeys (plus Views/Procedures/Triggers) model the rules
+  reason over, filled by a provider parser (ADR 0014).
+- **Prisma schema parser** — a hand-written, two-pass `schema.prisma` parser behind the
+  provider-owned `SchemaParser` capability, resolved by input, not language (ADR 0014).
+- **SQL-DDL parser** (`internal/providers/sqlddl`) — a hand-written,
+  dollar-quoting-aware incremental reducer over ordered Flyway PostgreSQL migrations
+  (ADR 0018).
+- **DB sensor + `codefit-scan-db`** — a standalone database-structure audit, with honest
+  "not measured" states (no schema / no parser / disabled), never a false clean
+  (ADR 0015).
+- **Eight schema-only OLTP rules** — structural: table without a primary key (DB-050,
+  affirmed), FK with no covering index (DB-001), duplicate index (DB-011), multivalued
+  column (DB-002); name-heuristic surface: text-typed FK (DB-051), missing audit
+  timestamps (DB-052), sensitive column in the clear (DB-053), repeating groups (DB-003)
+  (ADRs 0015, 0017).
+- **DB dimension in `codefit-scan-all`** — a parallel, non-endpoint `db` section, plus
+  `by_dimension` scoring (`scoring.Compute` wired in) with a global and a per-dimension
+  breakdown (ADRs 0020, 0021).
+- **Dimension lifecycle doctrine** (ADR 0016) recorded, with a pointer in `CLAUDE.md`.
+
+### Changed
+
+- **Unified multi-sensor baseline** — the baseline diff and prune are scoped by the
+  categories of the sensors that ran, so a single-sensor run never marks another
+  dimension's items gone (ADR 0019). No committed-format change.
+
+### Not yet covered (declared)
+
+- Query-driven DB rules (N+1, index-vs-query), view/procedure/trigger rules (the SQL-DDL
+  parser populates the model, but there are no rules yet), and OLAP.
+
 ## [0.1.5] — 2026-06-29
 
 **Phase 1.5 — NestJS surface.** Coverage expansion within Phase 1 (stays in the
