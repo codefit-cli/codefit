@@ -9,6 +9,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/report"
+	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
@@ -43,7 +44,13 @@ type ScanAllRequest struct {
 // empty even though Summary.CertainConcerns (computed before filtering) is > 0 —
 // the difference is exactly the "known" surface the baseline is silencing.
 type ScanAllResponse struct {
-	Summary         ScanAllSummary          `json:"summary"`
+	Summary ScanAllSummary `json:"summary"`
+	// Score is the per-dimension breakdown plus the weighted global (ADR 0021). It
+	// is ALWAYS present: by_dimension carries every weighted dimension, with the
+	// unaudited ones (review/complexity/tests, and db when it did not run) as null —
+	// an honest statement that the dimension exists but was not measured. The score
+	// reflects deterministic AFFIRMATIONS only, not mapped surface.
+	Score           scoring.ScoreSummary    `json:"score"`
 	Baseline        BaselineDelta           `json:"baseline"`
 	Actionable      []report.EndpointReport `json:"actionable"`
 	ResolvedClean   ResolvedClean           `json:"resolved_clean"`
@@ -158,6 +165,22 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 		dbSection.Findings, dbSection.Surface = filterDBByBaseline(dbRes, diff)
 	}
 
+	// Per-dimension scoring (ADR 0021): security always measured, db only when it
+	// ran. Over RAW findings (not baseline-filtered) so the global equals the flat
+	// security score exactly when db is absent — no value regression. The guard
+	// fails loudly if a measured dimension has no weight (a wiring bug), never a
+	// silently incomplete score.
+	measured := []findings.Dimension{findings.DimensionSecurity}
+	scored := append([]findings.Finding{}, secRes.Findings...)
+	if dbRan {
+		measured = append(measured, findings.DimensionDB)
+		scored = append(scored, dbRes.Findings...)
+	}
+	if missing := scoring.MissingWeights(measured, scoring.DefaultWeights()); len(missing) > 0 {
+		return ScanAllResponse{}, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
+	}
+	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
+
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Summary: ScanAllSummary{
@@ -166,6 +189,7 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 			SurfaceItems:          len(secRes.Surface),
 			CertainConcerns:       certain,
 		},
+		Score:      score,
 		Baseline:   delta,
 		Actionable: actionable,
 		ResolvedClean: ResolvedClean{
