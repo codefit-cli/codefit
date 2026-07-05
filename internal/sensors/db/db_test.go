@@ -9,7 +9,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/surface"
-	"github.com/codefit-cli/codefit/internal/providers/golang"
+	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
 	sdb "github.com/codefit-cli/codefit/internal/sensors/db"
 )
@@ -145,17 +145,9 @@ func TestSensorDB_NoSchemaPaths_NotMeasured(t *testing.T) {
 	}
 }
 
-func TestSensorDB_NoParser_NotMeasured(t *testing.T) {
-	// The Go provider does not implement providers.SchemaParser.
-	ctx := writeProject(t, "prisma/schema.prisma", happySchema, yamlWithSchema)
-	r, err := sdb.New(golang.New()).Audit(ctx)
-	if err != nil {
-		t.Fatalf("Audit: %v", err)
-	}
-	if r.Measured || r.Note == "" {
-		t.Errorf("provider without a schema parser must be not-measured with a note, got Measured=%v note=%q", r.Measured, r.Note)
-	}
-}
+// The "no parser for this schema type" case is now a compile-time concern of the
+// adapter (the sensor depends on providers.SchemaParser directly), so it is tested
+// in the mcp package (schemaParserForPaths), not here.
 
 func TestSensorDB_MissingSchemaFile_Errors(t *testing.T) {
 	// .codefit.yaml points at prisma/schema.prisma but we write the schema elsewhere.
@@ -171,5 +163,48 @@ func TestSensorDB_Identity(t *testing.T) {
 	s := sdb.New(typescript.New())
 	if s.Name() != "db" || s.Dimension() != findings.DimensionDB {
 		t.Errorf("identity = {%s, %s}, want {db, db}", s.Name(), s.Dimension())
+	}
+}
+
+// A directory schema_path is expanded to its *.sql files in Flyway version order.
+// V2 creates the table, V10 alters it — lexical order (V10 < V2) would break the
+// reduction; the numeric Flyway sort must apply V2 first.
+func TestSensorDB_FlywayDirectory_OrderedIncremental(t *testing.T) {
+	root := t.TempDir()
+	mig := filepath.Join(root, "db", "migration")
+	if err := os.MkdirAll(mig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mig, "V2__create.sql"), []byte("CREATE TABLE t (id int);"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mig, "V10__alter.sql"), []byte("ALTER TABLE t ADD COLUMN name varchar(10);"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "version: \"1\"\nproject:\n  name: t\n  language: java\n  framework: spring\ndatabase:\n  type: postgresql\n  schema_paths:\n    - db/migration\n"
+	if err := os.WriteFile(filepath.Join(root, ".codefit.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "java", Config: cfg}
+	r, err := sdb.New(sqlddl.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if !r.Measured {
+		t.Fatalf("Measured=false: %q", r.Note)
+	}
+	// The table was reconstructed from the .sql directory (DB-050 fires: no PK).
+	var db050 int
+	for _, f := range r.Res.Findings {
+		if f.ID == "DB-050" {
+			db050++
+		}
+	}
+	if db050 != 1 {
+		t.Errorf("expected the .sql directory reconstructed exactly one table (1 DB-050), got %d", db050)
 	}
 }

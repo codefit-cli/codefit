@@ -2,8 +2,6 @@ package db
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,15 +15,18 @@ import (
 	"github.com/codefit-cli/codefit/internal/sensors"
 )
 
-// Sensor audits the database structure, driven by a provider that can parse a
-// schema. The rule logic lives in the core (dbrules); the sensor only resolves
-// and reads the schema files and stamps identity.
+// Sensor audits the database structure, driven by a schema parser resolved by the
+// caller from the input's shape (.prisma / .sql — ADR 0018). The rule logic lives
+// in the core (dbrules); the sensor only reads/orders the schema files and stamps
+// identity. It depends on exactly the capability it uses, providers.SchemaParser —
+// not LanguageProvider — so the "no parser" case is a compile-time concern of the
+// adapter, not a runtime branch here.
 type Sensor struct {
-	provider providers.LanguageProvider
+	parser providers.SchemaParser
 }
 
-// New builds a DB sensor backed by a language provider.
-func New(p providers.LanguageProvider) *Sensor { return &Sensor{provider: p} }
+// New builds a DB sensor backed by a schema parser.
+func New(p providers.SchemaParser) *Sensor { return &Sensor{parser: p} }
 
 // compile-time check: the DB sensor satisfies the shared Sensor identity.
 var _ sensors.Sensor = (*Sensor)(nil)
@@ -61,28 +62,16 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	if !enabled(ctx.Config) {
 		return notMeasured("db sensor disabled in .codefit.yaml (sensors.db.enabled=false)"), nil
 	}
-	parser, ok := s.provider.(providers.SchemaParser)
-	if !ok {
-		return notMeasured(fmt.Sprintf("provider %q does not parse database schemas", s.provider.Language())), nil
-	}
 	if ctx.Config == nil || len(ctx.Config.Database.SchemaPaths) == 0 {
 		return notMeasured("no database.schema_paths configured in .codefit.yaml"), nil
 	}
 
-	sources := make([]providers.SourceFile, 0, len(ctx.Config.Database.SchemaPaths))
-	content := map[string][]byte{}
-	for _, rel := range ctx.Config.Database.SchemaPaths {
-		rel = filepath.ToSlash(rel)
-		data, err := os.ReadFile(filepath.Join(ctx.ProjectRoot, rel))
-		if err != nil {
-			// Configured but unreadable: a real misconfiguration, not "no DB".
-			return Result{}, fmt.Errorf("reading schema %q: %w", rel, err)
-		}
-		sources = append(sources, providers.SourceFile{Path: rel, Content: data})
-		content[rel] = data
+	sources, content, err := readSchemaSources(ctx.ProjectRoot, ctx.Config.Database.SchemaPaths)
+	if err != nil {
+		return Result{}, err
 	}
 
-	schema, err := parser.ParseSchema(sources)
+	schema, err := s.parser.ParseSchema(sources)
 	if err != nil {
 		return Result{}, fmt.Errorf("parsing database schema: %w", err)
 	}
