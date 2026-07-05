@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/baseline"
+	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/report"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
 // ScanAllRequest is the input to codefit-scan-all: a project root and language.
@@ -44,6 +48,25 @@ type ScanAllResponse struct {
 	Actionable      []report.EndpointReport `json:"actionable"`
 	ResolvedClean   ResolvedClean           `json:"resolved_clean"`
 	FrontierPending FrontierPending         `json:"frontier_pending"`
+	// DB is the parallel database-structure section — the db dimension's findings
+	// and surface, baseline-filtered. It is NON-endpoint (a table has no route), so
+	// it is its own section, not one of the three endpoint buckets. Nil when the
+	// project has no database.schema_paths configured, so a project without a
+	// database yields a response byte-identical to before db was wired (ADR 0020).
+	DB *DBSection `json:"db,omitempty"`
+}
+
+// DBSection is the database dimension's result inside scan-all. Measured=false with
+// a Note is the honest "not audited" state (disabled / no parser / schema read or
+// parse failure) — a db failure is SOFT here, reported but never fatal to the
+// security result (ADR 0020). Findings are affirmations (e.g. DB-050); Surface are
+// questions; both are already filtered by the baseline.
+type DBSection struct {
+	Measured bool                   `json:"measured"`
+	Note     string                 `json:"note,omitempty"`
+	Findings []findings.Finding     `json:"findings,omitempty"`
+	Surface  []findings.SurfaceItem `json:"surface,omitempty"`
+	Score    int                    `json:"score"`
 }
 
 // ResolvedClean declares the endpoints codefit resolved locally and found clean
@@ -82,43 +105,65 @@ type ScanAllSummary struct {
 // fact — it adds no detection, only the aggregation and the split.
 func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	// Load the committed baseline ONCE: it provides both the project's registered
-	// authz helpers (recognized during the scan) and the previous items the delta
-	// is computed against (applyBaseline reuses this same load — no double read).
+	// authz helpers (recognized during the scan) and the previous items the unified
+	// diff is computed against (diffBaseline reuses this same load — no double read).
 	path := filepath.Join(req.Root, baseline.Name)
 	prev, err := baseline.Load(path)
 	if err != nil {
 		return ScanAllResponse{}, fmt.Errorf("loading baseline: %w", err)
 	}
 
-	res, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language))
+	// Security ALWAYS runs and is the required core: if it fails, scan-all fails.
+	secRes, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language))
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
-
-	endpoints := report.AggregateEndpoints(res.Findings, res.Surface)
+	endpoints := report.AggregateEndpoints(secRes.Findings, secRes.Surface)
 	certain := 0
 	for _, ep := range endpoints {
 		certain += ep.CertainConcerns
 	}
 
-	// Baseline layer (ADR/RF-08): diff against the loaded baseline, record the delta,
-	// persist the updated baseline, and filter the view to what changed. Known
-	// surface is silenced; unaccepted deterministic affirmations always stay shown.
-	// The diff is scoped to the categories the sensors that ran own — here, only
-	// security — so items from a sensor that did not run are carried forward, never
-	// marked gone (ADR 0019).
-	delta, shown, err := applyBaseline(prev, path, res, endpoints, securityScope(req.Language))
+	// DB runs only when database.schema_paths is configured (the dimension applies
+	// to this project). A DB failure is SOFT — reported in its section, never fatal
+	// to security (ADR 0020). No schema_paths → no DB section → byte-identical to
+	// before db was wired.
+	cfg, err := config.LoadOptional(filepath.Join(req.Root, ".codefit.yaml"))
+	if err != nil {
+		return ScanAllResponse{}, fmt.Errorf("loading project config: %w", err)
+	}
+	var dbRes findings.SensorResult
+	var dbSection *DBSection
+	dbRan := false
+	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
+		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg)
+	}
+
+	// One unified baseline diff over both sensors' observations, scoped to the
+	// categories of the sensors that ran (ADR 0019), persisted once.
+	scanned := securityScope(req.Language)
+	if dbRan {
+		for _, c := range dbsensor.New(nil).OwnedCategories() {
+			scanned[c] = true
+		}
+	}
+	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned)
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
 
-	actionable, clean, frontier := report.ClassifyEndpoints(shown)
+	// Two presentations of the same diff: endpoints for security, a flat section for db.
+	actionable, clean, frontier := report.ClassifyEndpoints(filterEndpointsByBaseline(endpoints, diff))
+	if dbSection != nil && dbSection.Measured {
+		dbSection.Findings, dbSection.Surface = filterDBByBaseline(dbRes, diff)
+	}
+
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Summary: ScanAllSummary{
 			Endpoints:             len(endpoints),
-			DeterministicFindings: len(res.Findings),
-			SurfaceItems:          len(res.Surface),
+			DeterministicFindings: len(secRes.Findings),
+			SurfaceItems:          len(secRes.Surface),
 			CertainConcerns:       certain,
 		},
 		Baseline:   delta,
@@ -133,6 +178,7 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 			Note:      frontierNote(len(frontier), resolvedLocally),
 			Endpoints: frontier,
 		},
+		DB: dbSection,
 	}, nil
 }
 
@@ -234,4 +280,25 @@ func providerForLanguage(lang string, authzHelpers []string) providers.LanguageP
 	default:
 		return nil
 	}
+}
+
+// runDBForScanAll resolves the schema parser by input and runs the DB sensor,
+// returning the section, its raw result (for baseline filtering), and whether it
+// actually measured. Every not-measured/failure path is SOFT: it returns a
+// Measured=false section with a note and ran=false — never an error, so a db
+// misconfiguration can never blank the security audit (ADR 0020).
+func runDBForScanAll(root, language string, cfg *config.Config) (*DBSection, findings.SensorResult, bool) {
+	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths)
+	if parser == nil {
+		return &DBSection{Measured: false, Note: note}, findings.SensorResult{}, false
+	}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg}
+	r, err := dbsensor.New(parser).Audit(ctx)
+	if err != nil {
+		return &DBSection{Measured: false, Note: "db audit failed: " + err.Error()}, findings.SensorResult{}, false
+	}
+	if !r.Measured {
+		return &DBSection{Measured: false, Note: r.Note}, findings.SensorResult{}, false
+	}
+	return &DBSection{Measured: true, Score: r.Res.Score}, r.Res, true
 }
