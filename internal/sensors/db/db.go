@@ -34,6 +34,22 @@ var _ sensors.Sensor = (*Sensor)(nil)
 func (*Sensor) Name() string                  { return "db" }
 func (*Sensor) Dimension() findings.Dimension { return findings.DimensionDB }
 
+// OwnedCategories are the baseline Item categories the DB sensor produces: its
+// finding dimension ("db") plus its per-rule surface categories. They scope the
+// unified baseline (ADR 0019) and must be disjoint from every other sensor's.
+func (*Sensor) OwnedCategories() []string {
+	return []string{
+		string(findings.DimensionDB),
+		string(surface.CategoryDBFKNoIndex),
+		string(surface.CategoryDBDupIndex),
+		string(surface.CategoryDBMultivalued),
+		string(surface.CategoryDBFKTextType),
+		string(surface.CategoryDBNoTimestamps),
+		string(surface.CategoryDBSensitiveUnencrypted),
+		string(surface.CategoryDBRepeatingGroups),
+	}
+}
+
 // Result is the DB audit outcome, including whether the DB was measured at all.
 // Measured=false with a Note is the honest "not audited" state (disabled, no
 // schema_paths, provider without a schema parser) — distinct from "audited, 0

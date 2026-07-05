@@ -10,6 +10,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/baseline"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/report"
+	"github.com/codefit-cli/codefit/internal/sensors"
 )
 
 // BaselineDelta is scan-all's account of how the current scan compares to the
@@ -39,8 +40,8 @@ type GoneItem struct {
 // delta plus only the endpoints that have something to show (new/changed surface,
 // or an unaccepted deterministic affirmation). It never edits code — only the
 // baseline file.
-func applyBaseline(prev *baseline.Baseline, path string, res findings.SensorResult, endpoints []report.EndpointReport) (BaselineDelta, []report.EndpointReport, error) {
-	diff := baseline.Diff(prev, observedFrom(res))
+func applyBaseline(prev *baseline.Baseline, path string, res findings.SensorResult, endpoints []report.EndpointReport, scanned map[string]bool) (BaselineDelta, []report.EndpointReport, error) {
+	diff := baseline.Diff(prev, observedFrom(res), scanned)
 	if err := diff.Next.Save(path); err != nil {
 		return BaselineDelta{}, nil, fmt.Errorf("saving baseline: %w", err)
 	}
@@ -75,7 +76,7 @@ func applyBaseline(prev *baseline.Baseline, path string, res findings.SensorResu
 // observedFrom turns a scan result into baseline observations: deterministic
 // findings are affirmations (Affirms=true, displayed by Title — never the matched
 // secret), surface items are questions (Affirms=false). Deduplicated by fingerprint.
-func observedFrom(res findings.SensorResult) []baseline.Observed {
+func observedFrom(results ...findings.SensorResult) []baseline.Observed {
 	seen := map[string]bool{}
 	var obs []baseline.Observed
 	add := func(o baseline.Observed) {
@@ -85,13 +86,29 @@ func observedFrom(res findings.SensorResult) []baseline.Observed {
 		seen[o.FP] = true
 		obs = append(obs, o)
 	}
-	for _, f := range res.Findings {
-		add(baseline.Observed{FP: f.Fingerprint, Category: string(f.Dimension), File: f.File, Snippet: f.Title, Affirms: !f.Probabilistic})
-	}
-	for _, it := range res.Surface {
-		add(baseline.Observed{FP: it.Fingerprint, Category: it.Category, File: it.File, Snippet: firstLine(it.Snippet), Affirms: false})
+	for _, res := range results {
+		for _, f := range res.Findings {
+			add(baseline.Observed{FP: f.Fingerprint, Category: string(f.Dimension), File: f.File, Snippet: f.Title, Affirms: !f.Probabilistic})
+		}
+		for _, it := range res.Surface {
+			add(baseline.Observed{FP: it.Fingerprint, Category: it.Category, File: it.File, Snippet: firstLine(it.Snippet), Affirms: false})
+		}
 	}
 	return obs
+}
+
+// scannedCategories unions the OwnedCategories of the sensors that ran this pass —
+// the scope for the unified baseline diff/prune (ADR 0019). The MCP adapter only
+// unions; each sensor declares its own categories, so a new sensor is scoped
+// automatically without touching this code.
+func scannedCategories(ss ...sensors.Sensor) map[string]bool {
+	scope := map[string]bool{}
+	for _, s := range ss {
+		for _, c := range s.OwnedCategories() {
+			scope[c] = true
+		}
+	}
+	return scope
 }
 
 // recognizedHelpers loads the project's registered authz helpers for a language,
@@ -331,6 +348,10 @@ func HandleBaselinePrune(req BaselinePruneRequest) (BaselinePruneResponse, error
 	for _, o := range observedFrom(res) {
 		observed[o.FP] = true
 	}
+	// Scope the prune to the categories the re-scan actually covered (security
+	// here). An item owned by a sensor that did not run is NOT observed, but that
+	// does not make it gone — it must never be pruned by this run (ADR 0019).
+	scanned := securityScope(req.Language)
 	path := filepath.Join(req.Root, baseline.Name)
 	b, err := baseline.Load(path)
 	if err != nil {
@@ -343,6 +364,9 @@ func HandleBaselinePrune(req BaselinePruneRequest) (BaselinePruneResponse, error
 	}
 	var target []string
 	for _, it := range b.Items {
+		if !scanned[it.Category] {
+			continue // out of scope: a sensor that did not run — never prune
+		}
 		if observed[it.FP] {
 			continue // still present in the code — not a prune candidate
 		}

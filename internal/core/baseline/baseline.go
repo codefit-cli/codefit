@@ -168,7 +168,15 @@ func (b *Baseline) index() map[string]Item {
 // per-item delta, what must be shown, the gone candidates, and the next baseline
 // to persist. It never silences a deterministic affirmation that has not been
 // acknowledged.
-func Diff(prev *Baseline, observed []Observed) DiffResult {
+//
+// scanned is the set of Item categories owned by the sensors that RAN this pass.
+// "Gone" is scoped to it: a previous item whose category is NOT in scanned (its
+// sensor did not run) is carried forward UNTOUCHED — absent from the delta, never
+// a gone/prune candidate. This distinguishes "not observed because the sensor did
+// not run" from "not observed because it disappeared", so a single-sensor run
+// cannot corrupt another dimension's state (ADR 0019). An empty scanned means
+// nothing is in scope, hence nothing is gone — a conservative fail-safe.
+func Diff(prev *Baseline, observed []Observed, scanned map[string]bool) DiffResult {
 	prevByFP := prev.index()
 	observedFP := make(map[string]bool, len(observed))
 	for _, o := range observed {
@@ -179,11 +187,17 @@ func Diff(prev *Baseline, observed []Observed) DiffResult {
 	// not per-scan observations, so a scan must never drop them.
 	res := DiffResult{State: map[string]State{}, Shown: map[string]bool{}, Next: &Baseline{Version: "1", AuthzHelpers: prev.AuthzHelpers}}
 
-	// Gone = previous items not observed now (prune candidates). Index them by
-	// (file, category) so a new item at the same spot can be paired as "changed".
+	// Partition the previous items: out-of-scope items (their sensor did not run)
+	// are carried forward verbatim and take no part in the delta. In-scope items
+	// not observed now are "gone" (prune candidates), indexed by (file, category)
+	// so a new item at the same spot can be paired as "changed".
 	goneByLoc := map[string][]Item{}
 	var gone []Item
 	for _, it := range prev.Items {
+		if !scanned[it.Category] {
+			res.Next.Items = append(res.Next.Items, it) // out of scope: untouched carry-forward
+			continue
+		}
 		if !observedFP[it.FP] {
 			gone = append(gone, it)
 			loc := it.File + "\x00" + it.Category

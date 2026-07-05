@@ -97,7 +97,7 @@ func TestAuthzHelpers_SurviveSaveLoadAndDiff(t *testing.T) {
 	// are not among the observed items.
 	diff := baseline.Diff(loaded, []baseline.Observed{
 		{FP: "abc123", Category: "idor", File: "app/x/route.ts", Snippet: "GET", Affirms: false},
-	})
+	}, secScope())
 	if got := diff.Next.RecognizedAuthzHelpers("typescript"); len(got) != 1 {
 		t.Errorf("Diff dropped the registered helpers from the next baseline, got %v", got)
 	}
