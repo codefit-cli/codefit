@@ -16,12 +16,12 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
-## [0.2.0] — unreleased
+## [0.2.0] — 2026-07-05
 
 **Phase 2 — the database dimension.** codefit now audits database structure from the
 schema, standalone and inside `scan-all`, scored beside security. Schema-only OLTP
 rules; query-driven rules (N+1, index-vs-query), view/procedure/trigger rules, and
-OLAP are deferred. ADRs 0014–0021. _(Date set at tag time.)_
+OLAP are deferred. ADRs 0014–0021.
 
 ### Added
 
