@@ -551,7 +551,7 @@ no debe confundir una stub con una tool usable.
 | `codefit-baseline-accept` | Baseline | ✅ Fase 1 | Registra la decisión humana de aceptar item(s) (falso positivo / deuda asumida) con razón obligatoria |
 | `codefit-baseline-prune` | Baseline | ✅ Fase 1 | Saca del baseline los items que un refactor resolvió (re-escanea para confirmar que están `gone`) |
 | `codefit-coverage` | Metadata | ✅ Fase 1 | Devuelve el manifiesto de cobertura para el lenguaje |
-| `codefit-scan-db` | Determinístico | 🔲 Fase 2 | Estructura de DB (OLTP/OLAP, índices, vistas, procs) |
+| `codefit-scan-db` | Determinístico + Superficie | ✅ Fase 2 (`v0.2.0`) | Estructura de DB schema-only (OLTP): sin PK, FK sin índice, índices duplicados, columnas array, heurísticas por nombre. OLAP/vistas/procs/N+1 diferidos |
 | `codefit-check-cves` | Determinístico | ✅ Fase 1 (RF-09) | Consulta OSV.dev por las dependencias (versiones exactas de lockfile/go.mod) |
 | `codefit-check-practices` | Determinístico | 🔲 Fase 3 | Best practices del lenguaje |
 | `codefit-scan-tests` | Determinístico | 🔲 Fase 3 | Calidad de suite + riesgo de regresión |

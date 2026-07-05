@@ -29,7 +29,7 @@ pieces of it are still stubs.
 | Version  | PRD phase | Meaning |
 |----------|-----------|---------|
 | `0.1.0`  | Phase 1   | TS provider + security sensor + surface mapping + **`init` (config + skill) and baseline** functional (`update` is Phase 4) |
-| `0.2.0`  | Phase 2   | DB sensor (OLTP/OLAP, indexes, views, procs, N+1) |
+| `0.2.0`  | Phase 2   | DB dimension: schema-only OLTP rules (Prisma + SQL-DDL parsers), `scan-db`, DB in `scan-all` + `by_dimension` |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -57,6 +57,13 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.0` — Phase 2 complete (the database dimension).** Usable end-to-end from
+  `main`: a neutral schema model with a Prisma parser and a SQL-DDL (Flyway) parser,
+  eight schema-only OLTP rules, the standalone `codefit-scan-db`, the DB dimension
+  running inside `scan-all` as a parallel section, and `by_dimension` scoring beside
+  security. Dogfooded on a real Prisma backend and a real SQL-DDL/Postgres backend.
+  **Deferred (not in `0.2.0`):** N+1 and index-vs-query rules, view/procedure/trigger
+  rules, and OLAP.
 - **`v0.1.0` — Phase 1 complete.** Usable end-to-end from `main`: the MCP stdio
   server, deterministic TypeScript security rules, surface mapping (IDOR / broken
   authz / over-fetching), the `scan-all` three-bucket synthesis with `scan-endpoint`
