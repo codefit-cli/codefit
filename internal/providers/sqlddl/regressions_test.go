@@ -103,6 +103,178 @@ func TestDelimiterBlock_WellFormed_SubsequentTablesCaptured(t *testing.T) {
 	}
 }
 
+// --- FIX 4 (Unit I rework re-judge, CRITICAL) — the KEY/INDEX inline-index
+// discriminator must key off the TYPE (via the dialect's TypeMap), not off
+// mere '(' presence: a column legitimately named key/index/fulltext/spatial
+// whose TYPE carries parens (varchar(255), int(11), numeric(10,2),
+// enum('a','b')) must stay a column, never be misread as the inline-index
+// FORM and dropped. ---
+
+func TestKeyColumnWithParenType_StaysAColumn_Postgres(t *testing.T) {
+	src := "CREATE TABLE t (id int, key varchar(255));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.Postgres())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestKeyColumnWithParenType_StaysAColumn_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int, key varchar(255));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestIndexColumnWithParenType_StaysAColumn_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int, index int(11));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "index") {
+		t.Errorf("column 'index' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestKeyColumnWithNumericParenType_StaysAColumn_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int, key numeric(10,2));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestKeyColumnWithEnumType_StaysAColumn_MySQL(t *testing.T) {
+	// enum('a','b') has parens AND quoted strings — proves the discriminator is
+	// type-map-driven, not a digit/paren heuristic.
+	src := "CREATE TABLE t (id int, key enum('a','b'));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestSpatialColumnWithParenType_StaysAColumn_MySQL(t *testing.T) {
+	// "geometry" is not in the dialect TypeMap (declared subset), so use a
+	// type that IS mapped to still exercise the SPATIAL leading keyword.
+	src := "CREATE TABLE t (id int, spatial varchar(255));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "spatial") {
+		t.Errorf("column 'spatial' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestAlterAddKeyColumnWithParenType_StaysAColumn_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int); ALTER TABLE t ADD key varchar(255);"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("must not fabricate a phantom index, got %+v", tb.Indexes)
+	}
+}
+
+func TestAlterAddColumnKeyWithParenType_StillWorks_MySQL(t *testing.T) {
+	// with the explicit COLUMN keyword, must keep working as before.
+	src := "CREATE TABLE t (id int); ALTER TABLE t ADD COLUMN key varchar(255);"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if !hasCol(tb, "key") {
+		t.Errorf("column 'key' must be present, got columns = %v", colNames(tb))
+	}
+}
+
+// --- Lock: must NOT over-correct — the real inline-index FORM stays an index,
+// never becomes a phantom column, regardless of the fix above. ---
+
+func TestKeyIndexNoName_StillAnIndex_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int, KEY (id));"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if hasCol(tb, "key") || hasCol(tb, "KEY") {
+		t.Errorf("KEY (id) must not become a phantom column, columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 1 {
+		t.Errorf("KEY (id) must be recorded as an index, got %+v", tb.Indexes)
+	}
+}
+
+func TestAlterAddKeyIndexForm_StillAnIndex_MySQL(t *testing.T) {
+	src := "CREATE TABLE t (id int, col int); ALTER TABLE t ADD KEY idx (col);"
+	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
+	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())).ParseSchema(srcs)
+	if err != nil {
+		t.Fatalf("ParseSchema must not error: %v", err)
+	}
+	tb := table(t, s, "t")
+	if hasCol(tb, "key") || hasCol(tb, "KEY") {
+		t.Errorf("ADD KEY idx (col) must not add a phantom column, columns = %v", colNames(tb))
+	}
+	if len(tb.Indexes) != 1 {
+		t.Errorf("ADD KEY idx (col) must be recorded as an index, got %+v", tb.Indexes)
+	}
+}
+
 // --- REMOVE inRoutineBody guard: cross-file/cross-dialect hazards it caused.
 
 // C5: the guard must never leak state across files — a stuck-open guard from
