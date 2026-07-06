@@ -124,13 +124,34 @@ const noPKSQLSchema = `CREATE TABLE no_key (
 );
 `
 
-// TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged is the H8 DoD closure
-// confirmation: scan-all's DB bucket runs UNCHANGED for a PostgreSQL project
-// now that schemaParserForPaths is wired through cfg.Database.Type (H6, H7).
-// Before Unit H, database.type was read for validation only and never reached
-// the SQL-DDL parser; this proves the new dbType plumbing still resolves the
-// Postgres dialect (byte-identical parsing behavior) and the DB section is
-// populated exactly like the pre-Unit-H (unwired) call site was.
+const tsYAMLWithSQLDDLMySQL = `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  type: mysql
+  schema_paths:
+    - db/schema.sql
+`
+
+// mysqlNoPKSchema is a MySQL-dialect-EXCLUSIVE construct (backtick-quoted
+// identifiers + ENUM): under the Postgres dialect the backtick-quoted table
+// name does not canonicalize as a CREATE TABLE at all, so the table would be
+// silently dropped and DB-050 would never fire. This makes the fixture
+// discriminate — it only produces DB-050 if the MySQL dialect was actually
+// bound (see TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn).
+const mysqlNoPKSchema = "CREATE TABLE `no_key` (\n  `status` ENUM('a','b') NOT NULL\n);\n"
+
+// TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged proves the .sql
+// (SQL-DDL) scan-all path runs and populates the DB section exactly like the
+// pre-Unit-H (unwired) call site did. It does NOT, by itself, prove the
+// dbType→dialect plumbing (H6, H7): the fixture is dialect-neutral, and
+// sqlddl.New()'s default dialect is Postgres, so this test would still pass
+// even if cfg.Database.Type were dropped/hardcoded to "" before reaching
+// schemaParserForPaths. TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn
+// (below) is the test that actually locks the plumbing, via a dialect
+// -exclusive fixture that Postgres cannot parse correctly.
 func TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged(t *testing.T) {
 	root := writeProj(t, map[string]string{
 		".codefit.yaml":  tsYAMLWithSQLDDL,
@@ -152,6 +173,40 @@ func TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged(t *testing.T) {
 	}
 	if db050 != 1 {
 		t.Errorf("DB.Findings must include DB-050 for the PK-less table, got %d", db050)
+	}
+}
+
+// TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn is the discriminating
+// H8 DoD closure: it proves cfg.Database.Type actually reaches
+// schemaParserForPaths → sqlDialectParser and binds the MySQL dialect
+// descriptor. The fixture (mysqlNoPKSchema) uses backtick-quoted identifiers,
+// a MySQL-exclusive construct: under the WRONG dialect (e.g. Postgres, which
+// is sqlddl.New()'s default) the backtick-quoted table does not canonicalize
+// as a CREATE TABLE, so the table — and therefore DB-050 — would silently
+// disappear. If the dbType plumbing regresses (dropped/hardcoded to a
+// non-MySQL default), this test fails; TestScanAll_WithDB_PostgresSQLDDL_
+// DimensionUnchanged above would not catch that regression.
+func TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn(t *testing.T) {
+	root := writeProj(t, map[string]string{
+		".codefit.yaml":  tsYAMLWithSQLDDLMySQL,
+		"db/schema.sql":  mysqlNoPKSchema,
+		"app/x/route.ts": "export async function GET() { return Response.json({}); }\n",
+	})
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("DB section must be measured for a MySQL SQL-DDL project, got %+v", resp.DB)
+	}
+	var db050 int
+	for _, f := range resp.DB.Findings {
+		if f.ID == "DB-050" {
+			db050++
+		}
+	}
+	if db050 != 1 {
+		t.Errorf("DB.Findings must include DB-050 for the backtick-quoted PK-less table (proves the MySQL dialect was bound), got %d", db050)
 	}
 }
 
