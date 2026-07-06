@@ -19,6 +19,21 @@ type builder struct {
 	trigs     []db.Trigger
 	seenIndex map[string]bool
 	dialect   *Dialect
+
+	// inRoutineBody is the Unit I phantom-table guard (design §8): true while
+	// skipping the internal ';'-cut fragments of a T-SQL proc/trigger BODY
+	// (BEGIN...END, no dollar-quote protection) whose GO-batch separator
+	// already lets split() tokenize each internal fragment as its own
+	// statement. Without this guard a nested CREATE TABLE-shaped fragment
+	// inside the body could leak into the switch in apply() as a phantom
+	// top-level table. Dialect-free: gated only on the BEGIN/END keywords
+	// already visible in the statement text plus the reRoutine/reTrigger head
+	// match, never on dialect.Name. (MySQL's DELIMITER-protected bodies never
+	// reach this guard: split()'s DELIMITER-directive tracking already keeps
+	// the whole body as ONE statement, so it is captured by the head regex
+	// directly — this guard is the T-SQL-shaped backstop for bodies split()
+	// cannot merge on its own.)
+	inRoutineBody bool
 }
 
 func newBuilder(dialect *Dialect) *builder {
@@ -44,11 +59,25 @@ var (
 	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w"]+"?)\b.*?\son\s+("?[\w".]+"?)`)
 	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
 	reReferences  = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
+	reBeginWord   = regexp.MustCompile(`(?i)\bBEGIN\b`)
+	reEndWord     = regexp.MustCompile(`(?i)\bEND\b`)
 )
 
 // apply classifies one statement and mutates the schema. Anything outside the
 // declared subset (INSERT/UPDATE/DO/GRANT/COMMENT/CREATE TYPE/…) is skipped.
 func (b *builder) apply(file string, st stmt) {
+	// Unit I phantom-table guard (design §8) — see the inRoutineBody doc
+	// comment on builder. Every fragment inside a still-open routine/trigger
+	// body is skipped without being reduced; the fragment that finally
+	// contains the closing "END" ends the guard (and is itself skipped too —
+	// bodies are never modeled).
+	if b.inRoutineBody {
+		if reEndWord.MatchString(st.text) {
+			b.inRoutineBody = false
+		}
+		return
+	}
+
 	pos := db.Pos{File: file, Line: st.line}
 	head := strings.ToLower(strings.TrimSpace(st.text))
 	switch {
@@ -62,13 +91,28 @@ func (b *builder) apply(file string, st stmt) {
 		b.views = append(b.views, db.View{Name: normalizeName(reView.FindStringSubmatch(st.text)[1]), Pos: pos})
 	case reRoutine.MatchString(st.text):
 		b.procs = append(b.procs, db.Procedure{Name: routineName(reRoutine.FindStringSubmatch(st.text)[1]), Pos: pos})
+		b.openRoutineBodyIfUnclosed(st.text)
 	case reTrigger.MatchString(st.text):
 		m := reTrigger.FindStringSubmatch(st.text)
 		b.trigs = append(b.trigs, db.Trigger{Name: normalizeName(m[1]), Pos: pos, Table: normalizeName(m[2])})
+		b.openRoutineBodyIfUnclosed(st.text)
 	case reDropTable.MatchString(st.text):
 		b.dropTable(normalizeName(reDropTable.FindStringSubmatch(st.text)[1]))
 	default:
 		// out of the declared subset — skipped on purpose.
+	}
+}
+
+// openRoutineBodyIfUnclosed opens the Unit I phantom-table guard when a
+// CREATE PROCEDURE/TRIGGER statement's text contains an opening BEGIN with no
+// matching END in the SAME statement — the signature of a body that split()
+// could not merge into one statement (a T-SQL GO-batched body's internal
+// ';'s still terminate normally, unlike a dollar-quoted PostgreSQL body or a
+// MySQL DELIMITER-protected one, both already merged into a single statement
+// by split() and therefore containing BOTH BEGIN and END here).
+func (b *builder) openRoutineBodyIfUnclosed(text string) {
+	if reBeginWord.MatchString(text) && !reEndWord.MatchString(text) {
+		b.inRoutineBody = true
 	}
 }
 
@@ -124,6 +168,7 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 	item = strings.TrimSpace(item)
 	up := strings.ToUpper(item)
+	kw := leadingKeyword(item)
 	switch {
 	case strings.HasPrefix(up, "CONSTRAINT "):
 		// strip "CONSTRAINT <name>" then treat the rest as a table constraint
@@ -136,13 +181,43 @@ func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 		strings.HasPrefix(up, "FOREIGN KEY"), strings.HasPrefix(up, "CHECK"),
 		strings.HasPrefix(up, "EXCLUDE"), strings.HasPrefix(up, "PARTITION"):
 		b.applyTableConstraint(t, item, pos)
+	case kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL":
+		// MySQL inline secondary-index shorthand: KEY name (cols), INDEX name
+		// (cols), FULLTEXT KEY/INDEX (cols), SPATIAL KEY/INDEX (cols) — a
+		// table CONSTRAINT/index line, never a column (Unit I, task I4b: this
+		// previously mis-parsed as a phantom column literally named
+		// "KEY"/"INDEX" and silently dropped the index). A real column named
+		// `key`/`index` (MySQL reserved words, so it MUST be backtick-quoted
+		// in source) is unambiguous here: quoting is canonicalized to a
+		// leading '"' by split() before reduce.go ever sees it, so it never
+		// matches this bare, unquoted leadingKeyword check.
+		b.applyTableConstraint(t, item, pos)
 	default:
 		b.applyColumn(t, item, pos)
 	}
 }
 
+// leadingKeyword extracts the first table-item keyword: the run of
+// non-whitespace, non-'(' bytes at the start of s, uppercased. It is used to
+// distinguish MySQL's inline KEY/INDEX secondary-index shorthand — always
+// unquoted — from a real (quoted) column whose name happens to start with the
+// same letters (e.g. a column literally named "keyword" is NOT "KEY").
+func leadingKeyword(s string) string {
+	s = strings.TrimSpace(s)
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '(' {
+			break
+		}
+		i++
+	}
+	return strings.ToUpper(s[:i])
+}
+
 func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 	up := strings.ToUpper(strings.TrimSpace(c))
+	kw := leadingKeyword(c)
 	switch {
 	case strings.HasPrefix(up, "PRIMARY KEY"):
 		t.PrimaryKey = parenCols(c)
@@ -152,6 +227,10 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 		if fk, ok := parseForeignKey(c, pos); ok {
 			t.ForeignKeys = append(t.ForeignKeys, fk)
 		}
+	case kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL":
+		// MySQL inline KEY/INDEX/FULLTEXT KEY/SPATIAL KEY shorthand (task
+		// I4b) — recorded as a plain (non-unique) index by its base columns.
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: false})
 	default:
 		// CHECK / EXCLUDE / PARTITION — declared limits, skipped.
 	}

@@ -35,9 +35,12 @@ CREATE TABLE `film_actor` (
 
 CREATE INDEX `idx_fk_film_id` ON `film_actor` (`film_id`);
 
--- Known gap (kept at end-of-file so it does not shift statement line numbers in
--- the golden snapshot): MySQL's inline `KEY name (cols)` secondary-index
--- shorthand inside CREATE TABLE is NOT yet supported — it mis-parses into a
--- phantom column named "KEY" and silently drops the index. This fixture uses
--- standalone CREATE INDEX instead; the inline shorthand is tracked for Unit I
--- (task I4b).
+-- Historical note (kept at end-of-file so it does not shift statement line
+-- numbers in the golden snapshot): earlier revisions of this parser mis-parsed
+-- MySQL's inline `KEY name (cols)` secondary-index shorthand inside CREATE
+-- TABLE into a phantom column named "KEY" and silently dropped the index.
+-- Unit I (task I4b) fixed this — inline KEY/INDEX/FULLTEXT KEY/SPATIAL KEY is
+-- now recorded as a table index, never a column (see
+-- internal/providers/sqlddl/limits_test.go). This fixture intentionally keeps
+-- using standalone CREATE INDEX so the golden snapshot above stays
+-- byte-identical; the inline-shorthand behavior is locked by its own test.
