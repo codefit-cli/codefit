@@ -237,6 +237,53 @@ cuando el README decía "conectá codefit a tu agente".)
 
 ---
 
+## Mapa documental (fuente vs espejo — lo lee el skill de cierre documental)
+
+Estos son los HECHOS del árbol de docs; la doctrina de cómo escribirlos está en la
+sección anterior. Agregar/quitar un doc = editar esta tabla, nunca el skill. **Regla
+de oro: se edita la FUENTE, después se espeja.**
+
+**Cadena de verdad de cobertura (3 niveles):**
+`reglas (código)` → `coverage.go` → `COVERAGE.md`.
+- **Fuente-raíz:** `rules/<lang>/` + los sensores (`internal/sensors/`) + las reglas
+  DB del núcleo (`internal/core/db/`). Es lo que codefit realmente detecta.
+- **Espejo-a-mano:** `internal/providers/<lang>/coverage.go` — NO es fuente pura; debe
+  verificarse contra las reglas reales. El cierre lo chequea contra la raíz antes de
+  espejar. Declararlo fuente pura reintroduce el drift un nivel más abajo — el drift
+  silencioso que el pipeline existe para matar.
+- **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;
+  verificado: sin `go:generate`, ningún `.go` emite markdown). Su encabezado promete
+  auto-generación futura que no existe — claim stale, verificar la línea antes de tocar.
+
+| Doc | Rol | Cadencia | Notas |
+|-----|-----|----------|-------|
+| `README.md` | fuente | resumen | Capacidades usables HOY, install, tools, puntero a roadmap. |
+| `CHANGELOG.md` | fuente | resumen | Por release; lo realmente mergeado. Sin tags inventados. |
+| `VERSIONING.md` | fuente | resumen | SemVer↔fase + estado actual. |
+| `COVERAGE.md` | espejo (ver cadena) | resumen | Espejo 2º nivel, a mano. |
+| `internal/providers/<lang>/coverage.go` | espejo-a-mano de las reglas | resumen | Se verifica contra la raíz; se edita ANTES que COVERAGE.md. |
+| `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
+| `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
+| `docs/decisions/NNNN-*` | fuente (append-only) | por slice | Un ADR por decisión de arquitectura; no se reescriben. |
+
+**Exentos de la regla "reflejá lo de hoy" (diseño/visión, NO estado de entrega):**
+- `docs/PRD-codefit-v1.4.md` — fuente de scope/diseño. Su "Estado actual" queda a
+  propósito atrás de `main`. El cierre NO lo corrige; a lo sumo flipea markers de la
+  tabla de tools.
+- `docs/codefit-analisis-tokens-costos.md` — referencia arquitectónica.
+
+**Fuera del set de estado/capacidad (el cierre no los toca):** `SECURITY.md`,
+`CODE_OF_CONDUCT.md`, `rules/README.md` (doctrina del formato de reglas), plantillas
+`.github/`, READMEs de `testdata/`.
+
+### Registro al crear (obligatorio)
+Al crear un doc nuevo que declare estado o capacidad (guía de usuario, referencia,
+etc.), **registrarlo en esta tabla en el mismo acto**, con su rol y su cadencia. Un doc
+que declara capacidad y no está acá queda fuera del cierre documental y se desincroniza
+con el tiempo — el fallo exacto que este mapa previene.
+
+---
+
 ## Comandos de desarrollo
 
 ```bash
@@ -263,11 +310,6 @@ API interna de Go) sobre el propio código de codefit y asegura que no haya
 findings críticos. Un test de integración MCP aparte valida la capa de
 transporte (levantar el server, llamar una tool, verificar la respuesta). Ambos
 viven en `go test ./...` y corren en cada PR (PRD §26).
-
-**Vulnerabilidades de dependencias:** `govulncheck` está **pinneado a `@v1.1.4`**
-en `.github/workflows/security.yml`. Las versiones `>= ~v1.2` crashean
-(`panic: ForEachElement ... *types.TypeParam`) analizando los generics de
-`charmbracelet/huh`. No subir el pin hasta que el bug upstream esté resuelto.
 
 ---
 
@@ -312,26 +354,10 @@ Protocolo de sesión:
 
 ---
 
-## Rollout (PRD §25)
+## Rollout y versionado
 
-- **Fase 0** — Foundations + núcleo + Go provider (self-audit).
-- **Fase 1** ✅ **COMPLETA (`v0.1.0`)** — TypeScript provider + sensor de seguridad
-  completo (con mapeo de superficie) + **MCP server funcional** + `codefit init`
-  (genera la skill de codefit y la coloca para los agentes detectados; **no toca el
-  `AGENT.md`**) + **baseline** (memoria del proyecto: `scan-all` con delta +
-  `baseline-list`/`-accept`/`-prune`). Dogfoodeado en un backend real.
-- **Fase 2** ✅ **COMPLETA (`v0.2.0`)** — dimensión DB: modelo neutro + parsers Prisma
-  y SQL-DDL (Flyway), 8 reglas schema-only OLTP (DB-050/001/011/002 estructurales +
-  DB-051/052/053/003 heurísticas por nombre), `codefit-scan-db`, dimensión en `scan-all`
-  (sección DB + baseline unificado) y `by_dimension`. Dogfoodeada en Prisma real y
-  SQL-DDL/Postgres real. **Diferido:** N+1, índice-vs-query, reglas de vistas/procs/
-  triggers, y OLAP.
-- **Fase 3** — Code review + best practices + tests + riesgo de regresión.
-- **Fase 4** — Knowledge packs + `codefit update` + manifiesto de cobertura
-  (`COVERAGE.md` + tool `codefit-coverage`) + release pública `0.x`.
-- **Post-1.0.0** — Java (`1.1`), Python (`1.2`). El sensor de complejidad empírica
-  (sandbox Docker) se evalúa post-1.0 por requerir ejecución de código.
-
-Versionado: SemVer, Fase→MINOR (Fase 1 = `0.1.0`, … Fase 4 = `0.4.0`, estable =
-`1.0.0`); `v0.1.0` se reserva para Fase 1 completa. Ver el rollout completo, los
-criterios de "done" y la tabla de versionado en el PRD §25 y `VERSIONING.md`.
+El rollout completo por fase, los criterios de "done" y la tabla de versionado
+(SemVer, Fase→MINOR) son estado del proyecto y viven en su fuente, no acá:
+`docs/PRD-codefit-v1.4.md` §25 (rollout + criterios), `VERSIONING.md` (SemVer↔fase
++ estado actual) y `CHANGELOG.md` (lo realmente mergeado por release). Este archivo
+declara doctrina y método, no estado de fase.
