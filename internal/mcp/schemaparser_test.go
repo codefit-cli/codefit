@@ -157,6 +157,23 @@ func TestSchemaParserForPaths_SQLiteIsExplicitlyNotSupported(t *testing.T) {
 	}
 }
 
+// TestSchemaParserForPaths_UnrecognizedDBTypeIsExplicit locks that a
+// NON-EMPTY, unrecognized dbType (e.g. a typo, or a garbage value that
+// bypassed config.validate) must NEVER silently fall back to the Postgres
+// parser — codefit's "never silently guess" doctrine. Unlike ""/"none"
+// (today's honest default, TODO(J)), an unrecognized-but-non-empty type gets
+// an explicit not-bound note naming the type, mirroring the sqlite branch.
+func TestSchemaParserForPaths_UnrecognizedDBTypeIsExplicit(t *testing.T) {
+	root := t.TempDir()
+	p, note := schemaParserForPaths(root, []string{"schema.sql"}, "oracle")
+	if p != nil {
+		t.Fatalf("an unrecognized dbType must never resolve a parser (would silently PG-parse), got %v", p)
+	}
+	if note == "" || !containsFold(note, "oracle") {
+		t.Fatalf("an unrecognized dbType must return an explicit note naming the type, got %q", note)
+	}
+}
+
 // TestSchemaParserForPaths_NoDBTypeKeepsTodaysDefault locks that an empty or
 // "none" dbType preserves the pre-Unit-H default (Postgres-parsed by-input
 // resolution) — the sniff heuristic (Unit J) is not yet implemented, and this
