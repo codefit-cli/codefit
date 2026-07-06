@@ -83,3 +83,20 @@ func Postgres() Dialect {
 		Modifiers:           postgresModifiers(),
 	}
 }
+
+// MySQL returns the MySQL dialect descriptor: backtick-quoted identifiers,
+// "--" and "#" line comments, and " as a STRING delimiter (MySQL's default
+// ANSI_QUOTES-off behavior) rather than an identifier quote. No dollar
+// quoting. TypeMap and Modifiers are intentionally EMPTY here (Unit B is
+// tokenizing only) — Unit C fills the type/modifier vocabulary.
+func MySQL() Dialect {
+	return Dialect{
+		Name:                "mysql",
+		LineComments:        []string{"--", "#"},
+		IdentQuotes:         []QuotePair{{Open: '`', Close: '`', Doubling: true}},
+		DoubleQuoteIsString: true,
+		DollarQuoting:       false,
+		TypeMap:             map[string]db.Type{},
+		Modifiers:           map[string]bool{},
+	}
+}
