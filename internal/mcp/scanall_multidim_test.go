@@ -108,6 +108,53 @@ func TestScanAll_WithDB_SectionPopulated(t *testing.T) {
 	}
 }
 
+const tsYAMLWithSQLDDL = `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  type: postgresql
+  schema_paths:
+    - db/schema.sql
+`
+
+const noPKSQLSchema = `CREATE TABLE no_key (
+  name TEXT NOT NULL
+);
+`
+
+// TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged is the H8 DoD closure
+// confirmation: scan-all's DB bucket runs UNCHANGED for a PostgreSQL project
+// now that schemaParserForPaths is wired through cfg.Database.Type (H6, H7).
+// Before Unit H, database.type was read for validation only and never reached
+// the SQL-DDL parser; this proves the new dbType plumbing still resolves the
+// Postgres dialect (byte-identical parsing behavior) and the DB section is
+// populated exactly like the pre-Unit-H (unwired) call site was.
+func TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged(t *testing.T) {
+	root := writeProj(t, map[string]string{
+		".codefit.yaml":  tsYAMLWithSQLDDL,
+		"db/schema.sql":  noPKSQLSchema,
+		"app/x/route.ts": "export async function GET() { return Response.json({}); }\n",
+	})
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("DB section must be measured for a PostgreSQL SQL-DDL project, got %+v", resp.DB)
+	}
+	var db050 int
+	for _, f := range resp.DB.Findings {
+		if f.ID == "DB-050" {
+			db050++
+		}
+	}
+	if db050 != 1 {
+		t.Errorf("DB.Findings must include DB-050 for the PK-less table, got %d", db050)
+	}
+}
+
 // Honest states: a configured-but-missing schema is SOFT in scan-all — reported in
 // the DB section, never fatal, never invalidating security.
 func TestScanAll_DB_MissingSchema_Soft(t *testing.T) {
