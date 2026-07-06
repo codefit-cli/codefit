@@ -1,6 +1,9 @@
 package sqlddl
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // stmt is one top-level SQL statement with the 1-based line it starts on.
 type stmt struct {
@@ -27,6 +30,7 @@ func split(src []byte, dialect *Dialect) []stmt {
 	line := 1
 	startLine := 0 // 0 = statement not started yet
 	i := 0
+	term := ";" // active statement terminator; changed by a DELIMITER directive
 
 	flush := func() {
 		if t := strings.TrimSpace(buf.String()); t != "" {
@@ -42,6 +46,45 @@ func split(src []byte, dialect *Dialect) []stmt {
 	}
 
 	for i < n {
+		// Unit I phantom-table guard (design §8): two client-tool batch
+		// markers — MySQL's "DELIMITER <tok>" directive and T-SQL/sqlcmd's
+		// standalone "GO" batch separator — are recognized here as UNIVERSAL,
+		// dialect-free literals (never gated on dialect.Name): neither is
+		// part of the SQL:1992 grammar in ANY of the three dialects, so
+		// matching them unconditionally is safe and keeps every existing
+		// fixture byte-identical (neither marker appears in real DDL).
+		//
+		// A DELIMITER directive changes the ACTIVE terminator (term) that the
+		// generic terminator case below matches against, instead of the
+		// hardcoded ';' — this is what lets a MySQL "DELIMITER //" ... "//"
+		// ... "DELIMITER ;" trigger/procedure body stay ONE statement (its
+		// internal ';'s are no longer terminators), so the body's head
+		// (CREATE TRIGGER/PROCEDURE) is captured by reduce.go's anchored
+		// regex while no body-internal fragment can ever leak out as its own
+		// top-level statement (the phantom-table risk the design flagged).
+		if adv, newTerm, ok := matchDelimiterDirective(s, i); ok {
+			flush()
+			term = newTerm
+			if strings.Contains(s[i:i+adv], "\n") {
+				line++
+			}
+			i += adv
+			continue
+		}
+		// A standalone "GO" line is a soft statement break (like ';') so that
+		// a real CREATE TABLE on either side of a GO-batched routine body is
+		// still tokenized as its own statement, never glued to the batch's
+		// tail (reduce.go's builder-level guard handles the body's internal
+		// ';'-cut fragments — see applyRoutineOrTriggerHead/inRoutineBody).
+		if adv := matchGoBatchSeparator(s, i); adv > 0 {
+			flush()
+			if strings.Contains(s[i:i+adv], "\n") {
+				line++
+			}
+			i += adv
+			continue
+		}
+
 		c := s[i]
 		switch {
 		case matchLineComment(s, i, dialect.LineComments) > 0:
@@ -94,9 +137,9 @@ func split(src []byte, dialect *Dialect) []stmt {
 				buf.WriteByte(c)
 				i++
 			}
-		case c == ';':
+		case strings.HasPrefix(s[i:], term):
 			flush()
-			i++
+			i += len(term)
 		case c == '\n':
 			line++
 			if startLine != 0 {
@@ -257,4 +300,52 @@ func dollarTag(s string, i int) (string, bool) {
 
 func isAlnum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// reDelimiterDirective matches a MySQL client "DELIMITER <tok>" directive
+// line (e.g. "DELIMITER //", "DELIMITER ;"), case-insensitive. It is a
+// client-tool convention, never part of the SQL:1992 grammar, so matching it
+// unconditionally (not gated on dialect.Name) is safe — no real DDL fixture
+// in this package starts a line with the literal word "DELIMITER".
+var reDelimiterDirective = regexp.MustCompile(`(?i)^[ \t]*DELIMITER[ \t]+(\S+)[ \t]*(\r?\n|$)`)
+
+// reGoBatchSeparator matches a T-SQL/sqlcmd "GO" batch-separator line: the
+// ENTIRE trimmed line must be "GO" (case-insensitive) — this word-boundary
+// requirement (immediately followed by only whitespace then end-of-line/EOF)
+// is what keeps it from ever matching part of a longer identifier such as
+// "GOTO" or a column literally named "go".
+var reGoBatchSeparator = regexp.MustCompile(`(?i)^[ \t]*GO[ \t]*(\r?\n|$)`)
+
+// isAtLineStart reports whether s[i] begins a new line (i==0 or the previous
+// byte is '\n'). Both DELIMITER-directive and GO-batch-separator recognition
+// are gated on this: they only ever fire between statement content and the
+// start of a line, never with a string, comment, or quoted identifier
+// straddling the boundary — every such token is fully consumed in a single
+// loop iteration elsewhere in split(), so i is never left mid-token when this
+// check runs.
+func isAtLineStart(s string, i int) bool {
+	return i == 0 || s[i-1] == '\n'
+}
+
+// matchDelimiterDirective returns the byte length to advance and the new
+// terminator token when s[i:] is a DELIMITER directive line at the start of
+// a line, or ok=false otherwise.
+func matchDelimiterDirective(s string, i int) (advance int, newTerm string, ok bool) {
+	if !isAtLineStart(s, i) {
+		return 0, "", false
+	}
+	m := reDelimiterDirective.FindStringSubmatch(s[i:])
+	if m == nil {
+		return 0, "", false
+	}
+	return len(m[0]), m[1], true
+}
+
+// matchGoBatchSeparator returns the byte length to advance when s[i:] is a
+// standalone "GO" batch-separator line at the start of a line, or 0 otherwise.
+func matchGoBatchSeparator(s string, i int) int {
+	if !isAtLineStart(s, i) {
+		return 0
+	}
+	return len(reGoBatchSeparator.FindString(s[i:]))
 }
