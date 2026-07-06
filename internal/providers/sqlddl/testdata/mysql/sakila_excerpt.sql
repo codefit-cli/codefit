@@ -34,3 +34,10 @@ CREATE TABLE `film_actor` (
 );
 
 CREATE INDEX `idx_fk_film_id` ON `film_actor` (`film_id`);
+
+-- Known gap (kept at end-of-file so it does not shift statement line numbers in
+-- the golden snapshot): MySQL's inline `KEY name (cols)` secondary-index
+-- shorthand inside CREATE TABLE is NOT yet supported — it mis-parses into a
+-- phantom column named "KEY" and silently drops the index. This fixture uses
+-- standalone CREATE INDEX instead; the inline shorthand is tracked for Unit I
+-- (task I4b).

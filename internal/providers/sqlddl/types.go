@@ -55,6 +55,10 @@ func mysqlTypeMap() map[string]db.Type {
 		"tinytext": db.TypeText, "text": db.TypeText, "mediumtext": db.TypeText, "longtext": db.TypeText,
 		"blob": db.TypeBytes, "tinyblob": db.TypeBytes, "mediumblob": db.TypeBytes,
 		"longblob": db.TypeBytes, "varbinary": db.TypeBytes,
+		// MySQL SET is a multi-value bitmask, not a single-value enum, but the
+		// neutral db model has no bitmask concept; both fold onto TypeEnum. The
+		// full SET(...) / ENUM(...) literal is preserved verbatim in RawType, so
+		// no raw signal is lost — a future rule needing SET-vs-ENUM reads RawType.
 		"enum": db.TypeEnum, "set": db.TypeEnum,
 		"json":    db.TypeJSON,
 		"boolean": db.TypeBool, "bool": db.TypeBool,
