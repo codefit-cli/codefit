@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,11 @@ func schemaParserForPaths(root string, paths []string, dbType string) (providers
 // sqlDialectParser maps a config database.type string to the sqlddl parser
 // bound to the matching dialect descriptor (design §4). sqlite has no
 // descriptor and must never fall back to a silent PostgreSQL parse — it
-// returns an explicit not-supported note instead (RF-03.6).
+// returns an explicit not-supported note instead (RF-03.6). Likewise, any
+// non-empty, unrecognized dbType (a typo, or a value that bypassed
+// config.validate) must never silently resolve to Postgres — it returns an
+// explicit not-bound note naming the type, mirroring the sqlite branch. Only
+// "" and "none" get today's honest default.
 //
 // TODO(J): "" and "none" currently default to today's behavior (Postgres via
 // sqlddl.New()'s default dialect) rather than a heuristic sniff of the SQL
@@ -59,8 +64,10 @@ func sqlDialectParser(dbType string) (providers.SchemaParser, string) {
 		return sqlddl.New(sqlddl.WithDialect(sqlddl.Postgres())), ""
 	case "sqlite":
 		return nil, "sqlite DDL parsing is not supported yet"
-	default: // "" or "none": today's default (Postgres), sniff fallback not yet implemented (TODO(J))
+	case "", "none": // today's default (Postgres), sniff fallback not yet implemented (TODO(J))
 		return sqlddl.New(), ""
+	default:
+		return nil, fmt.Sprintf("unrecognized database type %q — no SQL-DDL parser bound", dbType)
 	}
 }
 
