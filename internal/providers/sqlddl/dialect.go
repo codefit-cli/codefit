@@ -58,9 +58,10 @@ type Dialect struct {
 }
 
 // QuotePair is one quoted-identifier delimiter pair. Doubling is true when an
-// occurrence of Close inside the identifier is escaped by doubling it
-// (“ “ “ -> literal “ ` “, `]]` -> literal `]`, `""` -> literal `"`) —
-// true for every dialect this package supports.
+// occurrence of Close inside the identifier is escaped by writing it twice:
+// two double-quotes mean one literal double-quote, two closing brackets mean
+// one literal bracket, two backticks mean one literal backtick — true for
+// every dialect this package supports.
 type QuotePair struct {
 	Open, Close byte
 	Doubling    bool
