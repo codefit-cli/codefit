@@ -47,7 +47,7 @@ func HandleScanDB(req ScanDBRequest) (ScanDBResponse, error) {
 	// not-measured note. With no schema_paths at all, the sensor reports it.
 	var parser providers.SchemaParser
 	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
-		p, note := schemaParserForPaths(req.Root, cfg.Database.SchemaPaths)
+		p, note := schemaParserForPaths(req.Root, cfg.Database.SchemaPaths, cfg.Database.Type)
 		if p == nil {
 			return ScanDBResponse{Measured: false, Note: note}, nil
 		}
