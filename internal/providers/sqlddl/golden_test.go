@@ -31,6 +31,15 @@ func TestSakila_GoldenSchema(t *testing.T) {
 	assertGolden(t, filepath.Join("mysql", "sakila_excerpt.sql"), filepath.Join("mysql", "sakila_excerpt.schema.golden.json"), sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))
 }
 
+// TestAdventureWorks_GoldenSchema locks the neutral db.Schema produced by
+// parsing the T-SQL AdventureWorks excerpt under the SQLServer() dialect
+// (Unit G, DoD closure item 2/3) — bracket identifiers, schema-qualified
+// names, IDENTITY, a single-column and a composite PK, a schema-qualified
+// FOREIGN KEY, an index, and a spread of T-SQL types.
+func TestAdventureWorks_GoldenSchema(t *testing.T) {
+	assertGolden(t, filepath.Join("tsql", "adventureworks_excerpt.sql"), filepath.Join("tsql", "adventureworks_excerpt.schema.golden.json"), sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())))
+}
+
 func assertGolden(t *testing.T, sqlFile, goldenFile string, p *sqlddl.Parser) {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join("testdata", sqlFile))

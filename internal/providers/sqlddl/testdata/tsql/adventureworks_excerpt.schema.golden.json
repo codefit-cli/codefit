@@ -1,0 +1,236 @@
+{
+  "Tables": [
+    {
+      "Name": "Customer",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "CustomerId",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 1
+          },
+          "Type": "int",
+          "RawType": "INT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "Rowguid",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 2
+          },
+          "Type": "string",
+          "RawType": "uniqueidentifier",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "AccountNumber",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 3
+          },
+          "Type": "string",
+          "RawType": "nvarchar(10)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "IsActive",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 4
+          },
+          "Type": "bool",
+          "RawType": "bit",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "ModifiedDate",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 5
+          },
+          "Type": "datetime",
+          "RawType": "datetime2",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "CustomerId"
+      ],
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 25
+          },
+          "Columns": [
+            "AccountNumber"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "SalesOrderHeader",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "SalesOrderId",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 9
+          },
+          "Type": "int",
+          "RawType": "INT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "CustomerId",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 10
+          },
+          "Type": "int",
+          "RawType": "INT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "OrderDate",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 11
+          },
+          "Type": "datetime",
+          "RawType": "datetime2",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "TotalDue",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 12
+          },
+          "Type": "float",
+          "RawType": "money",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "SalesOrderId"
+      ],
+      "ForeignKeys": [
+        {
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 13
+          },
+          "Columns": [
+            "CustomerId"
+          ],
+          "RefTable": "Customer",
+          "RefColumns": [
+            "CustomerId"
+          ]
+        }
+      ],
+      "Indexes": null
+    },
+    {
+      "Name": "SalesOrderDetail",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "SalesOrderId",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 17
+          },
+          "Type": "int",
+          "RawType": "INT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "SalesOrderDetailId",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 18
+          },
+          "Type": "int",
+          "RawType": "INT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "UnitPrice",
+          "DBName": "",
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 19
+          },
+          "Type": "float",
+          "RawType": "money",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "SalesOrderId",
+        "SalesOrderDetailId"
+      ],
+      "ForeignKeys": [
+        {
+          "Pos": {
+            "File": "tsql/adventureworks_excerpt.sql",
+            "Line": 21
+          },
+          "Columns": [
+            "SalesOrderId"
+          ],
+          "RefTable": "SalesOrderHeader",
+          "RefColumns": [
+            "SalesOrderId"
+          ]
+        }
+      ],
+      "Indexes": null
+    }
+  ],
+  "Views": null,
+  "Procedures": null,
+  "Triggers": null
+}
