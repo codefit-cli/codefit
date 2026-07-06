@@ -102,6 +102,52 @@ func TestSplit_UnterminatedQuotedIdentifierNoSyntheticClose(t *testing.T) {
 	}
 }
 
+func TestSplit_MySQLBacktickIdentifierCanonicalized(t *testing.T) {
+	// MySQL backtick-quoted identifiers are re-emitted as canonical ANSI
+	// "..." — the seam that keeps reduce.go dialect-free (design §2). Unlike
+	// the PG '"' pair, this is a genuine delimiter SWAP (unescaping), not a
+	// byte-length-preserving identity transform: assert the canonical value,
+	// not byte-length equality.
+	mysql := MySQL()
+	src := "CREATE TABLE `users` (`order` int);"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "users" ("order" int)`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLHashCommentSkippedLikeDashDash(t *testing.T) {
+	mysql := MySQL()
+	src := "# a leading hash comment with ; semicolon\nCREATE TABLE t (id int);"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := "CREATE TABLE t (id int)"
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLDoubleQuoteIsStringNotIdentifier(t *testing.T) {
+	// MySQL default (ANSI_QUOTES off): " opens a STRING literal, not a
+	// quoted identifier — must not be mistaken for identifier quoting.
+	mysql := MySQL()
+	src := `SELECT * FROM t WHERE name = "O'Brien";`
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `SELECT * FROM t WHERE name = "O'Brien"`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
 func TestDollarTag(t *testing.T) {
 	cases := map[string]string{
 		"$$rest":     "$$",
