@@ -19,21 +19,6 @@ type builder struct {
 	trigs     []db.Trigger
 	seenIndex map[string]bool
 	dialect   *Dialect
-
-	// inRoutineBody is the Unit I phantom-table guard (design §8): true while
-	// skipping the internal ';'-cut fragments of a T-SQL proc/trigger BODY
-	// (BEGIN...END, no dollar-quote protection) whose GO-batch separator
-	// already lets split() tokenize each internal fragment as its own
-	// statement. Without this guard a nested CREATE TABLE-shaped fragment
-	// inside the body could leak into the switch in apply() as a phantom
-	// top-level table. Dialect-free: gated only on the BEGIN/END keywords
-	// already visible in the statement text plus the reRoutine/reTrigger head
-	// match, never on dialect.Name. (MySQL's DELIMITER-protected bodies never
-	// reach this guard: split()'s DELIMITER-directive tracking already keeps
-	// the whole body as ONE statement, so it is captured by the head regex
-	// directly — this guard is the T-SQL-shaped backstop for bodies split()
-	// cannot merge on its own.)
-	inRoutineBody bool
 }
 
 func newBuilder(dialect *Dialect) *builder {
@@ -59,25 +44,26 @@ var (
 	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w"]+"?)\b.*?\son\s+("?[\w".]+"?)`)
 	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
 	reReferences  = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
-	reBeginWord   = regexp.MustCompile(`(?i)\bBEGIN\b`)
-	reEndWord     = regexp.MustCompile(`(?i)\bEND\b`)
 )
 
 // apply classifies one statement and mutates the schema. Anything outside the
 // declared subset (INSERT/UPDATE/DO/GRANT/COMMENT/CREATE TYPE/…) is skipped.
+//
+// Unit I rework: this used to guard T-SQL GO-batched routine/trigger bodies
+// with an inRoutineBody flag that matched BEGIN/END as raw text. That guard
+// was insound (matched BEGIN/END inside string literals, was not
+// depth-counted so nested BEGIN...END closed it early, and was never reset
+// between files — a stuck-open guard from one file's unterminated body could
+// swallow a LATER file's real tables). It has been removed. The documented
+// consequence: a T-SQL GO-batched procedure/trigger body containing a
+// CREATE TABLE-shaped fragment may now surface as a spurious top-level
+// table — a disclosed, rare limit (see docs/decisions and the sqlddl package
+// doc), not silent corruption. MySQL routine bodies wrapped by "DELIMITER
+// //" ... "DELIMITER ;" remain correctly handled: split()'s DELIMITER
+// tracking keeps the whole body as ONE statement, captured by the
+// reRoutine/reTrigger head regex directly, so no body fragment is ever
+// reduced as its own statement in that case.
 func (b *builder) apply(file string, st stmt) {
-	// Unit I phantom-table guard (design §8) — see the inRoutineBody doc
-	// comment on builder. Every fragment inside a still-open routine/trigger
-	// body is skipped without being reduced; the fragment that finally
-	// contains the closing "END" ends the guard (and is itself skipped too —
-	// bodies are never modeled).
-	if b.inRoutineBody {
-		if reEndWord.MatchString(st.text) {
-			b.inRoutineBody = false
-		}
-		return
-	}
-
 	pos := db.Pos{File: file, Line: st.line}
 	head := strings.ToLower(strings.TrimSpace(st.text))
 	switch {
@@ -91,28 +77,13 @@ func (b *builder) apply(file string, st stmt) {
 		b.views = append(b.views, db.View{Name: normalizeName(reView.FindStringSubmatch(st.text)[1]), Pos: pos})
 	case reRoutine.MatchString(st.text):
 		b.procs = append(b.procs, db.Procedure{Name: routineName(reRoutine.FindStringSubmatch(st.text)[1]), Pos: pos})
-		b.openRoutineBodyIfUnclosed(st.text)
 	case reTrigger.MatchString(st.text):
 		m := reTrigger.FindStringSubmatch(st.text)
 		b.trigs = append(b.trigs, db.Trigger{Name: normalizeName(m[1]), Pos: pos, Table: normalizeName(m[2])})
-		b.openRoutineBodyIfUnclosed(st.text)
 	case reDropTable.MatchString(st.text):
 		b.dropTable(normalizeName(reDropTable.FindStringSubmatch(st.text)[1]))
 	default:
 		// out of the declared subset — skipped on purpose.
-	}
-}
-
-// openRoutineBodyIfUnclosed opens the Unit I phantom-table guard when a
-// CREATE PROCEDURE/TRIGGER statement's text contains an opening BEGIN with no
-// matching END in the SAME statement — the signature of a body that split()
-// could not merge into one statement (a T-SQL GO-batched body's internal
-// ';'s still terminate normally, unlike a dollar-quoted PostgreSQL body or a
-// MySQL DELIMITER-protected one, both already merged into a single statement
-// by split() and therefore containing BOTH BEGIN and END here).
-func (b *builder) openRoutineBodyIfUnclosed(text string) {
-	if reBeginWord.MatchString(text) && !reEndWord.MatchString(text) {
-		b.inRoutineBody = true
 	}
 }
 

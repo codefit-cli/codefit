@@ -44,10 +44,21 @@ func TestPhantomGuard_MySQLDelimiterBody_NoPhantomTable(t *testing.T) {
 	}
 }
 
-// --- I3: T-SQL GO-separated batches must not leak a phantom table, real CREATE
-// TABLEs on both sides of a GO-batched proc body must still be captured ---
+// --- I3 (Unit I rework): T-SQL GO-separated batches — real CREATE TABLEs on
+// both sides of a GO-batched proc body must still be captured, and parsing
+// must never crash. The T-SQL routine-body phantom-table guard (inRoutineBody)
+// was REMOVED (Unit I rework, C3/C4/C5): it matched BEGIN/END as raw text
+// (also inside string literals), was not depth-counted (a nested BEGIN...END
+// closed it early), and leaked state across files (a stuck-open guard from
+// one file could swallow a LATER file's real tables). Retreating to a
+// documented limit: a T-SQL GO-batched routine body containing a
+// CREATE TABLE-shaped fragment MAY now surface as a spurious top-level
+// table/statement. This is a disclosed, rare limit (no dogfood evidence a
+// speculative guard was worth its own soundness bugs), not silent corruption
+// — the fixture below locks the HONEST current behavior (including the
+// spurious EvilLeak) rather than asserting a guard that no longer exists. ---
 
-func TestPhantomGuard_TSQLGoBatches_NoPhantomLeak(t *testing.T) {
+func TestPhantomGuard_TSQLGoBatches_DocumentedLimit_NoCrash(t *testing.T) {
 	src := "CREATE TABLE [dbo].[Orders] ([Id] INT PRIMARY KEY);\n" +
 		"GO\n" +
 		"CREATE PROCEDURE dbo.AuditOrder\n" +
@@ -63,20 +74,22 @@ func TestPhantomGuard_TSQLGoBatches_NoPhantomLeak(t *testing.T) {
 	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
 	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())).ParseSchema(srcs)
 	if err != nil {
-		t.Fatalf("ParseSchema must not error (no crash): %v", err)
+		t.Fatalf("ParseSchema must not error (no crash), even on the documented T-SQL routine-body limit: %v", err)
 	}
 
 	names := tableNames(s)
-	for _, n := range names {
-		if n == "EvilLeak" || n == "AuditLog" {
-			t.Errorf("phantom table %q leaked from the GO-batched proc body; tables = %v", n, names)
-		}
-	}
 	if !containsName(names, "Orders") || !containsName(names, "Customers") {
 		t.Errorf("real tables before/after the GO-batched proc must still be captured; got %v", names)
 	}
 	if len(s.Procedures) != 1 || s.Procedures[0].Name != "AuditOrder" {
 		t.Errorf("procedure HEAD must still be captured, got %+v", s.Procedures)
+	}
+	// DOCUMENTED LIMIT (not asserted as desired behavior, just locked as the
+	// honest current one): the body's inner CREATE TABLE-shaped fragment
+	// surfaces as a spurious top-level table now that the fragile guard is
+	// gone. See docs/decisions and the sqlddl package doc for the disclosure.
+	if !containsName(names, "EvilLeak") {
+		t.Logf("documented limit fixture behavior changed: EvilLeak no longer leaks (%v) — if a future fix legitimately closes this gap, tighten this test instead of loosening it", names)
 	}
 }
 

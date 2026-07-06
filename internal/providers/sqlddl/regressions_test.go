@@ -109,7 +109,7 @@ func TestDelimiterBlock_WellFormed_SubsequentTablesCaptured(t *testing.T) {
 // file1's unterminated routine body must not swallow file2's real table.
 func TestRoutineBodyGuardRemoval_NoCrossFileLeak(t *testing.T) {
 	file1 := "CREATE PROCEDURE p AS BEGIN SELECT 1;"
-	file2 := "CREATE TABLE realtable (id int);"
+	file2 := "CREATE TABLE real_table (id int);"
 	srcs := []providers.SourceFile{
 		{Path: "V1__p.sql", Content: []byte(file1)},
 		{Path: "V2__t.sql", Content: []byte(file2)},
@@ -118,8 +118,8 @@ func TestRoutineBodyGuardRemoval_NoCrossFileLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSchema must not error: %v", err)
 	}
-	if !containsName(tableNames(s), "realtable") {
-		t.Errorf("realtable must be captured regardless of file1's unterminated routine body; tables = %v", tableNames(s))
+	if !containsName(tableNames(s), "real_table") {
+		t.Errorf("real_table must be captured regardless of file1's unterminated routine body; tables = %v", tableNames(s))
 	}
 }
 
