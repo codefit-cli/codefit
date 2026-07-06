@@ -305,9 +305,18 @@ func isAlnum(b byte) bool {
 // reDelimiterDirective matches a MySQL client "DELIMITER <tok>" directive
 // line (e.g. "DELIMITER //", "DELIMITER ;"), case-insensitive. It is a
 // client-tool convention, never part of the SQL:1992 grammar, so matching it
-// unconditionally (not gated on dialect.Name) is safe — no real DDL fixture
-// in this package starts a line with the literal word "DELIMITER".
-var reDelimiterDirective = regexp.MustCompile(`(?i)^[ \t]*DELIMITER[ \t]+(\S+)[ \t]*(\r?\n|$)`)
+// unconditionally (not gated on dialect.Name) is safe in principle — but the
+// argument itself MUST be constrained to punctuation-only tokens (Unit I
+// rework, C1): a bare "DELIMITER[ \t]+(\S+)" also fires on an ordinary column
+// definition that happens to start a line with the word "delimiter" (e.g.
+// "delimiter VARCHAR(1),"), silently corrupting the tokenizer on VALID input.
+// A real client-tool delimiter token (//, $$, |, ;, ...) is never a bare
+// word/identifier, so requiring the argument to be entirely non-word,
+// non-whitespace characters (`[^\w\s]+`) keeps the directive recognizable
+// while making a word-leading argument (a type/identifier) categorically
+// impossible to match — dialect-free, no fixture in this package uses a
+// punctuation-only delimiter token as a real column/type name.
+var reDelimiterDirective = regexp.MustCompile(`(?i)^[ \t]*DELIMITER[ \t]+([^\w\s]+)[ \t]*(\r?\n|$)`)
 
 // reGoBatchSeparator matches a T-SQL/sqlcmd "GO" batch-separator line: the
 // ENTIRE trimmed line must be "GO" (case-insensitive) — this word-boundary

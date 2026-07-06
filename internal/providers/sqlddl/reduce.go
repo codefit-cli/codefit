@@ -181,20 +181,54 @@ func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 		strings.HasPrefix(up, "FOREIGN KEY"), strings.HasPrefix(up, "CHECK"),
 		strings.HasPrefix(up, "EXCLUDE"), strings.HasPrefix(up, "PARTITION"):
 		b.applyTableConstraint(t, item, pos)
-	case kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL":
+	case (kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL") && hasParenColumnList(item):
 		// MySQL inline secondary-index shorthand: KEY name (cols), INDEX name
 		// (cols), FULLTEXT KEY/INDEX (cols), SPATIAL KEY/INDEX (cols) — a
 		// table CONSTRAINT/index line, never a column (Unit I, task I4b: this
 		// previously mis-parsed as a phantom column literally named
-		// "KEY"/"INDEX" and silently dropped the index). A real column named
-		// `key`/`index` (MySQL reserved words, so it MUST be backtick-quoted
-		// in source) is unambiguous here: quoting is canonicalized to a
-		// leading '"' by split() before reduce.go ever sees it, so it never
-		// matches this bare, unquoted leadingKeyword check.
+		// "KEY"/"INDEX" and silently dropped the index). Unit I rework (C2):
+		// routing on the leading keyword ALONE also swallowed a legal
+		// unquoted column named `key`/`index` (PostgreSQL: these are
+		// non-reserved words, so `key text` is valid without quoting) — the
+		// discriminator that actually distinguishes the index FORM from a
+		// column definition is the parenthesized column list, so it is
+		// required here too. A real column named `key`/`index` (backtick- or
+		// bracket-quoted, MySQL/T-SQL reserved words) is unambiguous:
+		// quoting is canonicalized to a leading '"' by split() before
+		// reduce.go ever sees it, so it never matches this bare, unquoted
+		// leadingKeyword check either way.
 		b.applyTableConstraint(t, item, pos)
 	default:
 		b.applyColumn(t, item, pos)
 	}
+}
+
+// hasParenColumnList reports whether s contains a top-level '(' — the
+// discriminator (Unit I rework, C2) that distinguishes MySQL's inline
+// secondary-index FORM (KEY name (cols), INDEX (cols), ...) from a plain
+// column definition whose name happens to be the reserved word KEY/INDEX
+// (e.g. "key text", legal unquoted in PostgreSQL). The index form always
+// carries a parenthesized column list; a column definition never does at
+// this leading-keyword position.
+func hasParenColumnList(s string) bool {
+	return strings.ContainsRune(s, '(')
+}
+
+// isAddKeyIndexForm reports whether an ALTER TABLE action is the "ADD
+// KEY|INDEX|FULLTEXT KEY|SPATIAL KEY ... (cols)" secondary-index shorthand
+// (leading keyword after "ADD " is KEY/INDEX/FULLTEXT/SPATIAL AND a
+// parenthesized column list is present) rather than a column named
+// KEY/INDEX being added.
+func isAddKeyIndexForm(act string) bool {
+	up := strings.ToUpper(act)
+	if !strings.HasPrefix(up, "ADD ") {
+		return false
+	}
+	kw := leadingKeyword(act[len("ADD "):])
+	if kw != "KEY" && kw != "INDEX" && kw != "FULLTEXT" && kw != "SPATIAL" {
+		return false
+	}
+	return hasParenColumnList(act)
 }
 
 // leadingKeyword extracts the first table-item keyword: the run of
@@ -292,6 +326,14 @@ func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 		}
 		b.applyTableConstraint(t, rest, pos)
 	case strings.HasPrefix(up, "ADD PRIMARY KEY"), strings.HasPrefix(up, "ADD UNIQUE"), strings.HasPrefix(up, "ADD FOREIGN KEY"):
+		b.applyTableConstraint(t, strings.TrimSpace(act[len("ADD"):]), pos)
+	case isAddKeyIndexForm(act):
+		// ADD KEY idx (cols) / ADD INDEX idx (cols) / ADD FULLTEXT KEY (cols) /
+		// ADD SPATIAL KEY (cols) — MySQL's secondary-index shorthand via
+		// ALTER TABLE. Unit I rework (C2 MINOR): the generic "ADD " column
+		// branch below previously turned this into a phantom column literally
+		// named "KEY". Same parenthesized-column-list discriminator as
+		// applyTableItem's inline case.
 		b.applyTableConstraint(t, strings.TrimSpace(act[len("ADD"):]), pos)
 	case strings.HasPrefix(up, "ADD COLUMN"), strings.HasPrefix(up, "ADD "):
 		rest := strings.TrimSpace(act[len("ADD"):])
