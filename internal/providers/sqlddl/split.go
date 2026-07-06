@@ -74,8 +74,11 @@ func split(src []byte, dialect *Dialect) []stmt {
 		// A standalone "GO" line is a soft statement break (like ';') so that
 		// a real CREATE TABLE on either side of a GO-batched routine body is
 		// still tokenized as its own statement, never glued to the batch's
-		// tail (reduce.go's builder-level guard handles the body's internal
-		// ';'-cut fragments — see applyRoutineOrTriggerHead/inRoutineBody).
+		// tail. A T-SQL routine BODY is not modeled: its internal ';'-cut
+		// fragments are not guarded, so a CREATE-TABLE-shaped fragment inside a
+		// GO-batched body may surface as a spurious table — a documented known
+		// limit (ADR 0022), not silently corrected. MySQL bodies wrapped in
+		// DELIMITER //…// are unaffected (the whole body is one statement here).
 		if adv := matchGoBatchSeparator(s, i); adv > 0 {
 			flush()
 			if strings.Contains(s[i:i+adv], "\n") {
