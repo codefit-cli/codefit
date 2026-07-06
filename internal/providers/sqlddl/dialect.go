@@ -23,9 +23,10 @@ type Dialect struct {
 	Name string
 
 	// LineComments lists the line-comment prefixes this dialect recognizes
-	// (e.g. {"--"} for PostgreSQL/T-SQL, {"--", "#"} for MySQL). Block
-	// comments (/* ... */) are universal across dialects and not a field.
-	LineComments []string
+	// (e.g. {{"--", false}} for PostgreSQL/T-SQL, {{"--", true}, {"#", false}}
+	// for MySQL). Block comments (/* ... */) are universal across dialects and
+	// not a field.
+	LineComments []LineComment
 
 	// IdentQuotes lists the quoted-identifier delimiter pairs this dialect
 	// recognizes (e.g. {{'"','"',true}} for PostgreSQL, {{'`','`',true}} for
@@ -57,6 +58,27 @@ type Dialect struct {
 	Modifiers map[string]bool
 }
 
+// LineComment is one line-comment prefix a dialect recognizes.
+//
+// RequireBoundaryAfter encodes a real lexical divergence between dialects:
+// PostgreSQL's "--" opens a line comment unconditionally, but MySQL's "--"
+// opens one ONLY when immediately followed by a boundary — whitespace, a
+// control char, or end-of-line/EOF (https://dev.mysql.com/doc/refman/8.0/en/comments.html).
+// Without this distinction, "SELECT 1--1 FROM t;" under MySQL would be
+// misread as "SELECT 1" with the rest silently swallowed as a comment. MySQL
+// sets this true for "--" and false for "#" (which is unconditional in both
+// dialects); PostgreSQL sets it false for "--".
+type LineComment struct {
+	// Prefix is the literal comment-opening text (e.g. "--", "#").
+	Prefix string
+
+	// RequireBoundaryAfter, when true, means Prefix opens a comment only if
+	// the character immediately following it is a boundary (whitespace or a
+	// control char) or there is no following character (end-of-line/EOF).
+	// When false, Prefix is unconditional — matching as soon as it is found.
+	RequireBoundaryAfter bool
+}
+
 // QuotePair is one quoted-identifier delimiter pair. Doubling is true when an
 // occurrence of Close inside the identifier is escaped by writing it twice:
 // two double-quotes mean one literal double-quote, two closing brackets mean
@@ -75,7 +97,7 @@ type QuotePair struct {
 func Postgres() Dialect {
 	return Dialect{
 		Name:                "postgresql",
-		LineComments:        []string{"--"},
+		LineComments:        []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
 		IdentQuotes:         []QuotePair{{Open: '"', Close: '"', Doubling: true}},
 		DoubleQuoteIsString: false,
 		DollarQuoting:       true,
@@ -87,12 +109,18 @@ func Postgres() Dialect {
 // MySQL returns the MySQL dialect descriptor: backtick-quoted identifiers,
 // "--" and "#" line comments, and " as a STRING delimiter (MySQL's default
 // ANSI_QUOTES-off behavior) rather than an identifier quote. No dollar
-// quoting. TypeMap and Modifiers are intentionally EMPTY here (Unit B is
+// quoting. Unlike PostgreSQL's unconditional "--", MySQL's "--" opens a
+// comment ONLY when immediately followed by a boundary (whitespace, a
+// control char, or end-of-line/EOF); "#" stays unconditional in both
+// dialects. TypeMap and Modifiers are intentionally EMPTY here (Unit B is
 // tokenizing only) — Unit C fills the type/modifier vocabulary.
 func MySQL() Dialect {
 	return Dialect{
-		Name:                "mysql",
-		LineComments:        []string{"--", "#"},
+		Name: "mysql",
+		LineComments: []LineComment{
+			{Prefix: "--", RequireBoundaryAfter: true},
+			{Prefix: "#", RequireBoundaryAfter: false},
+		},
 		IdentQuotes:         []QuotePair{{Open: '`', Close: '`', Doubling: true}},
 		DoubleQuoteIsString: true,
 		DollarQuoting:       false,
