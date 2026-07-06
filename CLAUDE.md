@@ -246,11 +246,20 @@ de oro: se edita la FUENTE, después se espeja.**
 **Cadena de verdad de cobertura (3 niveles):**
 `reglas (código)` → `coverage.go` → `COVERAGE.md`.
 - **Fuente-raíz:** `rules/<lang>/` + los sensores (`internal/sensors/`) + las reglas
-  DB del núcleo (`internal/core/db/`). Es lo que codefit realmente detecta.
+  DB del núcleo (`internal/core/dbrules/` — las 8 reglas DB viven ahí; `internal/core/db/`
+  es solo el modelo neutro `Schema`/`Table`/…, NO las reglas). Es lo que codefit realmente
+  detecta.
 - **Espejo-a-mano:** `internal/providers/<lang>/coverage.go` — NO es fuente pura; debe
   verificarse contra las reglas reales. El cierre lo chequea contra la raíz antes de
   espejar. Declararlo fuente pura reintroduce el drift un nivel más abajo — el drift
   silencioso que el pipeline existe para matar.
+- **Excepción — dimensiones transversales (DB):** el modelo "un `coverage.go` por
+  provider" NO cubre una dimensión que razona sobre el modelo neutro y no pertenece a un
+  lenguaje. La dimensión DB NO tiene `coverage.go` propio: su prosa de cobertura vive
+  EMBEBIDA (hoy en `internal/providers/typescript/coverage.go`) como DEUDA declarada,
+  hasta que exista una fuente DB neutra (junto a `internal/core/dbrules/`). Al cerrar una
+  dimensión transversal se verifica y edita esa prosa embebida contra las reglas reales,
+  no un `coverage.go` per-lang inexistente.
 - **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;
   verificado: sin `go:generate`, ningún `.go` emite markdown). Su encabezado promete
   auto-generación futura que no existe — claim stale, verificar la línea antes de tocar.
