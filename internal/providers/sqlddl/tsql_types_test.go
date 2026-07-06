@@ -74,6 +74,26 @@ func TestTSQL_IdentityPrimaryKey(t *testing.T) {
 	}
 }
 
+// F1b: bare IDENTITY (no seed/increment parens) and ROWGUIDCOL are both
+// declared as parse-and-ignore Modifiers and promised in SQLServer()'s doc
+// comment, but only the parenthesized IDENTITY(1,1) form is locked above. Lock
+// the bare forms too: each must cut the type expression cleanly (no leakage
+// into RawType) rather than only working for the parenthesized case.
+func TestTSQL_BareIdentityAndRowguidcol(t *testing.T) {
+	s := parseTSQL(t, "CREATE TABLE [dbo].[T] ([Id] INT IDENTITY NOT NULL, [G] uniqueidentifier ROWGUIDCOL NOT NULL);")
+	tb := tsqlTable(t, s, "T")
+
+	id := tsqlCol(t, tb, "Id")
+	if id.Type != db.TypeInt || id.RawType != "INT" {
+		t.Errorf("Id: Type=%s RawType=%q, want int / %q (bare IDENTITY must be parse-and-ignore)", id.Type, id.RawType, "INT")
+	}
+
+	g := tsqlCol(t, tb, "G")
+	if g.Type != db.TypeString || g.RawType != "uniqueidentifier" {
+		t.Errorf("G: Type=%s RawType=%q, want string / %q (ROWGUIDCOL must be parse-and-ignore)", g.Type, g.RawType, "uniqueidentifier")
+	}
+}
+
 // F2: table-driven T-SQL base-type mapping — RawType always preserved
 // verbatim (these cases carry no trailing modifier, so RawType is the bare
 // type expression including its own "(...)" length/precision, if any).
