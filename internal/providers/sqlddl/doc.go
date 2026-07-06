@@ -47,5 +47,12 @@
 // "GO", so it cannot match part of a longer identifier — but it also means a
 // column literally named "go" standing alone on its own line (vanishingly
 // unlikely in real DDL) would collide with batch-separator recognition; this
-// narrow collision is accepted, not guarded against.
+// narrow collision is accepted, not guarded against. Relatedly, MySQL client
+// DELIMITER directives are only recognized when their argument is
+// punctuation-only (e.g. "DELIMITER //", "DELIMITER $$") — this is what lets
+// an ordinary "delimiter VARCHAR(1)" column definition parse as a column, not
+// a directive (Unit I rework, C1). A word-based custom delimiter (e.g.
+// "DELIMITER GO") is therefore NOT recognized as a delimiter directive; this
+// is a narrow, accepted limit, not a bug — punctuation-only delimiters cover
+// the overwhelming majority of real-world MySQL dump/migration tooling.
 package sqlddl
