@@ -7,9 +7,11 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 > Source of truth: the per-provider manifest in code
 > (`internal/providers/<lang>/coverage.go`, exposed by the `codefit-coverage`
-> tool). This file mirrors it for human reading; once the MCP server lands,
-> `codefit-coverage` generates it. Today only the **TypeScript** provider has a
-> full manifest.
+> tool as JSON). This file is a **hand-maintained mirror** of that manifest for
+> human reading — the MCP server has landed, but `codefit-coverage` returns
+> JSON, not markdown, so this file is kept in sync manually whenever the
+> in-code manifest changes. Today only the **TypeScript** provider has a full
+> manifest.
 
 ## TypeScript / Next.js / Express / Fastify / NestJS / Prisma
 
@@ -38,9 +40,16 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
 - **Table without a primary key (DB-050).** A model with no `@id`/`@@id`, read from
   the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
-  (Flyway PostgreSQL) migrations reconstructed to their final state
-  (`database.schema_paths`). A table with no primary key is structurally undeniable,
-  so it is **affirmed**. The DB dimension covers only what the schema states — no query
+  (Flyway) migrations reconstructed to their final state (`database.schema_paths`).
+  SQL-DDL parsing supports **three dialects — PostgreSQL, MySQL, and SQL Server
+  (T-SQL)** — selected by `database.type` in `.codefit.yaml`
+  (`postgresql` | `mysql` | `sqlserver`); `sqlite` is recognized but returns an
+  explicit "not supported yet" note rather than silently parsing as Postgres. All
+  DB rules (DB-050 and below) are **dialect-agnostic**: they reason over the
+  neutral `db.Schema` model regardless of which dialect parsed the DDL. An
+  unmapped type keyword falls back to `db.TypeUnknown` — an honest fallback, never
+  a silent guess. A table with no primary key is structurally undeniable, so it is
+  **affirmed**. The DB dimension covers only what the schema states — no query
   analysis.
   > **Scalability note:** the DB rules are **language-neutral** (they reason over
   > the neutral schema model, not TypeScript), so this DB coverage prose is
@@ -199,6 +208,23 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
+- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL
+  `GO`-batched stored-procedure/trigger **body** containing a `CREATE TABLE`-shaped
+  fragment may surface as a spurious top-level table — codefit does not model
+  routine bodies; MySQL routine bodies wrapped in `DELIMITER //`...`//` are **not**
+  affected (handled correctly). (2) A MySQL client `DELIMITER` directive is
+  recognized only when its argument is punctuation (`//`, `$$`); a word-based
+  delimiter such as `DELIMITER GO` is **not** recognized. (3) The T-SQL `GO` batch
+  separator is recognized only when a line is exactly `GO`; a column literally
+  named `go` alone on its own line would collide (vanishingly rare, accepted).
+  (4) An inline index whose **name** is itself a type keyword (e.g. `KEY int
+  (col)`, an index named "int") is read as a column — the KEY/INDEX-vs-column
+  discriminator trusts a type-named token as a column (pathological, accepted).
+- **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
+  bare `"` is read as a string literal, not an identifier quote); the parser
+  binds a **single dialect per project** at construction (a project mixing
+  dialects is not supported). A project mixing `.prisma` and `.sql` schema
+  inputs is likewise out of scope.
 
 ## Dependency CVEs (OSV.dev)
 

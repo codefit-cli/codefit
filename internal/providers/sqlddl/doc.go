@@ -1,13 +1,15 @@
 // Package sqlddl is codefit's hand-written SQL-DDL parser. It implements
 // providers.SchemaParser (the second implementer after the Prisma parser), turning
-// ordered SQL-DDL migrations into the neutral core/db.Schema. Today it supports
-// PostgreSQL only (via the Postgres() dialect descriptor and default New()
-// construction); the tokenizer and reducer are dialect-agnostic by design, but
-// no other Dialect value is wired in yet.
+// ordered SQL-DDL migrations into the neutral core/db.Schema. It supports THREE
+// dialects today — PostgreSQL (Postgres(), the default New() construction),
+// MySQL (MySQL()), and SQL Server/T-SQL (SQLServer()) — wired via
+// internal/mcp/schemaparser.go, which selects the Dialect descriptor from the
+// project's .codefit.yaml database.type setting; the tokenizer and reducer
+// are dialect-agnostic by design, consuming only the selected Dialect's data.
 //
 // A Parser is bound to exactly one Dialect at construction time (New(opts
 // ...Option), WithDialect) — see dialect.go for the descriptor shape. Two
-// pieces consume it (ADR 0018, and the dialect-descriptor design): a
+// pieces consume it (ADR 0018, and the per-dialect descriptor of ADR 0022): a
 // statement splitter (split.go) that is aware of the dialect's comment
 // styles, identifier quoting and (for PostgreSQL) dollar-quoting ($$…$$ /
 // $tag$…$tag$) — so a PL/pgSQL DO block's internal semicolons never cut a
