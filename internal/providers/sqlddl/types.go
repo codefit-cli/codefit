@@ -40,6 +40,41 @@ func postgresModifiers() map[string]bool {
 	}
 }
 
+// mysqlTypeMap is the MySQL base-type -> neutral db.Type vocabulary used to
+// build MySQL().TypeMap. An unmapped keyword is TypeUnknown (honest) — the
+// declared subset grows by dogfooded demand, not speculation (design §3).
+func mysqlTypeMap() map[string]db.Type {
+	return map[string]db.Type{
+		"tinyint": db.TypeInt, "smallint": db.TypeInt, "mediumint": db.TypeInt,
+		"int": db.TypeInt, "integer": db.TypeInt, "bigint": db.TypeInt,
+		"decimal": db.TypeFloat, "numeric": db.TypeFloat, "float": db.TypeFloat,
+		"double": db.TypeFloat, "real": db.TypeFloat,
+		"date": db.TypeDateTime, "datetime": db.TypeDateTime, "timestamp": db.TypeDateTime,
+		"time": db.TypeDateTime, "year": db.TypeDateTime,
+		"char": db.TypeString, "varchar": db.TypeString, "binary": db.TypeString,
+		"tinytext": db.TypeText, "text": db.TypeText, "mediumtext": db.TypeText, "longtext": db.TypeText,
+		"blob": db.TypeBytes, "tinyblob": db.TypeBytes, "mediumblob": db.TypeBytes,
+		"longblob": db.TypeBytes, "varbinary": db.TypeBytes,
+		"enum": db.TypeEnum, "set": db.TypeEnum,
+		"json":    db.TypeJSON,
+		"boolean": db.TypeBool, "bool": db.TypeBool,
+	}
+}
+
+// mysqlModifiers is the MySQL column-tail parse-and-ignore vocabulary used to
+// build MySQL().Modifiers — the keywords that end a column's type expression
+// in splitTypeAndMods, including MySQL-specific tail keywords (UNSIGNED,
+// ZEROFILL, AUTO_INCREMENT, CHARACTER SET, COLLATE) alongside the universal
+// ones shared with PostgreSQL.
+func mysqlModifiers() map[string]bool {
+	return map[string]bool{
+		"NOT": true, "NULL": true, "DEFAULT": true, "PRIMARY": true, "UNIQUE": true,
+		"REFERENCES": true, "CHECK": true, "CONSTRAINT": true, "COMMENT": true,
+		"UNSIGNED": true, "ZEROFILL": true, "AUTO_INCREMENT": true,
+		"CHARACTER": true, "COLLATE": true, "ON": true,
+	}
+}
+
 // mapType maps a base type name (already stripped of length/precision and
 // array markers by typeBase) to the neutral db.Type via this dialect's
 // TypeMap. An unmapped keyword is the honest db.TypeUnknown fallback.
