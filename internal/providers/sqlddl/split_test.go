@@ -85,6 +85,23 @@ func TestSplit_QuotedIdentifierCanonicalizedIdentity(t *testing.T) {
 	}
 }
 
+func TestSplit_UnterminatedQuotedIdentifierNoSyntheticClose(t *testing.T) {
+	// EOF hits before the closing '"' is found. The pre-refactor tokenizer
+	// only wrote a closing '"' when it actually matched one in the source —
+	// it never invents one. Regression: the refactored scanIdentQuoted wrote
+	// a trailing '"' unconditionally, breaking the PG byte-identical contract
+	// for malformed/truncated input.
+	src := `CREATE TABLE "unterminated (id int);`
+	got := texts(split([]byte(src), &pg))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "unterminated (id int);`
+	if got[0] != want {
+		t.Errorf("got %q, want %q (no synthetic closing quote on EOF)", got[0], want)
+	}
+}
+
 func TestDollarTag(t *testing.T) {
 	cases := map[string]string{
 		"$$rest":     "$$",

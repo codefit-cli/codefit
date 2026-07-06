@@ -181,6 +181,7 @@ func scanIdentQuoted(s string, i, line int, qp QuotePair) (string, int, int) {
 	var out strings.Builder
 	out.WriteByte('"')
 	i++
+	closed := false
 	for i < n {
 		if s[i] == qp.Close {
 			if qp.Doubling && i+1 < n && s[i+1] == qp.Close {
@@ -189,6 +190,7 @@ func scanIdentQuoted(s string, i, line int, qp QuotePair) (string, int, int) {
 				continue
 			}
 			i++ // closing delimiter consumed, identifier done
+			closed = true
 			break
 		}
 		if s[i] == '\n' {
@@ -197,7 +199,12 @@ func scanIdentQuoted(s string, i, line int, qp QuotePair) (string, int, int) {
 		writeIdentByte(&out, s[i])
 		i++
 	}
-	out.WriteByte('"')
+	// Only emit the canonical closing quote when a real closing delimiter was
+	// matched in the source. On EOF without a close, mirror the pre-refactor
+	// tokenizer: never invent a delimiter that was not there.
+	if closed {
+		out.WriteByte('"')
+	}
 	return out.String(), i, line
 }
 

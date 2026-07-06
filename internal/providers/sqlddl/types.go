@@ -22,9 +22,9 @@ func postgresTypeMap() map[string]db.Type {
 		"double precision": db.TypeFloat, "double": db.TypeFloat, "float": db.TypeFloat,
 		"float4": db.TypeFloat, "float8": db.TypeFloat, "money": db.TypeFloat,
 		"json": db.TypeJSON, "jsonb": db.TypeJSON,
-		"bytea": db.TypeBytes,
-		"uuid":  db.TypeString,
-		"text":  db.TypeText,
+		"bytea":   db.TypeBytes,
+		"uuid":    db.TypeString,
+		"text":    db.TypeText,
 		"varchar": db.TypeString, "character varying": db.TypeString, "char": db.TypeString,
 		"character": db.TypeString, "bpchar": db.TypeString, "citext": db.TypeString, "name": db.TypeString,
 	}
