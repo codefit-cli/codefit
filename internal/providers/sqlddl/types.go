@@ -79,6 +79,37 @@ func mysqlModifiers() map[string]bool {
 	}
 }
 
+// sqlserverTypeMap is the T-SQL base-type -> neutral db.Type vocabulary used
+// to build SQLServer().TypeMap. An unmapped keyword is TypeUnknown (honest) —
+// the declared subset grows by dogfooded demand, not speculation (design §3).
+// Every entry maps onto an EXISTING db.Type enum value; no core enrichment.
+func sqlserverTypeMap() map[string]db.Type {
+	return map[string]db.Type{
+		"int": db.TypeInt, "bigint": db.TypeInt, "smallint": db.TypeInt, "tinyint": db.TypeInt,
+		"nvarchar": db.TypeString, "nchar": db.TypeString, "varchar": db.TypeString, "char": db.TypeString,
+		"uniqueidentifier": db.TypeString,
+		"bit":              db.TypeBool,
+		"datetime2":        db.TypeDateTime, "smalldatetime": db.TypeDateTime,
+		"datetime": db.TypeDateTime, "date": db.TypeDateTime,
+		"money": db.TypeFloat, "smallmoney": db.TypeFloat,
+		"decimal": db.TypeFloat, "numeric": db.TypeFloat, "float": db.TypeFloat, "real": db.TypeFloat,
+		"varbinary": db.TypeBytes, "binary": db.TypeBytes, "image": db.TypeBytes,
+	}
+}
+
+// sqlserverModifiers is the T-SQL column-tail parse-and-ignore vocabulary used
+// to build SQLServer().Modifiers — the keywords that end a column's type
+// expression in splitTypeAndMods, including T-SQL-specific tail keywords
+// (IDENTITY, ROWGUIDCOL) alongside the universal ones shared with
+// PostgreSQL/MySQL.
+func sqlserverModifiers() map[string]bool {
+	return map[string]bool{
+		"NOT": true, "NULL": true, "DEFAULT": true, "PRIMARY": true, "UNIQUE": true,
+		"REFERENCES": true, "CHECK": true, "CONSTRAINT": true,
+		"IDENTITY": true, "ROWGUIDCOL": true, "COLLATE": true,
+	}
+}
+
 // mapType maps a base type name (already stripped of length/precision and
 // array markers by typeBase) to the neutral db.Type via this dialect's
 // TypeMap. An unmapped keyword is the honest db.TypeUnknown fallback.

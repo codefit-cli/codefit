@@ -141,10 +141,9 @@ func MySQL() Dialect {
 // TestSplit_SQLServerBracketIdentifierCanonicalized /
 // ...BracketDoublingEscape). ']]' doubles to one literal ']', matching the
 // universal Doubling convention. "--" is unconditional here (unlike MySQL's
-// boundary-gated "--"). No dollar quoting. TypeMap and Modifiers are left
-// EMPTY here (parse-and-ignore vocabulary is Unit F's scope, not this unit's)
-// — every column type resolves to the honest db.TypeUnknown fallback until F
-// fills them.
+// boundary-gated "--"). No dollar quoting. TypeMap and Modifiers hold the
+// T-SQL type/modifier vocabulary (Unit F, design §3): IDENTITY/ROWGUIDCOL are
+// parse-and-ignore Modifiers, never corrupting the mapped type.
 func SQLServer() Dialect {
 	return Dialect{
 		Name:                "sqlserver",
@@ -152,7 +151,7 @@ func SQLServer() Dialect {
 		IdentQuotes:         []QuotePair{{Open: '[', Close: ']', Doubling: true}, {Open: '"', Close: '"', Doubling: true}},
 		DoubleQuoteIsString: false,
 		DollarQuoting:       false,
-		TypeMap:             map[string]db.Type{},
-		Modifiers:           map[string]bool{},
+		TypeMap:             sqlserverTypeMap(),
+		Modifiers:           sqlserverModifiers(),
 	}
 }
