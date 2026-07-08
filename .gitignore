@@ -45,3 +45,7 @@ codefit-report.html
 
 # Agent tooling (skill registry, local only)
 .atl/
+
+# Engram project memory: versionada a mano en main (commit de infra), NO por-feature.
+# Ignorada para que `engram sync` no la re-stagee en branches de trabajo (el enredo).
+.engram/
