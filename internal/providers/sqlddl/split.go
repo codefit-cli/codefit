@@ -1,6 +1,9 @@
 package sqlddl
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // stmt is one top-level SQL statement with the 1-based line it starts on.
 type stmt struct {
@@ -8,11 +11,18 @@ type stmt struct {
 	line int
 }
 
-// split tokenizes SQL into top-level statements. A statement ends at a ';' that
-// is NOT inside a string, a quoted identifier, a line/block comment, or a
-// dollar-quoted block ($$...$$ / $tag$...$tag$). The dollar-quote handling is the
-// crux: PL/pgSQL DO/function bodies contain internal semicolons that must not cut.
-func split(src []byte) []stmt {
+// split tokenizes SQL into top-level statements, according to the given
+// dialect's lexical rules (comments, quoting, dollar-quoting). A statement
+// ends at a ';' that is NOT inside a string, a quoted identifier, a
+// line/block comment, or (when dialect.DollarQuoting) a dollar-quoted block
+// ($$...$$ / $tag$...$tag$) — the crux that keeps a PL/pgSQL DO/function
+// body's internal semicolons from cutting the statement.
+//
+// split is the SOLE owner of quote/comment knowledge (design §2): every
+// dialect-quoted identifier is RE-EMITTED as canonical ANSI "..." as it is
+// tokenized, so reduce.go's regexes and normalizeName never need to know the
+// source dialect's quoting style.
+func split(src []byte, dialect *Dialect) []stmt {
 	s := string(src)
 	n := len(s)
 	var out []stmt
@@ -20,6 +30,7 @@ func split(src []byte) []stmt {
 	line := 1
 	startLine := 0 // 0 = statement not started yet
 	i := 0
+	term := ";" // active statement terminator; changed by a DELIMITER directive
 
 	flush := func() {
 		if t := strings.TrimSpace(buf.String()); t != "" {
@@ -35,15 +46,57 @@ func split(src []byte) []stmt {
 	}
 
 	for i < n {
+		// Unit I phantom-table guard (design §8): two client-tool batch
+		// markers — MySQL's "DELIMITER <tok>" directive and T-SQL/sqlcmd's
+		// standalone "GO" batch separator — are recognized here as UNIVERSAL,
+		// dialect-free literals (never gated on dialect.Name): neither is
+		// part of the SQL:1992 grammar in ANY of the three dialects, so
+		// matching them unconditionally is safe and keeps every existing
+		// fixture byte-identical (neither marker appears in real DDL).
+		//
+		// A DELIMITER directive changes the ACTIVE terminator (term) that the
+		// generic terminator case below matches against, instead of the
+		// hardcoded ';' — this is what lets a MySQL "DELIMITER //" ... "//"
+		// ... "DELIMITER ;" trigger/procedure body stay ONE statement (its
+		// internal ';'s are no longer terminators), so the body's head
+		// (CREATE TRIGGER/PROCEDURE) is captured by reduce.go's anchored
+		// regex while no body-internal fragment can ever leak out as its own
+		// top-level statement (the phantom-table risk the design flagged).
+		if adv, newTerm, ok := matchDelimiterDirective(s, i); ok {
+			flush()
+			term = newTerm
+			if strings.Contains(s[i:i+adv], "\n") {
+				line++
+			}
+			i += adv
+			continue
+		}
+		// A standalone "GO" line is a soft statement break (like ';') so that
+		// a real CREATE TABLE on either side of a GO-batched routine body is
+		// still tokenized as its own statement, never glued to the batch's
+		// tail. A T-SQL routine BODY is not modeled: its internal ';'-cut
+		// fragments are not guarded, so a CREATE-TABLE-shaped fragment inside a
+		// GO-batched body may surface as a spurious table — a documented known
+		// limit (ADR 0022), not silently corrected. MySQL bodies wrapped in
+		// DELIMITER //…// are unaffected (the whole body is one statement here).
+		if adv := matchGoBatchSeparator(s, i); adv > 0 {
+			flush()
+			if strings.Contains(s[i:i+adv], "\n") {
+				line++
+			}
+			i += adv
+			continue
+		}
+
 		c := s[i]
 		switch {
-		case c == '-' && i+1 < n && s[i+1] == '-':
+		case matchLineComment(s, i, dialect.LineComments) > 0:
 			// line comment: skip to newline (not added to the statement)
 			for i < n && s[i] != '\n' {
 				i++
 			}
 		case c == '/' && i+1 < n && s[i+1] == '*':
-			// block comment
+			// block comment (universal, not a dialect field)
 			i += 2
 			for i < n && (i+1 >= n || s[i] != '*' || s[i+1] != '/') {
 				if s[i] == '\n' {
@@ -53,48 +106,19 @@ func split(src []byte) []stmt {
 			}
 			i += 2
 		case c == '\'':
+			// string literal (universal, '' escape) — never canonicalized.
 			mark()
-			buf.WriteByte(c)
-			i++
-			for i < n {
-				if s[i] == '\'' {
-					if i+1 < n && s[i+1] == '\'' { // '' escape
-						buf.WriteString("''")
-						i += 2
-						continue
-					}
-					buf.WriteByte('\'')
-					i++
-					break
-				}
-				if s[i] == '\n' {
-					line++
-				}
-				buf.WriteByte(s[i])
-				i++
-			}
-		case c == '"':
+			i, line = scanStringLiteral(&buf, s, i, line, '\'')
+		case dialect.DoubleQuoteIsString && c == '"':
+			// MySQL default (ANSI_QUOTES off): " opens a STRING, not an identifier.
 			mark()
-			buf.WriteByte(c)
-			i++
-			for i < n {
-				if s[i] == '"' {
-					if i+1 < n && s[i+1] == '"' {
-						buf.WriteString(`""`)
-						i += 2
-						continue
-					}
-					buf.WriteByte('"')
-					i++
-					break
-				}
-				if s[i] == '\n' {
-					line++
-				}
-				buf.WriteByte(s[i])
-				i++
-			}
-		case c == '$':
+			i, line = scanStringLiteral(&buf, s, i, line, '"')
+		case identQuoteFor(c, dialect.IdentQuotes) != nil:
+			mark()
+			var ident string
+			ident, i, line = scanIdentQuoted(s, i, line, *identQuoteFor(c, dialect.IdentQuotes))
+			buf.WriteString(ident)
+		case dialect.DollarQuoting && c == '$':
 			if tag, ok := dollarTag(s, i); ok {
 				mark()
 				buf.WriteString(tag)
@@ -116,9 +140,9 @@ func split(src []byte) []stmt {
 				buf.WriteByte(c)
 				i++
 			}
-		case c == ';':
+		case strings.HasPrefix(s[i:], term):
 			flush()
-			i++
+			i += len(term)
 		case c == '\n':
 			line++
 			if startLine != 0 {
@@ -140,6 +164,126 @@ func split(src []byte) []stmt {
 	return out
 }
 
+// matchLineComment returns the length of the dialect line-comment prefix that
+// s[i:] starts with, or 0 if none match. A prefix with RequireBoundaryAfter
+// only matches when the character immediately following it is a boundary
+// (whitespace or a control char) or there is no following character
+// (end-of-line/EOF) — the rule MySQL's "--" needs (unlike PostgreSQL's
+// unconditional "--") to avoid misreading "1--1" as a comment opener. This
+// single dialect-free path is shared by every dialect: no per-dialect branch
+// lives in the tokenizer.
+func matchLineComment(s string, i int, comments []LineComment) int {
+	for _, lc := range comments {
+		if lc.Prefix == "" || !strings.HasPrefix(s[i:], lc.Prefix) {
+			continue
+		}
+		if !lc.RequireBoundaryAfter || isCommentBoundary(s, i+len(lc.Prefix)) {
+			return len(lc.Prefix)
+		}
+	}
+	return 0
+}
+
+// isCommentBoundary reports whether position j in s is a valid boundary for
+// a line-comment prefix that requires one: whitespace/control char, or
+// end-of-string (no character at all).
+func isCommentBoundary(s string, j int) bool {
+	if j >= len(s) {
+		return true
+	}
+	c := s[j]
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c < 0x20 || c == 0x7f
+}
+
+// identQuoteFor returns the QuotePair whose Open == c, or nil if none match.
+func identQuoteFor(c byte, pairs []QuotePair) *QuotePair {
+	for i := range pairs {
+		if pairs[i].Open == c {
+			return &pairs[i]
+		}
+	}
+	return nil
+}
+
+// scanStringLiteral scans a string literal delimited by quote (with doubling
+// escape), writing it VERBATIM — including delimiters and escapes — into buf.
+// Strings are never canonicalized, only identifiers are. Returns the advanced
+// index and line.
+func scanStringLiteral(buf *strings.Builder, s string, i, line int, quote byte) (int, int) {
+	n := len(s)
+	buf.WriteByte(quote)
+	i++
+	for i < n {
+		if s[i] == quote {
+			if i+1 < n && s[i+1] == quote {
+				buf.WriteByte(quote)
+				buf.WriteByte(quote)
+				i += 2
+				continue
+			}
+			buf.WriteByte(quote)
+			i++
+			break
+		}
+		if s[i] == '\n' {
+			line++
+		}
+		buf.WriteByte(s[i])
+		i++
+	}
+	return i, line
+}
+
+// scanIdentQuoted scans a dialect-quoted identifier starting at s[i] (where
+// s[i] == qp.Open) and RE-EMITS it canonicalized to ANSI "..." regardless of
+// the source delimiter — the seam that keeps reduce.go's regexes and
+// normalizeName dialect-free (design §2). For the PostgreSQL descriptor
+// (qp.Open == qp.Close == '"') this is the identity transform: byte-identical
+// output, guaranteeing the PG no-regression gate. Returns the canonical
+// identifier text (including its own "..." delimiters), the advanced index
+// and line.
+func scanIdentQuoted(s string, i, line int, qp QuotePair) (string, int, int) {
+	n := len(s)
+	var out strings.Builder
+	out.WriteByte('"')
+	i++
+	closed := false
+	for i < n {
+		if s[i] == qp.Close {
+			if qp.Doubling && i+1 < n && s[i+1] == qp.Close {
+				writeIdentByte(&out, qp.Close)
+				i += 2
+				continue
+			}
+			i++ // closing delimiter consumed, identifier done
+			closed = true
+			break
+		}
+		if s[i] == '\n' {
+			line++
+		}
+		writeIdentByte(&out, s[i])
+		i++
+	}
+	// Only emit the canonical closing quote when a real closing delimiter was
+	// matched in the source. On EOF without a close, mirror the pre-refactor
+	// tokenizer: never invent a delimiter that was not there.
+	if closed {
+		out.WriteByte('"')
+	}
+	return out.String(), i, line
+}
+
+// writeIdentByte writes one content byte into a canonical ANSI-quoted
+// identifier, doubling it if it is the canonical delimiter '"' itself so the
+// re-emitted identifier stays validly escaped.
+func writeIdentByte(out *strings.Builder, b byte) {
+	out.WriteByte(b)
+	if b == '"' {
+		out.WriteByte('"')
+	}
+}
+
 // dollarTag returns the dollar-quote tag beginning at s[i] (which must be '$'),
 // e.g. "$$" or "$func$". The tag body is [A-Za-z0-9_]* and must be closed by a
 // second '$'. Returns ok=false when it is a lone '$' (not a dollar quote).
@@ -159,4 +303,61 @@ func dollarTag(s string, i int) (string, bool) {
 
 func isAlnum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// reDelimiterDirective matches a MySQL client "DELIMITER <tok>" directive
+// line (e.g. "DELIMITER //", "DELIMITER ;"), case-insensitive. It is a
+// client-tool convention, never part of the SQL:1992 grammar, so matching it
+// unconditionally (not gated on dialect.Name) is safe in principle — but the
+// argument itself MUST be constrained to punctuation-only tokens (Unit I
+// rework, C1): a bare "DELIMITER[ \t]+(\S+)" also fires on an ordinary column
+// definition that happens to start a line with the word "delimiter" (e.g.
+// "delimiter VARCHAR(1),"), silently corrupting the tokenizer on VALID input.
+// A real client-tool delimiter token (//, $$, |, ;, ...) is never a bare
+// word/identifier, so requiring the argument to be entirely non-word,
+// non-whitespace characters (`[^\w\s]+`) keeps the directive recognizable
+// while making a word-leading argument (a type/identifier) categorically
+// impossible to match — dialect-free, no fixture in this package uses a
+// punctuation-only delimiter token as a real column/type name.
+var reDelimiterDirective = regexp.MustCompile(`(?i)^[ \t]*DELIMITER[ \t]+([^\w\s]+)[ \t]*(\r?\n|$)`)
+
+// reGoBatchSeparator matches a T-SQL/sqlcmd "GO" batch-separator line: the
+// ENTIRE trimmed line must be "GO" (case-insensitive) — this word-boundary
+// requirement (immediately followed by only whitespace then end-of-line/EOF)
+// is what keeps it from ever matching part of a longer identifier such as
+// "GOTO" or a column literally named "go".
+var reGoBatchSeparator = regexp.MustCompile(`(?i)^[ \t]*GO[ \t]*(\r?\n|$)`)
+
+// isAtLineStart reports whether s[i] begins a new line (i==0 or the previous
+// byte is '\n'). Both DELIMITER-directive and GO-batch-separator recognition
+// are gated on this: they only ever fire between statement content and the
+// start of a line, never with a string, comment, or quoted identifier
+// straddling the boundary — every such token is fully consumed in a single
+// loop iteration elsewhere in split(), so i is never left mid-token when this
+// check runs.
+func isAtLineStart(s string, i int) bool {
+	return i == 0 || s[i-1] == '\n'
+}
+
+// matchDelimiterDirective returns the byte length to advance and the new
+// terminator token when s[i:] is a DELIMITER directive line at the start of
+// a line, or ok=false otherwise.
+func matchDelimiterDirective(s string, i int) (advance int, newTerm string, ok bool) {
+	if !isAtLineStart(s, i) {
+		return 0, "", false
+	}
+	m := reDelimiterDirective.FindStringSubmatch(s[i:])
+	if m == nil {
+		return 0, "", false
+	}
+	return len(m[0]), m[1], true
+}
+
+// matchGoBatchSeparator returns the byte length to advance when s[i:] is a
+// standalone "GO" batch-separator line at the start of a line, or 0 otherwise.
+func matchGoBatchSeparator(s string, i int) int {
+	if !isAtLineStart(s, i) {
+		return 0
+	}
+	return len(reGoBatchSeparator.FindString(s[i:]))
 }

@@ -79,6 +79,38 @@ database:
 	}
 }
 
+func TestLoadAcceptsSQLServerDBType(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+database:
+  type: "sqlserver"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load should accept database.type=sqlserver, got: %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownDBType(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+database:
+  type: "oracle"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil {
+		t.Fatal("Load accepted an unknown database type, want error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "database type") || !strings.Contains(msg, "oracle") {
+		t.Errorf("error %q should mention the field and the bad value", msg)
+	}
+}
+
 func TestLoadRejectsUnknownFramework(t *testing.T) {
 	body := `version: "1"
 project:

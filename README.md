@@ -108,14 +108,18 @@ independent audit layer that validates AI-generated code is secure and correct
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
 - **Database-structure auditing (Phase 2)** — a neutral schema model with two schema
-  parsers, **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway PostgreSQL migrations,
-  reconstructed incrementally). Eight schema-only OLTP rules: a table without a primary
+  parsers, **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway migrations,
+  reconstructed incrementally), the latter supporting **PostgreSQL, MySQL, and SQL
+  Server (T-SQL)** dialects selected by `database.type` in `.codefit.yaml`
+  (`postgresql` | `mysql` | `sqlserver`; `sqlite` returns an explicit "not supported
+  yet" note). Eight schema-only OLTP rules, dialect-agnostic — they reason over the
+  neutral schema regardless of which dialect parsed it: a table without a primary
   key (affirmed), and — as surface the agent reasons — un-indexed foreign keys,
   duplicate indexes, multivalued columns, text-typed FKs, missing audit timestamps,
   sensitive columns in the clear, and repeating groups. Run it standalone with
   `codefit-scan-db`; it also runs inside `scan-all` as its own section with a
-  per-dimension score. Dogfooded on a real Prisma backend and a real SQL-DDL
-  (Flyway/Postgres) backend.
+  per-dimension score. Dogfooded on a real Prisma backend and real SQL-DDL
+  (Postgres/MySQL/T-SQL) backends.
 
 **On the roadmap (not yet in `main`):** the HTTP/SSE transport; DB query-driven rules
 (N+1, index-vs-query) and view/procedure/trigger rules; Phase 3 code review / best
@@ -147,11 +151,23 @@ Concretely, on `main` — so you know exactly what to expect without reading
   surfaces OSV's severity rather than recomputing CVSS.
 - **Database structure — schema-only, the agent reasons the surface.** Read from
   `database.schema_paths` (a Prisma `schema.prisma` or a directory of SQL-DDL / Flyway
-  migrations reconstructed to the final schema). Affirmed: a table with no primary key
-  (DB-050). Surface: un-indexed FKs, duplicate indexes, multivalued columns, text-typed
-  FKs, missing audit timestamps, sensitive columns in the clear, repeating groups.
-  Query behaviour (N+1, index-vs-query), views/procedures/triggers, and OLAP are **not**
-  audited yet — declared, not silent.
+  migrations reconstructed to the final schema). SQL-DDL parsing supports **three
+  dialects**, selected by `database.type` in `.codefit.yaml`:
+
+  ```yaml
+  database:
+    type: postgresql # postgresql | mysql | sqlserver (sqlite: not supported yet)
+    schema_paths:
+      - db/migrations
+  ```
+
+  Affirmed: a table with no primary key (DB-050). Surface: un-indexed FKs, duplicate
+  indexes, multivalued columns, text-typed FKs, missing audit timestamps, sensitive
+  columns in the clear, repeating groups — all dialect-agnostic (they reason over the
+  reconstructed neutral schema, never a dialect-specific field). Query behaviour (N+1,
+  index-vs-query), views/procedures/triggers, and OLAP are **not** audited yet —
+  declared, not silent. See [COVERAGE.md](COVERAGE.md) for the declared SQL-DDL dialect
+  limits (T-SQL routine-body edge case, MySQL `DELIMITER` recognition, and others).
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by
@@ -343,7 +359,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. The main entry point. |
 | `codefit-scan-endpoint` | Full detail of one file on demand (to follow a `frontier_pending` endpoint). |
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). |
-| `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser. |
+| `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
 | `codefit-check-cves` | Check the project's dependencies against OSV.dev (free, no API key). Reads exact versions from lockfiles / `go.mod`; reports the vulnerable deps with id, severity and fixed version. |
 
