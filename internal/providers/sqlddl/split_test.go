@@ -197,6 +197,60 @@ func TestSplit_MySQLBacktickDoublingEscape(t *testing.T) {
 	}
 }
 
+func TestSplit_SQLServerBracketIdentifierCanonicalized(t *testing.T) {
+	// T-SQL bracket-quoted identifiers, INCLUDING schema-qualified names, are
+	// re-emitted as canonical ANSI "..." per identifier part — the seam that
+	// keeps reduce.go's regexes and normalizeName dialect-free (design §2).
+	// The schema qualifier '.' between the two bracket pairs is a plain
+	// literal byte, not part of either quoted identifier, so it survives
+	// untouched between the two canonicalized parts.
+	sqlserver := SQLServer()
+	src := "CREATE TABLE [dbo].[Users] ([Id] int);"
+	got := texts(split([]byte(src), &sqlserver))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "dbo"."Users" ("Id" int)`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_SQLServerBracketDoublingEscape(t *testing.T) {
+	// ']]' inside a bracket-quoted identifier is T-SQL's escape for one
+	// literal ']' — the asymmetric-quote analogue of MySQL's backtick
+	// doubling. Assert the canonical VALUE (not byte-length identity): this
+	// is a genuine unescaping transform.
+	sqlserver := SQLServer()
+	src := "SELECT * FROM [Weird]]Name];"
+	got := texts(split([]byte(src), &sqlserver))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `SELECT * FROM "Weird]Name"`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_SQLServerDoubleQuoteIdentifierAlsoSupported(t *testing.T) {
+	// T-SQL simultaneously supports BOTH bracket quoting and ANSI
+	// double-quote identifier quoting (SET QUOTED_IDENTIFIER ON, the
+	// default) — two IdentQuotes pairs active at once, the first dialect to
+	// exercise that. '"' must still be scanned as an identifier here (not a
+	// string), matching the second QuotePair, independent of the bracket pair.
+	sqlserver := SQLServer()
+	src := `CREATE TABLE "Users" ("Id" int);`
+	got := texts(split([]byte(src), &sqlserver))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "Users" ("Id" int)`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
 func TestDollarTag(t *testing.T) {
 	cases := map[string]string{
 		"$$rest":     "$$",

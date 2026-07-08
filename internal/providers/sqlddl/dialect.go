@@ -130,3 +130,29 @@ func MySQL() Dialect {
 		Modifiers:           mysqlModifiers(),
 	}
 }
+
+// SQLServer returns the T-SQL (SQL Server) dialect descriptor: this is the
+// first dialect with TWO simultaneously-active IdentQuotes pairs — bracket
+// identifiers ([Users], schema-qualified as [dbo].[Users]) AND ANSI
+// double-quote identifiers (the QUOTED_IDENTIFIER ON default). Unlike PG's
+// symmetric '"'/'"' pair and MySQL's symmetric '`'/'`' pair, the bracket pair
+// is ASYMMETRIC (Open='[' != Close=']'); scanIdentQuoted already scans by
+// Close alone so this required no tokenizer change (locked by
+// TestSplit_SQLServerBracketIdentifierCanonicalized /
+// ...BracketDoublingEscape). ']]' doubles to one literal ']', matching the
+// universal Doubling convention. "--" is unconditional here (unlike MySQL's
+// boundary-gated "--"). No dollar quoting. TypeMap and Modifiers are left
+// EMPTY here (parse-and-ignore vocabulary is Unit F's scope, not this unit's)
+// — every column type resolves to the honest db.TypeUnknown fallback until F
+// fills them.
+func SQLServer() Dialect {
+	return Dialect{
+		Name:                "sqlserver",
+		LineComments:        []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
+		IdentQuotes:         []QuotePair{{Open: '[', Close: ']', Doubling: true}, {Open: '"', Close: '"', Doubling: true}},
+		DoubleQuoteIsString: false,
+		DollarQuoting:       false,
+		TypeMap:             map[string]db.Type{},
+		Modifiers:           map[string]bool{},
+	}
+}
