@@ -1,0 +1,258 @@
+{
+  "Tables": [
+    {
+      "Name": "actor",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "actor_id",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 7
+          },
+          "Type": "int",
+          "RawType": "SMALLINT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "first_name",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 8
+          },
+          "Type": "string",
+          "RawType": "VARCHAR(45)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_name",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 9
+          },
+          "Type": "string",
+          "RawType": "VARCHAR(45)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 10
+          },
+          "Type": "datetime",
+          "RawType": "TIMESTAMP",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "actor_id"
+      ],
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 15
+          },
+          "Columns": [
+            "last_name"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "film",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "film_id",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 17
+          },
+          "Type": "int",
+          "RawType": "SMALLINT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "title",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 18
+          },
+          "Type": "string",
+          "RawType": "VARCHAR(255)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "description",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 19
+          },
+          "Type": "text",
+          "RawType": "TEXT",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "release_year",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 20
+          },
+          "Type": "datetime",
+          "RawType": "YEAR",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "rating",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 21
+          },
+          "Type": "enum",
+          "RawType": "ENUM('G','PG','PG-13','R','NC-17')",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "special_features",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 22
+          },
+          "Type": "enum",
+          "RawType": "SET('Trailers','Commentaries','Deleted Scenes','Behind the Scenes')",
+          "Nullable": true,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "film_id"
+      ],
+      "ForeignKeys": null,
+      "Indexes": null
+    },
+    {
+      "Name": "film_actor",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "actor_id",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 27
+          },
+          "Type": "int",
+          "RawType": "SMALLINT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "film_id",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 28
+          },
+          "Type": "int",
+          "RawType": "SMALLINT",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 29
+          },
+          "Type": "datetime",
+          "RawType": "TIMESTAMP",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "actor_id",
+        "film_id"
+      ],
+      "ForeignKeys": [
+        {
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 31
+          },
+          "Columns": [
+            "actor_id"
+          ],
+          "RefTable": "actor",
+          "RefColumns": [
+            "actor_id"
+          ]
+        },
+        {
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 32
+          },
+          "Columns": [
+            "film_id"
+          ],
+          "RefTable": "film",
+          "RefColumns": [
+            "film_id"
+          ]
+        }
+      ],
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "mysql/sakila_excerpt.sql",
+            "Line": 36
+          },
+          "Columns": [
+            "film_id"
+          ],
+          "Unique": false
+        }
+      ]
+    }
+  ],
+  "Views": null,
+  "Procedures": null,
+  "Triggers": null
+}

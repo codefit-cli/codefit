@@ -112,8 +112,10 @@ func Postgres() Dialect {
 // quoting. Unlike PostgreSQL's unconditional "--", MySQL's "--" opens a
 // comment ONLY when immediately followed by a boundary (whitespace, a
 // control char, or end-of-line/EOF); "#" stays unconditional in both
-// dialects. TypeMap and Modifiers are intentionally EMPTY here (Unit B is
-// tokenizing only) — Unit C fills the type/modifier vocabulary.
+// dialects. TypeMap and Modifiers hold the MySQL type/modifier vocabulary
+// (Unit C, design §3): UNSIGNED/ZEROFILL/AUTO_INCREMENT/CHARACTER
+// SET/COLLATE are parse-and-ignore Modifiers, never corrupting the mapped
+// type.
 func MySQL() Dialect {
 	return Dialect{
 		Name: "mysql",
@@ -124,7 +126,7 @@ func MySQL() Dialect {
 		IdentQuotes:         []QuotePair{{Open: '`', Close: '`', Doubling: true}},
 		DoubleQuoteIsString: true,
 		DollarQuoting:       false,
-		TypeMap:             map[string]db.Type{},
-		Modifiers:           map[string]bool{},
+		TypeMap:             mysqlTypeMap(),
+		Modifiers:           mysqlModifiers(),
 	}
 }

@@ -23,6 +23,14 @@ func TestPagila_GoldenSchema(t *testing.T) {
 	assertGolden(t, "pagila_excerpt.sql", "pagila_excerpt.schema.golden.json", sqlddl.New())
 }
 
+// TestSakila_GoldenSchema locks the neutral db.Schema produced by parsing the
+// MySQL Sakila excerpt under the MySQL() dialect (Unit D, DoD closure item
+// 1/3) — PK, FK, an index, an ENUM/SET column, backtick identifiers, and an
+// UNSIGNED/AUTO_INCREMENT column.
+func TestSakila_GoldenSchema(t *testing.T) {
+	assertGolden(t, filepath.Join("mysql", "sakila_excerpt.sql"), filepath.Join("mysql", "sakila_excerpt.schema.golden.json"), sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))
+}
+
 func assertGolden(t *testing.T, sqlFile, goldenFile string, p *sqlddl.Parser) {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join("testdata", sqlFile))

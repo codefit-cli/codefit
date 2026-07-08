@@ -312,7 +312,11 @@ func splitTypeAndMods(rest string, modifiers map[string]bool) (typeExpr, mods st
 			depth--
 		} else if depth == 0 && (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\n') {
 			word, _ := firstToken(rest[i:])
-			if modifiers[strings.ToUpper(word)] {
+			kw := word
+			if pi := strings.IndexByte(kw, '('); pi >= 0 {
+				kw = kw[:pi]
+			}
+			if modifiers[strings.ToUpper(kw)] {
 				return strings.TrimSpace(rest[:i]), strings.TrimSpace(rest[i:])
 			}
 		}
