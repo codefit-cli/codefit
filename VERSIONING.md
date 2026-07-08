@@ -30,6 +30,7 @@ pieces of it are still stubs.
 |----------|-----------|---------|
 | `0.1.0`  | Phase 1   | TS provider + security sensor + surface mapping + **`init` (config + skill) and baseline** functional (`update` is Phase 4) |
 | `0.2.0`  | Phase 2   | DB dimension: schema-only OLTP rules (Prisma + SQL-DDL parsers), `scan-db`, DB in `scan-all` + `by_dimension` |
+| `0.2.1`  | Phase 2.1 | Multi-dialect SQL-DDL: MySQL + SQL Server (T-SQL) alongside PostgreSQL (per-dialect DATA descriptor, ADR 0022; PG byte-identical) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -57,6 +58,16 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.1` — Phase 2.1 complete (multi-dialect SQL-DDL).** The database dimension is no
+  longer PostgreSQL-only: MySQL and SQL Server (T-SQL) DDL are parsed, selected by
+  `database.type`, through a per-dialect DATA descriptor feeding one shared tokenizer and one
+  dialect-free reducer (ADR 0022); the PostgreSQL path stays byte-identical. Config +
+  MCP-adapter wiring, MySQL (Sakila) and T-SQL (AdventureWorks) golden fixtures, and `sqlite`
+  as an explicit not-supported note (never a silent Postgres parse). **Deferred (declared
+  limits):** a T-SQL `GO`-batched routine body with a `CREATE TABLE`-shaped fragment may
+  surface a spurious table (MySQL `DELIMITER //` bodies unaffected); a word-based `DELIMITER`
+  (e.g. `DELIMITER GO`) is not recognized; one dialect per project; MySQL assumes
+  `ANSI_QUOTES` off.
 - **`v0.2.0` — Phase 2 complete (the database dimension).** Usable end-to-end from
   `main`: a neutral schema model with a Prisma parser and a SQL-DDL (Flyway) parser,
   eight schema-only OLTP rules, the standalone `codefit-scan-db`, the DB dimension
