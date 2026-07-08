@@ -14,7 +14,11 @@ var (
 	allowedLanguages  = []string{"typescript", "java", "python", "go"}
 	allowedFrameworks = []string{"react", "next", "express", "spring", "fastapi", "django"}
 	allowedParadigms  = []string{"oltp", "olap", "mixed"}
-	allowedDBTypes    = []string{"postgresql", "mysql", "sqlite", "none"}
+	// "sqlserver" (not "mssql") is the resolved config value for T-SQL — matches
+	// sqlddl.Dialect.Name and the sqlddl.SQLServer() constructor naming, so the
+	// config vocabulary stays consistent with the descriptor naming (design §5,
+	// H1 decision).
+	allowedDBTypes = []string{"postgresql", "mysql", "sqlserver", "sqlite", "none"}
 )
 
 // validate checks required fields and enum values, returning located

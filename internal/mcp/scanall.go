@@ -312,7 +312,7 @@ func providerForLanguage(lang string, authzHelpers []string) providers.LanguageP
 // Measured=false section with a note and ran=false — never an error, so a db
 // misconfiguration can never blank the security audit (ADR 0020).
 func runDBForScanAll(root, language string, cfg *config.Config) (*DBSection, findings.SensorResult, bool) {
-	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths)
+	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
 	if parser == nil {
 		return &DBSection{Measured: false, Note: note}, findings.SensorResult{}, false
 	}
