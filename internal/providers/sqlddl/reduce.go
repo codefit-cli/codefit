@@ -7,7 +7,10 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/db"
 )
 
-// builder accumulates the mutable schema state as statements are applied in order.
+// builder accumulates the mutable schema state as statements are applied in
+// order. It is dialect-free CODE (design §1): the dialect only supplies
+// type/modifier VOCABULARY (dialect.TypeMap / dialect.Modifiers) — quoting was
+// already canonicalized by split() before apply() ever sees a statement.
 type builder struct {
 	order     []string
 	tables    map[string]*db.Table
@@ -15,10 +18,11 @@ type builder struct {
 	procs     []db.Procedure
 	trigs     []db.Trigger
 	seenIndex map[string]bool
+	dialect   *Dialect
 }
 
-func newBuilder() *builder {
-	return &builder{tables: map[string]*db.Table{}, seenIndex: map[string]bool{}}
+func newBuilder(dialect *Dialect) *builder {
+	return &builder{tables: map[string]*db.Table{}, seenIndex: map[string]bool{}, dialect: dialect}
 }
 
 func (b *builder) schema() *db.Schema {
@@ -153,24 +157,19 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 	}
 }
 
-var modifierKw = map[string]bool{
-	"NOT": true, "NULL": true, "DEFAULT": true, "PRIMARY": true, "UNIQUE": true,
-	"REFERENCES": true, "CHECK": true, "GENERATED": true, "COLLATE": true, "CONSTRAINT": true,
-}
-
 func (b *builder) applyColumn(t *db.Table, def string, pos db.Pos) {
 	def = strings.TrimSpace(def)
 	name, rest := firstToken(def)
 	if name == "" {
 		return
 	}
-	rawType, mods := splitTypeAndMods(rest)
+	rawType, mods := splitTypeAndMods(rest, b.dialect.Modifiers)
 	col := db.Column{
 		Name:    normalizeName(name),
 		DBName:  "",
 		Pos:     pos,
 		RawType: strings.TrimSpace(rawType),
-		Type:    mapSQLType(typeBase(rawType)),
+		Type:    b.dialect.mapType(typeBase(rawType)),
 		List:    strings.Contains(rawType, "[]"),
 	}
 	upMods := strings.ToUpper(mods)
@@ -299,9 +298,11 @@ func firstToken(s string) (string, string) {
 	return s[:i], strings.TrimSpace(s[i:])
 }
 
-// splitTypeAndMods splits a column's tail into its type expression and the trailing
-// modifiers, stopping the type at the first modifier keyword at paren-depth 0.
-func splitTypeAndMods(rest string) (typeExpr, mods string) {
+// splitTypeAndMods splits a column's tail into its type expression and the
+// trailing modifiers, stopping the type at the first modifiers keyword at
+// paren-depth 0. modifiers is the dialect's parse-and-ignore vocabulary
+// (dialect.Modifiers) — this function itself stays dialect-free CODE.
+func splitTypeAndMods(rest string, modifiers map[string]bool) (typeExpr, mods string) {
 	depth := 0
 	i := 0
 	for i < len(rest) {
@@ -311,7 +312,7 @@ func splitTypeAndMods(rest string) (typeExpr, mods string) {
 			depth--
 		} else if depth == 0 && (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\n') {
 			word, _ := firstToken(rest[i:])
-			if modifierKw[strings.ToUpper(word)] {
+			if modifiers[strings.ToUpper(word)] {
 				return strings.TrimSpace(rest[:i]), strings.TrimSpace(rest[i:])
 			}
 		}

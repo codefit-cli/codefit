@@ -1,0 +1,108 @@
+{
+  "Tables": [
+    {
+      "Name": "actor",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "actor_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 9
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "first_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 10
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 11
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 12
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": null
+    }
+  ],
+  "Views": [
+    {
+      "Name": "actor_info",
+      "Pos": {
+        "File": "pagila_excerpt.sql",
+        "Line": 34
+      }
+    }
+  ],
+  "Procedures": [
+    {
+      "Name": "_group_concat",
+      "Pos": {
+        "File": "pagila_excerpt.sql",
+        "Line": 16
+      }
+    },
+    {
+      "Name": "last_updated",
+      "Pos": {
+        "File": "pagila_excerpt.sql",
+        "Line": 26
+      }
+    }
+  ],
+  "Triggers": [
+    {
+      "Name": "last_updated",
+      "Pos": {
+        "File": "pagila_excerpt.sql",
+        "Line": 41
+      },
+      "Table": "actor"
+    },
+    {
+      "Name": "film_fulltext_trigger",
+      "Pos": {
+        "File": "pagila_excerpt.sql",
+        "Line": 43
+      },
+      "Table": "film"
+    }
+  ]
+}

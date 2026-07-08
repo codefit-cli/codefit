@@ -2,6 +2,11 @@ package sqlddl
 
 import "testing"
 
+// pg is the shared Postgres dialect used by the internal tokenizer/reducer
+// tests, which exercise split()/newBuilder() directly rather than through the
+// public Parser.
+var pg = Postgres()
+
 func texts(sts []stmt) []string {
 	out := make([]string, len(sts))
 	for i, s := range sts {
@@ -11,7 +16,7 @@ func texts(sts []stmt) []string {
 }
 
 func TestSplit_BasicSemicolons(t *testing.T) {
-	got := texts(split([]byte("CREATE TABLE a (id int); CREATE TABLE b (id int);")))
+	got := texts(split([]byte("CREATE TABLE a (id int); CREATE TABLE b (id int);"), &pg))
 	if len(got) != 2 {
 		t.Fatalf("got %d statements, want 2: %q", len(got), got)
 	}
@@ -25,7 +30,7 @@ BEGIN
   SELECT 1; SELECT 2;
 END $$;
 CREATE TABLE after_do (id int);`
-	got := texts(split([]byte(src)))
+	got := texts(split([]byte(src), &pg))
 	if len(got) != 2 {
 		t.Fatalf("got %d statements, want 2 (DO block is one): %q", len(got), got)
 	}
@@ -37,7 +42,7 @@ CREATE TABLE after_do (id int);`
 func TestSplit_TaggedDollarQuote(t *testing.T) {
 	src := `CREATE FUNCTION f() RETURNS int AS $func$ BEGIN RETURN 1; END; $func$ LANGUAGE plpgsql;
 SELECT 1;`
-	got := texts(split([]byte(src)))
+	got := texts(split([]byte(src), &pg))
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2 (function body is one stmt): %q", len(got), got)
 	}
@@ -49,7 +54,7 @@ CREATE TABLE t (
   name varchar(20) DEFAULT 'a;b', -- inline comment ;
   /* block ; comment */ code int
 ); SELECT 'O''Brien';`
-	got := texts(split([]byte(src)))
+	got := texts(split([]byte(src), &pg))
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2 (semicolons in comments/strings ignored): %q", len(got), got)
 	}
@@ -57,12 +62,43 @@ CREATE TABLE t (
 
 func TestSplit_TracksStartLine(t *testing.T) {
 	src := "SELECT 1;\n\nCREATE TABLE t (id int);"
-	sts := split([]byte(src))
+	sts := split([]byte(src), &pg)
 	if len(sts) != 2 {
 		t.Fatalf("want 2, got %d", len(sts))
 	}
 	if sts[1].line != 3 {
 		t.Errorf("second statement start line = %d, want 3", sts[1].line)
+	}
+}
+
+func TestSplit_QuotedIdentifierCanonicalizedIdentity(t *testing.T) {
+	// PostgreSQL's own quote pair ('"','"') round-trips byte-identical —
+	// the identity transform the design promises for the PG no-regression gate.
+	src := `CREATE TABLE "Users" ("Id" int, "a""b" int);`
+	got := texts(split([]byte(src), &pg))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "Users" ("Id" int, "a""b" int)`
+	if got[0] != want {
+		t.Errorf("got %q, want %q (PG canonicalization must be identity)", got[0], want)
+	}
+}
+
+func TestSplit_UnterminatedQuotedIdentifierNoSyntheticClose(t *testing.T) {
+	// EOF hits before the closing '"' is found. The pre-refactor tokenizer
+	// only wrote a closing '"' when it actually matched one in the source —
+	// it never invents one. Regression: the refactored scanIdentQuoted wrote
+	// a trailing '"' unconditionally, breaking the PG byte-identical contract
+	// for malformed/truncated input.
+	src := `CREATE TABLE "unterminated (id int);`
+	got := texts(split([]byte(src), &pg))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "unterminated (id int);`
+	if got[0] != want {
+		t.Errorf("got %q, want %q (no synthetic closing quote on EOF)", got[0], want)
 	}
 }
 
