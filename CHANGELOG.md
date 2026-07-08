@@ -16,6 +16,40 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.2.1] — 2026-07-08
+
+**Phase 2.1 — multi-dialect SQL-DDL (MySQL, T-SQL).** The database dimension is no longer
+PostgreSQL-only: codefit parses MySQL and SQL Server (T-SQL) DDL, selected by `database.type`.
+The core stays untouched — a per-dialect DATA descriptor feeds one shared tokenizer and one
+dialect-free reducer; PostgreSQL output is byte-identical. ADR 0022.
+
+### Added
+
+- **MySQL SQL-DDL** — `database.type: mysql`: backtick identifiers, `#`/`--` comments,
+  `UNSIGNED`/`AUTO_INCREMENT`/`ENUM`/`SET` and the MySQL type vocabulary. (ADR 0022)
+- **SQL Server (T-SQL) SQL-DDL** — `database.type: sqlserver`: `[bracket]` identifiers,
+  `IDENTITY`, and `nvarchar`/`bit`/`datetime2`/`uniqueidentifier`/`money` mapping. (ADR 0022)
+- **Per-dialect `Dialect` descriptor** — dialect differences are DATA (comment / quote / type
+  vocabularies), consumed by one shared tokenizer and one dialect-free reducer; adding a
+  dialect touches no dialect-agnostic code. Identifier quoting is canonicalized to ANSI `"` at
+  tokenization, so the PostgreSQL path is byte-identical. (ADR 0022)
+- **Dialect golden fixtures** — MySQL (Sakila) and T-SQL (AdventureWorks) neutral-schema
+  goldens, alongside the PostgreSQL (Pagila) regression lock.
+
+### Changed
+
+- **`database.type`** accepts `sqlserver` (alongside `postgresql` / `mysql`). `sqlite` and any
+  unrecognized value return an explicit "not supported" note — never a silent PostgreSQL parse.
+  Every dialect type maps onto the existing neutral `db.Type` (no core enrichment); an unmapped
+  keyword is an honest `TypeUnknown`.
+
+### Not yet covered (declared)
+
+- A T-SQL `GO`-batched stored-procedure/trigger body containing a `CREATE TABLE`-shaped fragment
+  may surface as a spurious table (routine bodies are not modeled); MySQL `DELIMITER //`
+  bodies are unaffected. A word-based `DELIMITER` (e.g. `DELIMITER GO`) is not recognized. One
+  dialect per project; MySQL parsing assumes `ANSI_QUOTES` is off.
+
 ## [0.2.0] — 2026-07-05
 
 **Phase 2 — the database dimension.** codefit now audits database structure from the
