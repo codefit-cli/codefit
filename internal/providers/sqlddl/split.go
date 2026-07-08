@@ -119,14 +119,34 @@ func split(src []byte, dialect *Dialect) []stmt {
 }
 
 // matchLineComment returns the length of the dialect line-comment prefix that
-// s[i:] starts with, or 0 if none match.
-func matchLineComment(s string, i int, prefixes []string) int {
-	for _, p := range prefixes {
-		if p != "" && strings.HasPrefix(s[i:], p) {
-			return len(p)
+// s[i:] starts with, or 0 if none match. A prefix with RequireBoundaryAfter
+// only matches when the character immediately following it is a boundary
+// (whitespace or a control char) or there is no following character
+// (end-of-line/EOF) — the rule MySQL's "--" needs (unlike PostgreSQL's
+// unconditional "--") to avoid misreading "1--1" as a comment opener. This
+// single dialect-free path is shared by every dialect: no per-dialect branch
+// lives in the tokenizer.
+func matchLineComment(s string, i int, comments []LineComment) int {
+	for _, lc := range comments {
+		if lc.Prefix == "" || !strings.HasPrefix(s[i:], lc.Prefix) {
+			continue
+		}
+		if !lc.RequireBoundaryAfter || isCommentBoundary(s, i+len(lc.Prefix)) {
+			return len(lc.Prefix)
 		}
 	}
 	return 0
+}
+
+// isCommentBoundary reports whether position j in s is a valid boundary for
+// a line-comment prefix that requires one: whitespace/control char, or
+// end-of-string (no character at all).
+func isCommentBoundary(s string, j int) bool {
+	if j >= len(s) {
+		return true
+	}
+	c := s[j]
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c < 0x20 || c == 0x7f
 }
 
 // identQuoteFor returns the QuotePair whose Open == c, or nil if none match.

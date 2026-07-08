@@ -102,6 +102,101 @@ func TestSplit_UnterminatedQuotedIdentifierNoSyntheticClose(t *testing.T) {
 	}
 }
 
+func TestSplit_MySQLBacktickIdentifierCanonicalized(t *testing.T) {
+	// MySQL backtick-quoted identifiers are re-emitted as canonical ANSI
+	// "..." — the seam that keeps reduce.go dialect-free (design §2). Unlike
+	// the PG '"' pair, this is a genuine delimiter SWAP (unescaping), not a
+	// byte-length-preserving identity transform: assert the canonical value,
+	// not byte-length equality.
+	mysql := MySQL()
+	src := "CREATE TABLE `users` (`order` int);"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `CREATE TABLE "users" ("order" int)`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLHashCommentSkippedLikeDashDash(t *testing.T) {
+	mysql := MySQL()
+	src := "# a leading hash comment with ; semicolon\nCREATE TABLE t (id int);"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := "CREATE TABLE t (id int)"
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLDoubleQuoteIsStringNotIdentifier(t *testing.T) {
+	// MySQL default (ANSI_QUOTES off): " opens a STRING literal, not a
+	// quoted identifier — must not be mistaken for identifier quoting.
+	mysql := MySQL()
+	src := `SELECT * FROM t WHERE name = "O'Brien";`
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `SELECT * FROM t WHERE name = "O'Brien"`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLDashDashRequiresBoundary(t *testing.T) {
+	// MySQL's "--" opens a line comment ONLY when followed by whitespace,
+	// a control char, or end-of-line/EOF (unlike PostgreSQL, where "--" is
+	// unconditional). "--1" with no boundary after the second '-' is NOT a
+	// comment: it must survive verbatim, including the terminating ';'.
+	mysql := MySQL()
+	src := "SELECT 1--1 FROM t;"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := "SELECT 1--1 FROM t"
+	if got[0] != want {
+		t.Errorf("got %q, want %q (MySQL '--' without a trailing boundary must NOT be treated as a comment)", got[0], want)
+	}
+}
+
+func TestSplit_MySQLDashDashWithBoundaryIsComment(t *testing.T) {
+	// Confirms the normal MySQL "-- " comment case still works: "--"
+	// followed by whitespace does open a line comment.
+	mysql := MySQL()
+	src := "CREATE TABLE t (id INT) -- note\n;"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := "CREATE TABLE t (id INT)"
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
+func TestSplit_MySQLBacktickDoublingEscape(t *testing.T) {
+	// Backtick doubling is the MySQL escape for a literal backtick inside a
+	// quoted identifier: two backticks mean one literal backtick. This is a
+	// genuine unescaping transform, not byte-length-preserving — assert the
+	// canonical value.
+	mysql := MySQL()
+	src := "SELECT * FROM `a``b`;"
+	got := texts(split([]byte(src), &mysql))
+	if len(got) != 1 {
+		t.Fatalf("got %d statements, want 1: %q", len(got), got)
+	}
+	want := `SELECT * FROM "a` + "`" + `b"`
+	if got[0] != want {
+		t.Errorf("got %q, want %q", got[0], want)
+	}
+}
+
 func TestDollarTag(t *testing.T) {
 	cases := map[string]string{
 		"$$rest":     "$$",
