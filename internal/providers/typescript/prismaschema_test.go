@@ -256,6 +256,38 @@ func TestParseSchema_OLTPSurfaceEmpty(t *testing.T) {
 	}
 }
 
+// TestPrismaParse_ViewsProceduresTriggersRemainEmpty — Unit A locked
+// regression (db-debt-views-and-nplus1, spec RF-03.6): adding db.Body to
+// View/Procedure/Trigger must NOT change Prisma-parse behavior. The Prisma
+// provider never touches Views/Procedures/Triggers — a `view` block parses
+// OK and is deliberately skip-and-ignored (ADR 0014) — so this stays exactly
+// what it was before Unit A: zero elements, on the flagship blog fixture AND
+// on a schema that explicitly declares a `view` block.
+func TestPrismaParse_ViewsProceduresTriggersRemainEmpty(t *testing.T) {
+	blog := parseBlog(t)
+	if len(blog.Views) != 0 || len(blog.Procedures) != 0 || len(blog.Triggers) != 0 {
+		t.Errorf("blog.prisma: Views/Procedures/Triggers = %d/%d/%d, want 0/0/0",
+			len(blog.Views), len(blog.Procedures), len(blog.Triggers))
+	}
+
+	src := `view ActiveUser {
+  id    Int
+  email String
+}
+
+model User {
+  id Int @id
+}`
+	s, err := typescript.New().ParseSchema([]providers.SourceFile{{Path: "v.prisma", Content: []byte(src)}})
+	if err != nil {
+		t.Fatalf("view block should parse without error, got: %v", err)
+	}
+	if len(s.Views) != 0 || len(s.Procedures) != 0 || len(s.Triggers) != 0 {
+		t.Errorf("v.prisma (declares a view block): Views/Procedures/Triggers = %d/%d/%d, want 0/0/0",
+			len(s.Views), len(s.Procedures), len(s.Triggers))
+	}
+}
+
 // #15 comments ignored + malformed errors
 func TestParseSchema_CommentsIgnored(t *testing.T) {
 	src := `// a leading comment
