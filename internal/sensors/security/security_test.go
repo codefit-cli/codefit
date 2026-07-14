@@ -9,6 +9,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/golang"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
@@ -304,5 +305,21 @@ var k = "sk-ant-api03-AbCdEf1234567890"
 	f := find(res.Findings, "demo.go", "SEC-001")
 	if f == nil || f.Severity != findings.SeverityInfo {
 		t.Errorf("findings in examples should be info, got %+v", f)
+	}
+}
+
+// TestOwnedCategories_IncludesNPlus1: the unified baseline (ADR 0019) can only
+// track/prune an N+1 surface item if the security sensor declares
+// surface.CategoryNPlus1 in its owned scope, the same as idor/authz/overfetch.
+func TestOwnedCategories_IncludesNPlus1(t *testing.T) {
+	owned := security.New(nil).OwnedCategories()
+	found := false
+	for _, c := range owned {
+		if c == string(surface.CategoryNPlus1) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("OwnedCategories() = %v, want it to include %q (surface.CategoryNPlus1)", owned, surface.CategoryNPlus1)
 	}
 }
