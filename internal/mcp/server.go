@@ -37,6 +37,9 @@ func NewServer() *mcpsdk.Server {
 	addTool(s, string(ToolSurfaceOverfetch),
 		"Enumerate the over-fetching surface (domain-object serializations), ordered by structural certainty. Input: {files:[{path, content}]}.",
 		HandleSurfaceOverfetch)
+	addTool(s, string(ToolSurfaceNPlus1),
+		"Enumerate the N+1 surface (query calls inside a loop), ordered by structural certainty (frontier last, never dropped). Dimension: db. Input: {files:[{path, content}]}.",
+		HandleSurfaceNPlus1)
 	addTool(s, string(ToolConfirmSurface),
 		"Integrate the agent's verdicts on surface items: vulnerable ones become probabilistic findings (confidence < 1.0) anchored to the item. Stateless: codefit recomputes the id to validate.",
 		func(in ConfirmSurfaceRequest) (ConfirmSurfaceResponse, error) { return HandleConfirmSurface(in), nil })
