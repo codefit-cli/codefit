@@ -1,6 +1,8 @@
 package sqlddl_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -162,6 +164,41 @@ GO`
 	}
 }
 
+// TestSQLDDL_ExistingGoldens_UnaffectedByBodyField locks that Unit A's Body
+// field is ADDITIVE ONLY: every currently-passing Name/Pos/Table value on the
+// real dogfood fixtures golden_test.go pins (Pagila/Sakila/AdventureWorks) is
+// UNCHANGED. This is deliberately a SEPARATE assertion from golden_test.go's
+// byte-for-byte JSON compare — it locks the specific fields this task names,
+// independent of Body's own content, so a future change to Body's shape alone
+// can never silently make this invariant pass by accident.
+func TestSQLDDL_ExistingGoldens_UnaffectedByBodyField(t *testing.T) {
+	pagila := goldenSchema(t, "pagila_excerpt.sql", sqlddl.New())
+	if len(pagila.Views) != 1 || pagila.Views[0].Name != "actor_info" || pagila.Views[0].Pos.Line != 34 {
+		t.Errorf("pagila Views = %+v, want [{actor_info Pos.Line=34}]", pagila.Views)
+	}
+	if len(pagila.Procedures) != 2 || pagila.Procedures[0].Name != "_group_concat" || pagila.Procedures[0].Pos.Line != 16 ||
+		pagila.Procedures[1].Name != "last_updated" || pagila.Procedures[1].Pos.Line != 26 {
+		t.Errorf("pagila Procedures = %+v, want [{_group_concat Pos.Line=16} {last_updated Pos.Line=26}]", pagila.Procedures)
+	}
+	if len(pagila.Triggers) != 2 ||
+		pagila.Triggers[0].Name != "last_updated" || pagila.Triggers[0].Pos.Line != 41 || pagila.Triggers[0].Table != "actor" ||
+		pagila.Triggers[1].Name != "film_fulltext_trigger" || pagila.Triggers[1].Pos.Line != 43 || pagila.Triggers[1].Table != "film" {
+		t.Errorf("pagila Triggers = %+v, want [{last_updated Pos.Line=41 Table=actor} {film_fulltext_trigger Pos.Line=43 Table=film}]", pagila.Triggers)
+	}
+
+	sakila := goldenSchema(t, filepath.Join("mysql", "sakila_excerpt.sql"), sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))
+	if len(sakila.Views) != 0 || len(sakila.Procedures) != 0 || len(sakila.Triggers) != 0 {
+		t.Errorf("sakila Views/Procedures/Triggers = %d/%d/%d, want 0/0/0 (unchanged)",
+			len(sakila.Views), len(sakila.Procedures), len(sakila.Triggers))
+	}
+
+	adventureworks := goldenSchema(t, filepath.Join("tsql", "adventureworks_excerpt.sql"), sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())))
+	if len(adventureworks.Views) != 0 || len(adventureworks.Procedures) != 0 || len(adventureworks.Triggers) != 0 {
+		t.Errorf("adventureworks Views/Procedures/Triggers = %d/%d/%d, want 0/0/0 (unchanged)",
+			len(adventureworks.Views), len(adventureworks.Procedures), len(adventureworks.Triggers))
+	}
+}
+
 // --- helpers ---
 
 // parseDialect is parse() (reduce_test.go) with an explicit dialect, needed
@@ -172,6 +209,21 @@ func parseDialect(t *testing.T, d sqlddl.Dialect, src string) *db.Schema {
 	s, err := p.ParseSchema([]providers.SourceFile{{Path: "V0__m.sql", Content: []byte(src)}})
 	if err != nil {
 		t.Fatalf("ParseSchema: %v", err)
+	}
+	return s
+}
+
+// goldenSchema parses a real dogfood testdata/<path> fixture (the same ones
+// golden_test.go pins) with the given parser.
+func goldenSchema(t *testing.T, path string, p *sqlddl.Parser) *db.Schema {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join("testdata", path))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	s, err := p.ParseSchema([]providers.SourceFile{{Path: path, Content: content}})
+	if err != nil {
+		t.Fatalf("ParseSchema(%s): %v", path, err)
 	}
 	return s
 }
