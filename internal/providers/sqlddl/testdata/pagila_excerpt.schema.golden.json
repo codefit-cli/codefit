@@ -68,6 +68,11 @@
       "Pos": {
         "File": "pagila_excerpt.sql",
         "Line": 34
+      },
+      "Body": {
+        "Text": "CREATE VIEW public.actor_info AS\n SELECT a.actor_id,\n    a.first_name,\n    a.last_name\n   FROM public.actor a\n  GROUP BY a.actor_id, a.first_name, a.last_name",
+        "Complete": true,
+        "Note": ""
       }
     }
   ],
@@ -77,6 +82,11 @@
       "Pos": {
         "File": "pagila_excerpt.sql",
         "Line": 16
+      },
+      "Body": {
+        "Text": "CREATE FUNCTION public._group_concat(text, text) RETURNS text\n    LANGUAGE sql IMMUTABLE\n    AS $_$\nSELECT CASE\n  WHEN $2 IS NULL THEN $1\n  WHEN $1 IS NULL THEN $2\n  ELSE $1 || ', ' || $2\nEND\n$_$",
+        "Complete": true,
+        "Note": ""
       }
     },
     {
@@ -84,6 +94,11 @@
       "Pos": {
         "File": "pagila_excerpt.sql",
         "Line": 26
+      },
+      "Body": {
+        "Text": "CREATE FUNCTION public.last_updated() RETURNS trigger\n    LANGUAGE plpgsql\n    AS $$\nBEGIN\n    NEW.last_update = CURRENT_TIMESTAMP;\n    RETURN NEW;\nEND $$",
+        "Complete": true,
+        "Note": ""
       }
     }
   ],
@@ -94,7 +109,12 @@
         "File": "pagila_excerpt.sql",
         "Line": 41
       },
-      "Table": "actor"
+      "Table": "actor",
+      "Body": {
+        "Text": "CREATE TRIGGER last_updated BEFORE UPDATE ON public.actor FOR EACH ROW EXECUTE FUNCTION public.last_updated()",
+        "Complete": false,
+        "Note": "body may be truncated: this dialect has no statement-separator escape in effect here (no dollar-quoting, no active DELIMITER), so the tokenizer stopped at the body's first internal ';' — only the text up to and including that ';' was captured; any statements after it are not represented"
+      }
     },
     {
       "Name": "film_fulltext_trigger",
@@ -102,7 +122,12 @@
         "File": "pagila_excerpt.sql",
         "Line": 43
       },
-      "Table": "film"
+      "Table": "film",
+      "Body": {
+        "Text": "CREATE TRIGGER film_fulltext_trigger BEFORE INSERT OR UPDATE ON public.film FOR EACH ROW EXECUTE FUNCTION tsvector_update_trigger('fulltext', 'pg_catalog.english', 'title', 'description')",
+        "Complete": false,
+        "Note": "body may be truncated: this dialect has no statement-separator escape in effect here (no dollar-quoting, no active DELIMITER), so the tokenizer stopped at the body's first internal ';' — only the text up to and including that ';' was captured; any statements after it are not represented"
+      }
     }
   ]
 }

@@ -95,20 +95,37 @@ type Index struct {
 
 // View, Procedure and Trigger complete the OLTP surface. They are DEFINED here so
 // the model is format-agnostic, but the Prisma parser leaves them empty; the
-// SQL-DDL parser (slice 3) populates them (bodies/columns are added then — kept
-// minimal now, YAGNI).
+// SQL-DDL parser populates them, INCLUDING Body (Phase 2.2, RF-03.6).
 type View struct {
 	Name string
 	Pos  Pos
+	Body Body
 }
 
 type Procedure struct {
 	Name string
 	Pos  Pos
+	Body Body
 }
 
 type Trigger struct {
 	Name  string
 	Pos   Pos
 	Table string
+	Body  Body
+}
+
+// Body is a routine/view definition as the parser RECOVERED it. Complete=false
+// means the captured text may be TRUNCATED — the tokenizer could not prove the
+// whole body is here — an honest partial, never a silent one; Note says why.
+// This is deliberately a struct, not a plain string: a string cannot express
+// "partial", so every consumer would have to trust it blindly. A dbrules rule
+// reading Body.Text MUST treat Complete==false as grounds to abstain or
+// downgrade to a surface item, never to emit a deterministic finding — ADR
+// 0004's "a mutilated rule is worse than an absent one" made mechanical
+// instead of aspirational (architecture/tsql-body-truncation-limit).
+type Body struct {
+	Text     string
+	Complete bool
+	Note     string
 }
