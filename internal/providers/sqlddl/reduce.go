@@ -44,6 +44,17 @@ var (
 	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w"]+"?)\b.*?\son\s+("?[\w".]+"?)`)
 	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
 	reReferences  = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
+
+	// reTriggerExecutes matches the PostgreSQL "EXECUTE FUNCTION|PROCEDURE
+	// fn(...)" clause of a CREATE TRIGGER statement — the trigger→function
+	// LINK (Phase 2.2, Unit A2, architecture/pg-trigger-body-link). PG has no
+	// inline trigger body, but the executed function's NAME is always present
+	// in the statement text, letting a consumer follow the link to where the
+	// logic really lives (Schema.ExecutedProcedure). MySQL/T-SQL triggers
+	// embed their logic directly and have no EXECUTE FUNCTION/PROCEDURE
+	// clause in their grammar, so this never matches there —
+	// Trigger.ExecutesFunction correctly stays empty on those dialects.
+	reTriggerExecutes = regexp.MustCompile(`(?is)\bexecute\s+(?:function|procedure)\s+("?[\w".]+"?)\s*\(`)
 )
 
 // apply classifies one statement and mutates the schema. Anything outside the
@@ -79,7 +90,11 @@ func (b *builder) apply(file string, st stmt) {
 		b.procs = append(b.procs, db.Procedure{Name: routineName(reRoutine.FindStringSubmatch(st.text)[1]), Pos: pos, Body: routineBody(st)})
 	case reTrigger.MatchString(st.text):
 		m := reTrigger.FindStringSubmatch(st.text)
-		b.trigs = append(b.trigs, db.Trigger{Name: normalizeName(m[1]), Pos: pos, Table: normalizeName(m[2]), Body: routineBody(st)})
+		trig := db.Trigger{Name: normalizeName(m[1]), Pos: pos, Table: normalizeName(m[2]), Body: b.triggerBody(st)}
+		if fm := reTriggerExecutes.FindStringSubmatch(st.text); fm != nil {
+			trig.ExecutesFunction = normalizeName(fm[1])
+		}
+		b.trigs = append(b.trigs, trig)
 	case reDropTable.MatchString(st.text):
 		b.dropTable(normalizeName(reDropTable.FindStringSubmatch(st.text)[1]))
 	default:
@@ -136,6 +151,43 @@ func routineBody(st stmt) db.Body {
 			"after it are not represented"
 	}
 	return b
+}
+
+// triggerBody builds a Trigger's Body, consulting the per-dialect DATUM
+// dialect.TriggerHasInlineBody (Phase 2.2, Unit A2,
+// architecture/pg-trigger-body-link) instead of branching on dialect.Name —
+// the same DATA-not-code architecture ADR 0022 already established for every
+// other per-dialect fact in this package.
+//
+// PostgreSQL triggers carry NO inline body at all: "CREATE TRIGGER x ... FOR
+// EACH ROW EXECUTE FUNCTION fn();" is a WIRE from an event to a function, not
+// a body — the logic lives in fn(), captured separately as a Procedure with
+// its own (independently derived) Body. Applying routineBody's "Complete :=
+// term != termSemicolon || quotedBlockSeen" formula to a PG trigger produces
+// a FALSE incomplete: the statement was never truncated, it simply had
+// nothing to truncate. This was discovered against the real Pagila fixture
+// during Unit A (see apply-progress) and is what Unit A2 repairs: Condition 1
+// of architecture/pg-trigger-body-link — "the Complete flag must TELL THE
+// TRUTH" — is non-negotiable and binds here.
+//
+// TriggerHasInlineBody=false short-circuits straight to Complete=true with an
+// explanatory Note pointing at Trigger.ExecutesFunction. TriggerHasInlineBody
+// =true (MySQL, T-SQL) falls through to the UNCHANGED routineBody derivation
+// — this is the regression lock: MySQL-no-DELIMITER and T-SQL multi-statement
+// triggers keep their existing Complete=false behavior exactly as before this
+// unit.
+func (b *builder) triggerBody(st stmt) db.Body {
+	if !b.dialect.TriggerHasInlineBody {
+		return db.Body{
+			Text:     st.text,
+			Complete: true,
+			Note: "this dialect's triggers carry no inline body — the statement " +
+				"only wires an event to a function/procedure; see " +
+				"Trigger.ExecutesFunction for the executed routine, whose own " +
+				"Body carries the logic",
+		}
+	}
+	return routineBody(st)
 }
 
 func (b *builder) getTable(name string) *db.Table {

@@ -113,6 +113,41 @@ type Trigger struct {
 	Pos   Pos
 	Table string
 	Body  Body
+
+	// ExecutesFunction is the name of the function/procedure this trigger
+	// invokes, when the dialect expresses that as a distinct name in the
+	// trigger statement (PostgreSQL: "... EXECUTE FUNCTION|PROCEDURE fn()").
+	// EMPTY means the dialect embeds the trigger's logic directly in Body
+	// instead (MySQL, T-SQL), or the executed routine's name could not be
+	// parsed. This is the trigger→function LINK (Phase 2.2, Unit A2,
+	// architecture/pg-trigger-body-link): a PostgreSQL trigger carries no
+	// inline body of its own — the logic lives in the named function, which a
+	// consumer resolves via Schema.ExecutedProcedure(t), never by re-deriving
+	// completeness on the trigger's own (bodyless) statement.
+	ExecutesFunction string
+}
+
+// ExecutedProcedure resolves t.ExecutesFunction to the Procedure with that
+// name in s, or (nil, false) when t names no function (this dialect embeds
+// the trigger's logic directly in Body) or no Procedure with that name is
+// present in the schema — e.g. a PostgreSQL built-in like
+// tsvector_update_trigger, which has no CREATE FUNCTION statement of its own
+// and therefore never appears as a Procedure.
+//
+// Resolution lives HERE, in the neutral model, never in a rule and never in
+// a provider: both Trigger and Procedure are neutral model elements, and the
+// mapping between them is pure name-based schema data — the binding
+// placement of architecture/pg-trigger-body-link (Unit A2).
+func (s *Schema) ExecutedProcedure(t Trigger) (*Procedure, bool) {
+	if t.ExecutesFunction == "" {
+		return nil, false
+	}
+	for i := range s.Procedures {
+		if s.Procedures[i].Name == t.ExecutesFunction {
+			return &s.Procedures[i], true
+		}
+	}
+	return nil, false
 }
 
 // Body is a routine/view definition as the parser RECOVERED it. Complete=false
