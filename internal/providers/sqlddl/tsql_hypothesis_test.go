@@ -120,6 +120,25 @@ func TestTSQL_MultiStatementTrigger_PartialCapture(t *testing.T) {
 	}
 }
 
+// TestTSQL_TriggerName_SchemaQualified_IsTriggerNameNotSchema locks the fix
+// for the reTrigger regex bug discovered while writing the tests above
+// (discovery/sqlddl-trigger-name-regex-bug): reTrigger's trigger-NAME capture
+// group was missing '.' from its character class, unlike reView/reRoutine's
+// name group and reTrigger's own TABLE-name group — so a schema-qualified
+// T-SQL trigger name like [Purchasing].[uPurchaseOrderDetail] came back as
+// just "Purchasing" (the schema), not "uPurchaseOrderDetail" (the trigger's
+// own name). Fixture: the REAL Purchasing.uPurchaseOrderDetail trigger.
+func TestTSQL_TriggerName_SchemaQualified_IsTriggerNameNotSchema(t *testing.T) {
+	s := realDDLSchema(t)
+	if len(s.Triggers) != 1 {
+		t.Fatalf("triggers = %d, want 1", len(s.Triggers))
+	}
+	trig := s.Triggers[0]
+	if trig.Name != "uPurchaseOrderDetail" {
+		t.Errorf("Name = %q, want %q (the trigger's own name, not the schema)", trig.Name, "uPurchaseOrderDetail")
+	}
+}
+
 // realDDLSchema parses the real, verbatim AdventureWorks excerpt
 // (testdata/tsql/adventureworks_real_objects.sql) under the SQLServer
 // dialect. Shared by all three tests above — the fixture holds exactly one

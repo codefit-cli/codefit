@@ -41,7 +41,7 @@ var (
 	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+\w+\s*)?\(([^)]*)\)`)
 	reView        = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
 	reRoutine     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
-	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w"]+"?)\b.*?\son\s+("?[\w".]+"?)`)
+	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
 	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
 	reReferences  = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
 
