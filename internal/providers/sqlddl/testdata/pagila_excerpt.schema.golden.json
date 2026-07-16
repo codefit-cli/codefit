@@ -196,7 +196,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 158
+            "Line": 154
           },
           "Columns": [
             "address_id"
@@ -206,190 +206,10 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 162
+            "Line": 158
           },
           "Columns": [
             "last_name"
-          ],
-          "Unique": false
-        }
-      ]
-    },
-    {
-      "Name": "film",
-      "DBName": "",
-      "Pos": {
-        "File": "",
-        "Line": 0
-      },
-      "Columns": [
-        {
-          "Name": "film_id",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 121
-          },
-          "Type": "int",
-          "RawType": "integer",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "title",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 122
-          },
-          "Type": "text",
-          "RawType": "text",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "description",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 123
-          },
-          "Type": "text",
-          "RawType": "text",
-          "Nullable": true,
-          "List": false
-        },
-        {
-          "Name": "release_year",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 124
-          },
-          "Type": "unknown",
-          "RawType": "public.year",
-          "Nullable": true,
-          "List": false
-        },
-        {
-          "Name": "language_id",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 125
-          },
-          "Type": "int",
-          "RawType": "integer",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "original_language_id",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 126
-          },
-          "Type": "int",
-          "RawType": "integer",
-          "Nullable": true,
-          "List": false
-        },
-        {
-          "Name": "rental_duration",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 127
-          },
-          "Type": "int",
-          "RawType": "smallint",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "rental_rate",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 128
-          },
-          "Type": "float",
-          "RawType": "numeric(4,2)",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "length",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 129
-          },
-          "Type": "int",
-          "RawType": "smallint",
-          "Nullable": true,
-          "List": false
-        },
-        {
-          "Name": "replacement_cost",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 130
-          },
-          "Type": "float",
-          "RawType": "numeric(5,2)",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "rating",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 131
-          },
-          "Type": "unknown",
-          "RawType": "public.mpaa_rating",
-          "Nullable": true,
-          "List": false
-        },
-        {
-          "Name": "last_update",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 132
-          },
-          "Type": "datetime",
-          "RawType": "timestamp with time zone",
-          "Nullable": false,
-          "List": false
-        },
-        {
-          "Name": "special_features",
-          "DBName": "",
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 133
-          },
-          "Type": "text",
-          "RawType": "text[]",
-          "Nullable": true,
-          "List": true
-        }
-      ],
-      "PrimaryKey": null,
-      "ForeignKeys": null,
-      "Indexes": [
-        {
-          "Pos": {
-            "File": "pagila_excerpt.sql",
-            "Line": 164
-          },
-          "Columns": [
-            "title"
           ],
           "Unique": false
         }
@@ -408,7 +228,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 137
+            "Line": 133
           },
           "Type": "int",
           "RawType": "integer",
@@ -420,7 +240,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 138
+            "Line": 134
           },
           "Type": "text",
           "RawType": "text",
@@ -432,7 +252,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 139
+            "Line": 135
           },
           "Type": "text",
           "RawType": "text",
@@ -444,7 +264,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 140
+            "Line": 136
           },
           "Type": "text",
           "RawType": "text",
@@ -456,7 +276,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 141
+            "Line": 137
           },
           "Type": "int",
           "RawType": "integer",
@@ -468,7 +288,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 142
+            "Line": 138
           },
           "Type": "text",
           "RawType": "text",
@@ -480,7 +300,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 143
+            "Line": 139
           },
           "Type": "text",
           "RawType": "text",
@@ -492,7 +312,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 144
+            "Line": 140
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -506,7 +326,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 160
+            "Line": 156
           },
           "Columns": [
             "city_id"
@@ -528,7 +348,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 148
+            "Line": 144
           },
           "Type": "int",
           "RawType": "integer",
@@ -540,7 +360,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 149
+            "Line": 145
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -552,7 +372,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 150
+            "Line": 146
           },
           "Type": "int",
           "RawType": "integer",
@@ -564,7 +384,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 151
+            "Line": 147
           },
           "Type": "int",
           "RawType": "integer",
@@ -576,7 +396,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 152
+            "Line": 148
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -588,7 +408,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 153
+            "Line": 149
           },
           "Type": "int",
           "RawType": "integer",
@@ -600,7 +420,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 154
+            "Line": 150
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -614,7 +434,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 166
+            "Line": 160
           },
           "Columns": [
             "rental_date",
@@ -638,7 +458,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 182
+            "Line": 176
           },
           "Type": "int",
           "RawType": "integer",
@@ -650,7 +470,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 183
+            "Line": 177
           },
           "Type": "int",
           "RawType": "integer",
@@ -662,7 +482,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 184
+            "Line": 178
           },
           "Type": "int",
           "RawType": "integer",
@@ -674,7 +494,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 185
+            "Line": 179
           },
           "Type": "int",
           "RawType": "integer",
@@ -686,7 +506,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 186
+            "Line": 180
           },
           "Type": "float",
           "RawType": "numeric(5,2)",
@@ -698,7 +518,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 187
+            "Line": 181
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -712,7 +532,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 191
+            "Line": 185
           },
           "Columns": [
             "customer_id"
@@ -722,7 +542,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 193
+            "Line": 187
           },
           "Columns": [
             "customer_id"

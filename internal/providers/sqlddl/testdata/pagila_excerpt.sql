@@ -108,31 +108,27 @@ CREATE TABLE public.customer (
     active integer
 );
 
--- Verbatim EXCEPT the trailing "fulltext tsvector NOT NULL" column, which is
--- deliberately omitted (real, discovered parser gap; reported, not fixed —
--- see architecture/pagila-fixture-real-indexes and db011_integration_test.go):
--- a real column literally named "fulltext" with an unmapped type (tsvector
--- is not in postgresTypeMap) collides with codefit's sqlddl parser's
--- MySQL-inline-index-shorthand discriminator (isInlineKeyIndexForm treats
--- the leading token FULLTEXT as the "FULLTEXT KEY/INDEX" shorthand keyword
--- whenever the following type is unmapped), silently dropping the column
--- and fabricating a phantom zero-column index instead. Every other column
--- below is the real, unmodified upstream text.
-CREATE TABLE public.film (
-    film_id integer DEFAULT nextval('public.film_film_id_seq'::regclass) NOT NULL,
-    title text NOT NULL,
-    description text,
-    release_year public.year,
-    language_id integer NOT NULL,
-    original_language_id integer,
-    rental_duration smallint DEFAULT 3 NOT NULL,
-    rental_rate numeric(4,2) DEFAULT 4.99 NOT NULL,
-    length smallint,
-    replacement_cost numeric(5,2) DEFAULT 19.99 NOT NULL,
-    rating public.mpaa_rating DEFAULT 'G'::public.mpaa_rating,
-    last_update timestamp with time zone DEFAULT now() NOT NULL,
-    special_features text[]
-);
+-- public.film is DELIBERATELY NOT VENDORED here (whole table omitted, not
+-- just trimmed): its real trailing column, "fulltext tsvector NOT NULL",
+-- collides with a separate, confirmed cross-dialect parser bug —
+-- discovery/sqlddl-postgres-parser-gaps (obs #1062), HALLAZGO 2. A real PG
+-- column literally named "fulltext" with an unmapped type (tsvector is not
+-- in postgresTypeMap) trips codefit's sqlddl parser's MySQL-inline-index-
+-- shorthand discriminator (isInlineKeyIndexForm, reduce.go): it treats the
+-- leading token FULLTEXT as the "FULLTEXT KEY/INDEX" shorthand keyword
+-- whenever the following type is unmapped, silently dropping the column and
+-- fabricating a phantom zero-column index instead. Vendoring film with that
+-- column omitted (as an earlier pass did) made the fixture non-verbatim
+-- without saying so; omitting the whole table is honest about the dodge.
+-- This is a KNOWN, SEPARATE bug — not fixed in this change (db-debt-views-
+-- and-nplus1, v0.2.2). The film_fulltext_trigger below (part of the
+-- original, pre-index-extension excerpt) still references "public.film" in
+-- its ON clause; that is fine — Trigger.Table is parsed from the ON clause
+-- text and does not require the target table to exist in the schema.
+-- idx_title (an upstream index on film.title) is likewise not vendored,
+-- since vendoring it without the film table would auto-vivify a phantom
+-- zero-column "film" table via CREATE INDEX's getTable — the same shape of
+-- bug this note is dodging, from the other direction.
 
 CREATE TABLE public.address (
     address_id integer DEFAULT nextval('public.address_address_id_seq'::regclass) NOT NULL,
@@ -160,8 +156,6 @@ CREATE INDEX idx_fk_address_id ON public.customer USING btree (address_id);
 CREATE INDEX idx_fk_city_id ON public.address USING btree (city_id);
 
 CREATE INDEX idx_last_name ON public.customer USING btree (last_name);
-
-CREATE INDEX idx_title ON public.film USING btree (title);
 
 CREATE UNIQUE INDEX idx_unq_rental_rental_date_inventory_id_customer_id ON public.rental USING btree (rental_date, inventory_id, customer_id);
 

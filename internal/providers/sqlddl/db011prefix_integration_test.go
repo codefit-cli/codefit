@@ -20,10 +20,12 @@ import (
 // PostgreSQL/Pagila's excerpt USED TO have zero indexes and zero primary
 // keys at all (NotCovered for this whole rule family). The fixture
 // extension at architecture/pagila-fixture-real-indexes vendored real
-// upstream Pagila CREATE INDEX statements (idx_title, idx_last_name,
-// idx_fk_address_id, idx_fk_city_id, the UNIQUE rental index, plus the real
-// payment_p2022_01 exact-duplicate pair) — PostgreSQL now has real
-// index-like coverers to run this rule against, same as MySQL/T-SQL below.
+// upstream Pagila CREATE INDEX statements (idx_last_name, idx_fk_address_id,
+// idx_fk_city_id, the UNIQUE rental index, plus the real payment_p2022_01
+// exact-duplicate pair) — PostgreSQL now has real index-like coverers to run
+// this rule against, same as MySQL/T-SQL below. idx_title is NOT vendored
+// (it indexed film.title, and film itself is deliberately not vendored —
+// discovery/sqlddl-postgres-parser-gaps, obs #1062, HALLAZGO 2).
 //
 // The POSITIVE fire path is proven at the unit level
 // (internal/core/dbrules/db011prefix_test.go) with synthetic-but-
@@ -39,7 +41,7 @@ func TestDB011Prefix_Pagila_RealFixture_NegativeCase(t *testing.T) {
 		indexCount += len(tbl.Indexes)
 	}
 	if indexCount == 0 {
-		t.Fatal("test assumption broken: expected real Pagila indexes to be present (idx_title, idx_last_name, idx_fk_address_id, idx_fk_city_id, idx_unq_rental_rental_date_inventory_id_customer_id, payment_p2022_01's two duplicate indexes)")
+		t.Fatal("test assumption broken: expected real Pagila indexes to be present (idx_last_name, idx_fk_address_id, idx_fk_city_id, idx_unq_rental_rental_date_inventory_id_customer_id, payment_p2022_01's two duplicate indexes)")
 	}
 	_, surf := dbrules.Run(s)
 	if got := surfaceWithCategoryLocal(surf, surface.CategoryDBPrefixRedundantIndex); len(got) != 0 {

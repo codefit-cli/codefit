@@ -33,10 +33,12 @@ func TestPagila_ViewsProcsTriggersPopulated(t *testing.T) {
 	}
 	// actor, plus the real index-bearing tables appended for the DB-011a/
 	// DB-011b/Unit E fixture extension (architecture/pagila-fixture-real-indexes):
-	// customer, film, address, rental, and the real payment_p2022_01 partition-
-	// child table (the DB-011a positive-fire proof). All parsed cleanly
-	// alongside the dollar-quoted objects (splitting held).
-	wantTables := []string{"actor", "customer", "film", "address", "rental", "payment_p2022_01"}
+	// customer, address, rental, and the real payment_p2022_01 partition-child
+	// table (the DB-011a positive-fire proof). film is deliberately NOT
+	// vendored (discovery/sqlddl-postgres-parser-gaps, obs #1062, HALLAZGO 2 —
+	// see the inline note in pagila_excerpt.sql). All parsed cleanly alongside
+	// the dollar-quoted objects (splitting held).
+	wantTables := []string{"actor", "customer", "address", "rental", "payment_p2022_01"}
 	gotTables := tableNames(s)
 	if len(gotTables) != len(wantTables) {
 		t.Fatalf("tables = %v, want %v", gotTables, wantTables)
