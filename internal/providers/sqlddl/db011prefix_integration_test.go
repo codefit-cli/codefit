@@ -14,11 +14,16 @@ import (
 // EXPECTED SITUATION, confirmed by direct inspection, not assumed: a
 // prefix-redundant index ([a] made obsolete by a composite [a,b]) is an
 // antipattern nobody commits to a clean, hand-maintained schema — none of
-// the real corpora dogfooded here (Sakila/MySQL, AdventureWorks/T-SQL)
-// contain one. PostgreSQL's Pagila excerpt has NO indexes and NO primary
-// key declared AT ALL (locked below) — the rule genuinely cannot be
-// exercised on it, so PostgreSQL ships NotCovered for this rule, distinct
-// from a genuine (index-bearing) negative result on MySQL/T-SQL.
+// the real corpora dogfooded here (Sakila/MySQL, AdventureWorks/T-SQL,
+// Pagila/PostgreSQL) contain one.
+//
+// PostgreSQL/Pagila's excerpt USED TO have zero indexes and zero primary
+// keys at all (NotCovered for this whole rule family). The fixture
+// extension at architecture/pagila-fixture-real-indexes vendored real
+// upstream Pagila CREATE INDEX statements (idx_title, idx_last_name,
+// idx_fk_address_id, idx_fk_city_id, the UNIQUE rental index, plus the real
+// payment_p2022_01 exact-duplicate pair) — PostgreSQL now has real
+// index-like coverers to run this rule against, same as MySQL/T-SQL below.
 //
 // The POSITIVE fire path is proven at the unit level
 // (internal/core/dbrules/db011prefix_test.go) with synthetic-but-
@@ -27,21 +32,19 @@ import (
 // [actor_id, film_id]) — same discipline as DB-020's "AS SID" -> "AS ssn"
 // mutation (db020_integration_test.go).
 
-func TestDB011Prefix_Pagila_HasNoIndexesAtAll_NotCovered(t *testing.T) {
+func TestDB011Prefix_Pagila_RealFixture_NegativeCase(t *testing.T) {
 	s := parseFixture(t, "pagila_excerpt.sql", sqlddl.New(sqlddl.WithDialect(sqlddl.Postgres())))
+	indexCount := 0
 	for _, tbl := range s.Tables {
-		if len(tbl.Indexes) != 0 {
-			t.Fatalf("test assumption broken: table %s has %d indexes — pagila_excerpt.sql was believed index-free", tbl.Name, len(tbl.Indexes))
-		}
-		if len(tbl.PrimaryKey) != 0 {
-			t.Fatalf("test assumption broken: table %s has a primary key — pagila_excerpt.sql was believed PK-free", tbl.Name)
-		}
+		indexCount += len(tbl.Indexes)
 	}
-	// Confirms the rule has NO index-like coverer to check on this fixture
-	// at all — a 0-item result here would be VACUOUS, not a genuine negative
-	// dogfood proof. PostgreSQL is declared NotCovered for this rule for
-	// exactly this reason, not silently claimed clean alongside MySQL/T-SQL
-	// below.
+	if indexCount == 0 {
+		t.Fatal("test assumption broken: expected real Pagila indexes to be present (idx_title, idx_last_name, idx_fk_address_id, idx_fk_city_id, idx_unq_rental_rental_date_inventory_id_customer_id, payment_p2022_01's two duplicate indexes)")
+	}
+	_, surf := dbrules.Run(s)
+	if got := surfaceWithCategoryLocal(surf, surface.CategoryDBPrefixRedundantIndex); len(got) != 0 {
+		t.Errorf("real Pagila excerpt has no prefix-redundant index, got %d: %+v", len(got), got)
+	}
 }
 
 func TestDB011Prefix_Sakila_RealFixture_NegativeCase(t *testing.T) {
