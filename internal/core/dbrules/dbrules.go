@@ -20,6 +20,7 @@ func All() []Rule {
 	return []Rule{
 		db050{}, db001{}, db011{}, db002{}, // slice 2 — structural
 		db051{}, db052{}, db053{}, db003{}, // slice 2b — name heuristics (surface)
+		db020{}, // Phase 2.2 — view sensitive-column exposure (surface)
 	}
 }
 
