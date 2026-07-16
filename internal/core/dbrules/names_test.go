@@ -269,7 +269,7 @@ func TestAll_EightRules(t *testing.T) {
 	for _, r := range dbrules.All() {
 		ids[r.ID()] = true
 	}
-	for _, want := range []string{"DB-050", "DB-001", "DB-011", "DB-002", "DB-051", "DB-052", "DB-053", "DB-003"} {
+	for _, want := range []string{"DB-050", "DB-001", "DB-011a", "DB-002", "DB-051", "DB-052", "DB-053", "DB-003"} {
 		if !ids[want] {
 			t.Errorf("dbrules.All() missing %s (have %v)", want, ids)
 		}

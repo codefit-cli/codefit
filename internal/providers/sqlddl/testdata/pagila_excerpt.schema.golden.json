@@ -13,7 +13,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 9
+            "Line": 40
           },
           "Type": "int",
           "RawType": "integer",
@@ -25,7 +25,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 10
+            "Line": 41
           },
           "Type": "text",
           "RawType": "text",
@@ -37,7 +37,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 11
+            "Line": 42
           },
           "Type": "text",
           "RawType": "text",
@@ -49,7 +49,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 12
+            "Line": 43
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -60,6 +60,512 @@
       "PrimaryKey": null,
       "ForeignKeys": null,
       "Indexes": null
+    },
+    {
+      "Name": "customer",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 103
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "store_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 104
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "first_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 105
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 106
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "email",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 107
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "address_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 108
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "activebool",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 109
+          },
+          "Type": "bool",
+          "RawType": "boolean",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "create_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 110
+          },
+          "Type": "datetime",
+          "RawType": "date",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 111
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "active",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 112
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": true,
+          "List": false
+        }
+      ],
+      "PrimaryKey": [
+        "customer_id"
+      ],
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 159
+          },
+          "Columns": [
+            "address_id"
+          ],
+          "Unique": false
+        },
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 163
+          },
+          "Columns": [
+            "last_name"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "address",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "address_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 138
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "address",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 139
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "address2",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 140
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "district",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 141
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "city_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 142
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "postal_code",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 143
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "phone",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 144
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 145
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 161
+          },
+          "Columns": [
+            "city_id"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "rental",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "rental_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 149
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rental_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 150
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "inventory_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 151
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 152
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "return_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 153
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "staff_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 154
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 155
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 165
+          },
+          "Columns": [
+            "rental_date",
+            "inventory_id",
+            "customer_id"
+          ],
+          "Unique": true
+        }
+      ]
+    },
+    {
+      "Name": "payment_p2022_01",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "payment_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 181
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 182
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "staff_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 183
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rental_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 184
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "amount",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 185
+          },
+          "Type": "float",
+          "RawType": "numeric(5,2)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "payment_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 186
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 207
+          },
+          "Columns": [
+            "customer_id"
+          ],
+          "RefTable": "customer",
+          "RefColumns": [
+            "customer_id"
+          ]
+        }
+      ],
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 190
+          },
+          "Columns": [
+            "customer_id"
+          ],
+          "Unique": false
+        },
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 192
+          },
+          "Columns": [
+            "customer_id"
+          ],
+          "Unique": false
+        }
+      ]
     }
   ],
   "Views": [
@@ -67,7 +573,12 @@
       "Name": "actor_info",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 34
+        "Line": 65
+      },
+      "Body": {
+        "Text": "CREATE VIEW public.actor_info AS\n SELECT a.actor_id,\n    a.first_name,\n    a.last_name\n   FROM public.actor a\n  GROUP BY a.actor_id, a.first_name, a.last_name",
+        "Complete": true,
+        "Note": ""
       }
     }
   ],
@@ -76,14 +587,24 @@
       "Name": "_group_concat",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 16
+        "Line": 47
+      },
+      "Body": {
+        "Text": "CREATE FUNCTION public._group_concat(text, text) RETURNS text\n    LANGUAGE sql IMMUTABLE\n    AS $_$\nSELECT CASE\n  WHEN $2 IS NULL THEN $1\n  WHEN $1 IS NULL THEN $2\n  ELSE $1 || ', ' || $2\nEND\n$_$",
+        "Complete": true,
+        "Note": ""
       }
     },
     {
       "Name": "last_updated",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 26
+        "Line": 57
+      },
+      "Body": {
+        "Text": "CREATE FUNCTION public.last_updated() RETURNS trigger\n    LANGUAGE plpgsql\n    AS $$\nBEGIN\n    NEW.last_update = CURRENT_TIMESTAMP;\n    RETURN NEW;\nEND $$",
+        "Complete": true,
+        "Note": ""
       }
     }
   ],
@@ -92,17 +613,29 @@
       "Name": "last_updated",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 41
+        "Line": 72
       },
-      "Table": "actor"
+      "Table": "actor",
+      "Body": {
+        "Text": "CREATE TRIGGER last_updated BEFORE UPDATE ON public.actor FOR EACH ROW EXECUTE FUNCTION public.last_updated()",
+        "Complete": true,
+        "Note": "this dialect's triggers carry no inline body — the statement only wires an event to a function/procedure; see Trigger.ExecutesFunction for the executed routine, whose own Body carries the logic"
+      },
+      "ExecutesFunction": "last_updated"
     },
     {
       "Name": "film_fulltext_trigger",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 43
+        "Line": 74
       },
-      "Table": "film"
+      "Table": "film",
+      "Body": {
+        "Text": "CREATE TRIGGER film_fulltext_trigger BEFORE INSERT OR UPDATE ON public.film FOR EACH ROW EXECUTE FUNCTION tsvector_update_trigger('fulltext', 'pg_catalog.english', 'title', 'description')",
+        "Complete": true,
+        "Note": "this dialect's triggers carry no inline body — the statement only wires an event to a function/procedure; see Trigger.ExecutesFunction for the executed routine, whose own Body carries the logic"
+      },
+      "ExecutesFunction": "tsvector_update_trigger"
     }
   ]
 }

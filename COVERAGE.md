@@ -7,11 +7,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 > Source of truth: the per-provider manifest in code
 > (`internal/providers/<lang>/coverage.go`, exposed by the `codefit-coverage`
-> tool as JSON). This file is a **hand-maintained mirror** of that manifest for
-> human reading — the MCP server has landed, but `codefit-coverage` returns
-> JSON, not markdown, so this file is kept in sync manually whenever the
-> in-code manifest changes. Today only the **TypeScript** provider has a full
-> manifest.
+> tool as JSON), composed with the neutral DB dimension's own coverage source
+> (`internal/core/dbcoverage/dbcoverage.go`, schema-driven and
+> language-independent — appended into every provider's manifest, never
+> duplicated per provider). This file is a **hand-maintained mirror** of that
+> composed manifest for human reading — the MCP server has landed, but
+> `codefit-coverage` returns JSON, not markdown, so this file is kept in sync
+> manually whenever the in-code manifest changes. Today only the
+> **TypeScript** provider has a full manifest.
 
 ## TypeScript / Next.js / Express / Fastify / NestJS / Prisma
 
@@ -51,10 +54,6 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   a silent guess. A table with no primary key is structurally undeniable, so it is
   **affirmed**. The DB dimension covers only what the schema states — no query
   analysis.
-  > **Scalability note:** the DB rules are **language-neutral** (they reason over
-  > the neutral schema model, not TypeScript), so this DB coverage prose is
-  > duplicated per-provider today. It should move to a neutral DB-coverage source
-  > when a second ORM provider lands.
 
 ### Reasoning — codefit maps surface, the agent judges
 
@@ -108,8 +107,31 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `name` is not; that needs the schema and is the agent's. Serialization through a
   service is the frontier (codefit can't see the field selection). Matched by the
   serialization, never by model name.
-- **Express & Fastify.** The same IDOR / broken-authorization / over-fetching
-  surface above is mapped for these non-Next.js frameworks. Handlers are discovered
+- **N+1 query-in-loop pattern (DB-201).** Every query call site — a local Prisma
+  access OR a call at the cross-function frontier (the same service/repository
+  frontier IDOR/authz/over-fetching already declare, reusing `isPrismaCall`/
+  `isServiceCall` verbatim) — that sits lexically inside a loop construct: a
+  `for`/`for...of`/`for...in`/`while`/`do...while` statement, or a per-element
+  callback iteration (`.forEach`/`.map`/`.flatMap`/`.filter`/`.reduce`/`.some`/
+  `.every`/`.find`). Reuses the same handler-discovery mechanism as IDOR/authz/
+  over-fetching (`auditTargets`), so it applies uniformly to Next.js route
+  handlers and Server Actions, Express, Fastify, and NestJS, with no separate
+  per-framework detector. Per ADR 0005 it is **ordered, never filtered**: a loop
+  over a literal array of 3 elements is enumerated exactly like a loop over an
+  unbounded query result — the iterated source is named as a fact (e.g. *"a
+  literal array of 3 element(s)"*, *"the variable 'users'"*) so the agent
+  dismisses an obviously-bounded loop at a glance, never filtered away. A call
+  wrapped in `Promise.all(...)` is still enumerated as one query per element
+  (`promise_all_wrapped`, vs. a directly-awaited sequential call,
+  `awaited_in_loop`); `nested_loop` is exposed when the query sits under more
+  than one enclosing loop. A cross-function-frontier call carries an honest
+  signal that codefit did not follow it — whether it performs a per-iteration
+  query is **not verified**. This is a database access pattern conceptually, but
+  it is mapped as **per-endpoint surface** (from the application's code, not the
+  schema), so it appears in `scan-all`'s endpoint buckets, **never in the
+  schema-only DB section below**.
+- **Express & Fastify.** The same IDOR / broken-authorization / over-fetching /
+  N+1 surface above is mapped for these non-Next.js frameworks. Handlers are discovered
   **by shape, never by path** — an Express `router.<verb>('/path', …middleware,
   handler)` call, and Fastify's options-object form `.<verb>('/path', { handler,
   preHandler })` — so a same-named non-route call (`map.get('/k', v)`,
@@ -128,7 +150,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   controller→service split) — codefit emits `indirect_access=true` and names the
   callee in `indirect_call`; it does **not** follow the call across files, the agent
   reasons over the named function.
-- **NestJS.** Same IDOR / authz / over-fetching surface, for routes declared as
+- **NestJS.** Same IDOR / authz / over-fetching / N+1 surface, for routes declared as
   decorated class methods. A handler is a method with an **HTTP-verb decorator**
   (`@Get`/`@Post`/…), detected by that shape, never by `@Controller`. The client
   id-input comes from the method's **parameter decorators** (`@Param('id')`,
@@ -153,9 +175,29 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     index**, a `@unique` as an index. Whether an un-indexed FK matters depends on the
     table's size/access pattern, so codefit states the fact (`fk_columns`,
     `existing_indexes`, `covering_index_detected: false`) and the agent judges.
-  - **Exact duplicate index (DB-011).** Two indexes on the same columns, same order,
-    same uniqueness — a pure write/storage cost; which to drop is the human's call.
-    Prefix-redundancy (`[a]` subsumed by `[a,b]`) is **not yet detected** (later slice).
+  - **Exact duplicate index (DB-011a).** Two indexes on the same columns, same
+    order, same uniqueness — a pure write/storage cost; which to drop is the
+    human's call. **Dialect-uneven real-world coverage:** on **PostgreSQL/Pagila**
+    this rule fires on a **genuine upstream duplicate** (the `payment_p2022_01`
+    partition ships both `idx_fk_payment_p2022_01_customer_id` and
+    `payment_p2022_01_customer_id_idx` on the identical column) — the only one of
+    the three dialects where the positive case is proven by real vendored DDL, not
+    a constructed one. On **MySQL/Sakila** and **SQL Server/AdventureWorks** the
+    rule is verified **clean** against real DDL (no false positives), but its
+    positive fire path is proven only by a **constructed (synthetic)** schema,
+    since neither real corpus ships a duplicate index.
+  - **Prefix-redundant index (DB-011b).** An index `[a]` that is a **strict
+    leading prefix** of a wider index-like coverer `[a,b]` on the same table (a
+    real index, or the primary key as an implicit index) — pure write/storage
+    overhead, which to drop is the human's call. A **`UNIQUE` index never fires**
+    (it enforces a constraint the wider composite doesn't guarantee alone).
+    **Supported on all three dialects** — Pagila/Sakila/AdventureWorks all run
+    **clean** against real vendored DDL (none of the three real corpora happens
+    to contain a genuine prefix-redundant pair — an honest finding about how
+    these schemas are indexed, not a rule gap); the positive fire path on every
+    dialect is proven by mutating a copy of a real table (e.g. adding a synthetic
+    index on the leading column of Sakila's own real `film_actor` composite
+    primary key `[actor_id, film_id]`), never a fully synthetic fixture.
   - **Multivalued (array) column (DB-002).** An array violates 1NF, but a native
     array (Postgres) is legitimate sometimes — surfaced, not affirmed.
 - **Database structure — name-heuristic checks (schema-only).** These read meaning
@@ -180,6 +222,27 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   - **Repeating groups (DB-003).** Two or more same-typed columns sharing a base
     name with numeric suffixes (`phone1/phone2/phone3`) — a 1NF smell weighed
     against an intentional fixed set (address line 1/2).
+- **View sensitive-column exposure (DB-020).** A **`VIEW`** whose top-level
+  `SELECT` column list exposes a column or alias whose name matches a sensitive
+  token (the same vocabulary as DB-053). Read through a deliberately **bounded**
+  `SELECT`-projection scanner, never a general SQL-expression parser: a function
+  call, `CASE`, or subquery item with no alias is a declared miss for that one
+  item, and `SELECT *` is a declared miss for the **whole view**. **Never an
+  affirmation** — a column named `password` in a view says nothing about whether
+  the value is masked or genuinely exposed, so this is always surface.
+  **Runs clean on real DDL across all three dialects** — Pagila's `actor_info`,
+  AdventureWorks' `vEmployee`, and Sakila's `customer_list` all legitimately
+  confirm the negative case (a real, well-designed view's whole purpose is
+  usually a curated projection, so it rarely re-exposes a sensitive column under
+  a sensitive-looking name — a real finding about how views are written, not a
+  gap in the rule). **The positive fire path is proven only by a constructed
+  case** — renaming the real, vendored Sakila `customer_list` view's own
+  trailing `AS SID` alias to `AS ssn`. No real view in any of the three
+  dogfooded corpora genuinely exposes a sensitive-named column; that is stated
+  plainly, not implied by the clean runs above. **Zero value on Prisma-only
+  projects:** Prisma's `schema.prisma` has no view-block concept (ADR 0014
+  places it out of scope), so a Prisma-only project has no views for this rule
+  to read at all.
 
 ### Not covered (declared, not silent)
 
@@ -190,12 +253,39 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   deterministically.
 - **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** — **not yet
   covered**, a known gap, not a silent one.
-- **Database query behaviour** — N+1 access patterns and index-vs-query analysis
-  (whether an index serves the queries the code runs) are **not** covered; the DB
-  dimension is schema-only, it does not read the application's queries.
-- **Database views, procedures/functions, and triggers (DB-020..041)** — the SQL-DDL
-  parser records their names, but there are **no rules** auditing them yet — a known
-  gap, not a silent one.
+- **Index-vs-query analysis** — whether an existing index actually serves the
+  queries the application code runs — is **not** covered; the DB dimension is
+  schema-only, it does not read query text or application code. (**N+1
+  query-in-loop patterns are a different capability and are no longer part of
+  this gap** — N+1 is mapped as per-handler surface by the language provider,
+  not by the schema-only DB dimension; see the N+1 entry above. It appears in
+  `scan-all`'s endpoint buckets, never in this DB section.)
+- **Never-used index (DB-012)** is **not** covered, and this is **permanent**,
+  not deferred: detecting an unused index requires runtime query telemetry
+  (e.g. PostgreSQL's `pg_stat_user_indexes`) that only exists inside a live,
+  running database with real traffic history. codefit's model is static and
+  never connects to a database — it reads only DDL/schema text — so this rule
+  is structurally incompatible with how codefit operates, not merely
+  unscheduled.
+- **Database views ARE covered** for one rule (DB-020, sensitive-column
+  exposure — see above). **Stored procedures/functions and triggers** (DB-030
+  dynamic SQL by string concatenation, DB-031 missing exception handling,
+  DB-040 trigger cross-table DML, DB-041 trigger external-effecting call) are
+  **not** covered in this release — the SQL-DDL parser records their names and,
+  where the dialect allows, their bodies, but no rule reads them yet. This is
+  **deferred, not abandoned**: it moves to a separate change
+  (`routine-body-rules`, targeted for a later release) because it depends on a
+  parser fix first. SQL Server (T-SQL) has no statement-separator escape
+  mechanism, so a multi-statement T-SQL routine body is captured **truncated**
+  at its first internal `;` and marked incomplete; a rule like DB-031 ("is
+  exception handling present?") evaluated over a truncated body would
+  **falsely affirm** an absence that is really just unread text past the cut.
+  Shipping that rule family in this release would trade an honest declared gap
+  for a rule that lies with confidence, so it waits for the parser fix. When
+  the routine-body rules land, they will carry the same Prisma-zero-value
+  limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
+  block concept, so a Prisma-only project gets no value from this rule family
+  either.
 - **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
   columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
 - **Express/Fastify handler passed by reference.** A handler that is a named
@@ -220,6 +310,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (4) An inline index whose **name** is itself a type keyword (e.g. `KEY int
   (col)`, an index named "int") is read as a column — the KEY/INDEX-vs-column
   discriminator trusts a type-named token as a column (pathological, accepted).
+  (5) A column named exactly `key`, `index`, `fulltext`, or `spatial` whose type
+  is **not** in the dialect's recognized type vocabulary (e.g. PostgreSQL's
+  `tsvector`, as in real Pagila's `film.fulltext` column) collides with the
+  **same** inline-index-shorthand heuristic from a different direction: the
+  column is silently dropped and a phantom zero-column index is fabricated in
+  its place instead. Confirmed against real vendored Pagila DDL; **not yet
+  fixed**.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
