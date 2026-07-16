@@ -168,8 +168,12 @@ func TestDB011_NegativeDistinctIndexes(t *testing.T) {
 	}
 }
 
-func TestDB011_PrefixRedundancyDeferred(t *testing.T) {
-	// [a] subsumed by [a,b] is prefix-redundancy — DEFERRED to slice 2b, must NOT fire here.
+func TestDB011_PrefixRedundancyIsNotThisRulesCategory(t *testing.T) {
+	// [a] subsumed by [a,b] is prefix-redundancy — that is db011prefix's
+	// domain (CategoryDBPrefixRedundantIndex, Unit E / Phase 2.2,
+	// db011prefix.go), not db011's own EXACT-duplicate category. Must NOT
+	// fire CategoryDBDupIndex here (the converse is locked in
+	// db011prefix_test.go's TestDB011Prefix_PrefixPairNeverFiresExactDuplicateCategory).
 	s := &db.Schema{Tables: []db.Table{{
 		Name: "T",
 		Indexes: []db.Index{
@@ -179,7 +183,7 @@ func TestDB011_PrefixRedundancyDeferred(t *testing.T) {
 	}}}
 	_, items := run(s)
 	if got := surfaceWithCategory(items, surface.CategoryDBDupIndex); len(got) != 0 {
-		t.Errorf("prefix-redundancy is deferred to 2b, must not fire, got %d", len(got))
+		t.Errorf("prefix-redundancy is db011prefix's own category, must not fire DB-011's exact-duplicate category, got %d", len(got))
 	}
 }
 

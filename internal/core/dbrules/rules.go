@@ -121,9 +121,11 @@ func describeIndexLike(t db.Table) string {
 
 // db011 — an EXACT duplicate index (same columns in order, same uniqueness). Even
 // an exact duplicate may be intentional (an in-flight migration), so which to drop
-// is the human's call → SURFACE. Prefix-redundancy ([a] subsumed by [a,b]) is
-// DEFERRED to slice 2b. The reported item is deterministically the duplicate with
-// the HIGHER Pos.Line (the earlier one is kept), independent of parser order.
+// is the human's call → SURFACE. Prefix-redundancy ([a] subsumed by [a,b]) is a
+// DIFFERENT rule (db011prefix, db011prefix.go, CategoryDBPrefixRedundantIndex,
+// Unit E / Phase 2.2) — the two never overlap, see db011prefix.go's doc comment.
+// The reported item is deterministically the duplicate with the HIGHER Pos.Line
+// (the earlier one is kept), independent of parser order.
 type db011 struct{}
 
 func (db011) ID() string { return "DB-011" }
