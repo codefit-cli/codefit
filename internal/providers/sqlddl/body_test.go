@@ -172,18 +172,23 @@ GO`
 // independent of Body's own content, so a future change to Body's shape alone
 // can never silently make this invariant pass by accident.
 func TestSQLDDL_ExistingGoldens_UnaffectedByBodyField(t *testing.T) {
+	// Line numbers below shifted +31 from the original 34/16/26/41/43 when
+	// architecture/pagila-fixture-real-indexes upgraded the file's header to
+	// carry the full MIT permission text (same bar as the AdventureWorks/
+	// Sakila real-object fixtures) — the appended real-index content itself
+	// stays at end-of-file, per that fixture's own end-of-file discipline.
 	pagila := goldenSchema(t, "pagila_excerpt.sql", sqlddl.New())
-	if len(pagila.Views) != 1 || pagila.Views[0].Name != "actor_info" || pagila.Views[0].Pos.Line != 34 {
-		t.Errorf("pagila Views = %+v, want [{actor_info Pos.Line=34}]", pagila.Views)
+	if len(pagila.Views) != 1 || pagila.Views[0].Name != "actor_info" || pagila.Views[0].Pos.Line != 65 {
+		t.Errorf("pagila Views = %+v, want [{actor_info Pos.Line=65}]", pagila.Views)
 	}
-	if len(pagila.Procedures) != 2 || pagila.Procedures[0].Name != "_group_concat" || pagila.Procedures[0].Pos.Line != 16 ||
-		pagila.Procedures[1].Name != "last_updated" || pagila.Procedures[1].Pos.Line != 26 {
-		t.Errorf("pagila Procedures = %+v, want [{_group_concat Pos.Line=16} {last_updated Pos.Line=26}]", pagila.Procedures)
+	if len(pagila.Procedures) != 2 || pagila.Procedures[0].Name != "_group_concat" || pagila.Procedures[0].Pos.Line != 47 ||
+		pagila.Procedures[1].Name != "last_updated" || pagila.Procedures[1].Pos.Line != 57 {
+		t.Errorf("pagila Procedures = %+v, want [{_group_concat Pos.Line=47} {last_updated Pos.Line=57}]", pagila.Procedures)
 	}
 	if len(pagila.Triggers) != 2 ||
-		pagila.Triggers[0].Name != "last_updated" || pagila.Triggers[0].Pos.Line != 41 || pagila.Triggers[0].Table != "actor" ||
-		pagila.Triggers[1].Name != "film_fulltext_trigger" || pagila.Triggers[1].Pos.Line != 43 || pagila.Triggers[1].Table != "film" {
-		t.Errorf("pagila Triggers = %+v, want [{last_updated Pos.Line=41 Table=actor} {film_fulltext_trigger Pos.Line=43 Table=film}]", pagila.Triggers)
+		pagila.Triggers[0].Name != "last_updated" || pagila.Triggers[0].Pos.Line != 72 || pagila.Triggers[0].Table != "actor" ||
+		pagila.Triggers[1].Name != "film_fulltext_trigger" || pagila.Triggers[1].Pos.Line != 74 || pagila.Triggers[1].Table != "film" {
+		t.Errorf("pagila Triggers = %+v, want [{last_updated Pos.Line=72 Table=actor} {film_fulltext_trigger Pos.Line=74 Table=film}]", pagila.Triggers)
 	}
 
 	sakila := goldenSchema(t, filepath.Join("mysql", "sakila_excerpt.sql"), sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))

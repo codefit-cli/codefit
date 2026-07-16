@@ -1,10 +1,41 @@
 -- Vendored excerpt from Pagila — a real PostgreSQL sample DB — to exercise the
 -- SQL-DDL parser on genuine views, functions (dollar-quoted $$ and $_$ bodies with
--- internal semicolons), and triggers.
+-- internal semicolons), triggers, and (architecture/pagila-fixture-real-indexes)
+-- real indexes for the DB-011a/DB-011b/Unit E index-rule family.
 --   Source:  https://github.com/devrimgunduz/pagila  (pagila-schema.sql)
 --   Commit:  5ba5a57
---   License: Copyright (c) Devrim Gündüz — see repo LICENSE.txt
 -- Verbatim excerpt; only assembled into one file. Not the whole schema.
+--
+-- License: MIT
+--   Copyright (c) Devrim Gündüz <devrim@gunduz.org>
+--
+--   Permission is hereby granted, free of charge, to any person obtaining a
+--   copy of this software and associated documentation files (the
+--   "Software"), to deal in the Software without restriction, including
+--   without limitation the rights to use, copy, modify, merge, publish,
+--   distribute, sublicense, and/or sell copies of the Software, and to
+--   permit persons to whom the Software is furnished to do so, subject to
+--   the following conditions:
+--
+--   The above copyright notice and this permission notice shall be
+--   included in all copies or substantial portions of the Software.
+--
+--   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+--   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+--   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+--   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+--   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+--   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+--   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+--
+--   Full license text: https://github.com/devrimgunduz/pagila/blob/master/LICENSE.txt
+--
+-- codefit itself is Apache-2.0; this file is a vendored MIT-licensed
+-- excerpt and carries its own notice above, same discipline as the T-SQL
+-- AdventureWorks and MySQL Sakila real-object fixtures. The README at
+-- github.com/devrimgunduz/pagila loosely says "PostgreSQL license", but the
+-- repo's actual LICENSE.txt is the MIT License reproduced above (verified
+-- by reading it directly, not assumed from the README's wording).
 
 CREATE TABLE public.actor (
     actor_id integer NOT NULL,
