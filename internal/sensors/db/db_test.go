@@ -166,6 +166,21 @@ func TestSensorDB_Identity(t *testing.T) {
 	}
 }
 
+// DB-020 (Phase 2.2) must be in the unified-baseline scope (ADR 0019) like
+// every other DB surface category, or its items can never be baselined/
+// pruned. A locked test, not an assumption — forgetting this is "the only
+// way to corrupt an existing baseline" (design §15).
+func TestSensorDB_OwnedCategories_IncludesDB020(t *testing.T) {
+	s := sdb.New(typescript.New())
+	want := string(surface.CategoryDBViewSensitiveColumn)
+	for _, c := range s.OwnedCategories() {
+		if c == want {
+			return
+		}
+	}
+	t.Errorf("OwnedCategories() missing %q (have %v)", want, s.OwnedCategories())
+}
+
 // A directory schema_path is expanded to its *.sql files in Flyway version order.
 // V2 creates the table, V10 alters it — lexical order (V10 < V2) would break the
 // reduction; the numeric Flyway sort must apply V2 first.
