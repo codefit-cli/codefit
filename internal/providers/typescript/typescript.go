@@ -174,5 +174,6 @@ func (p *Provider) surfaceQueries() []surface.Query {
 		idorQuery{recognized: p.authzHelpers},
 		authzQuery{recognized: p.authzHelpers},
 		overfetchQuery{},
+		nplus1Query{},
 	}
 }
