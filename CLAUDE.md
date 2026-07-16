@@ -244,22 +244,25 @@ sección anterior. Agregar/quitar un doc = editar esta tabla, nunca el skill. **
 de oro: se edita la FUENTE, después se espeja.**
 
 **Cadena de verdad de cobertura (3 niveles):**
-`reglas (código)` → `coverage.go` → `COVERAGE.md`.
+`reglas (código)` → `dbcoverage.go` (DB) + `coverage.go` (por lenguaje) → `COVERAGE.md`.
 - **Fuente-raíz:** `rules/<lang>/` + los sensores (`internal/sensors/`) + las reglas
-  DB del núcleo (`internal/core/dbrules/` — las 8 reglas DB viven ahí; `internal/core/db/`
+  DB del núcleo (`internal/core/dbrules/` — las 10 reglas DB viven ahí; `internal/core/db/`
   es solo el modelo neutro `Schema`/`Table`/…, NO las reglas). Es lo que codefit realmente
   detecta.
 - **Espejo-a-mano:** `internal/providers/<lang>/coverage.go` — NO es fuente pura; debe
   verificarse contra las reglas reales. El cierre lo chequea contra la raíz antes de
   espejar. Declararlo fuente pura reintroduce el drift un nivel más abajo — el drift
   silencioso que el pipeline existe para matar.
-- **Excepción — dimensiones transversales (DB):** el modelo "un `coverage.go` por
-  provider" NO cubre una dimensión que razona sobre el modelo neutro y no pertenece a un
-  lenguaje. La dimensión DB NO tiene `coverage.go` propio: su prosa de cobertura vive
-  EMBEBIDA (hoy en `internal/providers/typescript/coverage.go`) como DEUDA declarada,
-  hasta que exista una fuente DB neutra (junto a `internal/core/dbrules/`). Al cerrar una
-  dimensión transversal se verifica y edita esa prosa embebida contra las reglas reales,
-  no un `coverage.go` per-lang inexistente.
+- **Dimensiones transversales (DB):** el modelo "un `coverage.go` por provider" NO
+  cubre una dimensión que razona sobre el modelo neutro y no pertenece a un lenguaje.
+  La dimensión DB tiene su PROPIA fuente neutra, `internal/core/dbcoverage/`
+  (`dbcoverage.go`), junto a `internal/core/dbrules/` — **la deuda de ubicación que
+  antes vivía EMBEBIDA en `internal/providers/typescript/coverage.go` está PAGADA**
+  (relocada en 0.2.2). Cada `coverage.go` per-lang la compone por `append`, nunca la
+  duplica a mano; `dbcoverage` no importa ningún provider (leaf puro). Al cerrar una
+  dimensión transversal se verifica y edita `dbcoverage.go` contra las reglas reales
+  (`internal/core/dbrules/`), ANTES de espejar a `COVERAGE.md` — la misma disciplina
+  fuente-antes-que-espejo del resto de esta tabla.
 - **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;
   verificado: sin `go:generate`, ningún `.go` emite markdown). Su encabezado promete
   auto-generación futura que no existe — claim stale, verificar la línea antes de tocar.
@@ -270,6 +273,7 @@ de oro: se edita la FUENTE, después se espeja.**
 | `CHANGELOG.md` | fuente | resumen | Por release; lo realmente mergeado. Sin tags inventados. |
 | `VERSIONING.md` | fuente | resumen | SemVer↔fase + estado actual. |
 | `COVERAGE.md` | espejo (ver cadena) | resumen | Espejo 2º nivel, a mano. |
+| `internal/core/dbcoverage/dbcoverage.go` | fuente neutra de la dimensión DB | resumen | Se verifica contra `internal/core/dbrules/`; se edita ANTES que COVERAGE.md. |
 | `internal/providers/<lang>/coverage.go` | espejo-a-mano de las reglas | resumen | Se verifica contra la raíz; se edita ANTES que COVERAGE.md. |
 | `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
 | `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
