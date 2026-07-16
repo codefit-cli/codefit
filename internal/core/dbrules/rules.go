@@ -126,9 +126,15 @@ func describeIndexLike(t db.Table) string {
 // Unit E / Phase 2.2) — the two never overlap, see db011prefix.go's doc comment.
 // The reported item is deterministically the duplicate with the HIGHER Pos.Line
 // (the earlier one is kept), independent of parser order.
+//
+// ID: both this rule and db011prefix derive from the SAME PRD number, DB-011
+// (docs/PRD-codefit-v1.4.md:371, "duplicados/redundantes"), so each carries a
+// letter suffix to stay individually addressable — the same sub-case
+// convention as DB-052b (rules_names.go:77). This is DB-011a (the
+// exact-duplicate case); db011prefix is DB-011b.
 type db011 struct{}
 
-func (db011) ID() string { return "DB-011" }
+func (db011) ID() string { return "DB-011a" }
 
 func (db011) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem

@@ -20,10 +20,13 @@ import (
 //
 // The PRD assigns ONE id, DB-011, to both the exact-duplicate case (db011,
 // rules.go) and this prefix-redundant case — they are the same numbered
-// rule in the product's own vocabulary. This type is nonetheless its OWN
-// Go struct / SurfaceItem category / Check(), sharing NO logic with db011's
-// exact-match path, so the two mechanisms structurally CANNOT double-report
-// the same index pair:
+// rule in the product's own vocabulary, but each carries its OWN letter
+// suffix (ID() below) to stay individually addressable in findings/coverage —
+// the same sub-case convention as DB-052b (rules_names.go:77): db011 is
+// DB-011a, this type is DB-011b. This type is nonetheless its OWN Go struct /
+// SurfaceItem category / Check(), sharing NO logic with db011's exact-match
+// path, so the two mechanisms structurally CANNOT double-report the same
+// index pair:
 //   - db011 (CategoryDBDupIndex) fires ONLY on an EXACT column-list match
 //     (same length, same order, same uniqueness).
 //   - db011prefix (CategoryDBPrefixRedundantIndex) fires ONLY when one
@@ -54,7 +57,7 @@ import (
 // sources.
 type db011prefix struct{}
 
-func (db011prefix) ID() string { return "DB-011" }
+func (db011prefix) ID() string { return "DB-011b" }
 
 func (db011prefix) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem
