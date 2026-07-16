@@ -159,3 +159,37 @@ func TestClassifyEndpoints_FrontierWithGapStaysFrontier(t *testing.T) {
 		t.Fatalf("frontier-with-gap must stay frontier, got actionable=%d clean=%d frontier=%d", len(actionable), len(clean), len(frontier))
 	}
 }
+
+// TestAggregateEndpoints_NPlus1OnlyEndpoint_IsActionable_NotResolvedClean is the
+// load-bearing test of the whole db-debt-views-and-nplus1 change: an endpoint
+// whose ONLY surface item is an N+1 concern (no idor/authz/overfetch item present)
+// must land in Actionable, NEVER in ResolvedClean. Before surfaceGap recognizes
+// "nplus1", the endpoint has CertainConcerns>0 (the item is locally confirmed) but
+// Actionable==0 (no gap kind matches), so it falls into resolved_clean and
+// verificationFact prints "codefit verified locally … no gap found in the handler
+// body" — a FALSE affirmation over a real N+1. That is worse than missing it.
+func TestAggregateEndpoints_NPlus1OnlyEndpoint_IsActionable_NotResolvedClean(t *testing.T) {
+	file := "app/reports/route.ts"
+	surface := []findings.SurfaceItem{
+		surf("nplus1", file, 20,
+			map[string]bool{"local_access_detected": true, "awaited_in_loop": true},
+			"Handler GET queries prisma.user.findUnique inside a for...of loop"),
+	}
+	eps := report.AggregateEndpoints(nil, surface)
+	if len(eps) != 1 {
+		t.Fatalf("the single N+1 concern must be one endpoint, got %d", len(eps))
+	}
+
+	actionable, resolvedClean, frontier := report.ClassifyEndpoints(eps)
+	if len(resolvedClean) != 0 {
+		t.Fatalf("an N+1-only endpoint must NEVER be resolved_clean (that would be a false "+
+			"'no gap found' affirmation over a real N+1), got %d resolved_clean: %+v",
+			len(resolvedClean), resolvedClean)
+	}
+	if len(actionable) != 1 || actionable[0].File != file {
+		t.Fatalf("the N+1-only endpoint must be actionable, got actionable=%d frontier=%d", len(actionable), len(frontier))
+	}
+	if g := actionable[0].Concerns[0].Gap; g == "" {
+		t.Errorf("the nplus1 concern must carry a non-empty gap kind, got %q", g)
+	}
+}

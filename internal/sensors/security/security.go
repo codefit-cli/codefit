@@ -41,13 +41,18 @@ var _ sensors.Sensor = (*Sensor)(nil)
 
 // OwnedCategories are the baseline Item categories the security sensor produces:
 // its finding dimension ("security") plus its surface categories (idor/authz/
-// overfetch). They scope the unified baseline (ADR 0019).
+// overfetch/nplus1). They scope the unified baseline (ADR 0019). CategoryNPlus1
+// is included even though its agent-confirmed finding is stamped DimensionDB
+// (dimensionFor) — this sensor is what ENUMERATES the surface item, so it must
+// own the category for baseline tracking/pruning, regardless of which dimension
+// a later confirmation lands in.
 func (*Sensor) OwnedCategories() []string {
 	return []string{
 		string(findings.DimensionSecurity),
 		string(surface.CategoryIDOR),
 		string(surface.CategoryAuthz),
 		string(surface.CategoryOverfetch),
+		string(surface.CategoryNPlus1),
 	}
 }
 

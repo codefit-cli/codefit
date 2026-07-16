@@ -8,6 +8,7 @@ const (
 	CategoryIDOR      Category = "idor"      // endpoints that access a resource by ID
 	CategoryAuthz     Category = "authz"     // protectable handlers
 	CategoryOverfetch Category = "overfetch" // serializations of domain objects
+	CategoryNPlus1    Category = "nplus1"    // a query call sits inside a loop (dimension db)
 
 	// DB-structure surface categories (schema-only rules, dimension "db"). One
 	// category per rule so a baseline fingerprint is distinct per rule, the same
