@@ -86,13 +86,18 @@ CREATE TRIGGER film_fulltext_trigger BEFORE INSERT OR UPDATE ON public.film FOR 
 -- triggers above (same discipline as sakila_excerpt.sql's historical note).
 --
 -- Primary keys and foreign keys for these tables are declared upstream via
--- separate "ALTER TABLE ONLY ... ADD CONSTRAINT" statements, deliberately
--- NOT vendored here: codefit's sqlddl parser does not yet handle
--- PostgreSQL's "ALTER TABLE ONLY <table>" idiom (it mis-parses the literal
--- token "ONLY" as the table name and silently drops the real constraint) —
--- a pre-existing, separately reported parser limit, not something this
--- fixture extension papers over. actor above already ships PK-free for the
--- identical upstream reason.
+-- separate "ALTER TABLE ONLY ... ADD CONSTRAINT" statements. codefit's
+-- sqlddl parser used to mis-parse PostgreSQL's "ALTER TABLE ONLY <table>"
+-- idiom (the literal token "ONLY" was captured as the table name, creating
+-- a phantom "only" table and silently dropping the real constraint) — see
+-- discovery/sqlddl-postgres-parser-gaps (obs #1062, HALLAZGO 1), fixed in
+-- db-debt-views-and-nplus1 (reAlterTable now matches an optional "ONLY" the
+-- same way it already matched optional "IF EXISTS"). customer's real
+-- primary key and payment_p2022_01's real foreign key to customer are
+-- vendored below (verbatim, upstream commit 5ba5a57) via this exact idiom —
+-- the load-bearing regression fixture for that fix. actor's, address's,
+-- rental's, and payment_p2022_01's OTHER real constraints stay unvendored:
+-- out of scope for this pass, not a parser limit.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE public.customer (
@@ -185,3 +190,18 @@ CREATE TABLE public.payment_p2022_01 (
 CREATE INDEX idx_fk_payment_p2022_01_customer_id ON public.payment_p2022_01 USING btree (customer_id);
 
 CREATE INDEX payment_p2022_01_customer_id_idx ON public.payment_p2022_01 USING btree (customer_id);
+
+-- Real "ALTER TABLE ONLY ... ADD CONSTRAINT" statements (verbatim, upstream
+-- commit 5ba5a57) — pg_dump's standard idiom for every PK/FK/UNIQUE
+-- constraint. This is the load-bearing regression fixture for HALLAZGO 1
+-- (discovery/sqlddl-postgres-parser-gaps, obs #1062): before the
+-- reAlterTable fix, "ONLY" was captured as the table name, so these two
+-- statements attached customer_pkey and payment_p2022_01_customer_id_fkey
+-- to a phantom table literally named "only" instead of customer and
+-- payment_p2022_01, and DB-050/DB-001 gave WRONG results as a consequence
+-- (see alter_table_only_integration_test.go).
+ALTER TABLE ONLY public.customer
+    ADD CONSTRAINT customer_pkey PRIMARY KEY (customer_id);
+
+ALTER TABLE ONLY public.payment_p2022_01
+    ADD CONSTRAINT payment_p2022_01_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customer(customer_id);
