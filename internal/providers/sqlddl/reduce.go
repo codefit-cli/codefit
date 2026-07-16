@@ -37,7 +37,7 @@ func (b *builder) schema() *db.Schema {
 
 var (
 	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
-	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)\s+(.*)$`)
+	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
 	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+\w+\s*)?\(([^)]*)\)`)
 	reView        = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
 	reRoutine     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
