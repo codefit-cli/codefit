@@ -28,6 +28,17 @@ const (
 	// column-type heuristic.
 	CategoryDBViewSensitiveColumn Category = "db-view-sensitive-column"
 
+	// CategoryDBPrefixRedundantIndex (DB-011's prefix-redundant half, Unit E,
+	// Phase 2.2): an index [a] whose columns are a strict leading prefix of
+	// another index-like column list [a,b] on the same table (a real
+	// composite index, or the primary key treated as an implicit index, same
+	// as DB-001/rules.go's indexLike). Distinct from CategoryDBDupIndex
+	// (DB-011's EXACT-duplicate case, same length): the two are mutually
+	// exclusive by construction (a strict prefix is, by definition, strictly
+	// SHORTER than what subsumes it). Closes the gap declared at
+	// coverage.go:34 ("Prefix-redundant indexes ... are NOT yet detected").
+	CategoryDBPrefixRedundantIndex Category = "db-prefix-redundant-index"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps

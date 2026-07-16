@@ -48,6 +48,7 @@ func (*Sensor) OwnedCategories() []string {
 		string(surface.CategoryDBSensitiveUnencrypted),
 		string(surface.CategoryDBRepeatingGroups),
 		string(surface.CategoryDBViewSensitiveColumn),
+		string(surface.CategoryDBPrefixRedundantIndex),
 	}
 }
 
