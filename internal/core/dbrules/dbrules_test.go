@@ -187,6 +187,28 @@ func TestDB011_PrefixRedundancyIsNotThisRulesCategory(t *testing.T) {
 	}
 }
 
+func TestDB011_SubCasesHaveDistinctSuffixedIDs(t *testing.T) {
+	// DB-011a (exact duplicate, db011/rules.go) and DB-011b (prefix-
+	// redundant, db011prefix/db011prefix.go) share ONE PRD number, DB-011
+	// (docs/PRD-codefit-v1.4.md:371, "duplicados/redundantes"), but are two
+	// separate Go types/categories — same sub-case letter-suffix convention
+	// as DB-052b (rules_names.go:77). The bare, unsuffixed "DB-011" must no
+	// longer be emitted by either.
+	ids := map[string]bool{}
+	for _, r := range dbrules.All() {
+		ids[r.ID()] = true
+	}
+	if !ids["DB-011a"] {
+		t.Errorf("dbrules.All() missing DB-011a (exact duplicate), have %v", ids)
+	}
+	if !ids["DB-011b"] {
+		t.Errorf("dbrules.All() missing DB-011b (prefix-redundant), have %v", ids)
+	}
+	if ids["DB-011"] {
+		t.Errorf("bare unsuffixed DB-011 must not be emitted by any rule, have %v", ids)
+	}
+}
+
 // --- DB-002: multivalued column (surface) ---
 
 func TestDB002_Multivalued(t *testing.T) {
@@ -221,7 +243,7 @@ func TestAll_FourRules(t *testing.T) {
 	for _, r := range dbrules.All() {
 		ids[r.ID()] = true
 	}
-	for _, want := range []string{"DB-050", "DB-001", "DB-011", "DB-002"} {
+	for _, want := range []string{"DB-050", "DB-001", "DB-011a", "DB-002"} {
 		if !ids[want] {
 			t.Errorf("dbrules.All() missing %s (have %v)", want, ids)
 		}
