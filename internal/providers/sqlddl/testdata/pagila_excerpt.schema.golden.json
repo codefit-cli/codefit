@@ -60,6 +60,676 @@
       "PrimaryKey": null,
       "ForeignKeys": null,
       "Indexes": null
+    },
+    {
+      "Name": "customer",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 67
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "store_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 68
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "first_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 69
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_name",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 70
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "email",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 71
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "address_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 72
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "activebool",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 73
+          },
+          "Type": "bool",
+          "RawType": "boolean",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "create_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 74
+          },
+          "Type": "datetime",
+          "RawType": "date",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 75
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "active",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 76
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": true,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 127
+          },
+          "Columns": [
+            "address_id"
+          ],
+          "Unique": false
+        },
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 131
+          },
+          "Columns": [
+            "last_name"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "film",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "film_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 90
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "title",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 91
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "description",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 92
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "release_year",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 93
+          },
+          "Type": "unknown",
+          "RawType": "public.year",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "language_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 94
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "original_language_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 95
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "rental_duration",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 96
+          },
+          "Type": "int",
+          "RawType": "smallint",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rental_rate",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 97
+          },
+          "Type": "float",
+          "RawType": "numeric(4,2)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "length",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 98
+          },
+          "Type": "int",
+          "RawType": "smallint",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "replacement_cost",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 99
+          },
+          "Type": "float",
+          "RawType": "numeric(5,2)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rating",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 100
+          },
+          "Type": "unknown",
+          "RawType": "public.mpaa_rating",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 101
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "special_features",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 102
+          },
+          "Type": "text",
+          "RawType": "text[]",
+          "Nullable": true,
+          "List": true
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 133
+          },
+          "Columns": [
+            "title"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "address",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "address_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 106
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "address",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 107
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "address2",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 108
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "district",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 109
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "city_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 110
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "postal_code",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 111
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "phone",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 112
+          },
+          "Type": "text",
+          "RawType": "text",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 113
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 129
+          },
+          "Columns": [
+            "city_id"
+          ],
+          "Unique": false
+        }
+      ]
+    },
+    {
+      "Name": "rental",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "rental_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 117
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rental_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 118
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "inventory_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 119
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 120
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "return_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 121
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": true,
+          "List": false
+        },
+        {
+          "Name": "staff_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 122
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "last_update",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 123
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 135
+          },
+          "Columns": [
+            "rental_date",
+            "inventory_id",
+            "customer_id"
+          ],
+          "Unique": true
+        }
+      ]
+    },
+    {
+      "Name": "payment_p2022_01",
+      "DBName": "",
+      "Pos": {
+        "File": "",
+        "Line": 0
+      },
+      "Columns": [
+        {
+          "Name": "payment_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 151
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "customer_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 152
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "staff_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 153
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "rental_id",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 154
+          },
+          "Type": "int",
+          "RawType": "integer",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "amount",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 155
+          },
+          "Type": "float",
+          "RawType": "numeric(5,2)",
+          "Nullable": false,
+          "List": false
+        },
+        {
+          "Name": "payment_date",
+          "DBName": "",
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 156
+          },
+          "Type": "datetime",
+          "RawType": "timestamp with time zone",
+          "Nullable": false,
+          "List": false
+        }
+      ],
+      "PrimaryKey": null,
+      "ForeignKeys": null,
+      "Indexes": [
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 160
+          },
+          "Columns": [
+            "customer_id"
+          ],
+          "Unique": false
+        },
+        {
+          "Pos": {
+            "File": "pagila_excerpt.sql",
+            "Line": 162
+          },
+          "Columns": [
+            "customer_id"
+          ],
+          "Unique": false
+        }
+      ]
     }
   ],
   "Views": [
