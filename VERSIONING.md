@@ -31,6 +31,7 @@ pieces of it are still stubs.
 | `0.1.0`  | Phase 1   | TS provider + security sensor + surface mapping + **`init` (config + skill) and baseline** functional (`update` is Phase 4) |
 | `0.2.0`  | Phase 2   | DB dimension: schema-only OLTP rules (Prisma + SQL-DDL parsers), `scan-db`, DB in `scan-all` + `by_dimension` |
 | `0.2.1`  | Phase 2.1 | Multi-dialect SQL-DDL: MySQL + SQL Server (T-SQL) alongside PostgreSQL (per-dialect DATA descriptor, ADR 0022; PG byte-identical) |
+| `0.2.2`  | Phase 2.2 | DB debt Slice A: N+1 surface (RF-04), view sensitive-column (DB-020), prefix-redundant index (DB-011b), neutral DB coverage source (ADRs 0023–0026) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -58,6 +59,18 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.2` — Phase 2.2 complete (DB debt Slice A).** Part of the Phase-2 debt declared in
+  `0.2.0` is paid: the N+1 antipattern as per-endpoint surface (RF-04, `codefit-surface-nplus1`,
+  reusing the IDOR/authz frontier; ADR 0023), view sensitive-column exposure (DB-020), and
+  prefix-redundant indexes (DB-011b, alongside the renamed DB-011a exact-duplicate). The DB
+  coverage prose moved from the TypeScript provider to a neutral source
+  (`internal/core/dbcoverage/`), composed by `append` and importing no provider. Routine bodies
+  are captured with a tokenizer-derived `Complete` flag and the PG trigger→function link is
+  modeled (ADRs 0025, 0026). Dogfooded on real vendored Pagila / Sakila / AdventureWorks DDL.
+  **Deferred:** routine-body rules (DB-030/031/040/041) to `0.2.3` — blocked at the T-SQL parser
+  layer, not the rule layer (ADR 0025); DB-012 (never-used index) is **permanently** not covered
+  (needs runtime telemetry, incompatible with the static model; ADR 0024); index-vs-query stays
+  deferred; view/N+1 rules add zero value on Prisma-only projects.
 - **`v0.2.1` — Phase 2.1 complete (multi-dialect SQL-DDL).** The database dimension is no
   longer PostgreSQL-only: MySQL and SQL Server (T-SQL) DDL are parsed, selected by
   `database.type`, through a per-dialect DATA descriptor feeding one shared tokenizer and one
