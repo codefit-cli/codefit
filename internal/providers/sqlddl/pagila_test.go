@@ -31,9 +31,22 @@ func TestPagila_ViewsProcsTriggersPopulated(t *testing.T) {
 	if len(s.Triggers) != 2 {
 		t.Fatalf("triggers = %d, want 2", len(s.Triggers))
 	}
-	// The actor table parsed cleanly alongside the objects (splitting held).
-	if len(s.Tables) != 1 || s.Tables[0].Name != "actor" {
-		t.Errorf("tables = %v, want [actor]", tableNames(s))
+	// actor, plus the real index-bearing tables appended for the DB-011a/
+	// DB-011b/Unit E fixture extension (architecture/pagila-fixture-real-indexes):
+	// customer, address, rental, and the real payment_p2022_01 partition-child
+	// table (the DB-011a positive-fire proof). film is deliberately NOT
+	// vendored (discovery/sqlddl-postgres-parser-gaps, obs #1062, HALLAZGO 2 —
+	// see the inline note in pagila_excerpt.sql). All parsed cleanly alongside
+	// the dollar-quoted objects (splitting held).
+	wantTables := []string{"actor", "customer", "address", "rental", "payment_p2022_01"}
+	gotTables := tableNames(s)
+	if len(gotTables) != len(wantTables) {
+		t.Fatalf("tables = %v, want %v", gotTables, wantTables)
+	}
+	for i, want := range wantTables {
+		if gotTables[i] != want {
+			t.Errorf("tables[%d] = %q, want %q (full: %v)", i, gotTables[i], want, gotTables)
+		}
 	}
 	// Trigger.Table is parsed from the ON clause (schema qualifier stripped).
 	var lastUpdated bool

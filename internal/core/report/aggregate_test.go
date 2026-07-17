@@ -121,6 +121,28 @@ func TestAggregateOrdersByActionableGap(t *testing.T) {
 	}
 }
 
+// TestGapCounts_EfficiencyRankedLast: an endpoint whose only actionable gap is
+// efficiency (N+1) must rank BELOW an endpoint whose only actionable gap is
+// exposure (over-fetch) — an N+1 must never outrank an access-control-adjacent
+// gap in the summary, mirroring ADR 0006's exposure-vs-access rationale.
+func TestGapCounts_EfficiencyRankedLast(t *testing.T) {
+	exposureFile := "app/exposed/route.ts"
+	efficiencyFile := "app/nplus1/route.ts"
+
+	surface := []findings.SurfaceItem{
+		surf("overfetch", exposureFile, 5, map[string]bool{"local_access_detected": true, "field_limiting_detected": false}, "serializes prisma.p"),
+		surf("nplus1", efficiencyFile, 5, map[string]bool{"local_access_detected": true}, "query inside for...of loop"),
+	}
+	eps := report.AggregateEndpoints(nil, surface)
+	if len(eps) != 2 {
+		t.Fatalf("want 2 endpoints, got %d", len(eps))
+	}
+	posExposure, posEfficiency := indexOf(eps, exposureFile), indexOf(eps, efficiencyFile)
+	if posExposure > posEfficiency {
+		t.Errorf("exposure gap must rank ABOVE efficiency (N+1) gap; got exposure@%d efficiency@%d", posExposure, posEfficiency)
+	}
+}
+
 func indexOf(eps []report.EndpointReport, file string) int {
 	for i := range eps {
 		if eps[i].File == file {

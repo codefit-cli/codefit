@@ -168,8 +168,12 @@ func TestDB011_NegativeDistinctIndexes(t *testing.T) {
 	}
 }
 
-func TestDB011_PrefixRedundancyDeferred(t *testing.T) {
-	// [a] subsumed by [a,b] is prefix-redundancy — DEFERRED to slice 2b, must NOT fire here.
+func TestDB011_PrefixRedundancyIsNotThisRulesCategory(t *testing.T) {
+	// [a] subsumed by [a,b] is prefix-redundancy — that is db011prefix's
+	// domain (CategoryDBPrefixRedundantIndex, Unit E / Phase 2.2,
+	// db011prefix.go), not db011's own EXACT-duplicate category. Must NOT
+	// fire CategoryDBDupIndex here (the converse is locked in
+	// db011prefix_test.go's TestDB011Prefix_PrefixPairNeverFiresExactDuplicateCategory).
 	s := &db.Schema{Tables: []db.Table{{
 		Name: "T",
 		Indexes: []db.Index{
@@ -179,7 +183,29 @@ func TestDB011_PrefixRedundancyDeferred(t *testing.T) {
 	}}}
 	_, items := run(s)
 	if got := surfaceWithCategory(items, surface.CategoryDBDupIndex); len(got) != 0 {
-		t.Errorf("prefix-redundancy is deferred to 2b, must not fire, got %d", len(got))
+		t.Errorf("prefix-redundancy is db011prefix's own category, must not fire DB-011's exact-duplicate category, got %d", len(got))
+	}
+}
+
+func TestDB011_SubCasesHaveDistinctSuffixedIDs(t *testing.T) {
+	// DB-011a (exact duplicate, db011/rules.go) and DB-011b (prefix-
+	// redundant, db011prefix/db011prefix.go) share ONE PRD number, DB-011
+	// (docs/PRD-codefit-v1.4.md:371, "duplicados/redundantes"), but are two
+	// separate Go types/categories — same sub-case letter-suffix convention
+	// as DB-052b (rules_names.go:77). The bare, unsuffixed "DB-011" must no
+	// longer be emitted by either.
+	ids := map[string]bool{}
+	for _, r := range dbrules.All() {
+		ids[r.ID()] = true
+	}
+	if !ids["DB-011a"] {
+		t.Errorf("dbrules.All() missing DB-011a (exact duplicate), have %v", ids)
+	}
+	if !ids["DB-011b"] {
+		t.Errorf("dbrules.All() missing DB-011b (prefix-redundant), have %v", ids)
+	}
+	if ids["DB-011"] {
+		t.Errorf("bare unsuffixed DB-011 must not be emitted by any rule, have %v", ids)
 	}
 }
 
@@ -217,7 +243,7 @@ func TestAll_FourRules(t *testing.T) {
 	for _, r := range dbrules.All() {
 		ids[r.ID()] = true
 	}
-	for _, want := range []string{"DB-050", "DB-001", "DB-011", "DB-002"} {
+	for _, want := range []string{"DB-050", "DB-001", "DB-011a", "DB-002"} {
 		if !ids[want] {
 			t.Errorf("dbrules.All() missing %s (have %v)", want, ids)
 		}

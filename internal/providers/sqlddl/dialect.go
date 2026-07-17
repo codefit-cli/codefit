@@ -56,6 +56,23 @@ type Dialect struct {
 	// ignored (e.g. UNSIGNED, AUTO_INCREMENT, IDENTITY), never corrupting
 	// the mapped type.
 	Modifiers map[string]bool
+
+	// TriggerHasInlineBody is a per-dialect DATUM (Phase 2.2, Unit A2,
+	// architecture/pg-trigger-body-link): does a CREATE TRIGGER statement in
+	// this dialect carry its own logic inline, or is it only a WIRE to a
+	// separately-defined function/procedure? PostgreSQL triggers are wires —
+	// "CREATE TRIGGER x ... EXECUTE FUNCTION fn();" — false: there is no body
+	// to capture, so the statement is always Complete and the logic is found
+	// via Trigger.ExecutesFunction instead. MySQL and T-SQL triggers embed
+	// their logic directly in the statement ("FOR EACH ROW SET ..." / "AS
+	// BEGIN ... END") — true: reduce.go's routineBody derivation (the same
+	// tokenizer-state formula routines use) still applies.
+	//
+	// reduce.go's triggerBody consults this DATUM instead of branching on
+	// dialect.Name, keeping the one-shared-reducer/per-dialect-data
+	// architecture ADR 0022 established — a new dialect only ever adds a
+	// Dialect value, never a branch in split.go or reduce.go.
+	TriggerHasInlineBody bool
 }
 
 // LineComment is one line-comment prefix a dialect recognizes.
@@ -96,13 +113,14 @@ type QuotePair struct {
 // dialect for New() when no Option is given.
 func Postgres() Dialect {
 	return Dialect{
-		Name:                "postgresql",
-		LineComments:        []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
-		IdentQuotes:         []QuotePair{{Open: '"', Close: '"', Doubling: true}},
-		DoubleQuoteIsString: false,
-		DollarQuoting:       true,
-		TypeMap:             postgresTypeMap(),
-		Modifiers:           postgresModifiers(),
+		Name:                 "postgresql",
+		LineComments:         []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
+		IdentQuotes:          []QuotePair{{Open: '"', Close: '"', Doubling: true}},
+		DoubleQuoteIsString:  false,
+		DollarQuoting:        true,
+		TypeMap:              postgresTypeMap(),
+		Modifiers:            postgresModifiers(),
+		TriggerHasInlineBody: false,
 	}
 }
 
@@ -123,11 +141,12 @@ func MySQL() Dialect {
 			{Prefix: "--", RequireBoundaryAfter: true},
 			{Prefix: "#", RequireBoundaryAfter: false},
 		},
-		IdentQuotes:         []QuotePair{{Open: '`', Close: '`', Doubling: true}},
-		DoubleQuoteIsString: true,
-		DollarQuoting:       false,
-		TypeMap:             mysqlTypeMap(),
-		Modifiers:           mysqlModifiers(),
+		IdentQuotes:          []QuotePair{{Open: '`', Close: '`', Doubling: true}},
+		DoubleQuoteIsString:  true,
+		DollarQuoting:        false,
+		TypeMap:              mysqlTypeMap(),
+		Modifiers:            mysqlModifiers(),
+		TriggerHasInlineBody: true,
 	}
 }
 
@@ -146,12 +165,13 @@ func MySQL() Dialect {
 // parse-and-ignore Modifiers, never corrupting the mapped type.
 func SQLServer() Dialect {
 	return Dialect{
-		Name:                "sqlserver",
-		LineComments:        []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
-		IdentQuotes:         []QuotePair{{Open: '[', Close: ']', Doubling: true}, {Open: '"', Close: '"', Doubling: true}},
-		DoubleQuoteIsString: false,
-		DollarQuoting:       false,
-		TypeMap:             sqlserverTypeMap(),
-		Modifiers:           sqlserverModifiers(),
+		Name:                 "sqlserver",
+		LineComments:         []LineComment{{Prefix: "--", RequireBoundaryAfter: false}},
+		IdentQuotes:          []QuotePair{{Open: '[', Close: ']', Doubling: true}, {Open: '"', Close: '"', Doubling: true}},
+		DoubleQuoteIsString:  false,
+		DollarQuoting:        false,
+		TypeMap:              sqlserverTypeMap(),
+		Modifiers:            sqlserverModifiers(),
+		TriggerHasInlineBody: true,
 	}
 }

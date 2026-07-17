@@ -119,7 +119,7 @@ func Integrate(confs []Confirmation) Integration {
 func findingFrom(c Confirmation) findings.Finding {
 	return findings.Finding{
 		ID:            strings.ToUpper(c.Category),
-		Dimension:     findings.DimensionSecurity,
+		Dimension:     dimensionFor(c.Category),
 		Severity:      severityFor(c),
 		File:          c.File,
 		Line:          c.Line,
@@ -129,6 +129,24 @@ func findingFrom(c Confirmation) findings.Finding {
 		Confidence:    clampConfidence(c.Confidence),
 		Probabilistic: true,
 	}
+}
+
+// dimensionForMap maps a surface category to the findings.Dimension its
+// agent-confirmed finding must be stamped with. Categories not listed default to
+// findings.DimensionSecurity (idor/authz/overfetch's historical, unchanged
+// behavior) — only "nplus1" (an efficiency/DB-shaped fact, not a security one)
+// overrides it. Test-locked: TestFindingFrom_DimensionForNPlus1IsDB.
+var dimensionForMap = map[string]findings.Dimension{
+	"nplus1": findings.DimensionDB,
+}
+
+// dimensionFor returns the finding dimension for a surface category, defaulting
+// to findings.DimensionSecurity when the category has no explicit mapping.
+func dimensionFor(category string) findings.Dimension {
+	if d, ok := dimensionForMap[category]; ok {
+		return d
+	}
+	return findings.DimensionSecurity
 }
 
 // clampConfidence enforces the invariant that a reasoned (probabilistic) finding
@@ -151,6 +169,7 @@ var defaultSeverity = map[string]findings.Severity{
 	"idor":      findings.SeverityHigh,
 	"authz":     findings.SeverityHigh,
 	"overfetch": findings.SeverityMedium,
+	"nplus1":    findings.SeverityMedium,
 }
 
 // severityFor uses the agent's severity when given (it judged the concrete
@@ -169,6 +188,7 @@ var titles = map[string]string{
 	"idor":      "Possible IDOR (confirmed by agent reasoning)",
 	"authz":     "Possible broken authorization (confirmed by agent reasoning)",
 	"overfetch": "Possible sensitive-data over-fetching (confirmed by agent reasoning)",
+	"nplus1":    "Possible N+1 query pattern (confirmed by agent reasoning)",
 }
 
 func titleFor(category string) string {

@@ -16,6 +16,68 @@ All notable changes to codefit are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.2.2] — 2026-07-17
+
+**Phase 2.2 — DB debt Slice A.** codefit closes part of the Phase-2 debt declared in
+`0.2.0`: the N+1 antipattern (RF-04), view sensitive-column exposure (DB-020), and
+prefix-redundant indexes (DB-011b), plus the DB coverage prose moved out of a language
+provider into a neutral source. The routine-body rules (DB-030/031/040/041) stay deferred
+to `0.2.3` — they are blocked at the T-SQL parser layer, not the rule layer. ADRs 0023–0026.
+
+### Added
+
+- **N+1 surface (RF-04)** — `codefit-surface-nplus1` enumerates query calls that sit inside a
+  loop (`for`/`while`/`forEach`/`map`/…), as per-endpoint **surface**, never a deterministic
+  finding: whether a query-in-a-loop matters is contextual, so codefit states the structural
+  fact and the agent judges. Reuses the IDOR/authz frontier verbatim (`auditTargets`,
+  `isPrismaCall`, `isServiceCall`), so it applies uniformly across Next.js / Express / Fastify /
+  NestJS. ORDERED, never FILTERED: a loop over three literal elements is enumerated exactly like
+  one over an unbounded result. (ADR 0023)
+- **DB-020 — view sensitive-column exposure** — a schema-only rule mapping columns a `CREATE
+  VIEW` exposes whose names look sensitive, as surface (never an affirmation). Runs clean on the
+  real Pagila / AdventureWorks / Sakila views. (Unit C)
+- **DB-011b — prefix-redundant index** — an index whose columns are a strict leading prefix of
+  another index (or the primary key as an implicit index) on the same table. A separate rule
+  and category from DB-011a (exact-duplicate); UNIQUE never fires; PK counts as an implicit
+  index, matching DB-001. (Unit E)
+- **Routine body capture with a `Complete` flag** — the neutral model gains `Body{Text,
+  Complete, Note}` on views/procedures/triggers. `Complete` is derived from tokenizer state,
+  never by re-scanning `BEGIN`/`END` (the unsound guard ADR 0022 removed); a rule reading a
+  body marked incomplete must abstain, never affirm over unread text. (ADR 0025)
+- **PostgreSQL trigger→function link** — a PG trigger carries no inline body; its logic lives in
+  the executed function. `Trigger.ExecutesFunction` records the link, resolved once in the
+  neutral model (`Schema.ExecutedProcedure`), driven by the `TriggerHasInlineBody` dialect
+  datum rather than a dialect branch. (ADR 0026)
+- **Real vendored routine fixtures** — real upstream Pagila (PostgreSQL) indexes, and the
+  AdventureWorks / Sakila real-object DDL, so the index and view rules are exercised against
+  genuine schemas rather than hand-written approximations.
+
+### Changed
+
+- **DB-011 split into DB-011a / DB-011b** — the shared DB-011 id is suffixed: DB-011a is the
+  existing exact-duplicate rule, DB-011b the new prefix-redundant one. The two share no logic
+  and structurally cannot double-report the same index pair.
+- **DB coverage prose moved to a neutral source** — the DB dimension's coverage text left
+  `internal/providers/typescript/coverage.go` (where it lived as declared location debt) for
+  `internal/core/dbcoverage/`, composed into each provider's manifest by `append`, never
+  duplicated. `dbcoverage` imports no provider (leaf-pure). `COVERAGE.md` and the `CLAUDE.md`
+  documental map are corrected to match; the DB rule count is the real 10.
+
+### Not yet covered (declared)
+
+- **Routine-body rules (DB-030/031/040/041)** — deferred to `0.2.3`, not abandoned. A
+  multi-statement T-SQL routine body is captured truncated at its first internal `;`; a rule
+  like DB-031 ("is exception handling present?") over a truncated body would falsely affirm an
+  absence that is really unread text past the cut. Shipping it would trade an honest gap for a
+  rule that lies with confidence. (ADR 0025)
+- **DB-012 (never-used index)** — **permanently** not covered, not deferred: detecting an unused
+  index needs runtime query telemetry (e.g. `pg_stat_user_indexes`), which exists only inside a
+  live database. codefit's model is static and never connects to a database, so DB-012 is
+  structurally incompatible with how it operates. (ADR 0024)
+- **Index-vs-query analysis** stays deferred (needs the code↔schema crossing, `0.2.3`). The
+  view/N+1 rules add zero value on Prisma-only projects (no view block, no raw query surface in
+  `schema.prisma`).
+
 ## [0.2.1] — 2026-07-08
 
 **Phase 2.1 — multi-dialect SQL-DDL (MySQL, T-SQL).** The database dimension is no longer

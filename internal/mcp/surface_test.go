@@ -192,3 +192,58 @@ func TestConfirmSurfaceRejectsBadID(t *testing.T) {
 		t.Errorf("the tampered confirmation must be reported as invalid, got %d", len(resp.Invalid))
 	}
 }
+
+// codefit-surface-nplus1 orders by STRUCTURAL CERTAINTY, without filtering
+// (ADR 0005): local+awaited(+nested) ranks first, local+Promise.all-wrapped
+// (concurrent) next, the cross-function frontier ranked LAST — honest, never
+// dropped. Mirrors codefit-surface-overfetch's ordering discipline.
+func TestHandleSurfaceNPlus1OrdersByCertainty(t *testing.T) {
+	resp, err := mcp.HandleSurfaceNPlus1(mcp.SurfaceIDORRequest{
+		Files: []mcp.FileInput{
+			{Path: "app/frontier/route.ts", Content: `
+export async function GET() {
+  for (const id of ids) { await userService.findById(id); }
+}`},
+			{Path: "app/concurrent/route.ts", Content: `
+export async function GET() {
+  await Promise.all(ids.map(id => prisma.a.findUnique({ where: { id } })));
+}`},
+			{Path: "app/sequential/route.ts", Content: `
+export async function GET() {
+  for (const id of ids) { await prisma.b.findUnique({ where: { id } }); }
+}`},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Surface) != 3 {
+		t.Fatalf("ordering must not drop items; want 3, got %d", len(resp.Surface))
+	}
+	// 1st: local + sequential await — the most certain, worst shape.
+	if !resp.Surface[0].StructuralFacts["local_access_detected"] || !resp.Surface[0].StructuralFacts["awaited_in_loop"] {
+		t.Errorf("position 0 must be the local sequentially-awaited query, got %+v", resp.Surface[0])
+	}
+	// 2nd: local + concurrent (Promise.all).
+	if !resp.Surface[1].StructuralFacts["local_access_detected"] || !resp.Surface[1].StructuralFacts["promise_all_wrapped"] {
+		t.Errorf("position 1 must be the local Promise.all-wrapped query, got %+v", resp.Surface[1])
+	}
+	// 3rd: frontier — kept, not filtered, ranked last.
+	if resp.Surface[2].StructuralFacts["local_access_detected"] {
+		t.Errorf("position 2 must be the frontier (local_access_detected=false), got %+v", resp.Surface[2])
+	}
+
+	// JSON contract keys (§11 surface contract).
+	data, _ := json.Marshal(resp)
+	var m struct {
+		Surface []map[string]any `json:"surface"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"id", "category", "file", "line", "snippet", "structural_signals", "reason_to_review"} {
+		if _, ok := m.Surface[0][key]; !ok {
+			t.Errorf("surface JSON missing key %q: %s", key, data)
+		}
+	}
+}

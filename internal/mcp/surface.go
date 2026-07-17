@@ -91,6 +91,43 @@ func overfetchCertaintyRank(it findings.SurfaceItem) int {
 	}
 }
 
+// HandleSurfaceNPlus1 enumerates the N+1 (DB-201) surface and orders by
+// STRUCTURAL CERTAINTY, reusing the queryable facts — it does NOT filter
+// (ADR 0005): a loop over three literal elements is enumerated exactly like a
+// loop over an unbounded query result.
+//
+//	1st  local + sequential await — the worst, most certain shape
+//	2nd  local + Promise.all-wrapped (concurrent) — still N queries
+//	3rd  frontier (a service/repository call — codefit cannot see the query;
+//	     kept last, honest, never dropped)
+func HandleSurfaceNPlus1(req SurfaceIDORRequest) (SurfaceResponse, error) {
+	resp, err := handleSurface(req, string(surface.CategoryNPlus1))
+	if err != nil {
+		return resp, err
+	}
+	sort.SliceStable(resp.Surface, func(i, j int) bool {
+		return nplus1CertaintyRank(resp.Surface[i]) < nplus1CertaintyRank(resp.Surface[j])
+	})
+	return resp, nil
+}
+
+// nplus1CertaintyRank ranks an N+1 item by how certainly codefit can assert
+// the query-in-loop shape from structure alone (lower = more certain, ordered
+// first). Mirrors overfetchCertaintyRank's discipline: order by fact, never
+// filter — the frontier is ranked LAST but never dropped.
+func nplus1CertaintyRank(it findings.SurfaceItem) int {
+	switch {
+	case !it.StructuralFacts["local_access_detected"]:
+		return 3 // frontier — codefit could not see the query
+	case it.StructuralFacts["promise_all_wrapped"]:
+		return 2 // local, concurrent (Promise.all) — still N queries
+	case it.StructuralFacts["awaited_in_loop"]:
+		return 0 // local + sequential await — the worst, most certain shape
+	default:
+		return 1 // local, neither sequentially awaited nor Promise.all-wrapped
+	}
+}
+
 // sortUncheckedFirst stably orders items so those whose given structural fact is
 // false (the actionable case: no known check/limit detected) come before those
 // where it is true. Ordering by a fact is not a severity judgment.

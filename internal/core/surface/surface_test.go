@@ -141,6 +141,39 @@ func TestIntegrateInvalidSurfaceIDIsRejected(t *testing.T) {
 	}
 }
 
+// TestFindingFrom_DimensionForNPlus1IsDB: an agent-confirmed surface item with
+// category "nplus1" must be stamped findings.DimensionDB, not the hard-coded
+// findings.DimensionSecurity default that findingFrom used before dimensionFor
+// existed — an agent-confirmed N+1 must never be reported as a SECURITY finding.
+func TestFindingFrom_DimensionForNPlus1IsDB(t *testing.T) {
+	file, line, cat := "app/reports/route.ts", 20, "nplus1"
+	c := surface.Confirmation{
+		SurfaceID:  surface.StableID(file, line, cat),
+		Category:   cat,
+		File:       file,
+		Line:       line,
+		Verdict:    surface.VerdictVulnerable,
+		Reasoning:  "the handler awaits a Prisma call inside a for...of loop over an array from the database",
+		Confidence: 0.8,
+	}
+	in := surface.Integrate([]surface.Confirmation{c})
+	if len(in.Findings) != 1 {
+		t.Fatalf("vulnerable verdict must produce 1 finding, got %d", len(in.Findings))
+	}
+	if got := in.Findings[0].Dimension; got != findings.DimensionDB {
+		t.Errorf("nplus1 finding dimension = %q, want %q", got, findings.DimensionDB)
+	}
+}
+
+// idor/authz/overfetch confirmations must keep DimensionSecurity — dimensionFor's
+// default must not regress for the existing categories.
+func TestFindingFrom_DimensionDefaultsToSecurity(t *testing.T) {
+	in := surface.Integrate([]surface.Confirmation{conf(surface.VerdictVulnerable, findings.SeverityHigh, 0.8)})
+	if got := in.Findings[0].Dimension; got != findings.DimensionSecurity {
+		t.Errorf("idor finding dimension = %q, want %q (unchanged default)", got, findings.DimensionSecurity)
+	}
+}
+
 func TestSummaryReportsCompleteAudit(t *testing.T) {
 	in := surface.Integration{
 		Findings:  []findings.Finding{{}},

@@ -6,10 +6,57 @@ import (
 )
 
 // stmt is one top-level SQL statement with the 1-based line it starts on.
+//
+// term and quotedBlockSeen are the two tokenizer FACTS reduce.go's Body
+// derivation (Phase 2.2, Unit A) reads to decide db.Body.Complete — split()
+// already knows both for free while it scans; nothing about them is
+// discovered by re-reading the statement text afterward.
 type stmt struct {
 	text string
 	line int
+
+	// term is which mechanism ended this statement: the terminator kind, per
+	// the binding decision (architecture/tsql-body-truncation-limit).
+	term termKind
+
+	// quotedBlockSeen is true when a dollar-quoted ($$...$$ / $tag$...$tag$)
+	// block was consumed while scanning this statement — PostgreSQL's
+	// DollarQuoting swallows every internal ';' inside it, so a statement
+	// that contains one is trustworthy as COMPLETE even when its own
+	// terminator is an ordinary ';' (the outer one, after the $$ block
+	// closed). A plain single-quoted string literal does NOT set this: it
+	// only protects ITS OWN content from being misread as a terminator, it
+	// does not prove the statement's tail is intact (see routineBody in
+	// reduce.go for why counting bare string literals here would be unsafe).
+	quotedBlockSeen bool
 }
+
+// termKind is the mechanism that flushed a stmt — the tokenizer-state fact
+// db.Body.Complete is derived from (reduce.go), never from re-scanning the
+// body text for BEGIN/END (that unsound guard was REMOVED from this package,
+// see apply()'s doc comment and ADR 0022).
+type termKind string
+
+const (
+	// termSemicolon: the statement ended at an ordinary ';' — the ONLY kind
+	// that can mean "this may just be the first of several internal
+	// statements", because it is the same character a routine/trigger body
+	// uses for ITS OWN internal statement separators too.
+	termSemicolon termKind = "semicolon"
+	// termCustomDelimiter: the statement ended at the dialect's ACTIVE
+	// terminator after a MySQL "DELIMITER //" directive changed it away from
+	// ';' — by construction this means every internal ';' inside the body was
+	// NOT a terminator, so the whole body was captured.
+	termCustomDelimiter termKind = "customDelimiter"
+	// termGoBreak: the statement ended at a T-SQL/sqlcmd "GO" batch
+	// separator, which is not part of the SQL grammar in any dialect — the
+	// text up to it is whatever the tokenizer accumulated, never CUT by GO
+	// itself.
+	termGoBreak termKind = "goBreak"
+	// termEOF: the statement ended because the input ran out (no trailing
+	// terminator at all) — like termGoBreak, EOF itself never cuts content.
+	termEOF termKind = "eof"
+)
 
 // split tokenizes SQL into top-level statements, according to the given
 // dialect's lexical rules (comments, quoting, dollar-quoting). A statement
@@ -30,14 +77,16 @@ func split(src []byte, dialect *Dialect) []stmt {
 	line := 1
 	startLine := 0 // 0 = statement not started yet
 	i := 0
-	term := ";" // active statement terminator; changed by a DELIMITER directive
+	term := ";"         // active statement terminator; changed by a DELIMITER directive
+	quotedSeen := false // a dollar-quoted block was consumed since the last flush (Phase 2.2, Unit A)
 
-	flush := func() {
+	flush := func(kind termKind) {
 		if t := strings.TrimSpace(buf.String()); t != "" {
-			out = append(out, stmt{text: t, line: startLine})
+			out = append(out, stmt{text: t, line: startLine, term: kind, quotedBlockSeen: quotedSeen})
 		}
 		buf.Reset()
 		startLine = 0
+		quotedSeen = false
 	}
 	mark := func() {
 		if startLine == 0 {
@@ -63,7 +112,13 @@ func split(src []byte, dialect *Dialect) []stmt {
 		// regex while no body-internal fragment can ever leak out as its own
 		// top-level statement (the phantom-table risk the design flagged).
 		if adv, newTerm, ok := matchDelimiterDirective(s, i); ok {
-			flush()
+			// A DELIMITER directive line normally follows a statement that
+			// already flushed on its OWN terminator (the common case: buf is
+			// empty here, so this flush produces no stmt at all). Labeled
+			// termGoBreak because it is the same kind of soft, non-';' break —
+			// never a real semicolon — for the rare malformed input where buf
+			// is non-empty at this point.
+			flush(termGoBreak)
 			term = newTerm
 			if strings.Contains(s[i:i+adv], "\n") {
 				line++
@@ -80,7 +135,7 @@ func split(src []byte, dialect *Dialect) []stmt {
 		// limit (ADR 0022), not silently corrected. MySQL bodies wrapped in
 		// DELIMITER //…// are unaffected (the whole body is one statement here).
 		if adv := matchGoBatchSeparator(s, i); adv > 0 {
-			flush()
+			flush(termGoBreak)
 			if strings.Contains(s[i:i+adv], "\n") {
 				line++
 			}
@@ -121,6 +176,7 @@ func split(src []byte, dialect *Dialect) []stmt {
 		case dialect.DollarQuoting && c == '$':
 			if tag, ok := dollarTag(s, i); ok {
 				mark()
+				quotedSeen = true
 				buf.WriteString(tag)
 				i += len(tag)
 				for i < n {
@@ -141,7 +197,11 @@ func split(src []byte, dialect *Dialect) []stmt {
 				i++
 			}
 		case strings.HasPrefix(s[i:], term):
-			flush()
+			kind := termCustomDelimiter
+			if term == ";" {
+				kind = termSemicolon
+			}
+			flush(kind)
 			i += len(term)
 		case c == '\n':
 			line++
@@ -160,7 +220,7 @@ func split(src []byte, dialect *Dialect) []stmt {
 			i++
 		}
 	}
-	flush()
+	flush(termEOF)
 	return out
 }
 

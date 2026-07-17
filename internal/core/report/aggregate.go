@@ -60,9 +60,10 @@ type Concern struct {
 }
 
 const (
-	gapAffirmed = "affirmed"
-	gapAccess   = "access"
-	gapExposure = "exposure"
+	gapAffirmed   = "affirmed"
+	gapAccess     = "access"
+	gapExposure   = "exposure"
+	gapEfficiency = "efficiency"
 )
 
 // EndpointReport is the complete picture of one handler: all its concerns from
@@ -150,16 +151,18 @@ func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) [
 		out = append(out, *ep)
 	}
 	// Order by ACTIONABLE structural gaps, hardest kind first (affirmed →
-	// access → exposure), then by certain-concern count. This surfaces the real
-	// findings (a missing access check, an affirmed vulnerability) above
-	// endpoints that are merely heavily instrumented but protected. It is ordering
-	// by FACT (which control is missing), never by severity — the agent judges
-	// danger. Access gaps outrank exposure gaps because over-fetch with no select
-	// is ubiquitous (every serialization) and would otherwise drown the
-	// access-control findings (ADR 0006, validated on Bitácora).
+	// access → exposure → efficiency), then by certain-concern count. This
+	// surfaces the real findings (a missing access check, an affirmed
+	// vulnerability) above endpoints that are merely heavily instrumented but
+	// protected. It is ordering by FACT (which control is missing), never by
+	// severity — the agent judges danger. Access gaps outrank exposure gaps
+	// because over-fetch with no select is ubiquitous (every serialization) and
+	// would otherwise drown the access-control findings (ADR 0006, validated on
+	// Bitácora). Efficiency (N+1) is ranked LAST for the same reason: an N+1
+	// must never outrank an access-control gap in the summary.
 	sort.SliceStable(out, func(i, j int) bool {
-		ai, ci, ei := gapCounts(out[i])
-		aj, cj, ej := gapCounts(out[j])
+		ai, ci, ei, fi := gapCounts(out[i])
+		aj, cj, ej, fj := gapCounts(out[j])
 		switch {
 		case ai != aj:
 			return ai > aj // affirmed deterministic
@@ -167,6 +170,8 @@ func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) [
 			return ci > cj // missing access control
 		case ei != ej:
 			return ei > ej // over-exposure
+		case fi != fj:
+			return fi > fj // efficiency (N+1) — ranked last
 		case out[i].CertainConcerns != out[j].CertainConcerns:
 			return out[i].CertainConcerns > out[j].CertainConcerns
 		case out[i].File != out[j].File:
@@ -286,8 +291,11 @@ func categoriesOf(ep EndpointReport) []string {
 	return out
 }
 
-// gapCounts returns an endpoint's count of affirmed, access, and exposure gaps.
-func gapCounts(ep EndpointReport) (affirmed, access, exposure int) {
+// gapCounts returns an endpoint's count of affirmed, access, exposure, and
+// efficiency gaps. Efficiency (N+1) is returned LAST and ranked last in the
+// endpoint sort — an N+1 must never outrank an access-control gap, the same
+// rationale ADR 0006 used for exposure-vs-access.
+func gapCounts(ep EndpointReport) (affirmed, access, exposure, efficiency int) {
 	for _, c := range ep.Concerns {
 		switch c.Gap {
 		case gapAffirmed:
@@ -296,9 +304,11 @@ func gapCounts(ep EndpointReport) (affirmed, access, exposure int) {
 			access++
 		case gapExposure:
 			exposure++
+		case gapEfficiency:
+			efficiency++
 		}
 	}
-	return affirmed, access, exposure
+	return affirmed, access, exposure, efficiency
 }
 
 func countActionable(cs []Concern) int {
@@ -370,6 +380,12 @@ func concernFromSurface(it findings.SurfaceItem) Concern {
 // An over-fetch with no select/omit is an EXPOSURE gap. A frontier IDOR (the id
 // left the body, local_access_detected=false) is not a local gap — the endpoint is
 // classified as frontier and the agent follows the data.
+//
+// An N+1 (category "nplus1") is an EFFICIENCY gap — codefit found a query inside a
+// loop. This case is the single most dangerous wiring detail in the N+1 change: an
+// endpoint whose only surface item is an N+1 concern MUST be actionable, never fall
+// through to resolved_clean (which would print a false "no gap found" affirmation
+// over a real N+1 — worse than not detecting it at all).
 func surfaceGap(it findings.SurfaceItem) (bool, string) {
 	switch it.Category {
 	case "idor":
@@ -384,6 +400,8 @@ func surfaceGap(it findings.SurfaceItem) (bool, string) {
 		if !it.StructuralFacts["field_limiting_detected"] {
 			return true, gapExposure
 		}
+	case "nplus1":
+		return true, gapEfficiency
 	}
 	return false, ""
 }
