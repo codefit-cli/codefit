@@ -14,7 +14,12 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+### Security
+
+- **Go toolchain bumped to `go1.25.12`** (go.mod + all four workflow pins) to close
+  **GO-2026-5856** — an Encrypted Client Hello privacy leak in the standard library's
+  `crypto/tls`, reached transitively by the OSV.dev HTTP client and the file hasher. A
+  toolchain recompile against the patched stdlib, no code change.
 
 ## [0.2.2] — 2026-07-17
 
