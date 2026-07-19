@@ -70,10 +70,7 @@ func TestTSQL_CreateView_SingleStatement_AlwaysComplete(t *testing.T) {
 // #1054).
 func TestTSQL_MultiStatementProcedure_PartialCapture(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Procedures) != 1 {
-		t.Fatalf("procedures = %d, want 1", len(s.Procedures))
-	}
-	body := s.Procedures[0].Body
+	body := findProc(t, s, "uspGetBillOfMaterials").Body
 	if !body.Complete {
 		t.Errorf("Complete = false, want true — the real uspGetBillOfMaterials procedure must be captured whole to GO; Text=%q", body.Text)
 	}
@@ -99,10 +96,7 @@ func TestTSQL_MultiStatementProcedure_PartialCapture(t *testing.T) {
 // uspPrintError/uspLogError).
 func TestTSQL_MultiStatementTrigger_PartialCapture(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(s.Triggers))
-	}
-	trig := s.Triggers[0]
+	trig := findTrigger(t, s, "uPurchaseOrderDetail")
 	if trig.Table != "PurchaseOrderDetail" {
 		t.Errorf("Table = %q, want %q", trig.Table, "PurchaseOrderDetail")
 	}
@@ -134,13 +128,95 @@ func TestTSQL_MultiStatementTrigger_PartialCapture(t *testing.T) {
 // own name). Fixture: the REAL Purchasing.uPurchaseOrderDetail trigger.
 func TestTSQL_TriggerName_SchemaQualified_IsTriggerNameNotSchema(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(s.Triggers))
-	}
-	trig := s.Triggers[0]
+	// The schema-qualified [Purchasing].[uPurchaseOrderDetail] must resolve to
+	// the trigger's OWN name — findTrigger locating it by "uPurchaseOrderDetail"
+	// (not "Purchasing") is itself the regression assertion.
+	trig := findTrigger(t, s, "uPurchaseOrderDetail")
 	if trig.Name != "uPurchaseOrderDetail" {
 		t.Errorf("Name = %q, want %q (the trigger's own name, not the schema)", trig.Name, "uPurchaseOrderDetail")
 	}
+}
+
+// TestTSQL_CleanNegativeProcedure_TryCatch_FullCapture locks the vendored
+// CLEAN-NEGATIVE procedure uspUpdateEmployeePersonalInfo (feat/tsql-routine-
+// fixtures): a single UPDATE wrapped in BEGIN TRY ... BEGIN CATCH, no dynamic
+// SQL. Its multi-statement body (SET NOCOUNT ON; TRY; UPDATE; CATCH) must be
+// captured WHOLE to the GO batch separator — Complete=true, no truncation Note
+// — so a future DB-031 (missing-exception-handling) rule can read the real
+// TRY/CATCH and correctly NOT fire. This is the live proof of ADR 0027
+// de-truncation over a second, independent real T-SQL routine.
+func TestTSQL_CleanNegativeProcedure_TryCatch_FullCapture(t *testing.T) {
+	body := findProc(t, realDDLSchema(t), "uspUpdateEmployeePersonalInfo").Body
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real uspUpdateEmployeePersonalInfo body must be captured whole to GO; Note=%q Text=%q", body.Note, body.Text)
+	}
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
+	}
+	if !strings.Contains(body.Text, "SET NOCOUNT ON") {
+		t.Errorf("Body.Text = %q, want the FIRST statement (SET NOCOUNT ON)", body.Text)
+	}
+	// NOTE: the tokenizer canonicalizes T-SQL [bracket] identifiers to "..".
+	// quoting in Body.Text (the on-disk fixture stays verbatim; the parsed body
+	// is normalized), so assert on the unquoted keywords/tokens.
+	if !strings.Contains(body.Text, "BEGIN TRY") || !strings.Contains(body.Text, "UPDATE") || !strings.Contains(body.Text, "Employee") || !strings.Contains(body.Text, "BEGIN CATCH") {
+		t.Errorf("Body.Text = %q, MUST contain the TRY/CATCH block and the UPDATE — the whole body is captured to GO", body.Text)
+	}
+}
+
+// TestTSQL_NonCascadingTrigger_FullCapture locks the vendored CLEAN-NEGATIVE
+// trigger dEmployee (feat/tsql-routine-fixtures): an INSTEAD OF DELETE trigger
+// whose whole body is DECLARE/SET/RAISERROR/ROLLBACK — it writes NO other
+// table (DB-040 cascade NEGATIVE) and makes NO external call (DB-041
+// NEGATIVE). The body still carries internal ';' and must be captured whole to
+// GO — Complete=true — so those future trigger rules read the real body and
+// correctly do NOT fire.
+func TestTSQL_NonCascadingTrigger_FullCapture(t *testing.T) {
+	trig := findTrigger(t, realDDLSchema(t), "dEmployee")
+	if trig.Table != "Employee" {
+		t.Errorf("Table = %q, want %q", trig.Table, "Employee")
+	}
+	body := trig.Body
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real dEmployee body must be captured whole to GO; Note=%q Text=%q", body.Note, body.Text)
+	}
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
+	}
+	if !strings.Contains(body.Text, "INSTEAD OF DELETE") || !strings.Contains(body.Text, "RAISERROR") {
+		t.Errorf("Body.Text = %q, want the RAISERROR-only body verbatim", body.Text)
+	}
+	// Honest negative: no INSERT/UPDATE/DELETE into any OTHER table, no EXECUTE.
+	if strings.Contains(body.Text, "INSERT INTO") || strings.Contains(body.Text, "EXECUTE") {
+		t.Errorf("Body.Text = %q, expected NO cascade write and NO external EXECUTE (DB-040/DB-041 negative)", body.Text)
+	}
+}
+
+// findProc returns the procedure with the given name, failing the test if
+// absent — used since the real-object fixture now holds MORE than one
+// procedure (positional [0] indexing would be fragile).
+func findProc(t *testing.T, s *db.Schema, name string) db.Procedure {
+	t.Helper()
+	for _, p := range s.Procedures {
+		if p.Name == name {
+			return p
+		}
+	}
+	t.Fatalf("procedure %q not found; have %+v", name, s.Procedures)
+	return db.Procedure{}
+}
+
+// findTrigger returns the trigger with the given name, failing the test if
+// absent.
+func findTrigger(t *testing.T, s *db.Schema, name string) db.Trigger {
+	t.Helper()
+	for _, tr := range s.Triggers {
+		if tr.Name == name {
+			return tr
+		}
+	}
+	t.Fatalf("trigger %q not found; have %+v", name, s.Triggers)
+	return db.Trigger{}
 }
 
 // realDDLSchema parses the real, verbatim AdventureWorks excerpt
