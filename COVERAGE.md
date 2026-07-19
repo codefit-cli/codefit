@@ -274,15 +274,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **not** covered in this release — the SQL-DDL parser records their names and,
   where the dialect allows, their bodies, but no rule reads them yet. This is
   **deferred, not abandoned**: it moves to a separate change
-  (`routine-body-rules`, targeted for a later release) because it depends on a
-  parser fix first. SQL Server (T-SQL) has no statement-separator escape
-  mechanism, so a multi-statement T-SQL routine body is captured **truncated**
-  at its first internal `;` and marked incomplete; a rule like DB-031 ("is
-  exception handling present?") evaluated over a truncated body would
-  **falsely affirm** an absence that is really just unread text past the cut.
-  Shipping that rule family in this release would trade an honest declared gap
-  for a rule that lies with confidence, so it waits for the parser fix. When
-  the routine-body rules land, they will carry the same Prisma-zero-value
+  (`routine-body-rules`, a later slice of `0.2.3`). The parser prerequisite is
+  now **done** — a multi-statement T-SQL routine body is captured **complete**
+  to the `GO` batch separator (or EOF), **not** truncated at its first internal
+  `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL `DELIMITER`-wrapped bodies
+  were already complete). The blocker is lifted and the full body text is
+  available marked complete; what remains is simply that the four rules are
+  **not implemented yet** — no longer a parser gap. (Had they shipped over the
+  old truncated T-SQL body, a rule like DB-031 ("is exception handling
+  present?") would have **falsely affirmed** an absence that was really just
+  unread text past the cut — which is exactly why the parser fix came first.)
+  When the routine-body rules land, they will carry the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from this rule family
   either.
@@ -298,11 +300,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
-- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL
-  `GO`-batched stored-procedure/trigger **body** containing a `CREATE TABLE`-shaped
-  fragment may surface as a spurious top-level table — codefit does not model
-  routine bodies; MySQL routine bodies wrapped in `DELIMITER //`...`//` are **not**
-  affected (handled correctly). (2) A MySQL client `DELIMITER` directive is
+- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL routine
+  body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
+  fragment inside a `GO`-batched procedure/trigger body is **absorbed into the
+  body**, not surfaced as a spurious top-level table (ADR 0027, closing a limit
+  ADR 0022 had declared); the trade is that a T-SQL routine with **no trailing
+  `GO`** immediately followed by another statement absorbs that statement into
+  the body — invalid T-SQL batching, the intentional boundary of ADR 0027. MySQL
+  routine bodies wrapped in `DELIMITER //`...`//` are unaffected. (2) A MySQL client `DELIMITER` directive is
   recognized only when its argument is punctuation (`//`, `$$`); a word-based
   delimiter such as `DELIMITER GO` is **not** recognized. (3) The T-SQL `GO` batch
   separator is recognized only when a line is exactly `GO`; a column literally
