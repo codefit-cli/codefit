@@ -57,6 +57,18 @@ var (
 	reTriggerExecutes = regexp.MustCompile(`(?is)\bexecute\s+(?:function|procedure)\s+("?[\w".]+"?)\s*\(`)
 )
 
+// isRoutineHead reports whether accumulated statement text is a CREATE
+// FUNCTION/PROCEDURE/TRIGGER head. Shared with split() ON PURPOSE (intentional
+// seam): split() consults it — only for a dialect with
+// RoutineBodyEndsAtBatchSeparator — to decide whether an internal ';' is a body
+// separator (suppress) or the statement terminator (flush). Head-recognition,
+// NOT block counting: it never inspects BEGIN/END. Do NOT "clean up" this seam
+// by moving these regexes out of reach — the T-SQL de-truncation depends on it
+// (ADR 0027).
+func isRoutineHead(text string) bool {
+	return reRoutine.MatchString(text) || reTrigger.MatchString(text)
+}
+
 // apply classifies one statement and mutates the schema. Anything outside the
 // declared subset (INSERT/UPDATE/DO/GRANT/COMMENT/CREATE TYPE/…) is skipped.
 //
