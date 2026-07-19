@@ -2,7 +2,7 @@ module github.com/codefit-cli/codefit
 
 go 1.25.0
 
-toolchain go1.25.11
+toolchain go1.25.12
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
