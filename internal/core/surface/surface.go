@@ -40,6 +40,20 @@ const (
 	// coverage.go:34 ("Prefix-redundant indexes ... are NOT yet detected").
 	CategoryDBPrefixRedundantIndex Category = "db-prefix-redundant-index"
 
+	// CategoryDBRoutineNoExceptionHandling (DB-031, 0.2.3 routine-body rules):
+	// a stored procedure/function whose captured body contains NO exception-
+	// handling construct for its dialect (T-SQL BEGIN TRY, MySQL DECLARE ...
+	// HANDLER, PL/pgSQL EXCEPTION WHEN). This states an ABSENCE as a structural
+	// fact, never an affirmation of a defect: whether the missing handler
+	// matters — and whether a PRESENT handler is adequate (an empty CATCH is
+	// "present" here yet may still be a bug) — is the agent's judgment, not
+	// codefit's. Body-derived (Procedure.Body), read through the same bounded,
+	// string/comment-aware token scanner discipline as DB-020, never a general
+	// SQL parser. Gated on Body.Complete (ADR 0004/0025): a body the parser
+	// could not prove whole is never evaluated, so an absence over unread text
+	// is never falsely affirmed.
+	CategoryDBRoutineNoExceptionHandling Category = "db-routine-no-exception-handling"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
