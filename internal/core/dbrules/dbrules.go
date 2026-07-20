@@ -23,6 +23,7 @@ func All() []Rule {
 		db020{},       // Phase 2.2 — view sensitive-column exposure (surface)
 		db011prefix{}, // Phase 2.2 (Unit E) — prefix-redundant index (surface)
 		db031{},       // 0.2.3 — routine without exception handling (surface, body-derived)
+		db040{},       // 0.2.3 — trigger cross-table cascade (surface, body-derived)
 	}
 }
 

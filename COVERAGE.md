@@ -280,6 +280,34 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   Prisma-only projects:** Prisma's `schema.prisma` has no
   stored-procedure/function block concept, so a Prisma-only project has no
   routines for this rule to read.
+- **Trigger cross-table cascade (DB-040).** A **trigger** whose body performs
+  DML (INSERT/UPDATE/DELETE) against a table **other** than the one it fires on.
+  Surface, never an affirmation: it states the facts (`writes_other_table: X`
+  per other table, and `documented_by_comment`) and the **agent** judges whether
+  the cascade is intentional — DB-040 detects the cross-table write, it does not
+  grade it. **Body source is per-dialect (ADR 0026):** MySQL/T-SQL triggers
+  carry an inline body scanned directly; a **PostgreSQL** trigger has no inline
+  body, so the rule resolves `Schema.ExecutedProcedure(trigger)` to the executed
+  function and scans **its** body, comparing writes against the trigger's own
+  table — an unresolvable built-in (e.g. `tsvector_update_trigger`) makes the
+  rule **abstain**. Bounded string/comment-aware scanner (DB-020/DB-031
+  discipline), never a SQL-expression parser: a DML token inside a string or
+  comment does not fabricate a write; the T-SQL `UPDATE(column)` function is
+  excluded; a trigger's own event clause (`AFTER UPDATE`, `INSTEAD OF DELETE`)
+  is not mistaken for a statement; and a schema-qualified write to the trigger's
+  **own** table is correctly not a cascade. **Gated on `Body.Complete`** (ADR
+  0004/0025). Per-dialect coverage: **T-SQL/AdventureWorks** — real POSITIVE
+  (`uPurchaseOrderDetail` cascades into `TransactionHistory` and
+  `PurchaseOrderHeader`, its same-table `PurchaseOrderDetail` write excluded) and
+  real NEGATIVE (`dEmployee`, only RAISERROR/ROLLBACK); **MySQL/Sakila** — real
+  POSITIVE (`ins_film`/`upd_film`/`del_film` cascade into `film_text`) and a
+  **constructed** NEGATIVE, declared synthetic in
+  `testdata/mysql/constructed_non_cascading_trigger.sql`; **PostgreSQL** — real
+  NEGATIVE (Pagila `last_updated`, only sets `NEW`) and a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/pg_constructed_cascade_trigger.sql` (a trigger→function pair
+  exercising the ADR-0026 resolution path). **Zero value on Prisma-only
+  projects:** `schema.prisma` has no trigger block concept.
 
 ### Not covered (declared, not silent)
 
@@ -304,15 +332,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   never connects to a database — it reads only DDL/schema text — so this rule
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
-- **Database views ARE covered** for one rule (DB-020, sensitive-column
-  exposure), and **stored procedures/functions ARE covered** for one rule
-  (DB-031, routine without exception handling) — both see above. The
-  **remaining routine-body/trigger rules** — DB-030 (dynamic SQL by string
-  concatenation), DB-040 (trigger cross-table DML), DB-041 (trigger
+- **Database views ARE covered** for DB-020 (sensitive-column exposure),
+  **stored procedures/functions ARE covered** for DB-031 (routine without
+  exception handling), and **triggers ARE covered** for DB-040 (cross-table
+  cascade) — all see above. The **remaining routine-body/trigger rules** —
+  DB-030 (dynamic SQL by string concatenation) and DB-041 (trigger
   external-effecting call) — are **not** covered in this release: the SQL-DDL
   parser records their bodies, but no rule reads them for those checks yet. This
   is **deferred, not abandoned**: they remain in the `routine-body-rules` change
-  of `0.2.3`, alongside the now-landed DB-031. The parser prerequisite was
+  of `0.2.3`, alongside the now-landed DB-031 and DB-040. The parser prerequisite was
   already **done** — a multi-statement T-SQL routine body is captured
   **complete** to the `GO` batch separator (or EOF), **not** truncated at its
   first internal `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL
