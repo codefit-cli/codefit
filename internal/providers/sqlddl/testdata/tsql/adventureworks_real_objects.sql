@@ -8,17 +8,23 @@
 --
 --   Source:  https://github.com/microsoft/sql-server-samples
 --            samples/databases/adventure-works/oltp-install-script/instawdb.sql
---   Objects taken (verbatim, unaltered other than CRLF->LF normalization):
+--   Objects taken (verbatim, unaltered other than CRLF->LF normalization and
+--   stripping the file's leading UTF-8 BOM — the BOM sits on the whole-file
+--   first line, outside every object's DDL):
 --     - CREATE VIEW    [HumanResources].[vEmployee]              (single SELECT)
 --     - CREATE PROCEDURE [dbo].[uspGetBillOfMaterials]            (recursive CTE,
 --       multiple internal statements)
 --     - CREATE TRIGGER [Purchasing].[uPurchaseOrderDetail]        (AFTER UPDATE,
 --       multiple internal statements, TRY/CATCH)
+--     - CREATE PROCEDURE [HumanResources].[uspUpdateEmployeePersonalInfo]
+--       (multi-statement, TRY/CATCH — DB-031 clean negative)
+--     - CREATE TRIGGER [HumanResources].[dEmployee]               (INSTEAD OF
+--       DELETE, no cross-table cascade, no external call — DB-040/041 negative)
 --
 -- Not the whole install script — trimmed to these three objects only.
 -- Trimming unrelated objects is fine; the DDL of the objects kept below is
--- NOT altered (byte-for-byte from upstream, aside from CRLF normalization
--- to match this repo's LF convention). Any cross-object reference not
+-- NOT altered (byte-for-byte from upstream, aside from CRLF->LF normalization
+-- to match this repo's LF convention and stripping the leading UTF-8 BOM). Any cross-object reference not
 -- present in this excerpt (e.g. [Production].[BillOfMaterials]) is expected
 -- and does not affect the DDL parser, which is structural and does not
 -- resolve cross-object references at parse time.
