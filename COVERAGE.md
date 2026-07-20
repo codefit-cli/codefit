@@ -338,6 +338,29 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   from _not covered_** (which would mean non-detectable): the capability exists,
   only the dogfood evidence is absent by the dialect's nature. **Zero value on
   Prisma-only projects.**
+- **Dynamic SQL construction in a routine (DB-030).** A **stored procedure or
+  function** whose body **builds and runs SQL from a string at runtime**.
+  Surface, never an affirmation: it states the fact (`dynamic_sql: <marker>`) and
+  the **agent** judges whether it is injectable — codefit maps the surface, it
+  deliberately does **not** do taint analysis. **The trap:** a static EXEC/CALL
+  of a **named internal** procedure (`EXEC dbo.uspFoo`) is **not** dynamic SQL
+  and does not fire (same EXEC family as DB-041's trap, excluded for a different
+  reason — there "not external", here "not dynamic"). Per-dialect markers:
+  **T-SQL** (`sp_executesql`; `EXEC(<expr>)` in parentheses, not a literal proc
+  name); **PL/pgSQL** (`EXECUTE '<string>'` / `EXECUTE format(...)`;
+  `quote_literal` / `quote_ident`); **MySQL** (`PREPARE ... FROM`). Bounded
+  string/comment-aware scanner; gated on `Body.Complete`. **Declared limit:** a
+  bare `EXECUTE <variable>` with no construction marker visible in the same body
+  is a miss. Per-dialect coverage: **PostgreSQL** — real POSITIVE (Pagila
+  `rewards_report` builds a string with `quote_literal` and runs it via
+  `EXECUTE`) and real NEGATIVE (`last_updated`); **MySQL** — a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/mysql/constructed_dynamic_sql_proc.sql` (`PREPARE ... FROM` a
+  CONCATenated string), and a real NEGATIVE (Sakila `rewards_report`,
+  temp-table based); **T-SQL** — a **constructed** POSITIVE, declared synthetic
+  in `testdata/tsql/constructed_dynamic_sql_proc.sql` (`sp_executesql` over a
+  built string), and a real NEGATIVE (`uspGetBillOfMaterials`). **Zero value on
+  Prisma-only projects.**
 
 ### Not covered (declared, not silent)
 
@@ -362,27 +385,21 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   never connects to a database — it reads only DDL/schema text — so this rule
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
-- **Database views ARE covered** for DB-020 (sensitive-column exposure),
-  **stored procedures/functions ARE covered** for DB-031 (routine without
-  exception handling), and **triggers ARE covered** for DB-040 (cross-table
-  cascade) and DB-041 (external-effecting call) — all see above. The **one
-  remaining routine-body rule** — DB-030 (dynamic SQL by string
-  concatenation) — is **not** covered in this release: the SQL-DDL parser
-  records routine bodies, but no rule reads them for that check yet. This
-  is **deferred, not abandoned**: it is the last item of the `routine-body-rules`
-  change of `0.2.3`, alongside the now-landed DB-031, DB-040, and DB-041. The parser prerequisite was
-  already **done** — a multi-statement T-SQL routine body is captured
-  **complete** to the `GO` batch separator (or EOF), **not** truncated at its
-  first internal `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL
-  `DELIMITER`-wrapped bodies were already complete) — which is exactly what let
-  DB-031 read whole T-SQL bodies safely. (Had DB-031 shipped over the old
-  truncated T-SQL body, "is exception handling present?" would have **falsely
-  affirmed** an absence that was really just unread text past the cut — which is
-  why the parser fix came first, and why DB-031 still **gates on
-  `Body.Complete`**.) When the remaining routine-body rules land, they carry the
-  same Prisma-zero-value limit as DB-020/DB-031: Prisma's `schema.prisma` has no
-  stored-procedure/trigger block concept, so a Prisma-only project gets no value
-  from this rule family either.
+- **The routine-body rule family is now COMPLETE.** DB-030 (dynamic SQL
+  construction), DB-031 (routine without exception handling), DB-040 (trigger
+  cross-table cascade), and DB-041 (trigger external-effecting call) are **all
+  covered** as surface (see above), **none deferred**. The parser prerequisite
+  was **done** — a multi-statement T-SQL routine body is captured **complete** to
+  the `GO` batch separator (or EOF), **not** truncated at its first internal `;`
+  (ADR 0027; PostgreSQL dollar-quoted and MySQL `DELIMITER`-wrapped bodies were
+  already complete) — which is what let these rules read whole T-SQL bodies
+  safely. (Had DB-031 shipped over the old truncated T-SQL body, "is exception
+  handling present?" would have **falsely affirmed** an absence that was really
+  just unread text past the cut — which is why the parser fix came first.) Each
+  rule still **gates on `Body.Complete`** so a body the parser could not prove
+  whole is never evaluated. The whole family carries the same Prisma-zero-value
+  limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
+  block concept, so a Prisma-only project gets no value from any of these rules.
 - **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
   columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
 - **Express/Fastify handler passed by reference.** A handler that is a named

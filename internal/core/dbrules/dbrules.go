@@ -25,6 +25,7 @@ func All() []Rule {
 		db031{},       // 0.2.3 — routine without exception handling (surface, body-derived)
 		db040{},       // 0.2.3 — trigger cross-table cascade (surface, body-derived)
 		db041{},       // 0.2.3 — trigger external-effecting call (surface, body-derived)
+		db030{},       // 0.2.3 — dynamic SQL construction in a routine (surface, body-derived)
 	}
 }
 
