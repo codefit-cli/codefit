@@ -71,6 +71,19 @@ const (
 	// Body.Complete (ADR 0004/0025).
 	CategoryDBTriggerCrossTableCascade Category = "db-trigger-cross-table-cascade"
 
+	// CategoryDBTriggerExternalCall (DB-041, 0.2.3 routine-body rules): a TRIGGER
+	// whose body invokes an EXTERNAL-EFFECTING call — one that reaches OUTSIDE the
+	// database (a shell exec, OLE automation, email, cross-database/remote query,
+	// async notification, or an untrusted-language routine). It states the
+	// structural FACT ("this trigger makes external call(s): X"), never an
+	// affirmation that the call is unsafe — the exploitability is the AGENT's
+	// judgment. STRICT vocabulary per dialect: a plain EXECUTE/CALL of an internal
+	// stored procedure is NOT external and does not fire (the noise a loose rule
+	// would create). Body source is per-dialect, resolving a PostgreSQL trigger to
+	// its executed function (ADR 0026) exactly as DB-040 does. Bounded, string/
+	// comment-aware token scanner; gated on Body.Complete (ADR 0004/0025).
+	CategoryDBTriggerExternalCall Category = "db-trigger-external-call"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
