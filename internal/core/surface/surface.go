@@ -84,6 +84,16 @@ const (
 	// comment-aware token scanner; gated on Body.Complete (ADR 0004/0025).
 	CategoryDBTriggerExternalCall Category = "db-trigger-external-call"
 
+	// CategoryDBDynamicSQLInRoutine (DB-030, 0.2.3 routine-body rules): a stored
+	// procedure or function whose body CONSTRUCTS and runs SQL at runtime from a
+	// string (T-SQL sp_executesql / EXEC(@var), PL/pgSQL EXECUTE over a built
+	// string / format() / quote_*, MySQL PREPARE ... FROM). It states the FACT
+	// that dynamic SQL is built here; whether it is injectable is the AGENT's
+	// judgment (codefit maps the surface, it does not do taint analysis). A static
+	// EXEC/CALL of a named internal procedure is NOT dynamic SQL and does not fire.
+	// Bounded string/comment-aware scanner; gated on Body.Complete (ADR 0004/0025).
+	CategoryDBDynamicSQLInRoutine Category = "db-dynamic-sql-in-routine"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
