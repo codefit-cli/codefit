@@ -24,6 +24,7 @@ func All() []Rule {
 		db011prefix{}, // Phase 2.2 (Unit E) — prefix-redundant index (surface)
 		db031{},       // 0.2.3 — routine without exception handling (surface, body-derived)
 		db040{},       // 0.2.3 — trigger cross-table cascade (surface, body-derived)
+		db041{},       // 0.2.3 — trigger external-effecting call (surface, body-derived)
 	}
 }
 

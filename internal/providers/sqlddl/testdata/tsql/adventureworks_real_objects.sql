@@ -220,15 +220,18 @@ GO
 --       DB-041 external-call is a TRIGGER rule and does not classify a proc.)
 --     - CREATE TRIGGER [HumanResources].[dEmployee]  — an INSTEAD OF DELETE
 --       trigger whose whole body is DECLARE/SET/RAISERROR/ROLLBACK: it writes
---       NO other table (a DB-040 cascade NEGATIVE) and makes NO external/
---       procedure call (a DB-041 NEGATIVE). It has no TRY/CATCH, so as a
---       trigger it is also a DB-031 POSITIVE.
+--       NO other table (a DB-040 cascade NEGATIVE) and makes NO external call
+--       (a DB-041 NEGATIVE). (DB-031 covers procedures/functions only, not
+--       triggers, so it does not classify dEmployee.)
 --
 -- Complement to the first three objects: uspGetBillOfMaterials (no handler =
 -- DB-031 POSITIVE, no dynamic SQL = DB-030 NEGATIVE) and uPurchaseOrderDetail
--- (writes TransactionHistory/PurchaseOrderHeader = DB-040 cascade POSITIVE;
--- EXECUTE uspPrintError/uspLogError = DB-041 external-call POSITIVE; has
--- TRY/CATCH = DB-031 NEGATIVE for a trigger). Kept at end-of-file so it does
+-- (writes TransactionHistory/PurchaseOrderHeader = DB-040 cascade POSITIVE; its
+-- CATCH does EXECUTE [dbo].[uspPrintError]/[uspLogError], which are INTERNAL
+-- logging procs — NOT external-effecting — so under DB-041's STRICT vocabulary
+-- this trigger is the DB-041 real NEGATIVE / trap, never a positive; the DB-041
+-- positive is the constructed xp_cmdshell trigger in
+-- constructed_external_call_trigger.sql). Kept at end-of-file so it does
 -- not shift the line numbers the existing tests pin for the objects above.
 -- Cross-object references ([HumanResources].[Employee], [dbo].[uspLogError])
 -- not present in this excerpt are expected and do not affect the structural

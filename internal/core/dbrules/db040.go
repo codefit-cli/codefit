@@ -45,7 +45,7 @@ func (db040) ID() string { return "DB-040" }
 func (db040) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem
 	for _, t := range s.Triggers {
-		bodyText, complete := db040bodyToScan(s, t)
+		bodyText, complete := triggerBodyToScan(s, t)
 		if bodyText == "" || !complete {
 			continue // unresolvable, or a body the parser could not prove whole — abstain
 		}
@@ -74,12 +74,12 @@ func (db040) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	return nil, out
 }
 
-// db040bodyToScan returns the body text DB-040 should scan for trigger t, and
+// triggerBodyToScan returns the body text DB-040 should scan for trigger t, and
 // whether that body is Complete. For a PostgreSQL-shaped trigger (ExecutesFunction
 // set) it resolves the executed function and returns ITS body; an unresolvable
 // function yields ("", false) so the caller abstains. For an inline-body trigger
 // (MySQL/T-SQL) it returns the trigger's own body.
-func db040bodyToScan(s *db.Schema, t db.Trigger) (string, bool) {
+func triggerBodyToScan(s *db.Schema, t db.Trigger) (string, bool) {
 	if t.ExecutesFunction != "" {
 		fn, ok := s.ExecutedProcedure(t)
 		if !ok {

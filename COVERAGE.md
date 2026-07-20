@@ -308,6 +308,36 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `testdata/pg_constructed_cascade_trigger.sql` (a trigger→function pair
   exercising the ADR-0026 resolution path). **Zero value on Prisma-only
   projects:** `schema.prisma` has no trigger block concept.
+- **Trigger external-effecting call (DB-041).** A **trigger** whose body invokes
+  a call that reaches **outside** the database (shell exec, OLE automation,
+  email, remote/cross-database query, async notification, or a pipe to a
+  program). Surface, never an affirmation: it states the fact (`external_call:
+  X`) and the **agent** judges whether the call is safe. **Strict vocabulary is
+  the line between real risk and noise:** an EXECUTE/CALL of an **internal**
+  stored procedure (`EXECUTE dbo.uspLogError`, `CALL recompute_totals`) does
+  **not** fire — that is the rule's trap, the token that looks like a call but is
+  not external. Per-dialect vocabulary: **T-SQL** (`xp_cmdshell`, `sp_OA*`,
+  `sp_send_dbmail`, `OPENROWSET`, `OPENQUERY`); **PostgreSQL** (`dblink` /
+  `dblink_exec`, `NOTIFY` / `pg_notify`, `COPY ... PROGRAM`); **MySQL**
+  (`sys_exec` / `sys_eval` UDFs). Body source is per-dialect, resolving a
+  PostgreSQL trigger to its function (ADR 0026) as DB-040 does; gated on
+  `Body.Complete`. Bounded string/comment-aware scanner: a token in a string or
+  comment does not fire, and a member access (`NEW.notify`) is not the `NOTIFY`
+  statement. Per-dialect coverage: **T-SQL/AdventureWorks** — a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/tsql/constructed_external_call_trigger.sql` (a trigger that EXECs
+  `xp_cmdshell`), and a real **NEGATIVE / trap** (`uPurchaseOrderDetail`, whose
+  only calls are EXECUTE of the internal `uspPrintError`/`uspLogError` logging
+  procs); **PostgreSQL** — a **constructed** POSITIVE, declared synthetic in
+  `testdata/pg_constructed_external_call_trigger.sql` (a trigger→function pair
+  whose function issues `NOTIFY`), and a real NEGATIVE (Pagila `last_updated`);
+  **MySQL** — **detectable without dogfood**: the scanner recognizes MySQL's
+  external vocabulary (`sys_exec`/`sys_eval`) and would fire if one appeared, but
+  a trigger making an external call is structurally rare and non-idiomatic in
+  MySQL, so no real or constructed MySQL case is dogfooded. This is **distinct
+  from _not covered_** (which would mean non-detectable): the capability exists,
+  only the dogfood evidence is absent by the dialect's nature. **Zero value on
+  Prisma-only projects.**
 
 ### Not covered (declared, not silent)
 
@@ -335,12 +365,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - **Database views ARE covered** for DB-020 (sensitive-column exposure),
   **stored procedures/functions ARE covered** for DB-031 (routine without
   exception handling), and **triggers ARE covered** for DB-040 (cross-table
-  cascade) — all see above. The **remaining routine-body/trigger rules** —
-  DB-030 (dynamic SQL by string concatenation) and DB-041 (trigger
-  external-effecting call) — are **not** covered in this release: the SQL-DDL
-  parser records their bodies, but no rule reads them for those checks yet. This
-  is **deferred, not abandoned**: they remain in the `routine-body-rules` change
-  of `0.2.3`, alongside the now-landed DB-031 and DB-040. The parser prerequisite was
+  cascade) and DB-041 (external-effecting call) — all see above. The **one
+  remaining routine-body rule** — DB-030 (dynamic SQL by string
+  concatenation) — is **not** covered in this release: the SQL-DDL parser
+  records routine bodies, but no rule reads them for that check yet. This
+  is **deferred, not abandoned**: it is the last item of the `routine-body-rules`
+  change of `0.2.3`, alongside the now-landed DB-031, DB-040, and DB-041. The parser prerequisite was
   already **done** — a multi-statement T-SQL routine body is captured
   **complete** to the `GO` batch separator (or EOF), **not** truncated at its
   first internal `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL
