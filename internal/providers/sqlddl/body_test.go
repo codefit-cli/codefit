@@ -127,17 +127,17 @@ GO`
 	}
 }
 
-// TestBody_TSQLMultiStatement_PartialCaptureFirstStatementOnly — the load-
-// bearing case (architecture/tsql-body-truncation-limit): T-SQL has NEITHER
-// dollar-quoting NOR a DELIMITER-style active-terminator override, so
-// split() treats every top-level ';' inside a multi-statement BEGIN...END
-// body as an ordinary statement terminator. Statements 2..N become separate,
-// unassociated top-level stmt entries that apply()'s default branch silently
-// skips (they match no CREATE * head regex) — captured Body is ONLY the text
-// up to and including the FIRST internal ';'. This MUST be Complete=false
-// with an explanatory Note, never a silent truncation and never an
-// affirmation over the missing tail.
-func TestBody_TSQLMultiStatement_PartialCaptureFirstStatementOnly(t *testing.T) {
+// TestBody_TSQLMultiStatement_FullCaptureToBatchSeparator — the load-bearing
+// case (ADR 0027, architecture/tsql-body-truncation-limit CLOSED): T-SQL has
+// NEITHER dollar-quoting NOR a DELIMITER-style active-terminator override, so
+// naively split()-ing on every top-level ';' would cut a multi-statement
+// BEGIN...END body at its first internal ';'. Instead, once split() recognizes
+// a CREATE FUNCTION/PROCEDURE/TRIGGER head (isRoutineHead), it suspends
+// ';'-flushing for the rest of the statement — the body is captured WHOLE, up
+// to the GO batch separator (or EOF), exactly like the dollar-quoted and
+// DELIMITER-wrapped cases. This MUST be Complete=true with no truncation Note,
+// and MUST contain every internal statement verbatim.
+func TestBody_TSQLMultiStatement_FullCaptureToBatchSeparator(t *testing.T) {
 	src := `CREATE PROCEDURE p AS
 BEGIN
   SET @a = 1;
@@ -150,17 +150,17 @@ GO`
 		t.Fatalf("procedures = %d, want 1", len(s.Procedures))
 	}
 	body := s.Procedures[0].Body
-	if body.Complete {
-		t.Errorf("Complete = true, want false (multi-statement T-SQL body is cut at the first internal ';'); Text=%q", body.Text)
+	if !body.Complete {
+		t.Errorf("Complete = false, want true (the body is captured whole to the GO batch separator); Text=%q", body.Text)
 	}
-	if body.Note == "" {
-		t.Error("Note = \"\", want a non-empty reason explaining the truncation")
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
 	}
 	if !strings.Contains(body.Text, "SET @a = 1") {
 		t.Errorf("Body.Text = %q, want it to contain the FIRST statement", body.Text)
 	}
-	if strings.Contains(body.Text, "SELECT * FROM t") || strings.Contains(body.Text, "UPDATE t SET x = 2") {
-		t.Errorf("Body.Text = %q, must NOT contain statements 2/3 — this is the partial-capture case, not a full body", body.Text)
+	if !strings.Contains(body.Text, "SELECT * FROM t") || !strings.Contains(body.Text, "UPDATE t SET x = 2") {
+		t.Errorf("Body.Text = %q, MUST contain statements 2/3 — this is the full-capture case, not a truncated one", body.Text)
 	}
 }
 

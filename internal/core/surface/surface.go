@@ -40,6 +40,60 @@ const (
 	// coverage.go:34 ("Prefix-redundant indexes ... are NOT yet detected").
 	CategoryDBPrefixRedundantIndex Category = "db-prefix-redundant-index"
 
+	// CategoryDBRoutineNoExceptionHandling (DB-031, 0.2.3 routine-body rules):
+	// a stored procedure/function whose captured body contains NO exception-
+	// handling construct for its dialect (T-SQL BEGIN TRY, MySQL DECLARE ...
+	// HANDLER, PL/pgSQL EXCEPTION WHEN). This states an ABSENCE as a structural
+	// fact, never an affirmation of a defect: whether the missing handler
+	// matters — and whether a PRESENT handler is adequate (an empty CATCH is
+	// "present" here yet may still be a bug) — is the agent's judgment, not
+	// codefit's. Body-derived (Procedure.Body), read through the same bounded,
+	// string/comment-aware token scanner discipline as DB-020, never a general
+	// SQL parser. Gated on Body.Complete (ADR 0004/0025): a body the parser
+	// could not prove whole is never evaluated, so an absence over unread text
+	// is never falsely affirmed.
+	CategoryDBRoutineNoExceptionHandling Category = "db-routine-no-exception-handling"
+
+	// CategoryDBTriggerCrossTableCascade (DB-040, 0.2.3 routine-body rules): a
+	// TRIGGER whose body performs DML (INSERT/UPDATE/DELETE) against a table
+	// OTHER than the trigger's OWN table — a cross-table cascade. It states the
+	// structural FACT ("this trigger writes to other table(s): X, Y") plus
+	// whether a comment documents the write near it (documented_by_comment),
+	// never an affirmation of a defect: whether the cascade is intentional and
+	// correct is the AGENT's judgment. Body source is per-dialect: MySQL/T-SQL
+	// triggers carry an inline Body scanned directly; a PostgreSQL trigger has
+	// NO inline body (ADR 0026) — its logic lives in the executed function,
+	// resolved via Schema.ExecutedProcedure(t), whose own Body is scanned
+	// instead; when that resolution yields nothing (a built-in like
+	// tsvector_update_trigger), the rule abstains for that trigger. Read through
+	// the same bounded, string/comment-aware token scanner discipline as DB-020/
+	// DB-031, never a general SQL parser. Gated on the scanned body's
+	// Body.Complete (ADR 0004/0025).
+	CategoryDBTriggerCrossTableCascade Category = "db-trigger-cross-table-cascade"
+
+	// CategoryDBTriggerExternalCall (DB-041, 0.2.3 routine-body rules): a TRIGGER
+	// whose body invokes an EXTERNAL-EFFECTING call — one that reaches OUTSIDE the
+	// database (a shell exec, OLE automation, email, cross-database/remote query,
+	// async notification, or an untrusted-language routine). It states the
+	// structural FACT ("this trigger makes external call(s): X"), never an
+	// affirmation that the call is unsafe — the exploitability is the AGENT's
+	// judgment. STRICT vocabulary per dialect: a plain EXECUTE/CALL of an internal
+	// stored procedure is NOT external and does not fire (the noise a loose rule
+	// would create). Body source is per-dialect, resolving a PostgreSQL trigger to
+	// its executed function (ADR 0026) exactly as DB-040 does. Bounded, string/
+	// comment-aware token scanner; gated on Body.Complete (ADR 0004/0025).
+	CategoryDBTriggerExternalCall Category = "db-trigger-external-call"
+
+	// CategoryDBDynamicSQLInRoutine (DB-030, 0.2.3 routine-body rules): a stored
+	// procedure or function whose body CONSTRUCTS and runs SQL at runtime from a
+	// string (T-SQL sp_executesql / EXEC(@var), PL/pgSQL EXECUTE over a built
+	// string / format() / quote_*, MySQL PREPARE ... FROM). It states the FACT
+	// that dynamic SQL is built here; whether it is injectable is the AGENT's
+	// judgment (codefit maps the surface, it does not do taint analysis). A static
+	// EXEC/CALL of a named internal procedure is NOT dynamic SQL and does not fire.
+	// Bounded string/comment-aware scanner; gated on Body.Complete (ADR 0004/0025).
+	CategoryDBDynamicSQLInRoutine Category = "db-dynamic-sql-in-routine"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps

@@ -80,6 +80,17 @@ func split(src []byte, dialect *Dialect) []stmt {
 	term := ";"         // active statement terminator; changed by a DELIMITER directive
 	quotedSeen := false // a dollar-quoted block was consumed since the last flush (Phase 2.2, Unit A)
 
+	// headDecided/routineHead (ADR 0027): per-statement state deciding whether
+	// an internal ';' inside a dialect with RoutineBodyEndsAtBatchSeparator is
+	// a body separator (suppress the flush) or the statement's real terminator
+	// (flush as usual). headDecided is set at most once per statement, the
+	// first time the generic ';' terminator case is reached — at that point
+	// buf holds exactly the CREATE FUNCTION/PROCEDURE/TRIGGER head (or not),
+	// and isRoutineHead's verdict is cached in routineHead for every
+	// subsequent internal ';' of the same statement.
+	headDecided := false
+	routineHead := false
+
 	flush := func(kind termKind) {
 		if t := strings.TrimSpace(buf.String()); t != "" {
 			out = append(out, stmt{text: t, line: startLine, term: kind, quotedBlockSeen: quotedSeen})
@@ -87,6 +98,8 @@ func split(src []byte, dialect *Dialect) []stmt {
 		buf.Reset()
 		startLine = 0
 		quotedSeen = false
+		headDecided = false
+		routineHead = false
 	}
 	mark := func() {
 		if startLine == 0 {
@@ -197,6 +210,28 @@ func split(src []byte, dialect *Dialect) []stmt {
 				i++
 			}
 		case strings.HasPrefix(s[i:], term):
+			// ADR 0027: when this dialect ends a routine body at the GO
+			// batch separator (T-SQL) rather than at an internal ';', an
+			// ordinary ';' terminator inside a recognized CREATE
+			// FUNCTION/PROCEDURE/TRIGGER head must NOT flush — it is a
+			// body-internal statement separator, not the end of THIS
+			// top-level statement. The verdict is decided once per
+			// statement (headDecided) from whatever buf holds at the
+			// FIRST internal ';' — that is exactly the routine head, since
+			// nothing has flushed yet — and cached for every subsequent
+			// ';' in the same body. The whole body then flushes later, at
+			// the existing GO branch (termGoBreak) or at EOF (termEOF).
+			if term == ";" && dialect.RoutineBodyEndsAtBatchSeparator {
+				if !headDecided {
+					routineHead = isRoutineHead(buf.String())
+					headDecided = true
+				}
+				if routineHead {
+					buf.WriteString(term)
+					i += len(term)
+					continue
+				}
+			}
 			kind := termCustomDelimiter
 			if term == ";" {
 				kind = termSemicolon

@@ -73,6 +73,22 @@ type Dialect struct {
 	// architecture ADR 0022 established — a new dialect only ever adds a
 	// Dialect value, never a branch in split.go or reduce.go.
 	TriggerHasInlineBody bool
+
+	// RoutineBodyEndsAtBatchSeparator is a per-dialect DATUM (ADR 0027,
+	// architecture/tsql-body-truncation-limit CLOSED): when true, a CREATE
+	// FUNCTION/PROCEDURE/TRIGGER body is delimited by the GO batch separator
+	// (or EOF), not by an internal ';'. split() consults this DATUM (via
+	// isRoutineHead in reduce.go) to suspend ';'-flushing once it recognizes a
+	// routine head, so the whole body is captured whole up to GO/EOF instead
+	// of being cut at the body's first internal ';'.
+	//
+	// true ONLY for SQLServer: T-SQL has neither PostgreSQL's dollar-quoting
+	// nor MySQL's DELIMITER directive to protect internal ';'s inside a
+	// routine body, so without this DATUM every multi-statement T-SQL body
+	// would truncate. PostgreSQL and MySQL set this explicitly false — their
+	// existing dollar-quoting/DELIMITER mechanisms already capture the whole
+	// body, and GO is not a batch separator in either dialect.
+	RoutineBodyEndsAtBatchSeparator bool
 }
 
 // LineComment is one line-comment prefix a dialect recognizes.
@@ -121,6 +137,8 @@ func Postgres() Dialect {
 		TypeMap:              postgresTypeMap(),
 		Modifiers:            postgresModifiers(),
 		TriggerHasInlineBody: false,
+
+		RoutineBodyEndsAtBatchSeparator: false,
 	}
 }
 
@@ -147,6 +165,8 @@ func MySQL() Dialect {
 		TypeMap:              mysqlTypeMap(),
 		Modifiers:            mysqlModifiers(),
 		TriggerHasInlineBody: true,
+
+		RoutineBodyEndsAtBatchSeparator: false,
 	}
 }
 
@@ -173,5 +193,7 @@ func SQLServer() Dialect {
 		TypeMap:              sqlserverTypeMap(),
 		Modifiers:            sqlserverModifiers(),
 		TriggerHasInlineBody: true,
+
+		RoutineBodyEndsAtBatchSeparator: true,
 	}
 }

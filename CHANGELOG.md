@@ -14,12 +14,69 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.3] — 2026-07-20
+
+**Phase 2.3 — routine-body rules.** codefit closes the last of the Phase-2 DB debt that
+needs a routine's *body*, not just its signature: dynamic SQL construction, missing
+exception handling, trigger cross-table cascades, and trigger external calls — across
+PostgreSQL, MySQL, and SQL Server. The prerequisite was a parser fix (T-SQL body
+de-truncation); the four rules all read the **complete** body as surface, gated on
+completeness, never affirmations. ADRs 0027–0028.
+
+### Added
+
+- **DB-031 — routine without exception handling** — a stored procedure or function whose
+  body has no exception-handling construct (T-SQL `BEGIN TRY`, MySQL `DECLARE ... HANDLER`,
+  PL/pgSQL `EXCEPTION WHEN`). PG `RAISE EXCEPTION` (a throw, not a handler) is excluded — the
+  trap, test-locked. Surface: the adequacy of a present handler is the agent's judgment.
+- **DB-040 — trigger cross-table cascade** — a trigger whose body writes DML to a table
+  other than the one it fires on. Resolves a PostgreSQL trigger to its function (ADR 0026);
+  excludes the T-SQL `UPDATE(column)` function and the trigger's own event clause; a
+  same-table write is not a cascade. Exposes a `documented_by_comment` fact.
+- **DB-041 — trigger external-effecting call** — a trigger that reaches outside the database
+  (T-SQL `xp_cmdshell`/`sp_OA*`/`sp_send_dbmail`/`OPENROWSET`; PostgreSQL `dblink`/`NOTIFY`/
+  `COPY ... PROGRAM`; MySQL `sys_exec`/`sys_eval`). **Strict vocabulary:** a plain `EXECUTE`/
+  `CALL` of an internal stored procedure is not external — the trap.
+- **DB-030 — dynamic SQL construction** — a procedure or function that builds and runs SQL
+  from a string at runtime (`sp_executesql`, `EXEC(<expr>)`, `EXECUTE format`/`quote_*`,
+  `PREPARE ... FROM`). A static `EXEC` of a named procedure is not dynamic — the trap.
+  Injectability is the agent's judgment (no taint analysis).
+- **Real + constructed routine fixtures** — the vendored Sakila / Pagila / AdventureWorks DDL
+  extended with real routines (byte-diffed, license-attributed), plus constructed
+  positives/negatives where the real corpora are clean, each declared `SYNTHETIC` in its
+  header.
+
+### Changed
+
+- **T-SQL routine bodies are de-truncated (ADR 0027)** — a multi-statement T-SQL routine body
+  is captured complete to the `GO` batch separator (or EOF), not cut at its first internal
+  `;`. Expressed as a per-dialect descriptor datum, scoped to routine heads, without
+  reintroducing the `BEGIN`/`END` guard ADR 0022 removed. Closes ADR 0022 known-limit (a) — a
+  `CREATE TABLE`-shaped fragment inside a routine body no longer surfaces as a phantom table.
+  PostgreSQL and MySQL output stays byte-identical.
+- **Coverage doctrine (ADR 0028)** — the coverage manifest gains a third state,
+  *detectable-without-dogfood* (distinct from covered and not-covered; e.g. DB-041 on MySQL,
+  where an external-calling trigger is non-idiomatic), plus a fixture gap policy (real →
+  constructed-declared-synthetic → not-covered only for structural impossibility).
+
 ### Security
 
 - **Go toolchain bumped to `go1.25.12`** (go.mod + all four workflow pins) to close
   **GO-2026-5856** — an Encrypted Client Hello privacy leak in the standard library's
-  `crypto/tls`, reached transitively by the OSV.dev HTTP client and the file hasher. A
-  toolchain recompile against the patched stdlib, no code change.
+  `crypto/tls`, reached transitively by the OSV.dev HTTP client and the file hasher. The
+  `0.2.3` binaries are built against the patched stdlib; a toolchain recompile, no code change.
+
+### Not yet covered (declared)
+
+- **Index-vs-query analysis** stays deferred — it needs the code↔schema crossing (the
+  `AuditContext` does not yet carry it); the DB dimension is still schema-only.
+- **DB-012 (never-used index)** remains **permanently** not covered: it needs runtime query
+  telemetry (e.g. `pg_stat_user_indexes`) a static, DB-less model cannot read.
+- **OLAP / data-warehouse schemas** are out of scope; the DB dimension audits OLTP structure
+  only. The routine-body rules add zero value on Prisma-only projects (`schema.prisma` has no
+  stored-procedure/trigger block).
 
 ## [0.2.2] — 2026-07-17
 
