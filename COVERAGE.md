@@ -243,6 +243,124 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   projects:** Prisma's `schema.prisma` has no view-block concept (ADR 0014
   places it out of scope), so a Prisma-only project has no views for this rule
   to read at all.
+- **Routine without exception handling (DB-031).** A **stored procedure or
+  function** (both surface as `db.Procedure`) whose captured body contains **no
+  exception-handling construct** for its dialect: T-SQL `BEGIN TRY` (paired with
+  `BEGIN CATCH`), MySQL `DECLARE ... HANDLER`, or PL/pgSQL `EXCEPTION WHEN`. This
+  states an **absence** as a structural fact, **never an affirmation** of a
+  defect: whether the missing handler matters is the agent's judgment, and so is
+  the **adequacy of a handler that is present** — an empty `CATCH`, or one that
+  swallows every error, reads as "present" here (the construct exists) yet may
+  still be a real bug. DB-031 detects the **structure**, it does not grade it.
+  Read through a deliberately **bounded**, string/comment-aware token scanner
+  (the same discipline as DB-020), never a general SQL parser: a handler-shaped
+  token inside a string literal or comment does not false-match. **Critical:**
+  PostgreSQL `RAISE EXCEPTION` is a **throw, not a handler** — the scanner
+  matches `EXCEPTION` only when the very next keyword token is `WHEN`, so
+  `RAISE EXCEPTION` and a bare `EXCEPTION` never count as handling. **Gated on
+  `Body.Complete`** (ADR 0004/0025): a body the parser could not prove whole is
+  never evaluated, so an absence over truncated text is never falsely affirmed.
+  **Per-dialect coverage against real vendored DDL:**
+  - **MySQL/Sakila** — real **positive** (`rewards_report`, no `HANDLER`) and
+    real **negative** (`inventory_held_by_customer`, real
+    `DECLARE EXIT HANDLER FOR NOT FOUND`).
+  - **T-SQL/AdventureWorks** — real **positive** (`uspGetBillOfMaterials`, a
+    recursive-CTE body with no `TRY`/`CATCH`) and real **negative**
+    (`uspUpdateEmployeePersonalInfo`, real `BEGIN TRY ... BEGIN CATCH`).
+  - **PostgreSQL** — real **positive** (Pagila `rewards_report`, which `RAISE`s
+    `EXCEPTION` twice but has **no** `EXCEPTION WHEN` — the bare-`EXCEPTION`
+    trap, locked by an explicit test) plus a **constructed negative**, declared
+    synthetic in `testdata/pg_constructed_exception_handler.sql` (a small
+    hand-written `safe_divide` with a real `BEGIN ... EXCEPTION WHEN ... END`
+    block), since no routine in the dogfooded Pagila excerpt contains a real
+    handler clause.
+
+  **Triggers are intentionally out of scope** for DB-031 (their
+  cross-table/external-effect risks are DB-040/DB-041's domain). **Zero value on
+  Prisma-only projects:** Prisma's `schema.prisma` has no
+  stored-procedure/function block concept, so a Prisma-only project has no
+  routines for this rule to read.
+- **Trigger cross-table cascade (DB-040).** A **trigger** whose body performs
+  DML (INSERT/UPDATE/DELETE) against a table **other** than the one it fires on.
+  Surface, never an affirmation: it states the facts (`writes_other_table: X`
+  per other table, and `documented_by_comment`) and the **agent** judges whether
+  the cascade is intentional — DB-040 detects the cross-table write, it does not
+  grade it. **Body source is per-dialect (ADR 0026):** MySQL/T-SQL triggers
+  carry an inline body scanned directly; a **PostgreSQL** trigger has no inline
+  body, so the rule resolves `Schema.ExecutedProcedure(trigger)` to the executed
+  function and scans **its** body, comparing writes against the trigger's own
+  table — an unresolvable built-in (e.g. `tsvector_update_trigger`) makes the
+  rule **abstain**. Bounded string/comment-aware scanner (DB-020/DB-031
+  discipline), never a SQL-expression parser: a DML token inside a string or
+  comment does not fabricate a write; the T-SQL `UPDATE(column)` function is
+  excluded; a trigger's own event clause (`AFTER UPDATE`, `INSTEAD OF DELETE`)
+  is not mistaken for a statement; and a schema-qualified write to the trigger's
+  **own** table is correctly not a cascade. **Gated on `Body.Complete`** (ADR
+  0004/0025). Per-dialect coverage: **T-SQL/AdventureWorks** — real POSITIVE
+  (`uPurchaseOrderDetail` cascades into `TransactionHistory` and
+  `PurchaseOrderHeader`, its same-table `PurchaseOrderDetail` write excluded) and
+  real NEGATIVE (`dEmployee`, only RAISERROR/ROLLBACK); **MySQL/Sakila** — real
+  POSITIVE (`ins_film`/`upd_film`/`del_film` cascade into `film_text`) and a
+  **constructed** NEGATIVE, declared synthetic in
+  `testdata/mysql/constructed_non_cascading_trigger.sql`; **PostgreSQL** — real
+  NEGATIVE (Pagila `last_updated`, only sets `NEW`) and a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/pg_constructed_cascade_trigger.sql` (a trigger→function pair
+  exercising the ADR-0026 resolution path). **Zero value on Prisma-only
+  projects:** `schema.prisma` has no trigger block concept.
+- **Trigger external-effecting call (DB-041).** A **trigger** whose body invokes
+  a call that reaches **outside** the database (shell exec, OLE automation,
+  email, remote/cross-database query, async notification, or a pipe to a
+  program). Surface, never an affirmation: it states the fact (`external_call:
+  X`) and the **agent** judges whether the call is safe. **Strict vocabulary is
+  the line between real risk and noise:** an EXECUTE/CALL of an **internal**
+  stored procedure (`EXECUTE dbo.uspLogError`, `CALL recompute_totals`) does
+  **not** fire — that is the rule's trap, the token that looks like a call but is
+  not external. Per-dialect vocabulary: **T-SQL** (`xp_cmdshell`, `sp_OA*`,
+  `sp_send_dbmail`, `OPENROWSET`, `OPENQUERY`); **PostgreSQL** (`dblink` /
+  `dblink_exec`, `NOTIFY` / `pg_notify`, `COPY ... PROGRAM`); **MySQL**
+  (`sys_exec` / `sys_eval` UDFs). Body source is per-dialect, resolving a
+  PostgreSQL trigger to its function (ADR 0026) as DB-040 does; gated on
+  `Body.Complete`. Bounded string/comment-aware scanner: a token in a string or
+  comment does not fire, and a member access (`NEW.notify`) is not the `NOTIFY`
+  statement. Per-dialect coverage: **T-SQL/AdventureWorks** — a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/tsql/constructed_external_call_trigger.sql` (a trigger that EXECs
+  `xp_cmdshell`), and a real **NEGATIVE / trap** (`uPurchaseOrderDetail`, whose
+  only calls are EXECUTE of the internal `uspPrintError`/`uspLogError` logging
+  procs); **PostgreSQL** — a **constructed** POSITIVE, declared synthetic in
+  `testdata/pg_constructed_external_call_trigger.sql` (a trigger→function pair
+  whose function issues `NOTIFY`), and a real NEGATIVE (Pagila `last_updated`);
+  **MySQL** — **detectable without dogfood**: the scanner recognizes MySQL's
+  external vocabulary (`sys_exec`/`sys_eval`) and would fire if one appeared, but
+  a trigger making an external call is structurally rare and non-idiomatic in
+  MySQL, so no real or constructed MySQL case is dogfooded. This is **distinct
+  from _not covered_** (which would mean non-detectable): the capability exists,
+  only the dogfood evidence is absent by the dialect's nature. **Zero value on
+  Prisma-only projects.**
+- **Dynamic SQL construction in a routine (DB-030).** A **stored procedure or
+  function** whose body **builds and runs SQL from a string at runtime**.
+  Surface, never an affirmation: it states the fact (`dynamic_sql: <marker>`) and
+  the **agent** judges whether it is injectable — codefit maps the surface, it
+  deliberately does **not** do taint analysis. **The trap:** a static EXEC/CALL
+  of a **named internal** procedure (`EXEC dbo.uspFoo`) is **not** dynamic SQL
+  and does not fire (same EXEC family as DB-041's trap, excluded for a different
+  reason — there "not external", here "not dynamic"). Per-dialect markers:
+  **T-SQL** (`sp_executesql`; `EXEC(<expr>)` in parentheses, not a literal proc
+  name); **PL/pgSQL** (`EXECUTE '<string>'` / `EXECUTE format(...)`;
+  `quote_literal` / `quote_ident`); **MySQL** (`PREPARE ... FROM`). Bounded
+  string/comment-aware scanner; gated on `Body.Complete`. **Declared limit:** a
+  bare `EXECUTE <variable>` with no construction marker visible in the same body
+  is a miss. Per-dialect coverage: **PostgreSQL** — real POSITIVE (Pagila
+  `rewards_report` builds a string with `quote_literal` and runs it via
+  `EXECUTE`) and real NEGATIVE (`last_updated`); **MySQL** — a **constructed**
+  POSITIVE, declared synthetic in
+  `testdata/mysql/constructed_dynamic_sql_proc.sql` (`PREPARE ... FROM` a
+  CONCATenated string), and a real NEGATIVE (Sakila `rewards_report`,
+  temp-table based); **T-SQL** — a **constructed** POSITIVE, declared synthetic
+  in `testdata/tsql/constructed_dynamic_sql_proc.sql` (`sp_executesql` over a
+  built string), and a real NEGATIVE (`uspGetBillOfMaterials`). **Zero value on
+  Prisma-only projects.**
 
 ### Not covered (declared, not silent)
 
@@ -267,25 +385,21 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   never connects to a database — it reads only DDL/schema text — so this rule
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
-- **Database views ARE covered** for one rule (DB-020, sensitive-column
-  exposure — see above). **Stored procedures/functions and triggers** (DB-030
-  dynamic SQL by string concatenation, DB-031 missing exception handling,
-  DB-040 trigger cross-table DML, DB-041 trigger external-effecting call) are
-  **not** covered in this release — the SQL-DDL parser records their names and,
-  where the dialect allows, their bodies, but no rule reads them yet. This is
-  **deferred, not abandoned**: it moves to a separate change
-  (`routine-body-rules`, targeted for a later release) because it depends on a
-  parser fix first. SQL Server (T-SQL) has no statement-separator escape
-  mechanism, so a multi-statement T-SQL routine body is captured **truncated**
-  at its first internal `;` and marked incomplete; a rule like DB-031 ("is
-  exception handling present?") evaluated over a truncated body would
-  **falsely affirm** an absence that is really just unread text past the cut.
-  Shipping that rule family in this release would trade an honest declared gap
-  for a rule that lies with confidence, so it waits for the parser fix. When
-  the routine-body rules land, they will carry the same Prisma-zero-value
+- **The routine-body rule family is now COMPLETE.** DB-030 (dynamic SQL
+  construction), DB-031 (routine without exception handling), DB-040 (trigger
+  cross-table cascade), and DB-041 (trigger external-effecting call) are **all
+  covered** as surface (see above), **none deferred**. The parser prerequisite
+  was **done** — a multi-statement T-SQL routine body is captured **complete** to
+  the `GO` batch separator (or EOF), **not** truncated at its first internal `;`
+  (ADR 0027; PostgreSQL dollar-quoted and MySQL `DELIMITER`-wrapped bodies were
+  already complete) — which is what let these rules read whole T-SQL bodies
+  safely. (Had DB-031 shipped over the old truncated T-SQL body, "is exception
+  handling present?" would have **falsely affirmed** an absence that was really
+  just unread text past the cut — which is why the parser fix came first.) Each
+  rule still **gates on `Body.Complete`** so a body the parser could not prove
+  whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
-  block concept, so a Prisma-only project gets no value from this rule family
-  either.
+  block concept, so a Prisma-only project gets no value from any of these rules.
 - **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
   columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
 - **Express/Fastify handler passed by reference.** A handler that is a named
@@ -298,11 +412,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
-- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL
-  `GO`-batched stored-procedure/trigger **body** containing a `CREATE TABLE`-shaped
-  fragment may surface as a spurious top-level table — codefit does not model
-  routine bodies; MySQL routine bodies wrapped in `DELIMITER //`...`//` are **not**
-  affected (handled correctly). (2) A MySQL client `DELIMITER` directive is
+- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL routine
+  body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
+  fragment inside a `GO`-batched procedure/trigger body is **absorbed into the
+  body**, not surfaced as a spurious top-level table (ADR 0027, closing a limit
+  ADR 0022 had declared); the trade is that a T-SQL routine with **no trailing
+  `GO`** immediately followed by another statement absorbs that statement into
+  the body — invalid T-SQL batching, the intentional boundary of ADR 0027. MySQL
+  routine bodies wrapped in `DELIMITER //`...`//` are unaffected. (2) A MySQL client `DELIMITER` directive is
   recognized only when its argument is punctuation (`//`, `$$`); a word-based
   delimiter such as `DELIMITER GO` is **not** recognized. (3) The T-SQL `GO` batch
   separator is recognized only when a line is exactly `GO`; a column literally

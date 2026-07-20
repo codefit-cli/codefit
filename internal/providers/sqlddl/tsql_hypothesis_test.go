@@ -13,17 +13,19 @@ import (
 // at REAL upstream AdventureWorks DDL (Unit B2, architecture/tsql-golden-real-ddl,
 // obs #1054).
 //
-// architecture/tsql-body-truncation-limit (obs #1050) STATES AS PROBABLE, NOT
-// CONFIRMED, that T-SQL views are unaffected by the body-truncation limit
-// (a CREATE VIEW ... AS SELECT ... is a single statement with no internal
-// ';'), while multi-statement T-SQL PROCEDURES and TRIGGERS truncate at the
-// first internal ';'. This file is the confirmation the architect required
-// before COVERAGE.md may say so — the first pass (Unit B) confirmed it
-// against hand-written "in the style of AdventureWorks" DDL; THIS pass
-// (Unit B2) re-confirms the identical three behaviors against a REAL,
-// VERBATIM excerpt of upstream AdventureWorks DDL, per the architect's
-// binding Condition 1 (obs #1054): "the DDL must come from UPSTREAM
-// AdventureWorks, COPIED, not rewritten in the style of."
+// architecture/tsql-body-truncation-limit (obs #1050) is CLOSED by ADR 0027:
+// T-SQL views were already unaffected by the body-truncation limit (a CREATE
+// VIEW ... AS SELECT ... is a single statement with no internal ';'), and
+// multi-statement T-SQL PROCEDURES and TRIGGERS no longer truncate at the
+// first internal ';' either — split() now suspends ';'-flushing once it
+// recognizes a routine head, capturing the whole body to the GO batch
+// separator (or EOF). This file is the confirmation the architect required
+// before COVERAGE.md may say so — the first pass (Unit B) confirmed the
+// (now-closed) truncation limit against hand-written "in the style of
+// AdventureWorks" DDL; THIS pass (Unit B2) re-confirms full capture to GO
+// against a REAL, VERBATIM excerpt of upstream AdventureWorks DDL, per the
+// architect's binding Condition 1 (obs #1054): "the DDL must come from
+// UPSTREAM AdventureWorks, COPIED, not rewritten in the style of."
 //
 // Fixture provenance: testdata/tsql/adventureworks_real_objects.sql — three
 // real objects copied VERBATIM (byte-for-byte, aside from CRLF->LF
@@ -60,60 +62,56 @@ func TestTSQL_CreateView_SingleStatement_AlwaysComplete(t *testing.T) {
 }
 
 // TestTSQL_MultiStatementProcedure_PartialCapture is the confirming test for
-// the "T-SQL multi-statement procedures truncate at the first internal ';'"
-// half of the hypothesis. Fixture: the REAL uspGetBillOfMaterials procedure
-// — a recursive CTE (WITH ... UNION ALL ...) followed by an outer SELECT,
-// genuinely complex, the architect's recommended candidate (obs #1054).
+// the "T-SQL multi-statement procedures capture the WHOLE body to the GO
+// batch separator" half of ADR 0027 (formerly: truncate at the first internal
+// ';', before de-truncation landed). Fixture: the REAL uspGetBillOfMaterials
+// procedure — a recursive CTE (WITH ... UNION ALL ...) followed by an outer
+// SELECT, genuinely complex, the architect's recommended candidate (obs
+// #1054).
 func TestTSQL_MultiStatementProcedure_PartialCapture(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Procedures) != 1 {
-		t.Fatalf("procedures = %d, want 1", len(s.Procedures))
+	body := findProc(t, s, "uspGetBillOfMaterials").Body
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real uspGetBillOfMaterials procedure must be captured whole to GO; Text=%q", body.Text)
 	}
-	body := s.Procedures[0].Body
-	if body.Complete {
-		t.Errorf("Complete = true, want false — HYPOTHESIS DISPROVED: the real uspGetBillOfMaterials procedure came back complete; Text=%q", body.Text)
-	}
-	if body.Note == "" {
-		t.Error("Note = \"\", want a non-empty reason explaining the truncation")
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
 	}
 	if !strings.Contains(body.Text, "SET NOCOUNT ON") {
 		t.Errorf("Body.Text = %q, want it to contain the FIRST statement (SET NOCOUNT ON)", body.Text)
 	}
-	if strings.Contains(body.Text, "BOM_cte") || strings.Contains(body.Text, "UNION ALL") || strings.Contains(body.Text, "MAXRECURSION") {
-		t.Errorf("Body.Text = %q, must NOT contain the recursive CTE or the outer SELECT — only text up to the first internal ';' may be captured", body.Text)
+	if !strings.Contains(body.Text, "BOM_cte") || !strings.Contains(body.Text, "UNION ALL") || !strings.Contains(body.Text, "MAXRECURSION") {
+		t.Errorf("Body.Text = %q, MUST contain the recursive CTE and the outer SELECT — the whole body is captured to GO now", body.Text)
 	}
 }
 
 // TestTSQL_MultiStatementTrigger_PartialCapture is the confirming test for
-// the trigger half of the same hypothesis. Unlike PostgreSQL (Unit A2:
-// TriggerHasInlineBody=false, triggers are wires with no body of their own),
-// T-SQL triggers DO carry an inline body (TriggerHasInlineBody=true) and so
-// go through the SAME routineBody derivation as procedures — they CAN
-// truncate exactly like a multi-statement procedure. Fixture: the REAL
-// Purchasing.uPurchaseOrderDetail AFTER UPDATE trigger (DECLARE, TRY/CATCH,
-// multiple INSERT/UPDATE statements, EXECUTE calls to uspPrintError/
-// uspLogError).
+// the trigger half of ADR 0027 (full capture to GO). Unlike PostgreSQL (Unit
+// A2: TriggerHasInlineBody=false, triggers are wires with no body of their
+// own), T-SQL triggers DO carry an inline body (TriggerHasInlineBody=true)
+// and so go through the SAME routineBody derivation as procedures — they now
+// capture whole to GO exactly like a multi-statement procedure. Fixture: the
+// REAL Purchasing.uPurchaseOrderDetail AFTER UPDATE trigger (DECLARE,
+// TRY/CATCH, multiple INSERT/UPDATE statements, EXECUTE calls to
+// uspPrintError/uspLogError).
 func TestTSQL_MultiStatementTrigger_PartialCapture(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(s.Triggers))
-	}
-	trig := s.Triggers[0]
+	trig := findTrigger(t, s, "uPurchaseOrderDetail")
 	if trig.Table != "PurchaseOrderDetail" {
 		t.Errorf("Table = %q, want %q", trig.Table, "PurchaseOrderDetail")
 	}
 	body := trig.Body
-	if body.Complete {
-		t.Errorf("Complete = true, want false — HYPOTHESIS DISPROVED: the real uPurchaseOrderDetail trigger came back complete; Text=%q", body.Text)
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real uPurchaseOrderDetail trigger must be captured whole to GO; Text=%q", body.Text)
 	}
-	if body.Note == "" {
-		t.Error("Note = \"\", want a non-empty reason explaining the truncation")
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
 	}
 	if !strings.Contains(body.Text, "DECLARE @Count") {
 		t.Errorf("Body.Text = %q, want it to contain the FIRST statement (DECLARE @Count int)", body.Text)
 	}
-	if strings.Contains(body.Text, "BEGIN TRY") || strings.Contains(body.Text, "INSERT INTO") || strings.Contains(body.Text, "uspPrintError") {
-		t.Errorf("Body.Text = %q, must NOT contain the TRY/CATCH block or the INSERT/UPDATE statements — only text up to the first internal ';' may be captured", body.Text)
+	if !strings.Contains(body.Text, "BEGIN TRY") || !strings.Contains(body.Text, "INSERT INTO") || !strings.Contains(body.Text, "uspPrintError") {
+		t.Errorf("Body.Text = %q, MUST contain the TRY/CATCH block and the INSERT/UPDATE statements — the whole body is captured to GO now", body.Text)
 	}
 	if trig.ExecutesFunction != "" {
 		t.Errorf("ExecutesFunction = %q, want empty (T-SQL triggers embed logic inline, unlike PostgreSQL)", trig.ExecutesFunction)
@@ -130,13 +128,95 @@ func TestTSQL_MultiStatementTrigger_PartialCapture(t *testing.T) {
 // own name). Fixture: the REAL Purchasing.uPurchaseOrderDetail trigger.
 func TestTSQL_TriggerName_SchemaQualified_IsTriggerNameNotSchema(t *testing.T) {
 	s := realDDLSchema(t)
-	if len(s.Triggers) != 1 {
-		t.Fatalf("triggers = %d, want 1", len(s.Triggers))
-	}
-	trig := s.Triggers[0]
+	// The schema-qualified [Purchasing].[uPurchaseOrderDetail] must resolve to
+	// the trigger's OWN name — findTrigger locating it by "uPurchaseOrderDetail"
+	// (not "Purchasing") is itself the regression assertion.
+	trig := findTrigger(t, s, "uPurchaseOrderDetail")
 	if trig.Name != "uPurchaseOrderDetail" {
 		t.Errorf("Name = %q, want %q (the trigger's own name, not the schema)", trig.Name, "uPurchaseOrderDetail")
 	}
+}
+
+// TestTSQL_CleanNegativeProcedure_TryCatch_FullCapture locks the vendored
+// CLEAN-NEGATIVE procedure uspUpdateEmployeePersonalInfo (feat/tsql-routine-
+// fixtures): a single UPDATE wrapped in BEGIN TRY ... BEGIN CATCH, no dynamic
+// SQL. Its multi-statement body (SET NOCOUNT ON; TRY; UPDATE; CATCH) must be
+// captured WHOLE to the GO batch separator — Complete=true, no truncation Note
+// — so a future DB-031 (missing-exception-handling) rule can read the real
+// TRY/CATCH and correctly NOT fire. This is the live proof of ADR 0027
+// de-truncation over a second, independent real T-SQL routine.
+func TestTSQL_CleanNegativeProcedure_TryCatch_FullCapture(t *testing.T) {
+	body := findProc(t, realDDLSchema(t), "uspUpdateEmployeePersonalInfo").Body
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real uspUpdateEmployeePersonalInfo body must be captured whole to GO; Note=%q Text=%q", body.Note, body.Text)
+	}
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
+	}
+	if !strings.Contains(body.Text, "SET NOCOUNT ON") {
+		t.Errorf("Body.Text = %q, want the FIRST statement (SET NOCOUNT ON)", body.Text)
+	}
+	// NOTE: the tokenizer canonicalizes T-SQL [bracket] identifiers to "..".
+	// quoting in Body.Text (the on-disk fixture stays verbatim; the parsed body
+	// is normalized), so assert on the unquoted keywords/tokens.
+	if !strings.Contains(body.Text, "BEGIN TRY") || !strings.Contains(body.Text, "UPDATE") || !strings.Contains(body.Text, "Employee") || !strings.Contains(body.Text, "BEGIN CATCH") {
+		t.Errorf("Body.Text = %q, MUST contain the TRY/CATCH block and the UPDATE — the whole body is captured to GO", body.Text)
+	}
+}
+
+// TestTSQL_NonCascadingTrigger_FullCapture locks the vendored CLEAN-NEGATIVE
+// trigger dEmployee (feat/tsql-routine-fixtures): an INSTEAD OF DELETE trigger
+// whose whole body is DECLARE/SET/RAISERROR/ROLLBACK — it writes NO other
+// table (DB-040 cascade NEGATIVE) and makes NO external call (DB-041
+// NEGATIVE). The body still carries internal ';' and must be captured whole to
+// GO — Complete=true — so those future trigger rules read the real body and
+// correctly do NOT fire.
+func TestTSQL_NonCascadingTrigger_FullCapture(t *testing.T) {
+	trig := findTrigger(t, realDDLSchema(t), "dEmployee")
+	if trig.Table != "Employee" {
+		t.Errorf("Table = %q, want %q", trig.Table, "Employee")
+	}
+	body := trig.Body
+	if !body.Complete {
+		t.Errorf("Complete = false, want true — the real dEmployee body must be captured whole to GO; Note=%q Text=%q", body.Note, body.Text)
+	}
+	if body.Note != "" {
+		t.Errorf("Note = %q, want empty (no truncation occurred)", body.Note)
+	}
+	if !strings.Contains(body.Text, "INSTEAD OF DELETE") || !strings.Contains(body.Text, "RAISERROR") {
+		t.Errorf("Body.Text = %q, want the RAISERROR-only body verbatim", body.Text)
+	}
+	// Honest negative: no INSERT/UPDATE/DELETE into any OTHER table, no EXECUTE.
+	if strings.Contains(body.Text, "INSERT INTO") || strings.Contains(body.Text, "EXECUTE") {
+		t.Errorf("Body.Text = %q, expected NO cascade write and NO external EXECUTE (DB-040/DB-041 negative)", body.Text)
+	}
+}
+
+// findProc returns the procedure with the given name, failing the test if
+// absent — used since the real-object fixture now holds MORE than one
+// procedure (positional [0] indexing would be fragile).
+func findProc(t *testing.T, s *db.Schema, name string) db.Procedure {
+	t.Helper()
+	for _, p := range s.Procedures {
+		if p.Name == name {
+			return p
+		}
+	}
+	t.Fatalf("procedure %q not found; have %+v", name, s.Procedures)
+	return db.Procedure{}
+}
+
+// findTrigger returns the trigger with the given name, failing the test if
+// absent.
+func findTrigger(t *testing.T, s *db.Schema, name string) db.Trigger {
+	t.Helper()
+	for _, tr := range s.Triggers {
+		if tr.Name == name {
+			return tr
+		}
+	}
+	t.Fatalf("trigger %q not found; have %+v", name, s.Triggers)
+	return db.Trigger{}
 }
 
 // realDDLSchema parses the real, verbatim AdventureWorks excerpt

@@ -1,6 +1,7 @@
 package sqlddl_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -44,21 +45,22 @@ func TestPhantomGuard_MySQLDelimiterBody_NoPhantomTable(t *testing.T) {
 	}
 }
 
-// --- I3 (Unit I rework): T-SQL GO-separated batches — real CREATE TABLEs on
-// both sides of a GO-batched proc body must still be captured, and parsing
-// must never crash. The T-SQL routine-body phantom-table guard (inRoutineBody)
-// was REMOVED (Unit I rework, C3/C4/C5): it matched BEGIN/END as raw text
-// (also inside string literals), was not depth-counted (a nested BEGIN...END
-// closed it early), and leaked state across files (a stuck-open guard from
-// one file could swallow a LATER file's real tables). Retreating to a
-// documented limit: a T-SQL GO-batched routine body containing a
-// CREATE TABLE-shaped fragment MAY now surface as a spurious top-level
-// table/statement. This is a disclosed, rare limit (no dogfood evidence a
-// speculative guard was worth its own soundness bugs), not silent corruption
-// — the fixture below locks the HONEST current behavior (including the
-// spurious EvilLeak) rather than asserting a guard that no longer exists. ---
+// --- I3 (Unit I rework, CLOSED by ADR 0027): T-SQL GO-separated batches —
+// real CREATE TABLEs on both sides of a GO-batched proc body must still be
+// captured, and parsing must never crash. The T-SQL routine-body
+// phantom-table guard (inRoutineBody) was REMOVED (Unit I rework, C3/C4/C5):
+// it matched BEGIN/END as raw text (also inside string literals), was not
+// depth-counted (a nested BEGIN...END closed it early), and leaked state
+// across files (a stuck-open guard from one file could swallow a LATER
+// file's real tables). ADR 0027's split()-level head-awareness closes the
+// documented limit from a different angle, without resurrecting a BEGIN/END
+// counter: once split() recognizes a CREATE FUNCTION/PROCEDURE/TRIGGER head,
+// it suspends ';'-flushing for the whole body up to GO/EOF, so an in-body
+// CREATE TABLE-shaped fragment is absorbed as TEXT inside the routine's Body
+// rather than ever being tokenized as its own top-level statement — EvilLeak
+// no longer leaks as a phantom table. ---
 
-func TestPhantomGuard_TSQLGoBatches_DocumentedLimit_NoCrash(t *testing.T) {
+func TestTSQLGoBatches_RoutineBodyAbsorbsInBodyCreateTable(t *testing.T) {
 	src := "CREATE TABLE [dbo].[Orders] ([Id] INT PRIMARY KEY);\n" +
 		"GO\n" +
 		"CREATE PROCEDURE dbo.AuditOrder\n" +
@@ -74,7 +76,7 @@ func TestPhantomGuard_TSQLGoBatches_DocumentedLimit_NoCrash(t *testing.T) {
 	srcs := []providers.SourceFile{{Path: "V1__m.sql", Content: []byte(src)}}
 	s, err := sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())).ParseSchema(srcs)
 	if err != nil {
-		t.Fatalf("ParseSchema must not error (no crash), even on the documented T-SQL routine-body limit: %v", err)
+		t.Fatalf("ParseSchema must not error (no crash): %v", err)
 	}
 
 	names := tableNames(s)
@@ -84,12 +86,19 @@ func TestPhantomGuard_TSQLGoBatches_DocumentedLimit_NoCrash(t *testing.T) {
 	if len(s.Procedures) != 1 || s.Procedures[0].Name != "AuditOrder" {
 		t.Errorf("procedure HEAD must still be captured, got %+v", s.Procedures)
 	}
-	// DOCUMENTED LIMIT (not asserted as desired behavior, just locked as the
-	// honest current one): the body's inner CREATE TABLE-shaped fragment
-	// surfaces as a spurious top-level table now that the fragile guard is
-	// gone. See docs/decisions and the sqlddl package doc for the disclosure.
-	if !containsName(names, "EvilLeak") {
-		t.Logf("documented limit fixture behavior changed: EvilLeak no longer leaks (%v) — if a future fix legitimately closes this gap, tighten this test instead of loosening it", names)
+	// CLOSED: EvilLeak must NOT surface as a spurious top-level table anymore
+	// — it is absorbed into the procedure's body text instead.
+	if containsName(names, "EvilLeak") {
+		t.Errorf("EvilLeak must NOT be a captured top-level table (it must be absorbed into the proc body instead); tables = %v", names)
+	}
+	if len(s.Procedures) == 1 {
+		body := s.Procedures[0].Body
+		if !body.Complete {
+			t.Errorf("Body.Complete = false, want true (full capture to GO); Note=%q Text=%q", body.Note, body.Text)
+		}
+		if !strings.Contains(body.Text, "EvilLeak") {
+			t.Errorf("Body.Text = %q, want it to contain the absorbed CREATE TABLE EvilLeak fragment (proof it was absorbed, not dropped)", body.Text)
+		}
 	}
 }
 
