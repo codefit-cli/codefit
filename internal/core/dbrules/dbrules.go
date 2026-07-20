@@ -22,6 +22,7 @@ func All() []Rule {
 		db051{}, db052{}, db053{}, db003{}, // slice 2b — name heuristics (surface)
 		db020{},       // Phase 2.2 — view sensitive-column exposure (surface)
 		db011prefix{}, // Phase 2.2 (Unit E) — prefix-redundant index (surface)
+		db031{},       // 0.2.3 — routine without exception handling (surface, body-derived)
 	}
 }
 

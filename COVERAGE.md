@@ -243,6 +243,43 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   projects:** Prisma's `schema.prisma` has no view-block concept (ADR 0014
   places it out of scope), so a Prisma-only project has no views for this rule
   to read at all.
+- **Routine without exception handling (DB-031).** A **stored procedure or
+  function** (both surface as `db.Procedure`) whose captured body contains **no
+  exception-handling construct** for its dialect: T-SQL `BEGIN TRY` (paired with
+  `BEGIN CATCH`), MySQL `DECLARE ... HANDLER`, or PL/pgSQL `EXCEPTION WHEN`. This
+  states an **absence** as a structural fact, **never an affirmation** of a
+  defect: whether the missing handler matters is the agent's judgment, and so is
+  the **adequacy of a handler that is present** — an empty `CATCH`, or one that
+  swallows every error, reads as "present" here (the construct exists) yet may
+  still be a real bug. DB-031 detects the **structure**, it does not grade it.
+  Read through a deliberately **bounded**, string/comment-aware token scanner
+  (the same discipline as DB-020), never a general SQL parser: a handler-shaped
+  token inside a string literal or comment does not false-match. **Critical:**
+  PostgreSQL `RAISE EXCEPTION` is a **throw, not a handler** — the scanner
+  matches `EXCEPTION` only when the very next keyword token is `WHEN`, so
+  `RAISE EXCEPTION` and a bare `EXCEPTION` never count as handling. **Gated on
+  `Body.Complete`** (ADR 0004/0025): a body the parser could not prove whole is
+  never evaluated, so an absence over truncated text is never falsely affirmed.
+  **Per-dialect coverage against real vendored DDL:**
+  - **MySQL/Sakila** — real **positive** (`rewards_report`, no `HANDLER`) and
+    real **negative** (`inventory_held_by_customer`, real
+    `DECLARE EXIT HANDLER FOR NOT FOUND`).
+  - **T-SQL/AdventureWorks** — real **positive** (`uspGetBillOfMaterials`, a
+    recursive-CTE body with no `TRY`/`CATCH`) and real **negative**
+    (`uspUpdateEmployeePersonalInfo`, real `BEGIN TRY ... BEGIN CATCH`).
+  - **PostgreSQL** — real **positive** (Pagila `rewards_report`, which `RAISE`s
+    `EXCEPTION` twice but has **no** `EXCEPTION WHEN` — the bare-`EXCEPTION`
+    trap, locked by an explicit test) plus a **constructed negative**, declared
+    synthetic in `testdata/pg_constructed_exception_handler.sql` (a small
+    hand-written `safe_divide` with a real `BEGIN ... EXCEPTION WHEN ... END`
+    block), since no routine in the dogfooded Pagila excerpt contains a real
+    handler clause.
+
+  **Triggers are intentionally out of scope** for DB-031 (their
+  cross-table/external-effect risks are DB-040/DB-041's domain). **Zero value on
+  Prisma-only projects:** Prisma's `schema.prisma` has no
+  stored-procedure/function block concept, so a Prisma-only project has no
+  routines for this rule to read.
 
 ### Not covered (declared, not silent)
 
@@ -268,26 +305,26 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
 - **Database views ARE covered** for one rule (DB-020, sensitive-column
-  exposure — see above). **Stored procedures/functions and triggers** (DB-030
-  dynamic SQL by string concatenation, DB-031 missing exception handling,
-  DB-040 trigger cross-table DML, DB-041 trigger external-effecting call) are
-  **not** covered in this release — the SQL-DDL parser records their names and,
-  where the dialect allows, their bodies, but no rule reads them yet. This is
-  **deferred, not abandoned**: it moves to a separate change
-  (`routine-body-rules`, a later slice of `0.2.3`). The parser prerequisite is
-  now **done** — a multi-statement T-SQL routine body is captured **complete**
-  to the `GO` batch separator (or EOF), **not** truncated at its first internal
-  `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL `DELIMITER`-wrapped bodies
-  were already complete). The blocker is lifted and the full body text is
-  available marked complete; what remains is simply that the four rules are
-  **not implemented yet** — no longer a parser gap. (Had they shipped over the
-  old truncated T-SQL body, a rule like DB-031 ("is exception handling
-  present?") would have **falsely affirmed** an absence that was really just
-  unread text past the cut — which is exactly why the parser fix came first.)
-  When the routine-body rules land, they will carry the same Prisma-zero-value
-  limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
-  block concept, so a Prisma-only project gets no value from this rule family
-  either.
+  exposure), and **stored procedures/functions ARE covered** for one rule
+  (DB-031, routine without exception handling) — both see above. The
+  **remaining routine-body/trigger rules** — DB-030 (dynamic SQL by string
+  concatenation), DB-040 (trigger cross-table DML), DB-041 (trigger
+  external-effecting call) — are **not** covered in this release: the SQL-DDL
+  parser records their bodies, but no rule reads them for those checks yet. This
+  is **deferred, not abandoned**: they remain in the `routine-body-rules` change
+  of `0.2.3`, alongside the now-landed DB-031. The parser prerequisite was
+  already **done** — a multi-statement T-SQL routine body is captured
+  **complete** to the `GO` batch separator (or EOF), **not** truncated at its
+  first internal `;` (ADR 0027; PostgreSQL dollar-quoted and MySQL
+  `DELIMITER`-wrapped bodies were already complete) — which is exactly what let
+  DB-031 read whole T-SQL bodies safely. (Had DB-031 shipped over the old
+  truncated T-SQL body, "is exception handling present?" would have **falsely
+  affirmed** an absence that was really just unread text past the cut — which is
+  why the parser fix came first, and why DB-031 still **gates on
+  `Body.Complete`**.) When the remaining routine-body rules land, they carry the
+  same Prisma-zero-value limit as DB-020/DB-031: Prisma's `schema.prisma` has no
+  stored-procedure/trigger block concept, so a Prisma-only project gets no value
+  from this rule family either.
 - **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
   columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
 - **Express/Fastify handler passed by reference.** A handler that is a named
