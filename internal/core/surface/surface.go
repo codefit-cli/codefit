@@ -54,6 +54,23 @@ const (
 	// is never falsely affirmed.
 	CategoryDBRoutineNoExceptionHandling Category = "db-routine-no-exception-handling"
 
+	// CategoryDBTriggerCrossTableCascade (DB-040, 0.2.3 routine-body rules): a
+	// TRIGGER whose body performs DML (INSERT/UPDATE/DELETE) against a table
+	// OTHER than the trigger's OWN table — a cross-table cascade. It states the
+	// structural FACT ("this trigger writes to other table(s): X, Y") plus
+	// whether a comment documents the write near it (documented_by_comment),
+	// never an affirmation of a defect: whether the cascade is intentional and
+	// correct is the AGENT's judgment. Body source is per-dialect: MySQL/T-SQL
+	// triggers carry an inline Body scanned directly; a PostgreSQL trigger has
+	// NO inline body (ADR 0026) — its logic lives in the executed function,
+	// resolved via Schema.ExecutedProcedure(t), whose own Body is scanned
+	// instead; when that resolution yields nothing (a built-in like
+	// tsvector_update_trigger), the rule abstains for that trigger. Read through
+	// the same bounded, string/comment-aware token scanner discipline as DB-020/
+	// DB-031, never a general SQL parser. Gated on the scanned body's
+	// Body.Complete (ADR 0004/0025).
+	CategoryDBTriggerCrossTableCascade Category = "db-trigger-cross-table-cascade"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
