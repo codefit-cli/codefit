@@ -94,6 +94,32 @@ const (
 	// Bounded string/comment-aware scanner; gated on Body.Complete (ADR 0004/0025).
 	CategoryDBDynamicSQLInRoutine Category = "db-dynamic-sql-in-routine"
 
+	// CategoryDBFilteredColumnNoIndex (DB-010, index-vs-query cross): a query in the
+	// CODE filters by a column that the SCHEMA does not index — no index-like list
+	// (an index, a unique constraint, or the primary key) has that column as a
+	// LEADING prefix (db.CoveredByOrderedPrefix). It is the first rule of the code↔schema
+	// cross (ADR 0029): unlike the schema-only DB categories, establishing it needs
+	// BOTH the parsed schema AND the code's query filters. It is SURFACE, not a
+	// deterministic finding — the structural fact (filtered-and-uncovered) is
+	// certain once reconcile matches exactly, but whether a missing index MATTERS
+	// depends on the column's cardinality, the table's size, and the write load, the
+	// same agent judgment DB-001 (FK without index) already defers (ADR 0004/0005,
+	// ADR 0030). Reconcile abstains (and the rule emits nothing) on any inexact
+	// match — the Complete==false floor.
+	CategoryDBFilteredColumnNoIndex Category = "db-filtered-column-no-index"
+
+	// CategoryDBNoCompositeIndex (DB-013, index-vs-query cross): a query in the CODE
+	// filters by MULTIPLE columns of one table together (a AND b) that no composite
+	// index covers — no index-like list has that column SET as its leading columns
+	// (db.CoveredBySetPrefix). It is the multi-column sibling of DB-010: a
+	// multi-column WHERE wants a composite index, not a standalone index per column,
+	// so it is DB-013's, never split into per-column DB-010 concerns (precedence, ADR
+	// 0031). SURFACE, not a finding (same reasoning as DB-010, ADR 0030): whether the
+	// composite index matters — and whether column ORDER matters for a range filter,
+	// which codefit does not capture — is the agent's judgment. Reconcile abstains
+	// (emits nothing) on any inexact match.
+	CategoryDBNoCompositeIndex Category = "db-no-composite-index"
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps

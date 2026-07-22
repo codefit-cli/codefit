@@ -47,9 +47,9 @@ func (db001) ID() string { return "DB-001" }
 func (db001) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem
 	for _, t := range s.Tables {
-		coverers := indexLike(t)
+		coverers := db.IndexLike(t)
 		for _, fk := range t.ForeignKeys {
-			if coveredByPrefix(coverers, fk.Columns) {
+			if db.CoveredByOrderedPrefix(coverers, fk.Columns) {
 				continue
 			}
 			out = append(out, findings.SurfaceItem{
@@ -70,45 +70,11 @@ func (db001) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	return nil, out
 }
 
-// indexLike returns every index-like leading-column list of a table: each index's
-// columns, plus the primary key as an implicit index.
-func indexLike(t db.Table) [][]string {
-	out := make([][]string, 0, len(t.Indexes)+1)
-	for _, ix := range t.Indexes {
-		out = append(out, ix.Columns)
-	}
-	if len(t.PrimaryKey) > 0 {
-		out = append(out, t.PrimaryKey)
-	}
-	return out
-}
-
-// coveredByPrefix reports whether some coverer has cols as a leading prefix (same
-// order). A B-tree serves a lookup on the leading columns of an index, so an index
-// [a,b] covers a FK on [a] and on [a,b], but not on [b] alone.
-func coveredByPrefix(coverers [][]string, cols []string) bool {
-	for _, c := range coverers {
-		if hasLeadingPrefix(c, cols) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasLeadingPrefix(index, prefix []string) bool {
-	if len(prefix) == 0 || len(index) < len(prefix) {
-		return false
-	}
-	for i := range prefix {
-		if index[i] != prefix[i] {
-			return false
-		}
-	}
-	return true
-}
-
+// describeIndexLike renders a table's index-like column lists for a signal. The
+// leftmost-prefix coverage logic itself now lives in core/db (db.IndexLike /
+// db.CoveredByOrderedPrefix), shared with the cross rules so it never drifts.
 func describeIndexLike(t db.Table) string {
-	lists := indexLike(t)
+	lists := db.IndexLike(t)
 	if len(lists) == 0 {
 		return "(none)"
 	}
