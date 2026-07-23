@@ -1,6 +1,7 @@
 package crossrules
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -204,6 +205,58 @@ func TestDB013_GroupsSameSetAcrossTables(t *testing.T) {
 	joined := strings.Join(got[0].StructuralSignals, " | ")
 	if !strings.Contains(joined, "Service") || !strings.Contains(joined, "Supplier") {
 		t.Errorf("grouped item must list BOTH models (grouped, not suppressed), got %+v", got[0].StructuralSignals)
+	}
+}
+
+// TestDB013_GroupedOutputIsDeterministic locks the FIX 4 anchor/fingerprint against
+// churn (ADR 0031/0032): the grouped item spans many models, so its anchor and its
+// baseline snippet MUST NOT depend on filter-collection order (a map/traversal order
+// leaking in would make the agent see a "new" item every scan over an unchanged
+// tree — worse than the noise we removed). Two runs with the filters in DIFFERENT
+// orders must produce byte-identical items: same order, same anchor File/Line, same
+// per-set Snippet (which is what the fingerprint is derived from), same model list.
+func TestDB013_GroupedOutputIsDeterministic(t *testing.T) {
+	build := func() *db.Schema {
+		// Beta before Alpha in table order AND at a different schema line, so a stable
+		// anchor must NOT be "first table seen" (Beta, line 20) — it must be the
+		// alphabetically-first model (Alpha, line 5).
+		beta := db.Table{
+			Name: "Beta", Pos: db.Pos{File: "schema.prisma", Line: 20},
+			PrimaryKey: []string{"id"},
+			Columns:    []db.Column{col("id", 21), col("a", 22), col("b", 23)},
+		}
+		alpha := db.Table{
+			Name: "Alpha", Pos: db.Pos{File: "schema.prisma", Line: 5},
+			PrimaryKey: []string{"id"},
+			Columns:    []db.Column{col("id", 6), col("a", 7), col("b", 8), col("c", 9), col("d", 10)},
+		}
+		return schema(beta, alpha)
+	}
+	fwd := []query.QueryFilter{
+		filter("Beta", "a", "b"), filter("Alpha", "a", "b"), filter("Alpha", "c", "d"),
+	}
+	rev := []query.QueryFilter{
+		filter("Alpha", "c", "d"), filter("Alpha", "a", "b"), filter("Beta", "a", "b"),
+	}
+	_, out1 := db013{}.Check(build(), fwd)
+	_, out2 := db013{}.Check(build(), rev)
+
+	if !reflect.DeepEqual(out1, out2) {
+		t.Fatalf("grouped output changed with filter order (fingerprint churn):\n fwd=%+v\n rev=%+v", out1, out2)
+	}
+	// And the (a,b) group must anchor to Alpha (alphabetically first), list "Alpha, Beta".
+	if len(out1) != 2 {
+		t.Fatalf("want 2 items ((a,b) group + (c,d)), got %d: %+v", len(out1), out1)
+	}
+	ab := out1[0] // sorted key order: "a,b" before "c,d"
+	if ab.Snippet != "a, b" {
+		t.Errorf("snippet = %q, want the sorted set 'a, b' (the fingerprint basis)", ab.Snippet)
+	}
+	if ab.Line != 5 {
+		t.Errorf("anchor line = %d, want 5 (Alpha, the alphabetically-first model), not Beta:20", ab.Line)
+	}
+	if sig := strings.Join(ab.StructuralSignals, " | "); !strings.Contains(sig, "affected_models: Alpha, Beta") {
+		t.Errorf("model list must be sorted 'Alpha, Beta', got %q", sig)
 	}
 }
 

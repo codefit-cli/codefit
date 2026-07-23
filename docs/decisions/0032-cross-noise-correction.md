@@ -49,6 +49,17 @@ low-cardinality by construction; refining by value count would require extending
 neutral model with `Schema.Enums`/values — a separate slice. DB-013 does NOT apply
 this: a Boolean/enum as part of a composite filter is legitimate.
 
+**Declared limit — String-used-as-enum** (locked by
+`TestDB010_StringUsedAsEnumIsAKnownLimit`): FIX 2 keys off the DECLARED type, so a
+column declared `String` yet used as a categorical (e.g. `Transaction.type` holding
+only `'income'/'expense'`, the values living in a code comment) is
+indistinguishable at the schema level from a high-cardinality String — DB-010 still
+emits on it. This is a known blind spot, safe in direction (noise the agent refutes
+by reading the schema, never a false affirmation), the same lineage as the range
+predicate (ADR 0031). Resolving it requires the neutral `QueryFilter` to carry the
+WHERE's LITERAL VALUES so cardinality can be inferred from usage — a separate slice,
+not a fix here.
+
 ### FIX 3 — High arity is abstention, not a magic cap (DB-013)
 
 With a filter of 4 or more columns, WHICH subset to index depends on selectivity
@@ -66,12 +77,20 @@ models. That is ONE architectural observation, not 15 findings; from the second 
 adds nothing and burns attention budget. DB-013 now GROUPS emitted items by their
 column SET across tables into one item per unique set, naming every affected model
 in an `affected_models` signal. Grouped, NOT suppressed — the full model list is in
-the item. The item anchors to the first affected model (a clickable start) and sets
-its snippet explicitly to the sorted column set, so the baseline fingerprint is
-distinct-per-set and stable regardless of which model anchors it (this also fixed a
-latent collision where two sets on one table shared the model line's snippet). DB
-surface is baseline-tracked by fingerprint, not the StableID confirm flow, so the
-per-set snippet is the identity that matters.
+the item.
+
+Everything about the grouped item is DETERMINISTIC, so an unchanged tree never
+churns the baseline (which would make the agent see a "new" item every scan — worse
+than the noise removed): the items are emitted in sorted column-set order; within a
+group the affected models are sorted by name; the anchor is the ALPHABETICALLY-FIRST
+model (a clickable start, never "first filter seen" — filter-collection order must
+not leak in); and the snippet is set explicitly to the sorted column set. So the
+baseline fingerprint (`category + schema-file + snippet`) is distinct-per-set and
+stable regardless of which model anchors it — DB surface is baseline-tracked by
+fingerprint, not the StableID confirm flow. Locked by
+`TestDB013_GroupedOutputIsDeterministic` (two runs, filters in opposite order →
+byte-identical items). This also fixed a latent collision where two sets on one
+table shared the model line's snippet.
 
 ## Consequences
 

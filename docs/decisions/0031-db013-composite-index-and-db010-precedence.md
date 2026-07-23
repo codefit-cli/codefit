@@ -69,6 +69,12 @@ The item anchors to the SCHEMA table (the fix, `@@index([a,b])`, is a table-leve
 change) and is deduplicated by (table, column SET) so `(a,b)` and `(b,a)` are one
 concern. Reuses `reconcile` and `core/db` coverage — no reimplementation.
 
+**Superseded for grouped items (ADR 0032, FIX 4):** the same column set recurring
+across many models is grouped into ONE item, so the anchor is no longer "the table"
+but the ALPHABETICALLY-FIRST affected model, with a per-set snippet driving a stable
+baseline fingerprint. The single-table anchor above still holds for a set that
+occurs in exactly one model. See ADR 0032 for the determinism guarantee.
+
 ## Declared limits (carried from ADR 0029, still in force)
 
 - OR / NOT and nested relation filters are skipped at extraction.

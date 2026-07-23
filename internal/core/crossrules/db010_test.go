@@ -61,6 +61,33 @@ func TestDB010_LowCardinalitySkippedByType(t *testing.T) {
 	}
 }
 
+// TestDB010_StringUsedAsEnumIsAKnownLimit locks the flip side of FIX 2 as a DECLARED
+// LIMIT (ADR 0032), the same lineage as the range predicate: FIX 2 skips a column
+// whose DECLARED type is bounded (Boolean, enum), but a column declared `String` yet
+// used as a categorical (e.g. Transaction.type holding only 'income'/'expense', the
+// values living in a code comment) is INDISTINGUISHABLE at the schema level from a
+// high-cardinality String — so DB-010 still emits. It is a known blind spot, safe in
+// direction (noise the agent refutes by reading the schema comment, never a lie), and
+// resolving it would require the neutral QueryFilter to carry the WHERE's literal
+// values to infer cardinality from usage — a separate slice. This test pins the
+// current behavior so the limit is explicit, not latent.
+func TestDB010_StringUsedAsEnumIsAKnownLimit(t *testing.T) {
+	s := schema(db.Table{
+		Name: "Transaction", Pos: db.Pos{File: "schema.prisma", Line: 1},
+		Columns: []db.Column{
+			col("id", 2),
+			// declared String, but only ever 'income'/'expense' in practice — codefit
+			// cannot see that from the type.
+			coltyp("type", 3, db.TypeString),
+		},
+	})
+	s.Tables[0].PrimaryKey = []string{"id"}
+	if got := run010(s, filter("Transaction", "type")); len(got) != 1 {
+		t.Fatalf("known limit: a String-typed-but-categorical column is not schema-distinguishable "+
+			"from a high-cardinality String → DB-010 still emits (agent refutes), got %+v", got)
+	}
+}
+
 // TestDB010_UncoveredColumnEmits — a filtered column with no index at all is
 // surfaced, anchored to the schema column, with the cross category. Findings stay
 // nil (surface, not a deterministic finding — ADR 0030).
