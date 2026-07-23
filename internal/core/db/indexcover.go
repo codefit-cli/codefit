@@ -92,3 +92,60 @@ func sameSet(leading []string, want map[string]bool) bool {
 	}
 	return len(got) == len(want)
 }
+
+// UniqueKeys returns every column list that UNIQUELY identifies a row of the table:
+// the primary key (if any), plus the columns of each UNIQUE index/constraint. It is
+// the neutral notion of "what makes a row addressable to at most one", shared by the
+// cross rules (ADR 0031/0032).
+func UniqueKeys(t Table) [][]string {
+	var out [][]string
+	if len(t.PrimaryKey) > 0 {
+		out = append(out, t.PrimaryKey)
+	}
+	for _, ix := range t.Indexes {
+		if ix.Unique {
+			out = append(out, ix.Columns)
+		}
+	}
+	return out
+}
+
+// CoveredByUniqueSubset reports whether some unique key's column set is a SUBSET of
+// the filtered column set — meaning the filter CONSTRAINS a unique key and therefore
+// resolves to at most one row. When that holds, NO additional index helps (the
+// lookup is already a single-row seek), so the rule must not flag a missing index.
+//
+// This covers @id (PK), a single @unique column, and a composite @@unique in one
+// rule: e.g. filter (id, salonId) with id the PK is covered (id ⊆ {id, salonId}),
+// but filter (a, c) with a @@unique([a,b]) is NOT ({a,b} ⊄ {a,c}) — do not over-kill.
+// It is ROBUST to the equality-vs-range limit (ADR 0031): even a range on the PK
+// still uses the PK index for a bounded seek, so the short-circuit introduces no new
+// false negative. Used by DB-010 and DB-013 (ADR 0032).
+func CoveredByUniqueSubset(uniqueKeys [][]string, cols []string) bool {
+	if len(cols) == 0 {
+		return false
+	}
+	have := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		have[c] = true
+	}
+	for _, uk := range uniqueKeys {
+		if len(uk) == 0 {
+			continue
+		}
+		if isSubset(uk, have) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSubset reports whether every element of sub is a key of have.
+func isSubset(sub []string, have map[string]bool) bool {
+	for _, c := range sub {
+		if !have[c] {
+			return false
+		}
+	}
+	return true
+}

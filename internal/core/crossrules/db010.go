@@ -61,9 +61,26 @@ func (db010) Check(s *db.Schema, filters []query.QueryFilter) ([]findings.Findin
 			continue
 		}
 		c := cols[0]
+		// FIX unique-subset (ADR 0032): a filter that constrains a unique key resolves
+		// to ≤1 row → no index missing. For a single column this coincides with the
+		// ordered-prefix check below (a unique/PK on c leads c), but it is wired here
+		// too so DB-010 and DB-013 share one coverage floor.
+		if db.CoveredByUniqueSubset(db.UniqueKeys(*table), cols) {
+			continue
+		}
 		coverers := db.IndexLike(*table)
 		if db.CoveredByOrderedPrefix(coverers, []string{c}) {
 			continue // covered by an index / unique / PK leading column
+		}
+		col := columnByName(table, c)
+		// Low-cardinality by TYPE, derivable from the schema, not the data (ADR 0032):
+		// a Boolean is 2 values; an enum is a declared, bounded set. Indexing such a
+		// column standalone is almost always wrong, and codefit knows it from the
+		// .prisma without seeing a row. Skip — a partial-index / distribution judgment
+		// is the agent's, and refining an enum by value COUNT would need the neutral
+		// model to carry enum values (a separate slice).
+		if isLowCardinalityType(col.Type) {
+			continue
 		}
 		k := key{table.Name, c}
 		if seen[k] {
@@ -71,7 +88,6 @@ func (db010) Check(s *db.Schema, filters []query.QueryFilter) ([]findings.Findin
 		}
 		seen[k] = true
 
-		col := columnByName(table, c)
 		out = append(out, findings.SurfaceItem{
 			Category: string(surface.CategoryDBFilteredColumnNoIndex),
 			File:     col.Pos.File,
@@ -88,6 +104,15 @@ func (db010) Check(s *db.Schema, filters []query.QueryFilter) ([]findings.Findin
 		})
 	}
 	return nil, out
+}
+
+// isLowCardinalityType reports whether a column's declared type is bounded by
+// construction — a Boolean (2 values) or an enum (a declared, finite value set).
+// Filtering by such a column rarely warrants a standalone index; DB-010 skips it
+// (FIX 2, ADR 0032). It is used ONLY by DB-010 (single column): a Boolean/enum as
+// PART of a composite filter is legitimate, so DB-013 does not apply this.
+func isLowCardinalityType(t db.Type) bool {
+	return t == db.TypeBool || t == db.TypeEnum
 }
 
 // columnByName returns the column of t with the given Name (for its schema Pos).

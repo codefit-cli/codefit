@@ -2,6 +2,7 @@ package crossrules
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -34,9 +35,18 @@ type db013 struct{}
 
 func (db013) ID() string { return "DB-013" }
 
+// setGroup accumulates the models that share one uncovered column set — the FIX 4
+// aggregation: (salonId, deletedAt) appearing across 15 models is ONE architectural
+// observation, not 15 findings.
+type setGroup struct {
+	set    []string    // sorted column set
+	models []*db.Table // models exhibiting it, deduped, later sorted by name
+}
+
 func (db013) Check(s *db.Schema, filters []query.QueryFilter) ([]findings.Finding, []findings.SurfaceItem) {
-	seen := map[string]bool{}
-	var out []findings.SurfaceItem
+	groups := map[string]*setGroup{}
+	seenModelSet := map[string]bool{} // dedup a (model, set) pair
+	var order []string                // first-seen order of set keys, re-sorted at the end
 
 	for _, f := range filters {
 		table, cols, ok := reconcile(s, f)
@@ -44,40 +54,99 @@ func (db013) Check(s *db.Schema, filters []query.QueryFilter) ([]findings.Findin
 			continue // abstain — inexact match (Complete==false floor)
 		}
 		// DB-013 owns MULTI-column filters only; a single real column is DB-010's
-		// (precedence, ADR 0031). Routing by the reconciled column count partitions
-		// the filters between the two rules with no overlap.
+		// (precedence, ADR 0031).
 		if len(cols) < 2 {
+			continue
+		}
+		// FIX high-arity abstention (ADR 0032): with 4+ filtered columns, which
+		// subset to index depends on selectivity codefit cannot see → it does not
+		// know, so it stays silent. A 4-column @@index is a guess with an item's
+		// format, not an actionable suggestion — the same floor as cross-naming-space
+		// and the range limit.
+		if len(cols) >= arityAbstainThreshold {
+			continue
+		}
+		// FIX unique-subset (ADR 0032): a filter constraining a unique key (the PK, a
+		// @unique, or a @@unique subset) resolves to ≤1 row → no composite index
+		// helps. Kills the (id, salonId) tenant-scoped-lookup false positive.
+		if db.CoveredByUniqueSubset(db.UniqueKeys(*table), cols) {
 			continue
 		}
 		if db.CoveredBySetPrefix(db.IndexLike(*table), cols) {
 			continue // a composite index already has this column set as its leading columns
 		}
-		// Dedup by (table, column SET): (a,b) and (b,a) are one concern — one
-		// @@index fixes both. The sorted set is also the stable signal order.
+
 		set := append([]string(nil), cols...)
 		sort.Strings(set)
-		key := table.Name + "\x00" + strings.Join(set, ",")
-		if seen[key] {
-			continue
+		key := strings.Join(set, ",")
+		if seenModelSet[table.Name+"\x00"+key] {
+			continue // (a,b) and (b,a) on the same model are one concern
 		}
-		seen[key] = true
+		seenModelSet[table.Name+"\x00"+key] = true
+
+		g := groups[key]
+		if g == nil {
+			g = &setGroup{set: set}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.models = append(g.models, table)
+	}
+
+	sort.Strings(order) // stable output, independent of filter order
+	var out []findings.SurfaceItem
+	for _, key := range order {
+		g := groups[key]
+		sort.Slice(g.models, func(i, j int) bool { return g.models[i].Name < g.models[j].Name })
+		anchor := g.models[0] // a clickable starting point; the concern spans all models
+		names := make([]string, len(g.models))
+		for i, m := range g.models {
+			names[i] = m.Name
+		}
+		setStr := strings.Join(g.set, ", ")
 
 		out = append(out, findings.SurfaceItem{
 			Category: string(surface.CategoryDBNoCompositeIndex),
-			File:     table.Pos.File,
-			Line:     table.Pos.Line,
+			File:     anchor.Pos.File,
+			Line:     anchor.Pos.Line,
+			// Snippet is set EXPLICITLY to the column set (not a source line): the
+			// grouped item spans models, and a per-set snippet makes the baseline
+			// fingerprint distinct-per-set and stable regardless of which model anchors
+			// it (FIX 4, ADR 0032). It also fixes a latent collision where two sets on
+			// one table shared the model line's snippet.
+			Snippet: setStr,
 			StructuralSignals: []string{
-				"model: " + table.Name,
-				"filtered_columns: " + strings.Join(set, ", "),
-				"existing_indexes: " + describeIndexLike(*table),
+				"filtered_columns: " + setStr,
+				"affected_models: " + strings.Join(names, ", "),
 			},
 			StructuralFacts: map[string]bool{"covering_composite_index_detected": false},
-			ReasonToReview: "Code filters " + table.Name + " by " + strings.Join(set, " and ") +
-				" together, but no composite index has these columns as its leading columns. Given this " +
-				"table's size and access pattern, should a composite index (e.g. @@index([" + strings.Join(set, ", ") +
-				"])) be added? Column order in the index matters for range filters — codefit reports the set, " +
-				"you judge the order.",
+			ReasonToReview:  db013Reason(setStr, names),
 		})
 	}
 	return nil, out
 }
+
+// arityAbstainThreshold is the filtered-column count at or above which DB-013
+// abstains (FIX 3, ADR 0032): it emits only for 2- or 3-column filters. Real
+// composite indexes rarely exceed 3 columns; beyond that the useful subset depends
+// on selectivity codefit cannot observe.
+const arityAbstainThreshold = 4
+
+// db013Reason phrases the grouped concern, naming the recurrence when it spans more
+// than one model (an architectural pattern, not N separate findings).
+func db013Reason(setStr string, models []string) string {
+	base := "Code filters by " + setStr + " together, but no composite index has these columns as " +
+		"its leading columns. Given the table's size and access pattern, should a composite index " +
+		"(e.g. @@index([" + setStr + "])) be added? Column order in the index matters for range filters — " +
+		"codefit reports the set, you judge the order."
+	if len(models) > 1 {
+		base = "This column set is filtered-and-uncovered across " + itoa(len(models)) + " models (" +
+			strings.Join(models, ", ") + ") — likely one architectural pattern (e.g. tenant scoping + " +
+			"soft-delete). " + base
+	} else {
+		base = "Model " + models[0] + ": " + base
+	}
+	return base
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

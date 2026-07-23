@@ -29,6 +29,38 @@ func run010(s *db.Schema, filters ...query.QueryFilter) []findings.SurfaceItem {
 	return surf
 }
 
+// coltyp builds a positioned column with a declared neutral type (for FIX 2).
+func coltyp(name string, line int, t db.Type) db.Column {
+	return db.Column{Name: name, Type: t, Pos: db.Pos{File: "schema.prisma", Line: line}}
+}
+
+// TestDB010_LowCardinalitySkippedByType fixes FIX 2 (ADR 0032): DB-010 skips a
+// filtered column whose DECLARED type is bounded — Boolean or enum — because
+// indexing it standalone is almost always wrong, and codefit knows the type from the
+// schema without seeing a row. A String column (unbounded) still emits.
+func TestDB010_LowCardinalitySkippedByType(t *testing.T) {
+	s := schema(db.Table{
+		Name: "M", Pos: db.Pos{File: "schema.prisma", Line: 1},
+		Columns: []db.Column{
+			col("id", 2),
+			coltyp("isActive", 3, db.TypeBool), // Boolean → skip
+			coltyp("status", 4, db.TypeEnum),   // enum → skip
+			coltyp("note", 5, db.TypeString),   // String → still emits
+		},
+	})
+	s.Tables[0].PrimaryKey = []string{"id"}
+
+	if got := run010(s, filter("M", "isActive")); len(got) != 0 {
+		t.Errorf("Boolean column is low-cardinality by type → skip, got %+v", got)
+	}
+	if got := run010(s, filter("M", "status")); len(got) != 0 {
+		t.Errorf("enum column is low-cardinality by type → skip, got %+v", got)
+	}
+	if got := run010(s, filter("M", "note")); len(got) != 1 {
+		t.Fatalf("String column (unbounded cardinality) → still emits, got %+v", got)
+	}
+}
+
 // TestDB010_UncoveredColumnEmits — a filtered column with no index at all is
 // surfaced, anchored to the schema column, with the cross category. Findings stay
 // nil (surface, not a deterministic finding — ADR 0030).

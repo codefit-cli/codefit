@@ -62,6 +62,58 @@ func TestIndexLike_NoPK(t *testing.T) {
 	}
 }
 
+// TestCoveredByUniqueSubset locks the unique-subset short-circuit (ADR 0032): a
+// filter that CONTAINS a unique key resolves to ≤1 row, so no index is missing. It
+// must fire for @id/@unique/@@unique subsets and NOT over-fire when the unique key
+// is not fully contained.
+func TestCoveredByUniqueSubset(t *testing.T) {
+	tests := []struct {
+		name string
+		uniq [][]string
+		cols []string
+		want bool
+	}{
+		{"PK id ⊆ (id, salonId)", [][]string{{"id"}}, []string{"id", "salonId"}, true},
+		{"single @unique ⊆ (email, salonId)", [][]string{{"email"}}, []string{"email", "salonId"}, true},
+		{"composite @@unique([a,b]) ⊆ (a,b,c)", [][]string{{"a", "b"}}, []string{"a", "b", "c"}, true},
+		{"exact match", [][]string{{"a", "b"}}, []string{"a", "b"}, true},
+		{"NEGATIVE: @@unique([a,b]) ⊄ (a,c)", [][]string{{"a", "b"}}, []string{"a", "c"}, false},
+		{"no unique keys", nil, []string{"id"}, false},
+		{"unique key not contained", [][]string{{"x"}}, []string{"a", "b"}, false},
+		{"empty filter never covered", [][]string{{"id"}}, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CoveredByUniqueSubset(tt.uniq, tt.cols); got != tt.want {
+				t.Errorf("CoveredByUniqueSubset(%v, %v) = %v, want %v", tt.uniq, tt.cols, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUniqueKeys collects the PK and the unique indexes, excluding plain indexes.
+func TestUniqueKeys(t *testing.T) {
+	tb := Table{
+		PrimaryKey: []string{"id"},
+		Indexes: []Index{
+			{Columns: []string{"email"}, Unique: true},
+			{Columns: []string{"name"}, Unique: false}, // plain — excluded
+			{Columns: []string{"a", "b"}, Unique: true},
+		},
+	}
+	got := UniqueKeys(tb)
+	// PK first, then unique indexes in order; the plain [name] index is not unique.
+	want := [][]string{{"id"}, {"email"}, {"a", "b"}}
+	if len(got) != len(want) {
+		t.Fatalf("UniqueKeys = %v, want %v", got, want)
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) || (len(got[i]) > 0 && got[i][0] != want[i][0]) {
+			t.Errorf("UniqueKeys[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
 // TestCoveredBySetPrefix locks the ORDER-INSENSITIVE leading-set coverage DB-013
 // uses: same leading set covers (any order), a gap in the prefix does not, a shorter
 // index cannot. This is the composite-filter trap made mechanical.
