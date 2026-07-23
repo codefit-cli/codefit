@@ -200,6 +200,34 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     primary key `[actor_id, film_id]`), never a fully synthetic fixture.
   - **Multivalued (array) column (DB-002).** An array violates 1NF, but a native
     array (Postgres) is legitimate sometimes — surfaced, not affirmed.
+- **Index-vs-query — the code's queries crossed with the schema (`scan-all` only,
+  Prisma).** Unlike every rule above (schema-only), these read BOTH sides: the WHERE
+  columns of the code's Prisma queries **and** the schema's indexes. Both are
+  **surface** — a missing index may or may not matter (cardinality, table size, write
+  load are the agent's call), never affirmed. "Covered" counts an index's **leading
+  columns**, the **primary key**, and a **`@unique`**; a filter that constrains a
+  unique key is a single-row lookup and never fires. Matching is by the **logical
+  field name** on both sides (Prisma `@map` physical names never enter).
+  - **Filtered column with no index (DB-010).** One column the code filters on with
+    nothing (index, unique, or PK) covering it as a leading column. A `Boolean` or
+    `enum` column is **skipped** — low-cardinality by its declared type, where a
+    standalone index is almost always wrong.
+  - **Multi-column filter with no composite index (DB-013).** A `WHERE a AND b` with
+    no composite index whose leading columns are that **set** — order-insensitive, so
+    `[b,a]` covers `(a,b)`. The **same set recurring across many models is grouped
+    into one item** listing every affected model (an architectural pattern — e.g.
+    tenant scoping + soft-delete — not *N* findings).
+  - **Declared limits — what keeps this channel trustworthy.** `OR`/`NOT` and nested
+    relation filters are skipped at extraction. A Prisma **field name vs a physical
+    SQL-DDL column name** (cross-naming-space) **abstains**. **Range predicates** are
+    treated as equality — codefit does not capture the WHERE operator, a safe
+    direction (false negatives, never a wrong suggestion). A **4-or-more-column
+    filter abstains** — which subset to index needs selectivity codefit cannot see. A
+    **`String` column used as an enum** (its values in a comment, not the type) is
+    not schema-distinguishable from a high-cardinality string, so DB-010 still emits
+    and the agent refutes it by reading the schema. Resolving the last two would need
+    the neutral query model to carry operators / literal values — a separate slice.
+    **Cross-table (join) filters** are out of scope: a query filter names one model.
 - **Database structure — name-heuristic checks (schema-only).** These read meaning
   from column names, so they are **never affirmed** — codefit states the fact, the
   agent judges. Names are matched **by component** (camelCase/snake_case), never raw
@@ -371,13 +399,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   deterministically.
 - **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** — **not yet
   covered**, a known gap, not a silent one.
-- **Index-vs-query analysis** — whether an existing index actually serves the
-  queries the application code runs — is **not** covered; the DB dimension is
-  schema-only, it does not read query text or application code. (**N+1
-  query-in-loop patterns are a different capability and are no longer part of
-  this gap** — N+1 is mapped as per-handler surface by the language provider,
-  not by the schema-only DB dimension; see the N+1 entry above. It appears in
-  `scan-all`'s endpoint buckets, never in this DB section.)
+- **Index-vs-query analysis** — whether the schema indexes the columns the code
+  actually filters on — **is now covered** by DB-010 / DB-013 (see the *Index-vs-query*
+  section above) for **Prisma** projects, in `scan-all`. What remains uncovered is
+  declared there: range-vs-equality (no WHERE operator captured), a `String` used as
+  an enum, cross-naming-space against a physical SQL-DDL schema, and cross-table
+  (join) filters. Whether an existing index is *actually used* at runtime is a
+  different, telemetry-only question — see DB-012 below. (**N+1 query-in-loop
+  patterns** are a separate capability — mapped as per-handler surface in `scan-all`'s
+  endpoint buckets, never in this DB section; see the N+1 entry above.)
 - **Never-used index (DB-012)** is **not** covered, and this is **permanent**,
   not deferred: detecting an unused index requires runtime query telemetry
   (e.g. PostgreSQL's `pg_stat_user_indexes`) that only exists inside a live,
