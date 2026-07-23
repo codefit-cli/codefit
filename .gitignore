@@ -49,3 +49,6 @@ codefit-report.html
 # Engram project memory: versionada a mano en main (commit de infra), NO por-feature.
 # Ignorada para que `engram sync` no la re-stagee en branches de trabajo (el enredo).
 .engram/
+
+# Dogfood harness config — local project paths, per machine, never committed (see internal/mcp/dogfood_cross_test.go)
+dogfood.local.json
