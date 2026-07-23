@@ -2,12 +2,18 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/baseline"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	"github.com/codefit-cli/codefit/internal/core/crossrules"
+	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/query"
 	"github.com/codefit-cli/codefit/internal/core/report"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/providers"
@@ -143,14 +149,19 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	var dbSection *DBSection
 	dbRan := false
 	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
-		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg)
+		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg, crossrules.All())
 	}
 
 	// One unified baseline diff over both sensors' observations, scoped to the
-	// categories of the sensors that ran (ADR 0019), persisted once.
+	// categories of the sensors that ran (ADR 0019), persisted once. When db ran,
+	// the cross rules' categories join the db scope too — their items are part of the
+	// db result, so gone-detection/pruning must cover them (ADR 0029).
 	scanned := securityScope(req.Language)
 	if dbRan {
 		for _, c := range dbsensor.New(nil).OwnedCategories() {
+			scanned[c] = true
+		}
+		for _, c := range crossrules.OwnedCategories() {
 			scanned[c] = true
 		}
 	}
@@ -311,7 +322,7 @@ func providerForLanguage(lang string, authzHelpers []string) providers.LanguageP
 // actually measured. Every not-measured/failure path is SOFT: it returns a
 // Measured=false section with a note and ran=false — never an error, so a db
 // misconfiguration can never blank the security audit (ADR 0020).
-func runDBForScanAll(root, language string, cfg *config.Config) (*DBSection, findings.SensorResult, bool) {
+func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrules.Rule) (*DBSection, findings.SensorResult, bool) {
 	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
 	if parser == nil {
 		return &DBSection{Measured: false, Note: note}, findings.SensorResult{}, false
@@ -324,5 +335,85 @@ func runDBForScanAll(root, language string, cfg *config.Config) (*DBSection, fin
 	if !r.Measured {
 		return &DBSection{Measured: false, Note: r.Note}, findings.SensorResult{}, false
 	}
-	return &DBSection{Measured: true, Score: r.Res.Score}, r.Res, true
+
+	// Code↔schema cross (index-vs-query infra, ADR 0029): the adapter is the only
+	// place that knows BOTH the code provider and the parsed schema. It extracts the
+	// neutral query filters from the code and runs the neutral cross-runner over
+	// (schema, filters), merging its output into the db result. With crossrules.All()
+	// empty this slice, this is a proven no-op — the seam, never an output change.
+	res := r.Res
+	crossF, crossS := runCross(root, language, r.Schema, r.SchemaContent, rules)
+	res.Findings = append(res.Findings, crossF...)
+	res.Surface = append(res.Surface, crossS...)
+
+	return &DBSection{Measured: true, Score: res.Score}, res, true
+}
+
+// runCross extracts the code's query filters (when the language provider implements
+// QueryExtractor) and runs the given cross-rule set over the schema and those
+// filters, stamping the emitted items so they carry a baseline fingerprint (they
+// are produced AFTER the db sensor, so they miss its stamping — content is the
+// parsed schema content, exposed on the sensor result). The rule set is INJECTED:
+// production passes crossrules.All(); the seam gate passes nil. Returns nothing
+// when the schema is nil or the provider has no extractor. The cross is SOFT: a
+// read/parse hiccup never blanks the db result (ADR 0020) — the walk swallows
+// per-file errors, mirroring the security walk's resilience.
+func runCross(root, language string, schema *db.Schema, content map[string][]byte, rules []crossrules.Rule) ([]findings.Finding, []findings.SurfaceItem) {
+	if schema == nil {
+		return nil, nil
+	}
+	provider := providerForLanguage(language, nil)
+	extractor, ok := provider.(providers.QueryExtractor)
+	if !ok {
+		return nil, nil
+	}
+	filters := collectQueryFilters(root, provider.FileExtensions(), extractor)
+	fs, surf := crossrules.RunWith(schema, filters, rules)
+	dbsensor.StampSurface(surf, content)
+	return fs, surf
+}
+
+// crossSkipDirs are directories never walked for query extraction — the same set
+// the security sensor skips.
+var crossSkipDirs = map[string]bool{
+	".git": true, "vendor": true, "node_modules": true,
+	"dist": true, "bin": true, ".codefit": true,
+}
+
+// collectQueryFilters walks the project's source files of the provider's extensions
+// and unions the query filters each yields. Per-file read/extract errors are
+// swallowed (the cross is soft, never fatal to the db result); the file path is
+// made project-relative, matching the anchors the security surface uses.
+func collectQueryFilters(root string, exts []string, ex providers.QueryExtractor) []query.QueryFilter {
+	var out []query.QueryFilter
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if crossSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !slices.Contains(exts, filepath.Ext(path)) {
+			return nil
+		}
+		content, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+		ff, xerr := ex.ExtractQueryFilters(providers.SourceFile{Path: rel, Content: content})
+		if xerr != nil {
+			return nil
+		}
+		out = append(out, ff...)
+		return nil
+	})
+	return out
 }

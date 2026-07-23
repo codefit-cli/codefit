@@ -14,7 +14,44 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+**Index-vs-query — the DB dimension now crosses the code's queries against the
+schema.** Every DB rule so far read the schema alone; these are the first that need
+BOTH sides — a query's `WHERE` columns (code) and the schema's indexes — so codefit
+required new neutral infrastructure to cross them without the core ever importing a
+provider (a neutral `QueryFilter` produced by a provider `QueryExtractor`, mirroring
+how a `SchemaParser` produces the neutral schema). Both rules are **surface**, not
+affirmations: a missing index may or may not matter, the agent judges. Prisma only,
+in `scan-all`. Dogfooded on a real production schema (~40 models): after four noise
+corrections the cross settled at a low, sustainable frequency (a Prisma RealWorld app
+stays silent — nothing filtered that isn't already a key). ADRs 0029–0032.
+
+### Added
+
+- **DB-010 — filtered column without a covering index.** A single column the code
+  filters on that no index, `@unique`, or primary key covers as a leading column.
+  Emits **surface** (whether it matters depends on cardinality/size/write-load).
+- **DB-013 — multi-column filter without a composite index.** A `WHERE a AND b` with
+  no composite index whose leading columns are that **set** (order-insensitive —
+  `[b,a]` covers `(a,b)`). The same set recurring across many models is **grouped**
+  into one item naming every affected model — one architectural observation (e.g.
+  tenant scoping + soft-delete), not *N* findings.
+- **The cross infrastructure**: `internal/core/query` (the neutral `QueryFilter`),
+  `providers.QueryExtractor` with a Prisma/TypeScript implementation (the `WHERE`
+  columns of every query call-site), and `internal/core/crossrules` (a two-input rule
+  family with an exact-match reconciliation floor that abstains rather than point at a
+  column that is not there). Wired into `scan-all`; the merge is byte-identical when
+  the rule set is empty, locked by a mutation-tested seam gate.
+
+### Fixed
+
+- **Cross noise correction** (from dogfooding, ADR 0032): a filter constraining a
+  **unique key** (PK / `@unique` / `@@unique` subset) is a single-row lookup and no
+  longer flags a missing index (killed the tenant-scoped `where: { id, salonId }`
+  false positive); DB-010 **skips `Boolean`/`enum`** columns (low-cardinality by
+  declared type); DB-013 **abstains on 4-or-more-column** filters (unknowable subset);
+  and the repeated-pattern **grouping** above. Declared limits — range predicates,
+  `String`-used-as-enum, cross-naming-space, cross-table joins — are each fixed by a
+  test, not left latent.
 
 ## [0.2.3] — 2026-07-20
 

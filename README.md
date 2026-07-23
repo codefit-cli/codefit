@@ -121,9 +121,9 @@ independent audit layer that validates AI-generated code is secure and correct
   per-dimension score. Dogfooded on a real Prisma backend and real SQL-DDL
   (Postgres/MySQL/T-SQL) backends.
 
-**On the roadmap (not yet in `main`):** the HTTP/SSE transport; DB query-driven rules
-(N+1, index-vs-query) and view/procedure/trigger rules; Phase 3 code review / best
-practices / tests; Phase 4 knowledge packs + `update`.
+**On the roadmap (not yet in `main`):** the HTTP/SSE transport; OLAP / data-warehouse
+DB rules; Phase 3 code review / best practices / tests; Phase 4 knowledge packs +
+`update`.
 See the [PRD](docs/PRD-codefit-v1.4.md) §25 and [VERSIONING.md](VERSIONING.md).
 
 ## What codefit covers today
@@ -164,10 +164,13 @@ Concretely, on `main` — so you know exactly what to expect without reading
   Affirmed: a table with no primary key (DB-050). Surface: un-indexed FKs, duplicate
   indexes, multivalued columns, text-typed FKs, missing audit timestamps, sensitive
   columns in the clear, repeating groups — all dialect-agnostic (they reason over the
-  reconstructed neutral schema, never a dialect-specific field). Query behaviour (N+1,
-  index-vs-query), views/procedures/triggers, and OLAP are **not** audited yet —
-  declared, not silent. See [COVERAGE.md](COVERAGE.md) for the declared SQL-DDL dialect
-  limits (T-SQL routine-body edge case, MySQL `DELIMITER` recognition, and others).
+  reconstructed neutral schema, never a dialect-specific field). **The DB dimension
+  now also crosses the code's Prisma queries against the schema** (in `scan-all`): a
+  filtered column with no covering index (DB-010) or a multi-column filter with no
+  covering composite index (DB-013), surfaced with its declared limits. OLAP is
+  **not** audited yet — declared, not silent. See [COVERAGE.md](COVERAGE.md) for the
+  full rule list and the declared SQL-DDL dialect limits (T-SQL routine-body edge
+  case, MySQL `DELIMITER` recognition, and others).
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by

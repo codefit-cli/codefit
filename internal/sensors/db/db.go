@@ -7,6 +7,7 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	coredb "github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/dbrules"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
@@ -60,6 +61,18 @@ type Result struct {
 	Measured bool
 	Note     string
 	Res      findings.SensorResult
+	// Schema is the parsed neutral schema, exposed so the MCP adapter can run the
+	// code↔schema cross (crossrules) over it WITHOUT re-reading/re-parsing and
+	// without importing a provider here (ADR 0029). Nil on a not-measured result.
+	// The sensor stays schema-only: it merely returns what it parsed; the cross is
+	// orchestrated in the adapter, never here.
+	Schema *coredb.Schema
+	// SchemaContent is the raw content of the parsed schema files, keyed by path —
+	// exposed alongside Schema so the adapter can STAMP the cross rules' items
+	// (snippet + fingerprint) the same way the sensor stamps its own, since those
+	// items are produced after Audit returns and would otherwise carry no baseline
+	// identity (ADR 0029). Nil on a not-measured result.
+	SchemaContent map[string][]byte
 }
 
 // Run adapts Audit to the sensors.Sensor interface (for future aggregate use in
@@ -97,7 +110,7 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	fs, surf := dbrules.Run(schema)
 	stampFingerprints(fs, surf, content)
 
-	return Result{Measured: true, Res: findings.SensorResult{
+	return Result{Measured: true, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
 		Sensor:     "db",
 		Score:      scoring.DimensionScore(fs),
 		Findings:   fs,
@@ -128,6 +141,15 @@ func stampFingerprints(fs []findings.Finding, surf []findings.SurfaceItem, conte
 			fs[i].Fingerprint = findings.Fingerprint(string(fs[i].Dimension)+"/"+fs[i].ID, fs[i].File, lineAt(content[fs[i].File], fs[i].Line))
 		}
 	}
+	StampSurface(surf, content)
+}
+
+// StampSurface fills the snippet (from the source line at the item's position),
+// the baseline fingerprint, and the stable id of any surface item that lacks them.
+// It is exported so the MCP adapter can stamp the cross rules' items (produced
+// after Audit) with the SAME discipline the sensor uses on its own — one
+// stamping, no drift (ADR 0029). Idempotent: an item already stamped is untouched.
+func StampSurface(surf []findings.SurfaceItem, content map[string][]byte) {
 	for i := range surf {
 		if surf[i].Snippet == "" {
 			surf[i].Snippet = strings.TrimSpace(lineAt(content[surf[i].File], surf[i].Line))
