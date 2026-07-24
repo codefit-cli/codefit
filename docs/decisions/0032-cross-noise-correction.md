@@ -49,16 +49,25 @@ low-cardinality by construction; refining by value count would require extending
 neutral model with `Schema.Enums`/values — a separate slice. DB-013 does NOT apply
 this: a Boolean/enum as part of a composite filter is legitimate.
 
-**Declared limit — String-used-as-enum** (locked by
-`TestDB010_StringUsedAsEnumIsAKnownLimit`): FIX 2 keys off the DECLARED type, so a
-column declared `String` yet used as a categorical (e.g. `Transaction.type` holding
-only `'income'/'expense'`, the values living in a code comment) is
-indistinguishable at the schema level from a high-cardinality String — DB-010 still
-emits on it. This is a known blind spot, safe in direction (noise the agent refutes
-by reading the schema, never a false affirmation), the same lineage as the range
-predicate (ADR 0031). Resolving it requires the neutral `QueryFilter` to carry the
-WHERE's LITERAL VALUES so cardinality can be inferred from usage — a separate slice,
-not a fix here.
+**Declared limit — a declared type that does not reveal real cardinality** (locked
+by `TestDB010_StringUsedAsEnumIsAKnownLimit`): FIX 2 keys off the DECLARED type, so a
+column that is low-cardinality in PRACTICE but not in its type slips through and
+DB-010 still emits on it. This is ONE limit with two faces, both observed across the
+N=3 dogfood — independent field motivations, not a hypothetical:
+
+  - a `String` used as an enum — the values live in a code comment, not the type
+    (`Transaction.type` = `'income'/'expense'` in salonpro; `User.role` in umami);
+  - a `DateTime?` used as a binary flag — null = live / set = deleted
+    (`deletedAt`, filtered alone, in both umami and papermark).
+
+Both are indistinguishable at the schema level from a genuinely high-cardinality
+column, so both emit; both are safe in direction (noise the agent refutes by reading
+the schema, never a false affirmation), the same lineage as the range predicate (ADR
+0031). And both have the SAME fix: the neutral `QueryFilter` carrying the WHERE's
+LITERAL VALUES so cardinality is inferred from usage. That turns "literals in
+`QueryFilter`" from a nice-to-have into a slice with two independent, field-observed
+motivations (this cardinality limit and the range-operator limit) — a separate
+slice, not a fix here.
 
 ### FIX 3 — High arity is abstention, not a magic cap (DB-013)
 

@@ -12,18 +12,29 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
-## [Unreleased]
+## [0.2.4] — 2026-07-24
 
-**Index-vs-query — the DB dimension now crosses the code's queries against the
-schema.** Every DB rule so far read the schema alone; these are the first that need
-BOTH sides — a query's `WHERE` columns (code) and the schema's indexes — so codefit
-required new neutral infrastructure to cross them without the core ever importing a
-provider (a neutral `QueryFilter` produced by a provider `QueryExtractor`, mirroring
-how a `SchemaParser` produces the neutral schema). Both rules are **surface**, not
-affirmations: a missing index may or may not matter, the agent judges. Prisma only,
-in `scan-all`. Dogfooded on a real production schema (~40 models): after four noise
-corrections the cross settled at a low, sustainable frequency (a Prisma RealWorld app
-stays silent — nothing filtered that isn't already a key). ADRs 0029–0032.
+**Phase 2.4 — index-vs-query.** codefit pays the index-vs-query DB debt deferred in
+`0.2.0` (OLAP remains the open Phase-2 debt): the first rules that cross the code's
+queries against the schema, not the schema alone. A query's `WHERE` columns and the schema's indexes are matched through
+new neutral infrastructure, so the core never imports a provider. Both rules are
+**surface** — a missing index may or may not matter, the agent judges. Prisma only,
+in `scan-all`. ADRs 0029–0032.
+
+**Signal, measured.** On umami (a real analytics schema with 77 `@@index`), of **94
+query filters extracted, 7 surface** — the rest fall on columns that are already
+indexed, and the cross stays silent. That is the honest signal/noise: it speaks only
+where the schema left a filtered column uncovered. Calibrated across real schemas of
+different conventions, with **zero undeniable false positives**:
+
+| schema | models | DB-010 | DB-013 | what it validated |
+|---|---|---|---|---|
+| node-express-prisma (RealWorld) | 4 | 0 | 0 | stays silent on a well-keyed schema |
+| umami | 18 | 2 | 5 | coverage READS existing indexes — a wide index is not a cover of a trailing column |
+| a private production SaaS | ~40 | 4 | 17 | drove the four noise corrections |
+| papermark | 77 | 4 | 53 | the unique-subset short-circuit, against real composite `@@id` keys |
+
+Output scales with the schema (7 / 21 / 57 items on 18 / ~40 / 77 models) — proportional, not runaway.
 
 ### Added
 
@@ -49,9 +60,11 @@ stays silent — nothing filtered that isn't already a key). ADRs 0029–0032.
   longer flags a missing index (killed the tenant-scoped `where: { id, salonId }`
   false positive); DB-010 **skips `Boolean`/`enum`** columns (low-cardinality by
   declared type); DB-013 **abstains on 4-or-more-column** filters (unknowable subset);
-  and the repeated-pattern **grouping** above. Declared limits — range predicates,
-  `String`-used-as-enum, cross-naming-space, cross-table joins — are each fixed by a
-  test, not left latent.
+  and the repeated-pattern **grouping** above. Declared limits — each fixed by a test,
+  not left latent — are range predicates, cross-naming-space, cross-table joins, and
+  **a declared type that hides real cardinality** (a `String` used as an enum, a
+  `DateTime` used as a flag: both observed in the dogfood, both resolved by the same
+  future slice — literal values in the query model).
 
 ## [0.2.3] — 2026-07-20
 

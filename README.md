@@ -122,8 +122,11 @@ independent audit layer that validates AI-generated code is secure and correct
   (Postgres/MySQL/T-SQL) backends.
 
 **On the roadmap (not yet in `main`):** the HTTP/SSE transport; OLAP / data-warehouse
-DB rules; Phase 3 code review / best practices / tests; Phase 4 knowledge packs +
-`update`.
+DB rules; **literal values in the query model** — carrying the WHERE's literals so the
+cross can infer cardinality from usage (a `String` used as an enum, a `DateTime` used
+as a flag) and tell an equality filter from a range, the two field-observed limits of
+the index-vs-query cross; Phase 3 code review / best practices / tests; Phase 4
+knowledge packs + `update`.
 See the [PRD](docs/PRD-codefit-v1.4.md) §25 and [VERSIONING.md](VERSIONING.md).
 
 ## What codefit covers today

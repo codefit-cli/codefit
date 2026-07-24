@@ -222,12 +222,21 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     SQL-DDL column name** (cross-naming-space) **abstains**. **Range predicates** are
     treated as equality — codefit does not capture the WHERE operator, a safe
     direction (false negatives, never a wrong suggestion). A **4-or-more-column
-    filter abstains** — which subset to index needs selectivity codefit cannot see. A
-    **`String` column used as an enum** (its values in a comment, not the type) is
-    not schema-distinguishable from a high-cardinality string, so DB-010 still emits
-    and the agent refutes it by reading the schema. Resolving the last two would need
-    the neutral query model to carry operators / literal values — a separate slice.
-    **Cross-table (join) filters** are out of scope: a query filter names one model.
+    filter abstains** — which subset to index needs selectivity codefit cannot see.
+    **A column whose declared type does not reveal its real cardinality** still emits
+    on DB-010, and the agent refutes it by reading the schema — one limit with two
+    faces, both seen in the field: a `String` used as an enum (`Transaction.type` =
+    `income`/`expense` in salonpro; `User.role` in umami) and a `DateTime?` used as a
+    binary flag (`deletedAt` — null = live / set = deleted — in umami and papermark).
+    `Boolean`/`enum` skipping handles the same concern but keys off the DECLARED type,
+    which these two evade. Resolving both — and the range-operator case — needs the
+    neutral query model to carry the WHERE's **literal values** (cardinality inferred
+    from usage), a separate slice. **Cross-table (join) filters** are out of scope: a
+    query filter names one model.
+  - **Volume scales with the schema.** The cross emits per query-shape, so a larger
+    schema surfaces more: measured **7 items on 18 models, 21 on 40, 57 on 77** — a
+    steady ~1/3 of the DB channel, not a spike. It is proportional, not runaway; on a
+    large monorepo expect tens of items, each a schema-anchored surface question.
 - **Database structure — name-heuristic checks (schema-only).** These read meaning
   from column names, so they are **never affirmed** — codefit states the fact, the
   agent judges. Names are matched **by component** (camelCase/snake_case), never raw

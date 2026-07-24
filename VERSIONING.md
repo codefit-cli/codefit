@@ -33,6 +33,7 @@ pieces of it are still stubs.
 | `0.2.1`  | Phase 2.1 | Multi-dialect SQL-DDL: MySQL + SQL Server (T-SQL) alongside PostgreSQL (per-dialect DATA descriptor, ADR 0022; PG byte-identical) |
 | `0.2.2`  | Phase 2.2 | DB debt Slice A: N+1 surface (RF-04), view sensitive-column (DB-020), prefix-redundant index (DB-011b), neutral DB coverage source (ADRs 0023–0026) |
 | `0.2.3`  | Phase 2.3 | Routine-body rules: dynamic SQL (DB-030), exception handling (DB-031), trigger cross-table cascade (DB-040), trigger external call (DB-041), over de-truncated T-SQL bodies (ADRs 0027–0028) |
+| `0.2.4`  | Phase 2.4 | Index-vs-query cross (a Phase-2 debt deferred in `0.2.0`; OLAP still open): filtered column without an index (DB-010), multi-column filter without a composite index (DB-013), neutral cross infrastructure + four dogfood-driven noise corrections (ADRs 0029–0032) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -60,6 +61,16 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.4` — Phase 2.4 complete (index-vs-query).** The index-vs-query DB debt deferred in
+  `0.2.0` is paid (OLAP remains the open Phase-2 debt): the first rules that cross the code's
+  queries against the schema. A filtered
+  column with no covering index (DB-010) and a multi-column filter with no covering composite index
+  (DB-013), both **surface** — matched through neutral infrastructure so the core imports no provider
+  (a `QueryFilter` from a `QueryExtractor`, mirroring the `SchemaParser`; the merge is byte-identical
+  under a mutation-tested seam gate). Prisma only, in `scan-all`. Calibrated on four real schemas of
+  different conventions (node-express-prisma, umami, a private ~40-model SaaS, papermark) with zero
+  undeniable false positives; four dogfood-driven noise corrections (unique-subset short-circuit,
+  low-cardinality-by-type skip, high-arity abstention, cross-model grouping). ADRs 0029–0032.
 - **`v0.2.3` — Phase 2.3 complete (routine-body rules).** The last Phase-2 DB debt that needs a
   routine's body is paid: four surface rules over the captured body across PostgreSQL, MySQL, and
   SQL Server — dynamic SQL construction (DB-030), missing exception handling (DB-031), trigger
