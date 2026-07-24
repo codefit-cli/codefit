@@ -17,24 +17,26 @@
 // HOW TO RUN
 //
 //	1. Create dogfood.local.json at the repo root (gitignored — paths are per
-//	   machine, never committed), listing the projects you have locally:
+//	   machine, never committed), listing the projects you have locally. "schema" is
+//	   a path relative to "root" — either a single .prisma file OR a DIRECTORY of
+//	   .prisma files (a multi-file Prisma schema):
 //
 //	     [
 //	       {"name":"node-express","root":"/abs/clone","schema":"prisma/schema.prisma"},
-//	       {"name":"salonpro","root":"/abs/salonpro","schema":"app/frontend/prisma/schema.prisma"}
+//	       {"name":"papermark","root":"/abs/papermark","schema":"prisma/schema"}
 //	     ]
 //
 //	   (override the config path with CODEFIT_DOGFOOD_CONFIG=/some/file.json)
 //	2. go test -tags dogfood -run TestDogfoodCross -v ./internal/mcp/
 //
-// THE THREE PROJECTS the PR #65 table cites:
+// THE PROJECTS the PR #65 table cites (calibration N grows here):
 //   - gothinkster/node-express-prisma-v1-official-app — Prisma RealWorld; git clone it.
 //   - lujakob/nestjs-realworld-example-app — TypeORM, no .prisma → cross N/A.
 //   - salonpro — a private ~40-model production Prisma schema.
 //
 // SKIP-IF-ABSENT: no config file → the whole test skips clean; a config entry whose
-// root or schema file is not on this machine → that entry skips. Whoever has the
-// fixtures measures; whoever does not breaks nothing (exit 0, no lie).
+// root or schema is not on this machine → that entry skips. Whoever has the fixtures
+// measures; whoever does not breaks nothing (exit 0, no lie).
 package mcp
 
 import (
@@ -43,10 +45,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/crossrules"
+	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
@@ -54,22 +58,44 @@ import (
 type dogfoodProject struct {
 	Name   string `json:"name"`
 	Root   string `json:"root"`
-	Schema string `json:"schema"` // schema path relative to Root
+	Schema string `json:"schema"` // .prisma file OR a directory of .prisma files, relative to Root
 }
 
 func dogfoodConfigPath() string {
 	if p := os.Getenv("CODEFIT_DOGFOOD_CONFIG"); p != "" {
 		return p
 	}
-	return "dogfood.local.json" // repo root (test cwd is the package dir, so climb)
+	return "dogfood.local.json"
+}
+
+// resolveSchemaPaths turns the config "schema" into the list of schema paths (root-
+// relative) codefit parses: one file, or every .prisma under a directory (a
+// multi-file Prisma schema — the parser is two-pass, so cross-file model refs
+// resolve). Returns nil when nothing exists on this machine (→ skip).
+func resolveSchemaPaths(root, schema string) []string {
+	abs := filepath.Join(root, filepath.FromSlash(schema))
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		return []string{schema}
+	}
+	var out []string
+	entries, _ := os.ReadDir(abs)
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".prisma") {
+			out = append(out, filepath.ToSlash(filepath.Join(schema, e.Name())))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestDogfoodCross(t *testing.T) {
 	path := dogfoodConfigPath()
-	// The test runs with cwd = the package dir; the default config lives at the repo
-	// root, two levels up. An absolute CODEFIT_DOGFOOD_CONFIG is used verbatim.
 	if !filepath.IsAbs(path) {
-		path = filepath.Join("..", "..", path)
+		path = filepath.Join("..", "..", path) // test cwd is the package dir; config is at repo root
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -88,13 +114,33 @@ func TestDogfoodCross(t *testing.T) {
 			if _, err := os.Stat(p.Root); err != nil {
 				t.Skipf("root absent (skip-if-absent): %s", p.Root)
 			}
-			if _, err := os.Stat(filepath.Join(p.Root, filepath.FromSlash(p.Schema))); err != nil {
+			schemaPaths := resolveSchemaPaths(p.Root, p.Schema)
+			if len(schemaPaths) == 0 {
 				t.Skipf("schema absent (skip-if-absent): %s/%s", p.Root, p.Schema)
 			}
 
 			cfg := &config.Config{}
 			cfg.Database.Type = "postgresql"
-			cfg.Database.SchemaPaths = []string{p.Schema}
+			cfg.Database.SchemaPaths = schemaPaths
+
+			// Harness-side instrumentation (NOT the rule): the extracted query filters
+			// by arity, so we can see how many the arity≥4 rule abstains on. This is the
+			// PRE-reconcile column count (the raw WHERE columns); reconcile may drop a
+			// relation/phantom column, so it is an upper bound on the arity cohort.
+			provider := providerForLanguage("typescript", nil)
+			ex, _ := provider.(providers.QueryExtractor)
+			filters := collectQueryFilters(p.Root, provider.FileExtensions(), ex)
+			var arity1, arity23, arity4plus int
+			for _, f := range filters {
+				switch n := len(f.Columns); {
+				case n <= 1:
+					arity1++
+				case n <= 3:
+					arity23++
+				default:
+					arity4plus++
+				}
+			}
 
 			_, res, ran := runDBForScanAll(p.Root, "typescript", cfg, crossrules.All())
 			if !ran {
@@ -102,6 +148,7 @@ func TestDogfoodCross(t *testing.T) {
 			}
 
 			var d10, d13 []string
+			var d13Grouped, d13Single int
 			for _, it := range res.Surface {
 				line := fmt.Sprintf("  %s:%d  %v", it.File, it.Line, it.StructuralSignals)
 				switch it.Category {
@@ -109,21 +156,45 @@ func TestDogfoodCross(t *testing.T) {
 					d10 = append(d10, line)
 				case string(surface.CategoryDBNoCompositeIndex):
 					d13 = append(d13, line)
+					if affectedModelCount(it.StructuralSignals) > 1 {
+						d13Grouped++
+					} else {
+						d13Single++
+					}
 				}
 			}
 			sort.Strings(d10)
 			sort.Strings(d13)
 
+			cross := len(d10) + len(d13)
+			total := len(res.Surface)
+			pct := 0.0
+			if total > 0 {
+				pct = 100 * float64(cross) / float64(total)
+			}
 			t.Logf("\n=== %s (%s) ===", p.Name, p.Root)
-			t.Logf("DB-010 (filtered column, no index): %d item(s)", len(d10))
+			t.Logf("query filters extracted: %d (1-col=%d, 2-3col=%d, 4+col[arity-abstained]=%d)", len(filters), arity1, arity23, arity4plus)
+			t.Logf("DB-010: %d | DB-013: %d (grouped[>1 model]=%d, single=%d) | cross total=%d | db surface total=%d | cross %% of channel=%.0f%%",
+				len(d10), len(d13), d13Grouped, d13Single, cross, total, pct)
+			t.Log("--- DB-010 items ---")
 			for _, l := range d10 {
 				t.Log(l)
 			}
-			t.Logf("DB-013 (multi-column, no composite index): %d item(s)", len(d13))
+			t.Log("--- DB-013 items ---")
 			for _, l := range d13 {
 				t.Log(l)
 			}
-			t.Logf("cross total = %d ; db surface total across all rules = %d", len(d10)+len(d13), len(res.Surface))
 		})
 	}
+}
+
+// affectedModelCount reads the model count from a DB-013 item's "affected_models: A,
+// B, C" signal (FIX 4 grouping).
+func affectedModelCount(signals []string) int {
+	for _, s := range signals {
+		if rest, ok := strings.CutPrefix(s, "affected_models: "); ok {
+			return len(strings.Split(rest, ", "))
+		}
+	}
+	return 1
 }
