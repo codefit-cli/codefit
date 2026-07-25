@@ -421,6 +421,105 @@ database:
 	}
 }
 
+// DB-002 (CategoryDBMultivalued) boundary tests (CRITICAL C2, S1 review
+// ledger): suppress3NF treats DB-002 and DB-003 identically (db.go
+// suppressedCategory), but until this fix ONLY DB-003 was ever exercised by
+// a test — a visible contract of one of the slice's two rules went
+// unverified. These lock the same auto-olap/mixed-partial boundaries
+// already locked for DB-003, above, for DB-002.
+func TestSensorDB_3NFSuppression_DB002_MultivaluedColumn(t *testing.T) {
+	t.Run("auto-olap: multivalued column on a dimension table is suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
+}
+
+model dim_product {
+  id     Int      @id
+  labels String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "dim_product") {
+			t.Error("DB-002 fired for dim_product under auto/olap-role detection, want suppressed")
+		}
+	})
+
+	t.Run("mixed: dimension suppressed, unclassified table NOT over-suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+}
+
+model dim_customer {
+  id   Int      @id
+  tags String[]
+}
+
+model widgets {
+  id   Int      @id
+  tags String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: mixed
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "dim_customer") {
+			t.Error("DB-002 fired for dim_customer (dimension role) under mixed, want suppressed")
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "widgets") {
+			t.Error("DB-002 did not fire for widgets (unclassified role) under mixed, want NOT suppressed (over-suppression)")
+		}
+	})
+}
+
 // oltp-negative: an explicit oltp override on a dim_-prefixed schema with the
 // identical shape as the auto-olap case MUST still fire — explicit config
 // always wins, detection MUST NOT suppress. A detected-oltp schema (no
