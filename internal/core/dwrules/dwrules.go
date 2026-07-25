@@ -4,6 +4,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/paradigm"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
 // Rule is one deterministic check over BOTH neutral inputs — the schema AND
@@ -27,13 +28,28 @@ func All() []Rule {
 		dw002{}, // S2 — dimension without a surrogate key (surface)
 		dw005{}, // S2 — facts present, no time dimension (surface)
 		dw010{}, // S2 — SCD-2 dimension without a currency index (surface)
+		dw011{}, // S2 — mixed SCD strategies in one schema (surface)
 	}
 }
 
-// OwnedCategories are the baseline Item categories the DW rules produce.
-// Empty in S1 — no DW rule owns a surface category yet; the sensor's own
-// OwnedCategories() is therefore unchanged this slice (design §2f).
-func OwnedCategories() []string { return nil }
+// OwnedCategories are the baseline Item categories the DW rules produce — one
+// per rule, in All() order. The DB sensor appends them to its own
+// OwnedCategories() (design §2f): DW rules run INSIDE the sensor, so their
+// categories are the SENSOR's, unlike crossrules, whose categories are unioned
+// in the MCP adapter because the cross runs outside any sensor.
+//
+// A category that is emitted but NOT declared here can never be baselined or
+// pruned (ADR 0019) — it is the one way to corrupt an existing baseline — so
+// this list is test-locked against All() rather than maintained by memory.
+func OwnedCategories() []string {
+	return []string{
+		string(surface.CategoryDWNoFactDimensionFK),       // DW-001
+		string(surface.CategoryDWDimensionNoSurrogateKey), // DW-002
+		string(surface.CategoryDWNoTimeDimension),         // DW-005
+		string(surface.CategoryDWSCD2NoCurrencyIndex),     // DW-010
+		string(surface.CategoryDWMixedSCDStrategies),      // DW-011
+	}
+}
 
 // Run executes the production rule set (All()) over the schema and its
 // classification.

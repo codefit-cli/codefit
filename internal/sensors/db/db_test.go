@@ -196,14 +196,14 @@ func TestSensorDB_OwnedCategories_IncludesPrefixRedundantIndex(t *testing.T) {
 	t.Errorf("OwnedCategories() missing %q (have %v)", want, s.OwnedCategories())
 }
 
-// The sensor's paradigm assembly (paradigm.Detect + paradigm.Resolve merged
-// with dwrules.RunWith) must leave Findings/Surface BYTE-IDENTICAL to the
-// pre-change output while dwrules.All() is still empty in S1 — the
-// crossrules seam-gate discipline applied one layer up (design §2c). This is
-// exercised across every valid paradigm config value: none of them can
-// change the output yet, since there is no real DW rule to react to the
-// classification.
-func TestSensorDB_ParadigmAssembly_NoChangeWhileDWRulesEmpty(t *testing.T) {
+// S1 asserted that the paradigm assembly left the sensor's output
+// byte-identical, because dwrules.All() was empty. S2 broke that premise on
+// purpose: there are five real DW rules now. What SURVIVES the premise change
+// is the property that actually mattered — a schema with NO warehouse-role
+// table must be completely untouched by the DW family, under EVERY valid
+// paradigm config value. happySchema (User/Post/NoKey) is exactly such a
+// schema, so no config value may add or remove a single item.
+func TestSensorDB_ParadigmAssembly_NoDWEffectOnAnOLTPSchema(t *testing.T) {
 	base := yamlWithSchema // has "paradigm: oltp"
 	variants := map[string]string{
 		"unset (no paradigm key)": "version: \"1\"\nproject:\n  name: t\n  language: typescript\n  framework: next\ndatabase:\n  orm: prisma\n  type: postgresql\n  schema_paths:\n    - prisma/schema.prisma\n",
@@ -214,8 +214,8 @@ func TestSensorDB_ParadigmAssembly_NoChangeWhileDWRulesEmpty(t *testing.T) {
 	}
 
 	// Baseline from the "oltp" variant, to compare every other variant against
-	// — proves byte-identical output without hardcoding a magic count that
-	// would drift with every unrelated dbrules rule this schema happens to hit.
+	// — proves identical output without hardcoding a magic count that would
+	// drift with every unrelated dbrules rule this schema happens to hit.
 	baseCtx := writeProject(t, "prisma/schema.prisma", happySchema, variants["oltp"])
 	baseR, err := sdb.New(typescript.New()).Audit(baseCtx)
 	if err != nil {
@@ -241,7 +241,106 @@ func TestSensorDB_ParadigmAssembly_NoChangeWhileDWRulesEmpty(t *testing.T) {
 			if len(r.Res.Surface) != len(baseR.Res.Surface) {
 				t.Errorf("Surface count = %d, want %d (unchanged by paradigm assembly)", len(r.Res.Surface), len(baseR.Res.Surface))
 			}
+			for _, it := range r.Res.Surface {
+				if strings.HasPrefix(it.Category, "dw-") {
+					t.Errorf("DW surface item %q emitted on a schema with no warehouse-role table", it.Category)
+				}
+			}
 		})
+	}
+}
+
+// The other half of the same premise change: on a schema that IS a star, the
+// DW family must actually run through the sensor — end to end, from
+// ParseSchema through paradigm.Detect to dwrules — and its items must be
+// stamped with a fingerprint and a stable ID like every other surface item,
+// or they can never be baselined.
+func TestSensorDB_ParadigmAssembly_DWRulesRunOnAStarSchema(t *testing.T) {
+	// fact_sales fans out to two dimensions (real corroboration); dim_product
+	// is keyed by a natural string code (DW-002) and there is no time
+	// dimension anywhere (DW-005).
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id           Int          @id
+  customerKey  Int
+  productCode  String
+  amount       Float
+  dim_customer dim_customer @relation(fields: [customerKey], references: [customer_key])
+  dim_product  dim_product  @relation(fields: [productCode], references: [product_code])
+}
+
+model dim_customer {
+  customer_key Int          @id
+  name         String
+  fact_sales   fact_sales[]
+}
+
+model dim_product {
+  product_code String       @id
+  category     String
+  fact_sales   fact_sales[]
+}
+`
+	yaml := strings.Replace(yamlWithSchema, "paradigm: oltp", "paradigm: auto", 1)
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if !r.Measured {
+		t.Fatalf("Measured=false: %q", r.Note)
+	}
+
+	for _, want := range []string{
+		string(surface.CategoryDWDimensionNoSurrogateKey), // dim_product's natural key
+		string(surface.CategoryDWNoTimeDimension),         // no dim_date anywhere
+	} {
+		found := false
+		for _, it := range r.Res.Surface {
+			if it.Category != want {
+				continue
+			}
+			found = true
+			if it.Fingerprint == "" || it.ID == "" {
+				t.Errorf("%s item is not stamped (fingerprint=%q id=%q) — it could never be baselined",
+					want, it.Fingerprint, it.ID)
+			}
+		}
+		if !found {
+			t.Errorf("no %s item — the DW family did not run through the sensor", want)
+		}
+	}
+
+	// DW-001 must NOT fire: fact_sales genuinely joins two dimensions.
+	for _, it := range r.Res.Surface {
+		if it.Category == string(surface.CategoryDWNoFactDimensionFK) {
+			t.Errorf("DW-001 fired on a fact that joins two dimensions: %v", it.StructuralSignals)
+		}
+	}
+}
+
+// Every DW category must be in the sensor's baseline scope (ADR 0019), same
+// rationale as the DB-020 and prefix-redundant-index locks above: an
+// undeclared category can never be baselined or pruned.
+func TestSensorDB_OwnedCategories_IncludesEveryDWCategory(t *testing.T) {
+	owned := map[string]bool{}
+	for _, c := range sdb.New(typescript.New()).OwnedCategories() {
+		owned[c] = true
+	}
+	for _, want := range []surface.Category{
+		surface.CategoryDWNoFactDimensionFK,
+		surface.CategoryDWDimensionNoSurrogateKey,
+		surface.CategoryDWNoTimeDimension,
+		surface.CategoryDWSCD2NoCurrencyIndex,
+		surface.CategoryDWMixedSCDStrategies,
+	} {
+		if !owned[string(want)] {
+			t.Errorf("OwnedCategories() missing %q", want)
+		}
 	}
 }
 

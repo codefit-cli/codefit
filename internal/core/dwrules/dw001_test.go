@@ -16,8 +16,20 @@ import (
 // paradigm.Detect. That is DELIBERATE: a rule's unit test must fail for the
 // RULE's reason, not for a detection-heuristic reason, and Detect's
 // corroboration thresholds (FK fan-out / fan-in) are S1's contract with their
-// own tests. The REAL Detect→rule path is proven end-to-end in the DB sensor's
-// integration test over the vendored AdventureWorksDW DDL.
+// own tests. The REAL Detect→rule path is proven end-to-end twice: in
+// internal/sensors/db (a star schema audited through Sensor.Audit) and in
+// internal/providers/sqlddl (the vendored AdventureWorksDW DDL).
+//
+// DECLARED SYNTHETIC (ADR 0028 fixture-gap policy), stated once for the whole
+// DW rule-test family rather than implied: EVERY schema in these unit tests is
+// constructed, not taken from a real corpus. The vendored real warehouse
+// (AdventureWorksDW) cannot carry the positive fire paths today for two
+// independent, test-locked reasons documented in
+// internal/providers/sqlddl/dw_integration_test.go — its PascalCase Kimball
+// names are outside the recognized prefix vocabulary, and the T-SQL reducer
+// drops the ALTER TABLE ... ADD CONSTRAINT shapes it uses, so its real keys
+// and foreign keys never reach the model. Both a POSITIVE and a TRAP
+// (negative) case are constructed for each rule.
 
 // dwtbl builds a positioned table.
 func dwtbl(name string, cols ...db.Column) db.Table {

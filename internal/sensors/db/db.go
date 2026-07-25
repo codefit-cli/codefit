@@ -40,8 +40,16 @@ func (*Sensor) Dimension() findings.Dimension { return findings.DimensionDB }
 // OwnedCategories are the baseline Item categories the DB sensor produces: its
 // finding dimension ("db") plus its per-rule surface categories. They scope the
 // unified baseline (ADR 0019) and must be disjoint from every other sensor's.
+//
+// The DW-0xx categories are APPENDED from dwrules.OwnedCategories() rather
+// than re-listed here: the DW rules run INSIDE this sensor (design §2f), so
+// their categories are the sensor's, and sourcing them from the rule package
+// means a new DW rule cannot land with its category missing from the baseline
+// scope — the one way to corrupt an existing baseline. This is the deliberate
+// contrast with crossrules, whose categories are unioned in the MCP adapter
+// because the cross runs outside any sensor (ADR 0029).
 func (*Sensor) OwnedCategories() []string {
-	return []string{
+	own := []string{
 		string(findings.DimensionDB),
 		string(surface.CategoryDBFKNoIndex),
 		string(surface.CategoryDBDupIndex),
@@ -53,6 +61,7 @@ func (*Sensor) OwnedCategories() []string {
 		string(surface.CategoryDBViewSensitiveColumn),
 		string(surface.CategoryDBPrefixRedundantIndex),
 	}
+	return append(own, dwrules.OwnedCategories()...)
 }
 
 // Result is the DB audit outcome, including whether the DB was measured at all.

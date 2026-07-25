@@ -1,6 +1,8 @@
 package dwrules_test
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -8,6 +10,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/dwrules"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/paradigm"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
 // TestRunWith_SeamGate proves the merge mechanism BEFORE any real DW rule
@@ -120,5 +123,49 @@ func TestAll_RuleIDsAreUniqueAndNonEmpty(t *testing.T) {
 			t.Errorf("duplicate rule ID %q — two rules would share one baseline identity", id)
 		}
 		seen[id] = true
+	}
+}
+
+// TestAll_RegistersTheS2Family locks the EXACT S2 rule set. DW-020
+// (partitioning, S4) and DW-021 (columnar index, S3) are deliberately ABSENT
+// and must stay declared-not-covered in dbcoverage.go/COVERAGE.md until they
+// are actually built — a rule appearing here before its coverage prose, or
+// coverage prose before the rule, is the exact drift this project's honesty
+// doctrine exists to prevent.
+func TestAll_RegistersTheS2Family(t *testing.T) {
+	want := []string{"DW-001", "DW-002", "DW-005", "DW-010", "DW-011"}
+	got := make([]string, 0, len(dwrules.All()))
+	for _, r := range dwrules.All() {
+		got = append(got, r.ID())
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("All() rule IDs = %v, want %v", got, want)
+	}
+}
+
+// TestOwnedCategories_CoversEveryS2Rule replaces S1's
+// TestOwnedCategories_EmptyInS1. Every DW rule emits exactly one surface
+// category, and every one of those categories MUST be declared owned — an
+// undeclared category can never be baselined or pruned (ADR 0019), which is
+// the single way to corrupt an existing baseline.
+func TestOwnedCategories_CoversEveryS2Rule(t *testing.T) {
+	want := []string{
+		string(surface.CategoryDWNoFactDimensionFK),
+		string(surface.CategoryDWDimensionNoSurrogateKey),
+		string(surface.CategoryDWNoTimeDimension),
+		string(surface.CategoryDWSCD2NoCurrencyIndex),
+		string(surface.CategoryDWMixedSCDStrategies),
+	}
+	got := dwrules.OwnedCategories()
+	if len(got) != len(dwrules.All()) {
+		t.Errorf("OwnedCategories() has %d entries but All() has %d rules — one category per rule",
+			len(got), len(dwrules.All()))
+	}
+	sorted := append([]string(nil), got...)
+	sort.Strings(sorted)
+	sort.Strings(want)
+	if !reflect.DeepEqual(sorted, want) {
+		t.Errorf("OwnedCategories() = %v, want %v", sorted, want)
 	}
 }
