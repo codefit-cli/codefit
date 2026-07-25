@@ -331,6 +331,77 @@ database:
 	}
 }
 
+// WARNING (risk R2), S1 review ledger: 3NF-suppression must not be silent —
+// "siempre se informan las consecuencias" (CLAUDE.md). When suppress3NF
+// withholds items, the sensor's Result.Note carries a factual trace of what
+// was withheld and how to see it (database.paradigm: oltp). The note must
+// stay empty (never spammed) when nothing was suppressed.
+func TestSensorDB_3NFSuppression_AuditTraceNote(t *testing.T) {
+	t.Run("note appears when items are suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note == "" {
+			t.Fatal("Note is empty, want a factual trace of what 3NF-suppression withheld")
+		}
+		if !strings.Contains(r.Note, "1") {
+			t.Errorf("Note = %q, want it to mention the suppressed count (1)", r.Note)
+		}
+		if !strings.Contains(r.Note, "database.paradigm") {
+			t.Errorf("Note = %q, want it to point at database.paradigm: oltp as the escape hatch", r.Note)
+		}
+	})
+
+	t.Run("note is empty when nothing is suppressed", func(t *testing.T) {
+		// yamlWithSchema has paradigm: oltp and happySchema has no
+		// fact_/dim_ tables — suppress3NF never drops anything here.
+		ctx := writeProject(t, "prisma/schema.prisma", happySchema, yamlWithSchema)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note != "" {
+			t.Errorf("Note = %q, want empty when nothing was suppressed (never spam)", r.Note)
+		}
+	})
+}
+
 // explicit-olap-override: database.paradigm: olap set explicitly, ANY table
 // (even one with no fact_/dim_/stg_/mart_ prefix) has its DB-003 item
 // dropped SCHEMA-WIDE — the dev asserts the whole schema is a warehouse.

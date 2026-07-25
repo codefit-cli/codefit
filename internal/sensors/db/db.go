@@ -122,11 +122,11 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	fs = append(fs, dwF...)
 	surf = append(surf, dwS...)
 
-	surf = suppress3NF(surf, cls, override)
+	surf, note := suppress3NF(surf, cls, override)
 
 	stampFingerprints(fs, surf, content)
 
-	return Result{Measured: true, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
+	return Result{Measured: true, Note: note, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
 		Sensor:     "db",
 		Score:      scoring.DimensionScore(fs),
 		Findings:   fs,
@@ -158,9 +158,15 @@ func notMeasured(note string) Result { return Result{Measured: false, Note: note
 //     recognized role (unclassified/ordinary OLTP) keeps firing unchanged,
 //     preventing over-suppression on a mixed schema (design §7 boundary
 //     risk #3).
-func suppress3NF(surf []findings.SurfaceItem, cls paradigm.Classification, override paradigm.Paradigm) []findings.SurfaceItem {
+//
+// R2 audit trace (WARNING, S1 review ledger — "siempre se informan las
+// consecuencias", CLAUDE.md): suppression is never silent. When one or more
+// items are withheld, the returned note records how many and on how many
+// OLAP-classified tables, and points at database.paradigm: oltp to reveal
+// them. The note is empty (never spammed) when nothing was suppressed.
+func suppress3NF(surf []findings.SurfaceItem, cls paradigm.Classification, override paradigm.Paradigm) ([]findings.SurfaceItem, string) {
 	if override == paradigm.ParadigmOLTP {
-		return surf
+		return surf, ""
 	}
 
 	suppressedCategory := func(c string) bool {
@@ -170,18 +176,58 @@ func suppress3NF(surf []findings.SurfaceItem, cls paradigm.Classification, overr
 	dropAll := override == paradigm.ParadigmOLAP
 
 	kept := surf[:0:0] //nolint:gocritic // deliberate zero-length, non-aliased slice: never mutate surf in place
+	droppedCount := 0
+	droppedTables := map[string]bool{}
 	for _, it := range surf {
 		if suppressedCategory(it.Category) {
 			if dropAll {
+				droppedCount++
+				droppedTables[itemTable(it)] = true
 				continue
 			}
 			if role, ok := tableRole(it, cls); ok && isOLAPRole(role) {
+				droppedCount++
+				droppedTables[itemTable(it)] = true
 				continue
 			}
 		}
 		kept = append(kept, it)
 	}
-	return kept
+
+	if droppedCount == 0 {
+		return kept, ""
+	}
+	return kept, suppressionNote(droppedCount, len(droppedTables))
+}
+
+// itemTable extracts a surface item's "table: <name>" StructuralSignal —
+// the same signal tableRole resolves a role from. Empty when absent (should
+// not happen for DB-002/DB-003, which always carry it).
+func itemTable(it findings.SurfaceItem) string {
+	for _, sig := range it.StructuralSignals {
+		if table, found := strings.CutPrefix(sig, "table: "); found {
+			return table
+		}
+	}
+	return ""
+}
+
+// suppressionNote renders the R2 audit trace: a factual, minimal statement
+// of what 3NF-suppression withheld and how to see it.
+func suppressionNote(items, tables int) string {
+	itemWord := "item"
+	if items != 1 {
+		itemWord += "s"
+	}
+	tableWord := "table"
+	if tables != 1 {
+		tableWord += "s"
+	}
+	return fmt.Sprintf(
+		"3NF-suppression withheld %d 1NF surface %s (DB-002/DB-003) on %d OLAP-classified %s "+
+			"(fact/dimension/mart); set database.paradigm: oltp to see them.",
+		items, itemWord, tables, tableWord,
+	)
 }
 
 // tableRole resolves a surface item's table via its "table: <name>"
