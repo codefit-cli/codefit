@@ -89,7 +89,7 @@ a linter already catches them and they are **out of scope**. codefit is the
 independent audit layer that validates AI-generated code is secure and correct
 **before** it merges.
 
-## Status — Phase 2 complete (`v0.2.0`)
+## Status — Phase 2 (the database dimension), OLAP still open
 
 **Works today, on `main`, validated in real use against real backends:**
 
@@ -107,19 +107,21 @@ independent audit layer that validates AI-generated code is secure and correct
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
-- **Database-structure auditing (Phase 2)** — a neutral schema model with two schema
-  parsers, **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway migrations,
-  reconstructed incrementally), the latter supporting **PostgreSQL, MySQL, and SQL
-  Server (T-SQL)** dialects selected by `database.type` in `.codefit.yaml`
-  (`postgresql` | `mysql` | `sqlserver`; `sqlite` returns an explicit "not supported
-  yet" note). Eight schema-only OLTP rules, dialect-agnostic — they reason over the
-  neutral schema regardless of which dialect parsed it: a table without a primary
-  key (affirmed), and — as surface the agent reasons — un-indexed foreign keys,
-  duplicate indexes, multivalued columns, text-typed FKs, missing audit timestamps,
-  sensitive columns in the clear, and repeating groups. Run it standalone with
+- **Database-dimension auditing** — a neutral schema model with two schema parsers,
+  **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway migrations, reconstructed
+  incrementally), the latter supporting **PostgreSQL, MySQL, and SQL Server (T-SQL)**
+  dialects selected by `database.type` in `.codefit.yaml` (`postgresql` | `mysql` |
+  `sqlserver`; `sqlite` returns an explicit "not supported yet" note). It audits, all
+  dialect-agnostic over the neutral schema: the schema's **structural quality** (keys,
+  indexes, column shape, name-heuristic smells), **view** sensitive-column exposure,
+  the **routine bodies** of stored procedures, functions, and triggers (dynamic SQL,
+  missing exception handling, cross-table cascades, external-effecting calls), and
+  **code×schema crosses** that check whether the columns the code actually filters on
+  are backed by an index. One structural fact is affirmed (a table with no primary
+  key); everything else is surface the agent reasons. Run it standalone with
   `codefit-scan-db`; it also runs inside `scan-all` as its own section with a
-  per-dimension score. Dogfooded on a real Prisma backend and real SQL-DDL
-  (Postgres/MySQL/T-SQL) backends.
+  per-dimension score. The rule inventory lives in [COVERAGE.md](COVERAGE.md).
+  Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
 **On the roadmap (not yet in `main`):** the HTTP/SSE transport; OLAP / data-warehouse
 DB rules; **literal values in the query model** — carrying the WHERE's literals so the
@@ -152,7 +154,7 @@ Concretely, on `main` — so you know exactly what to expect without reading
   `package-lock.json` / `go.mod` — never guessed from `package.json` ranges (no
   lockfile → an honest note, not a guess). codefit keeps no vuln DB of its own and
   surfaces OSV's severity rather than recomputing CVSS.
-- **Database structure — schema-only, the agent reasons the surface.** Read from
+- **Database dimension — the agent reasons the surface.** Read from
   `database.schema_paths` (a Prisma `schema.prisma` or a directory of SQL-DDL / Flyway
   migrations reconstructed to the final schema). SQL-DDL parsing supports **three
   dialects**, selected by `database.type` in `.codefit.yaml`:
@@ -164,16 +166,16 @@ Concretely, on `main` — so you know exactly what to expect without reading
       - db/migrations
   ```
 
-  Affirmed: a table with no primary key (DB-050). Surface: un-indexed FKs, duplicate
-  indexes, multivalued columns, text-typed FKs, missing audit timestamps, sensitive
-  columns in the clear, repeating groups — all dialect-agnostic (they reason over the
-  reconstructed neutral schema, never a dialect-specific field). **The DB dimension
-  now also crosses the code's Prisma queries against the schema** (in `scan-all`): a
-  filtered column with no covering index (DB-010) or a multi-column filter with no
-  covering composite index (DB-013), surfaced with its declared limits. OLAP is
-  **not** audited yet — declared, not silent. See [COVERAGE.md](COVERAGE.md) for the
-  full rule list and the declared SQL-DDL dialect limits (T-SQL routine-body edge
-  case, MySQL `DELIMITER` recognition, and others).
+  codefit audits the schema's **structural quality** (keys, indexes, column shape, and
+  name-heuristic smells), **view** sensitive-column exposure, the **routine bodies** of
+  stored procedures, functions, and triggers (dynamic SQL, missing exception handling,
+  cross-table cascades, external-effecting calls), and — in `scan-all` — **crosses the
+  code's Prisma queries against the schema** to see whether the columns the code filters
+  on are backed by an index. One structural fact is affirmed (a table with no primary
+  key); everything else is surface the agent judges, all dialect-agnostic over the
+  reconstructed neutral schema. OLAP is **not** audited yet — declared, not silent. See
+  [COVERAGE.md](COVERAGE.md) for the full rule inventory and the declared SQL-DDL dialect
+  limits.
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by
@@ -194,18 +196,18 @@ tagged build, so `codefit version` reports the real version, and it needs no Go.
 **Linux / macOS** (pick your target: `linux_amd64`, `linux_arm64`, `darwin_arm64`):
 
 ```bash
-tar -xzf codefit_0.1.0_linux_amd64.tar.gz
+tar -xzf codefit_<version>_linux_amd64.tar.gz
 sudo mv codefit /usr/local/bin/        # a directory on your PATH
 chmod +x /usr/local/bin/codefit
 ```
 
-**Windows** (`windows_amd64`): download `codefit_0.1.0_windows_amd64.zip`, extract it,
+**Windows** (`windows_amd64`): download `codefit_<version>_windows_amd64.zip`, extract it,
 and put `codefit.exe` in a stable folder (e.g. `C:\tools\codefit\`). Optionally add
 that folder to your `PATH`.
 
 Verify the download against `checksums.txt` from the release —
 `sha256sum -c checksums.txt` (Linux), `shasum -a 256 -c checksums.txt` (macOS), or
-`Get-FileHash codefit_0.1.0_windows_amd64.zip -Algorithm SHA256` (Windows PowerShell).
+`Get-FileHash codefit_<version>_windows_amd64.zip -Algorithm SHA256` (Windows PowerShell).
 
 ### Option B — `go install` (needs Go 1.25+)
 
@@ -224,8 +226,8 @@ checkout with `make build`.
 
 ```bash
 codefit version
-# example output — your commit and date will differ:
-# release binary →  codefit 0.1.0 (commit <commit>, built <date>)
+# example output — your version, commit, and date will differ:
+# release binary →  codefit <version> (commit <commit>, built <date>)
 # go install     →  codefit 0.1.0-dev (commit none, built unknown)
 ```
 
