@@ -162,6 +162,7 @@ Concretely, on `main` — so you know exactly what to expect without reading
   ```yaml
   database:
     type: postgresql # postgresql | mysql | sqlserver (sqlite: not supported yet)
+    paradigm: auto   # auto (default) | oltp | olap | mixed — codefit detects when unset; an explicit value wins
     schema_paths:
       - db/migrations
   ```
@@ -173,9 +174,12 @@ Concretely, on `main` — so you know exactly what to expect without reading
   code's Prisma queries against the schema** to see whether the columns the code filters
   on are backed by an index. One structural fact is affirmed (a table with no primary
   key); everything else is surface the agent judges, all dialect-agnostic over the
-  reconstructed neutral schema. OLAP is **not** audited yet — declared, not silent. See
-  [COVERAGE.md](COVERAGE.md) for the full rule inventory and the declared SQL-DDL dialect
-  limits.
+  reconstructed neutral schema. codefit also **detects the schema's paradigm** (OLTP vs
+  OLAP, by table naming and structure — `database.paradigm` overrides it) and does **not**
+  flag an OLAP schema's intentional denormalization as a normalization violation. The OLAP
+  **rule family** (star-schema, SCD, partitioning findings) is **not** built yet — declared,
+  not silent. See [COVERAGE.md](COVERAGE.md) for the full rule inventory and the declared
+  SQL-DDL dialect limits.
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by
