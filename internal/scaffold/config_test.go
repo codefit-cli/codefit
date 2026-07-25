@@ -55,8 +55,8 @@ func TestRenderConfigNextPrismaRoundTrips(t *testing.T) {
 	if cfg.Database.Type != "postgresql" {
 		t.Errorf("db type = %q, want postgresql", cfg.Database.Type)
 	}
-	if cfg.Database.Paradigm != "oltp" {
-		t.Errorf("paradigm = %q, want oltp", cfg.Database.Paradigm)
+	if cfg.Database.Paradigm != "auto" {
+		t.Errorf("paradigm = %q, want auto", cfg.Database.Paradigm)
 	}
 	if !slices.Contains(cfg.Database.SchemaPaths, "prisma/schema.prisma") {
 		t.Errorf("schema paths = %v, want to contain prisma/schema.prisma", cfg.Database.SchemaPaths)

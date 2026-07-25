@@ -23,7 +23,7 @@ type ProjectInfo struct {
 	Framework       string // a value within config.allowedFrameworks, or ""
 	ORM             string // prisma | drizzle | typeorm | ""
 	DBType          string // postgresql | mysql | sqlite | "" (within config.allowedDBTypes)
-	DBParadigm      string // oltp | olap | mixed | "" (oltp when a DB is detected)
+	DBParadigm      string // oltp | olap | mixed | "" (auto when a DB is detected, seeding paradigm detection)
 	SchemaPaths     []string
 	RouteHandlers   int // count of route handlers found (informational, for the report)
 	PathCriticality config.PathCriticality
@@ -98,7 +98,7 @@ func enrichTypeScript(root string, info *ProjectInfo) {
 	if rel := findPrismaSchema(root); rel != "" {
 		info.ORM = "prisma"
 		info.SchemaPaths = []string{rel}
-		info.DBParadigm = "oltp"
+		info.DBParadigm = "auto"
 		info.DBType = prismaProvider(filepath.Join(root, rel))
 	} else if _, ok := deps["drizzle-orm"]; ok {
 		info.ORM = "drizzle"
