@@ -39,10 +39,13 @@ func Run(s *db.Schema, cls *paradigm.Classification) ([]findings.Finding, []find
 // the seam-gate test passes an empty/nil set so it proves the MERGE
 // mechanism (that appending the runner's output leaves the caller's result
 // byte-identical) independently of which rules All() happens to hold —
-// otherwise the first real rule would put the seam gate red. A nil schema
-// yields nothing, mirroring dbrules.Run/crossrules.RunWith.
+// otherwise the first real rule would put the seam gate red. A nil schema OR
+// a nil classification yields nothing, mirroring dbrules.Run/
+// crossrules.RunWith — unreachable via the production sensor today (it
+// always builds a real Classification), but forward-safety for S2, where
+// every real dwrules.Rule dereferences cls (SUGGESTION, S1 review ledger).
 func RunWith(s *db.Schema, cls *paradigm.Classification, rules []Rule) ([]findings.Finding, []findings.SurfaceItem) {
-	if s == nil {
+	if s == nil || cls == nil {
 		return nil, nil
 	}
 	var fs []findings.Finding

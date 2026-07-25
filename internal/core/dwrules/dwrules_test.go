@@ -69,6 +69,20 @@ func TestRunWith_MergesRuleOutput(t *testing.T) {
 	}
 }
 
+// TestRunWith_NilClassification mirrors TestRunWith_NilSchema: a nil
+// classification yields nothing regardless of the rule set — even a
+// non-empty one that would otherwise run and return output (SUGGESTION,
+// resilience, S1 review ledger). Unreachable via the production sensor
+// today (it always builds a real Classification), but forward-safety for
+// S2, where every real rule dereferences cls.
+func TestRunWith_NilClassification(t *testing.T) {
+	schema := &db.Schema{Tables: []db.Table{{Name: "t"}}}
+	fs, surf := dwrules.RunWith(schema, nil, []dwrules.Rule{fakeRule{id: "FAKE-1"}})
+	if fs != nil || surf != nil {
+		t.Errorf("RunWith(schema, nil, ...) = (%v, %v), want (nil, nil)", fs, surf)
+	}
+}
+
 // TestRun_DelegatesToRunWithAll locks that Run calls RunWith(s, cls, All())
 // — in S1, All() is empty, so Run over a real schema returns (nil, nil).
 func TestRun_DelegatesToRunWithAll(t *testing.T) {
