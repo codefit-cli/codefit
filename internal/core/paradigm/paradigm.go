@@ -17,9 +17,12 @@ const (
 	ParadigmAuto Paradigm = "auto"
 )
 
-// Role classifies a single table's warehouse role. RoleUnclassified is the
-// zero value: an ordinary OLTP table, or a table with no fact_/dim_/stg_/
-// mart_ prefix and no structural corroboration.
+// Role classifies a single table's warehouse role: an ordinary OLTP table,
+// or a table with no fact_/dim_/stg_/mart_ prefix or insufficient structural
+// corroboration, gets the explicit RoleUnclassified value ("unclassified") —
+// NOT the bare Go zero value (""), which Detect never returns. Every entry
+// in a Classification's Roles map is always one of the five named constants
+// below.
 type Role string
 
 const (
@@ -46,12 +49,18 @@ const factFanOutMin = 2
 
 // Detect computes a Classification as a pure function of s. Table role is
 // determined by NAME PREFIX as the primary signal (fact_/dim_/stg_/mart_,
-// locked decision A5); a prefixed table is further corroborated by
-// structure — a single-column (surrogate) primary key, or (for fact_) FK
-// fan-out to multiple distinct tables — and demoted to unclassified when
-// neither corroborates. A table with no recognized prefix is always
-// unclassified, regardless of structure (name-only demotion never promotes:
-// structure corroborates, it never substitutes for the name).
+// locked decision A5); a prefixed fact_/dim_ table is further corroborated
+// by REAL relational structure — fact_ needs FK fan-out to factFanOutMin+
+// distinct tables; dim_ needs to be referenced (fan-in) by at least one
+// other table — and demoted to unclassified when that structural evidence
+// is absent. A lone single-column (surrogate) primary key is deliberately
+// NOT, by itself, corroboration: almost every ordinary OLTP table has one,
+// so accepting it alone made the corroboration vacuous (CRITICAL C1, fixed
+// post-review — see ADR 0033 decision 2 and the S1 review ledger). stg_/
+// mart_ need no structural signal in S1 (design §2a). A table with no
+// recognized prefix is always unclassified, regardless of structure
+// (name-only demotion never promotes: structure corroborates, it never
+// substitutes for the name).
 //
 // The schema-level Paradigm folds from the resulting role mix: any
 // olap-role table (fact/dimension/staging/mart) coexisting with at least one
@@ -76,7 +85,8 @@ func Detect(s *db.Schema) Classification {
 }
 
 // roleFor determines one table's role: name prefix as the primary signal,
-// corroborated by structure.
+// corroborated by REAL relational structure — FK fan-out for fact_, fan-in
+// for dim_ — never by a lone surrogate primary key alone (CRITICAL C1 fix).
 func roleFor(s *db.Schema, t db.Table, fanIn map[string]int) Role {
 	candidate, ok := prefixRole(t.Name)
 	if !ok {
@@ -85,12 +95,12 @@ func roleFor(s *db.Schema, t db.Table, fanIn map[string]int) Role {
 
 	switch candidate {
 	case RoleFact:
-		if isSurrogatePK(t) || fkFanOut(t) >= factFanOutMin {
+		if fkFanOut(t) >= factFanOutMin {
 			return RoleFact
 		}
 		return RoleUnclassified
 	case RoleDimension:
-		if isSurrogatePK(t) || fanIn[t.Name] >= 1 {
+		if fanIn[t.Name] >= 1 {
 			return RoleDimension
 		}
 		return RoleUnclassified
@@ -120,12 +130,6 @@ func prefixRole(name string) (Role, bool) {
 
 func hasPrefix(name, prefix string) bool {
 	return len(name) >= len(prefix) && name[:len(prefix)] == prefix
-}
-
-// isSurrogatePK reports whether t's primary key looks synthetic: exactly one
-// column. A composite or absent PK is not treated as surrogate.
-func isSurrogatePK(t db.Table) bool {
-	return len(t.PrimaryKey) == 1
 }
 
 // fkFanOut counts the distinct tables t references via foreign key.

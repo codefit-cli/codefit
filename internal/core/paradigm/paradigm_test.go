@@ -130,6 +130,40 @@ func TestDetect_PrefixWithoutCorroboration_Demotes(t *testing.T) {
 	})
 }
 
+// TestDetect_SingleColumnPKAloneInsufficientCorroboration locks the CRITICAL
+// C1 fix (S1 4R review, ledger sdd/db-olap-rules/review-ledger-s1): a lone
+// single-column (surrogate) primary key is NOT, by itself, structural
+// corroboration for fact_/dim_. Almost every ordinary OLTP table has a
+// single-column surrogate PK, so accepting it alone made the corroboration
+// vacuous — any fact_/dim_-prefixed table with a simple `id` PK classified as
+// warehouse-role regardless of any real relational fan-out/fan-in, silently
+// suppressing its DB-002/DB-003 findings under the auto default.
+func TestDetect_SingleColumnPKAloneInsufficientCorroboration(t *testing.T) {
+	t.Run("dim_ prefix, single-column surrogate PK, zero fan-in", func(t *testing.T) {
+		schema := &db.Schema{Tables: []db.Table{{
+			Name:       "dim_users",
+			PrimaryKey: []string{"id"}, // single-column surrogate PK ALONE
+			// nothing else in the schema references it: zero fan-in
+		}}}
+		cls := paradigm.Detect(schema)
+		if got := cls.Roles["dim_users"]; got != paradigm.RoleUnclassified {
+			t.Errorf("Roles[dim_users] = %q, want unclassified (a lone surrogate PK is not corroboration)", got)
+		}
+	})
+
+	t.Run("fact_ prefix, single-column surrogate PK, zero FK fan-out", func(t *testing.T) {
+		schema := &db.Schema{Tables: []db.Table{{
+			Name:       "fact_x",
+			PrimaryKey: []string{"id"}, // single-column surrogate PK ALONE
+			// no ForeignKeys: zero fan-out
+		}}}
+		cls := paradigm.Detect(schema)
+		if got := cls.Roles["fact_x"]; got != paradigm.RoleUnclassified {
+			t.Errorf("Roles[fact_x] = %q, want unclassified (a lone surrogate PK is not corroboration)", got)
+		}
+	})
+}
+
 // TestDetect_FactCorroboratedByFanOutAlone locks the FK-fan-out corroboration
 // path independently of the surrogate-PK path (a composite-PK fact table
 // with high fan-out still corroborates as fact).

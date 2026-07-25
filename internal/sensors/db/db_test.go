@@ -9,6 +9,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/paradigm"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
@@ -263,14 +264,31 @@ func hasSurfaceForTable(items []findings.SurfaceItem, category, table string) bo
 	return false
 }
 
-// auto-olap: default/"auto" config, a dim_-prefixed table (denormalized,
-// repeating category columns, role=dimension by prefix+surrogate-key
-// corroboration) must NOT be flagged by DB-003 (spec "Denormalized dimension
-// table is not flagged").
+// auto-olap: default/"auto" config, a GENUINE multi-table star schema
+// (fact_sales with real FK fan-out to two dimensions) — this is the headline
+// scenario and must be asserted END-TO-END, not folded to OLTP: post-review
+// fix (reliability WARNING c, S1 review ledger), a lone single-column PK is
+// no longer sufficient corroboration (CRITICAL C1), so dim_product must
+// classify as a dimension via REAL fan-in from fact_sales, and
+// paradigm.Detect must genuinely return olap for the schema — only then is
+// its denormalized (repeating category columns) DB-003 item suppressed
+// (spec "Denormalized dimension table is not flagged").
 func TestSensorDB_3NFSuppression_AutoOLAP_DimensionTableNotFlagged(t *testing.T) {
 	schema := `datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
 }
 
 model dim_product {
@@ -295,6 +313,19 @@ database:
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
+
+	// The star must genuinely auto-detect as olap, and dim_product must
+	// classify via REAL fan-in from fact_sales — not merely because it has a
+	// single-column PK (the vacuous corroboration this test used to,
+	// wrongly, rely on before the C1 fix).
+	cls := paradigm.Detect(r.Schema)
+	if cls.Paradigm != paradigm.ParadigmOLAP {
+		t.Fatalf("paradigm.Detect(r.Schema).Paradigm = %q, want olap (genuine multi-table star)", cls.Paradigm)
+	}
+	if got := cls.Roles["dim_product"]; got != paradigm.RoleDimension {
+		t.Fatalf("Roles[dim_product] = %q, want dimension (real fan-in from fact_sales)", got)
+	}
+
 	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
 		t.Error("DB-003 fired for dim_product under auto/olap-role detection, want suppressed")
 	}
@@ -345,6 +376,12 @@ func TestSensorDB_3NFSuppression_Mixed_OnlyOLAPRoleSuppressed(t *testing.T) {
 	schema := `datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
 }
 
 model dim_customer {
