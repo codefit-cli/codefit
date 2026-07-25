@@ -400,6 +400,59 @@ database:
 			t.Errorf("Note = %q, want empty when nothing was suppressed (never spam)", r.Note)
 		}
 	})
+
+	t.Run("note pluralizes items and tables when more than one is withheld", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id     Int    @id
+  phone1 String
+  phone2 String
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note == "" {
+			t.Fatal("Note is empty, want a factual trace of what 3NF-suppression withheld")
+		}
+		if !strings.Contains(r.Note, "2 1NF surface items") {
+			t.Errorf("Note = %q, want it to pluralize \"items\" for a count of 2", r.Note)
+		}
+		if !strings.Contains(r.Note, "2 OLAP-classified tables") {
+			t.Errorf("Note = %q, want it to pluralize \"tables\" for a count of 2", r.Note)
+		}
+	})
 }
 
 // explicit-olap-override: database.paradigm: olap set explicitly, ANY table
