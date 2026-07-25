@@ -9,7 +9,9 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	coredb "github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/dbrules"
+	"github.com/codefit-cli/codefit/internal/core/dwrules"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/paradigm"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
@@ -108,6 +110,17 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	}
 
 	fs, surf := dbrules.Run(schema)
+
+	// Paradigm assembly (design §2c): the sensor is the natural join point —
+	// it already holds both schema AND ctx.Config, and the second input is
+	// pure-core (paradigm.Detect) plus a config string, no provider crossing
+	// (the deliberate divergence from ADR 0029's cross, which assembles in
+	// the MCP adapter because its second input comes FROM a provider).
+	cls := paradigm.Resolve(paradigm.Detect(schema), toParadigmEnum(ctx.Config.Database.Paradigm))
+	dwF, dwS := dwrules.RunWith(schema, &cls, dwrules.All())
+	fs = append(fs, dwF...)
+	surf = append(surf, dwS...)
+
 	stampFingerprints(fs, surf, content)
 
 	return Result{Measured: true, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
@@ -120,6 +133,13 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 }
 
 func notMeasured(note string) Result { return Result{Measured: false, Note: note} }
+
+// toParadigmEnum maps ctx.Config.Database.Paradigm to a paradigm.Paradigm —
+// identity, since config validation already restricts the value to
+// auto/oltp/olap/mixed/"" and paradigm.Resolve treats ""/"auto" as
+// no-override. This is the ONE place config meets core, keeping the
+// paradigm/dwrules packages config-free (design §2c).
+func toParadigmEnum(s string) paradigm.Paradigm { return paradigm.Paradigm(s) }
 
 // enabled applies the three-state toggle: unset (nil) → on (opt-out default),
 // explicit true/false overrides.
