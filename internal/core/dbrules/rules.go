@@ -155,6 +155,7 @@ func (db002) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 				StructuralSignals: []string{
 					"column: " + c.Name,
 					"type: " + c.RawType + "[]",
+					"table: " + t.Name,
 				},
 				StructuralFacts: map[string]bool{"multivalued_column": true},
 				ReasonToReview: "Column " + c.Name + " is multivalued (an array). Is a normalized relation more " +

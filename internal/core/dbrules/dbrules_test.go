@@ -229,6 +229,34 @@ func TestDB002_Multivalued(t *testing.T) {
 	}
 }
 
+// DB-002 must carry a "table: <name>" StructuralSignal so a consumer (the
+// sensor's paradigm-aware 3NF-suppression pass) can resolve the item's table
+// deterministically, instead of fragile File+Line geometry (design §2e).
+func TestDB002_StructuralSignals_IncludesTable(t *testing.T) {
+	s := &db.Schema{Tables: []db.Table{{
+		Name: "dim_product", PrimaryKey: []string{"id"},
+		Columns: []db.Column{
+			{Name: "id", Type: db.TypeString},
+			{Name: "tags", Type: db.TypeString, List: true, Pos: db.Pos{File: "s.prisma", Line: 9}},
+		},
+	}}}
+	_, items := run(s)
+	got := surfaceWithCategory(items, surface.CategoryDBMultivalued)
+	if len(got) != 1 {
+		t.Fatalf("DB-002 surface = %d, want 1", len(got))
+	}
+	want := "table: dim_product"
+	found := false
+	for _, sig := range got[0].StructuralSignals {
+		if sig == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DB-002 StructuralSignals = %v, want to contain %q", got[0].StructuralSignals, want)
+	}
+}
+
 func TestDB002_NegativeScalar(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{{Name: "T", Columns: []db.Column{{Name: "id", Type: db.TypeString}}}}}
 	_, items := run(s)

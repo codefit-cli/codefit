@@ -203,6 +203,7 @@ func (db003) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 					"base: " + base,
 					"columns: " + strings.Join(names, ", "),
 					"count: " + strconv.Itoa(len(members)),
+					"table: " + t.Name,
 				},
 				StructuralFacts: map[string]bool{"uniform_type": true},
 				ReasonToReview: "Several columns share a base name with numeric suffixes (a repeating group). Is this a " +
