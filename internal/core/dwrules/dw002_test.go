@@ -146,3 +146,20 @@ func TestDW002_RegisteredInAll(t *testing.T) {
 		t.Error("DW-002 is not registered in dwrules.All() — the sensor would never run it")
 	}
 }
+
+// A primary key column with no RawType (a parser that classified the neutral
+// type but recovered no verbatim type text) must still render a usable
+// primary_key_type signal, falling back to the neutral type rather than
+// emitting an empty value.
+func TestDW002_PrimaryKeyColumnWithoutRawType_FallsBackToNeutralType(t *testing.T) {
+	tb := dimTable("dim_customer", []string{"code"}, db.Column{Name: "code", Type: db.TypeString})
+	s, c := onlyDim(tb)
+
+	got := itemsOfCategory(run002(s, c), surface.CategoryDWDimensionNoSurrogateKey)
+	if len(got) != 1 {
+		t.Fatalf("DW-002 items = %d, want 1", len(got))
+	}
+	if v := signalValue(got[0], "primary_key_type"); v != "string" {
+		t.Errorf("primary_key_type signal = %q, want the neutral type %q", v, "string")
+	}
+}

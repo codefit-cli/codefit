@@ -183,3 +183,20 @@ func TestDW005_RegisteredInAll(t *testing.T) {
 		t.Error("DW-005 is not registered in dwrules.All() — the sensor would never run it")
 	}
 }
+
+// A dimension with a COMPOSITE primary key can never be date-grained (a
+// calendar has one row per point in time, so its key is one column), so the
+// structural signal must not even inspect the columns.
+func TestDW005_DimensionWithCompositePK_IsNotATimeDimension(t *testing.T) {
+	s, c := starWith(
+		dimTable("fact_sales", []string{"id"}, dwcol("id", db.TypeInt)),
+		dimTable("dim_slot", []string{"day", "hour"},
+			dwcol("day", db.TypeDateTime),
+			dwcol("hour", db.TypeInt),
+		),
+	)
+
+	if got := itemsOfCategory(run005(s, c), surface.CategoryDWNoTimeDimension); len(got) != 1 {
+		t.Errorf("DW-005 items = %d, want 1 (a composite key is not a date grain)", len(got))
+	}
+}

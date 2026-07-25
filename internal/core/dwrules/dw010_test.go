@@ -190,3 +190,24 @@ func TestDW010_RegisteredInAll(t *testing.T) {
 		t.Error("DW-010 is not registered in dwrules.All() — the sensor would never run it")
 	}
 }
+
+// An SCD-2 dimension with NO index-like coverer at all — no indexes and no
+// primary key — must state that absence explicitly rather than emitting an
+// empty existing_indexes value. (DB-050 separately affirms the missing PK;
+// DW-010 still has a real currency-lookup question to raise.)
+func TestDW010_NoIndexLikeCovererAtAll_StatesTheAbsence(t *testing.T) {
+	tb := scd2Dim("dim_customer")
+	tb.PrimaryKey = nil
+	s, c := onlyDim(tb)
+
+	got := itemsOfCategory(run010(s, c), surface.CategoryDWSCD2NoCurrencyIndex)
+	if len(got) != 1 {
+		t.Fatalf("DW-010 items = %d, want 1", len(got))
+	}
+	if v := signalValue(got[0], "existing_indexes"); v != "(none)" {
+		t.Errorf("existing_indexes signal = %q, want %q", v, "(none)")
+	}
+	if got[0].StructuralFacts["has_any_index_like"] {
+		t.Error("has_any_index_like must be false")
+	}
+}

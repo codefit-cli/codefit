@@ -223,3 +223,28 @@ func TestDW001_RegisteredInAll(t *testing.T) {
 		t.Error("DW-001 is not registered in dwrules.All() — the sensor would never run it")
 	}
 }
+
+// A fact declaring TWO foreign keys to the SAME table must report that table
+// once, not twice — the signal is a set of referenced tables, and a duplicate
+// would misrepresent the fan-out to the agent. (AdventureWorksDW's real
+// FactInternetSales does exactly this: three separate FKs to DimDate.)
+func TestDW001_RepeatedForeignKeyToSameTable_ReportedOnce(t *testing.T) {
+	tb := dwtbl("fact_sales", dwcol("amount", db.TypeFloat))
+	tb.ForeignKeys = []db.ForeignKey{
+		dwfk("order_date_key", "stg_dates", "id"),
+		dwfk("ship_date_key", "stg_dates", "id"),
+	}
+	s := &db.Schema{Tables: []db.Table{tb, dwtbl("stg_dates", dwcol("id", db.TypeInt))}}
+	c := cls(paradigm.ParadigmOLAP, map[string]paradigm.Role{
+		"fact_sales": paradigm.RoleFact,
+		"stg_dates":  paradigm.RoleStaging,
+	})
+
+	got := itemsOfCategory(run001(s, c), surface.CategoryDWNoFactDimensionFK)
+	if len(got) != 1 {
+		t.Fatalf("DW-001 items = %d, want 1", len(got))
+	}
+	if v := signalValue(got[0], "foreign_keys"); v != "stg_dates" {
+		t.Errorf("foreign_keys signal = %q, want %q (deduplicated)", v, "stg_dates")
+	}
+}
