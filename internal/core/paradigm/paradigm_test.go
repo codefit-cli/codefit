@@ -89,6 +89,112 @@ func TestDetect(t *testing.T) {
 	})
 }
 
+// TestDetect_NilSchema locks the honest fallback: a nil schema classifies as
+// oltp with no roles, mirroring dbrules.Run/crossrules.RunWith's nil guard.
+func TestDetect_NilSchema(t *testing.T) {
+	cls := paradigm.Detect(nil)
+	if cls.Paradigm != paradigm.ParadigmOLTP {
+		t.Errorf("Paradigm = %q, want oltp for a nil schema", cls.Paradigm)
+	}
+	if len(cls.Roles) != 0 {
+		t.Errorf("Roles = %v, want empty for a nil schema", cls.Roles)
+	}
+}
+
+// TestDetect_PrefixWithoutCorroboration_Demotes locks that a fact_/dim_
+// prefix ALONE, with no structural corroboration, demotes to unclassified —
+// structure corroborates a name candidate, it never substitutes for one.
+func TestDetect_PrefixWithoutCorroboration_Demotes(t *testing.T) {
+	t.Run("fact_ prefix, composite PK, no FK fan-out", func(t *testing.T) {
+		schema := &db.Schema{Tables: []db.Table{{
+			Name:       "fact_orphan",
+			PrimaryKey: []string{"a", "b"}, // composite: not a surrogate
+			// no ForeignKeys: zero fan-out
+		}}}
+		cls := paradigm.Detect(schema)
+		if got := cls.Roles["fact_orphan"]; got != paradigm.RoleUnclassified {
+			t.Errorf("Roles[fact_orphan] = %q, want unclassified (no corroboration)", got)
+		}
+	})
+
+	t.Run("dim_ prefix, composite PK, no fan-in", func(t *testing.T) {
+		schema := &db.Schema{Tables: []db.Table{{
+			Name:       "dim_orphan",
+			PrimaryKey: []string{"a", "b"}, // composite: not a surrogate
+			// nothing else in the schema references it: zero fan-in
+		}}}
+		cls := paradigm.Detect(schema)
+		if got := cls.Roles["dim_orphan"]; got != paradigm.RoleUnclassified {
+			t.Errorf("Roles[dim_orphan] = %q, want unclassified (no corroboration)", got)
+		}
+	})
+}
+
+// TestDetect_FactCorroboratedByFanOutAlone locks the FK-fan-out corroboration
+// path independently of the surrogate-PK path (a composite-PK fact table
+// with high fan-out still corroborates as fact).
+func TestDetect_FactCorroboratedByFanOutAlone(t *testing.T) {
+	schema := &db.Schema{
+		Tables: []db.Table{
+			{
+				Name:       "fact_events",
+				PrimaryKey: []string{"event_id", "occurred_at"}, // composite: not surrogate
+				ForeignKeys: []db.ForeignKey{
+					{RefTable: "dim_customer"},
+					{RefTable: "dim_product"},
+				},
+			},
+			{Name: "dim_customer"},
+			{Name: "dim_product"},
+		},
+	}
+	cls := paradigm.Detect(schema)
+	if got := cls.Roles["fact_events"]; got != paradigm.RoleFact {
+		t.Errorf("Roles[fact_events] = %q, want fact (FK fan-out corroboration)", got)
+	}
+}
+
+// TestDetect_DimensionCorroboratedByFanInAlone locks the fan-in corroboration
+// path independently of the surrogate-PK path.
+func TestDetect_DimensionCorroboratedByFanInAlone(t *testing.T) {
+	schema := &db.Schema{
+		Tables: []db.Table{
+			{
+				Name:       "fact_sales",
+				PrimaryKey: []string{"id"},
+				ForeignKeys: []db.ForeignKey{
+					{RefTable: "dim_region"},
+				},
+			},
+			{
+				Name:       "dim_region",
+				PrimaryKey: []string{"region_code", "country_code"}, // composite: not surrogate
+			},
+		},
+	}
+	cls := paradigm.Detect(schema)
+	if got := cls.Roles["dim_region"]; got != paradigm.RoleDimension {
+		t.Errorf("Roles[dim_region] = %q, want dimension (fan-in corroboration)", got)
+	}
+}
+
+// TestDetect_StagingAndMartPrefixesAcceptedOnNameAlone locks that stg_/mart_
+// tables need no structural corroboration in S1 (design §2a: no structural
+// signal specified for staging/mart tables).
+func TestDetect_StagingAndMartPrefixesAcceptedOnNameAlone(t *testing.T) {
+	schema := &db.Schema{Tables: []db.Table{
+		{Name: "stg_raw_events"},
+		{Name: "mart_customer_summary"},
+	}}
+	cls := paradigm.Detect(schema)
+	if got := cls.Roles["stg_raw_events"]; got != paradigm.RoleStaging {
+		t.Errorf("Roles[stg_raw_events] = %q, want staging", got)
+	}
+	if got := cls.Roles["mart_customer_summary"]; got != paradigm.RoleMart {
+		t.Errorf("Roles[mart_customer_summary] = %q, want mart", got)
+	}
+}
+
 // TestResolve locks the spec's "Paradigm Config Override Semantics (S1)"
 // scenarios.
 func TestResolve(t *testing.T) {

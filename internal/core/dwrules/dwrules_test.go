@@ -5,6 +5,7 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/dwrules"
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/paradigm"
 )
 
@@ -37,6 +38,47 @@ func TestRunWith_NilSchema(t *testing.T) {
 	fs, surf := dwrules.RunWith(nil, nil, dwrules.All())
 	if fs != nil || surf != nil {
 		t.Errorf("RunWith(nil, ...) = (%v, %v), want (nil, nil)", fs, surf)
+	}
+}
+
+// fakeRule is a minimal Rule implementation used only to exercise RunWith's
+// merge loop and Run's All()-delegation, since dwrules.All() is itself empty
+// in S1 (no real rule exists yet to exercise these paths otherwise).
+type fakeRule struct{ id string }
+
+func (r fakeRule) ID() string { return r.id }
+
+func (fakeRule) Check(*db.Schema, *paradigm.Classification) ([]findings.Finding, []findings.SurfaceItem) {
+	return []findings.Finding{{ID: "FAKE-1"}}, []findings.SurfaceItem{{Category: "fake"}}
+}
+
+// TestRunWith_MergesRuleOutput exercises RunWith's merge loop over a
+// non-empty rule set — dwrules.All() is empty in S1, so this is the only way
+// to prove the merge mechanism actually appends a rule's output.
+func TestRunWith_MergesRuleOutput(t *testing.T) {
+	schema := &db.Schema{Tables: []db.Table{{Name: "t"}}}
+	cls := &paradigm.Classification{}
+
+	fs, surf := dwrules.RunWith(schema, cls, []dwrules.Rule{fakeRule{id: "FAKE-1"}})
+
+	if len(fs) != 1 || fs[0].ID != "FAKE-1" {
+		t.Errorf("Findings = %v, want one FAKE-1 finding", fs)
+	}
+	if len(surf) != 1 || surf[0].Category != "fake" {
+		t.Errorf("Surface = %v, want one fake-category item", surf)
+	}
+}
+
+// TestRun_DelegatesToRunWithAll locks that Run calls RunWith(s, cls, All())
+// — in S1, All() is empty, so Run over a real schema returns (nil, nil).
+func TestRun_DelegatesToRunWithAll(t *testing.T) {
+	schema := &db.Schema{Tables: []db.Table{{Name: "t"}}}
+	cls := &paradigm.Classification{}
+
+	fs, surf := dwrules.Run(schema, cls)
+
+	if fs != nil || surf != nil {
+		t.Errorf("Run(...) = (%v, %v), want (nil, nil) while All() is empty", fs, surf)
 	}
 }
 

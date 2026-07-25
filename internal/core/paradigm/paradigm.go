@@ -60,12 +60,11 @@ const factFanOutMin = 2
 // somewhere; a schema of ONLY olap-role tables with at least one fact AND one
 // dimension yields olap; otherwise oltp.
 func Detect(s *db.Schema) Classification {
-	cls := Classification{Roles: make(map[string]Role, len(s.Tables))}
 	if s == nil {
-		cls.Paradigm = ParadigmOLTP
-		return cls
+		return Classification{Paradigm: ParadigmOLTP, Roles: map[string]Role{}}
 	}
 
+	cls := Classification{Roles: make(map[string]Role, len(s.Tables))}
 	fanIn := fanInCounts(s)
 
 	for _, t := range s.Tables {
