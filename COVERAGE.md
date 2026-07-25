@@ -398,6 +398,25 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   in `testdata/tsql/constructed_dynamic_sql_proc.sql` (`sp_executesql` over a
   built string), and a real NEGATIVE (`uspGetBillOfMaterials`). **Zero value on
   Prisma-only projects.**
+- **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
+  tables (S1, RF-03 OLAP closure).** codefit computes a schema's **paradigm**
+  (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
+  `dimension` | `staging` | `mart` | `unclassified`) as a pure function of the
+  schema: table-name prefixes (`fact_`/`dim_`/`stg_`/`mart_`) are the
+  **primary** signal, corroborated by structure (a single-column surrogate
+  primary key; for `fact_` tables, foreign-key fan-out to 2+ distinct tables).
+  `database.paradigm` defaults to `"auto"` (detection decides); an **explicit**
+  `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins** over
+  detection — developer autonomy is innegotiable. This slice's first consumer:
+  DB-002 (multivalued column) and DB-003 (repeating groups) — still
+  schema-only, deterministic 1NF checks, unchanged in shape — are
+  **suppressed** for fact/dimension/mart-role tables under auto detection or
+  an explicit `mixed` override (an intentionally denormalized warehouse table
+  is not a 1NF violation), or dropped **schema-wide** under an explicit `olap`
+  override. An explicit `oltp` override **never** suppresses, regardless of
+  any detected role — the identical shape still fires exactly as before this
+  slice. The DW-0xx star/snowflake/SCD/columnar/partitioning rule family is
+  **not yet built** (see Not covered, below).
 
 ### Not covered (declared, not silent)
 
@@ -439,8 +458,18 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse schemas** (star/snowflake, slowly-changing dimensions,
-  columnar/partitioning) — out of scope; the DB dimension audits OLTP structure only.
+- **OLAP / data-warehouse rule family (DW-0xx), narrowed as of S1.** Paradigm/
+  table-role detection and 3NF-suppression on OLAP-classified tables **are now
+  covered** (see above) — this entry no longer means "OLAP is entirely out of
+  scope". What **remains** not covered: the star/snowflake shape checks (fact
+  table without a dimension FK, dimension without a surrogate key, schema with
+  facts but no time dimension), slowly-changing-dimension checks (SCD-2
+  currency index, mixed SCD strategies), a columnar/analytic-index check, and
+  a partitioning check — the DW-001/002/005/010/011/020/021 rule family,
+  planned for slices S2-S4 of this same RF-03 OLAP-closure change.
+  Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
+  **permanently dropped**, same DB-012 lineage as never-used-index: refresh
+  cadence lives in external cron/scheduler state absent from static DDL.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
