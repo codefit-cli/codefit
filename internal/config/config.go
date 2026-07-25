@@ -46,7 +46,7 @@ type PathCriticality struct {
 
 // Database declares the DB paradigm and schema sources for the DB sensor.
 type Database struct {
-	Paradigm    string   `yaml:"paradigm"` // oltp | olap | mixed (auto by default)
+	Paradigm    string   `yaml:"paradigm"` // oltp | olap | mixed | auto (default)
 	Type        string   `yaml:"type"`
 	SchemaPaths []string `yaml:"schema_paths"`
 	ORM         string   `yaml:"orm"`

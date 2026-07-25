@@ -13,7 +13,7 @@ import (
 var (
 	allowedLanguages  = []string{"typescript", "java", "python", "go"}
 	allowedFrameworks = []string{"react", "next", "express", "spring", "fastapi", "django"}
-	allowedParadigms  = []string{"oltp", "olap", "mixed"}
+	allowedParadigms  = []string{"oltp", "olap", "mixed", "auto"}
 	// "sqlserver" (not "mssql") is the resolved config value for T-SQL — matches
 	// sqlddl.Dialect.Name and the sqlddl.SQLServer() constructor naming, so the
 	// config vocabulary stays consistent with the descriptor naming (design §5,
