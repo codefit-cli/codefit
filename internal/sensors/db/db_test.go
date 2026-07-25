@@ -3,11 +3,13 @@ package db_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/paradigm"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
@@ -192,6 +194,571 @@ func TestSensorDB_OwnedCategories_IncludesPrefixRedundantIndex(t *testing.T) {
 		}
 	}
 	t.Errorf("OwnedCategories() missing %q (have %v)", want, s.OwnedCategories())
+}
+
+// The sensor's paradigm assembly (paradigm.Detect + paradigm.Resolve merged
+// with dwrules.RunWith) must leave Findings/Surface BYTE-IDENTICAL to the
+// pre-change output while dwrules.All() is still empty in S1 — the
+// crossrules seam-gate discipline applied one layer up (design §2c). This is
+// exercised across every valid paradigm config value: none of them can
+// change the output yet, since there is no real DW rule to react to the
+// classification.
+func TestSensorDB_ParadigmAssembly_NoChangeWhileDWRulesEmpty(t *testing.T) {
+	base := yamlWithSchema // has "paradigm: oltp"
+	variants := map[string]string{
+		"unset (no paradigm key)": "version: \"1\"\nproject:\n  name: t\n  language: typescript\n  framework: next\ndatabase:\n  orm: prisma\n  type: postgresql\n  schema_paths:\n    - prisma/schema.prisma\n",
+		"auto":                    strings.Replace(base, "paradigm: oltp", "paradigm: auto", 1),
+		"oltp":                    base,
+		"olap":                    strings.Replace(base, "paradigm: oltp", "paradigm: olap", 1),
+		"mixed":                   strings.Replace(base, "paradigm: oltp", "paradigm: mixed", 1),
+	}
+
+	// Baseline from the "oltp" variant, to compare every other variant against
+	// — proves byte-identical output without hardcoding a magic count that
+	// would drift with every unrelated dbrules rule this schema happens to hit.
+	baseCtx := writeProject(t, "prisma/schema.prisma", happySchema, variants["oltp"])
+	baseR, err := sdb.New(typescript.New()).Audit(baseCtx)
+	if err != nil {
+		t.Fatalf("Audit (baseline): %v", err)
+	}
+	if !baseR.Measured || len(baseR.Res.Findings) == 0 && len(baseR.Res.Surface) == 0 {
+		t.Fatalf("baseline audit produced no findings/surface to compare against: %+v", baseR)
+	}
+
+	for name, yaml := range variants {
+		t.Run(name, func(t *testing.T) {
+			ctx := writeProject(t, "prisma/schema.prisma", happySchema, yaml)
+			r, err := sdb.New(typescript.New()).Audit(ctx)
+			if err != nil {
+				t.Fatalf("Audit: %v", err)
+			}
+			if !r.Measured {
+				t.Fatalf("Measured=false, want true; note=%q", r.Note)
+			}
+			if len(r.Res.Findings) != len(baseR.Res.Findings) {
+				t.Errorf("Findings count = %d, want %d (unchanged by paradigm assembly)", len(r.Res.Findings), len(baseR.Res.Findings))
+			}
+			if len(r.Res.Surface) != len(baseR.Res.Surface) {
+				t.Errorf("Surface count = %d, want %d (unchanged by paradigm assembly)", len(r.Res.Surface), len(baseR.Res.Surface))
+			}
+		})
+	}
+}
+
+// --- 3NF-suppression boundary tests (design §2e, §7 boundary risk #3) ---
+
+// hasSurfaceForTable reports whether items contains a category item whose
+// "table: <name>" StructuralSignal equals table.
+func hasSurfaceForTable(items []findings.SurfaceItem, category, table string) bool {
+	want := "table: " + table
+	for _, it := range items {
+		if it.Category != category {
+			continue
+		}
+		for _, sig := range it.StructuralSignals {
+			if sig == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// auto-olap: default/"auto" config, a GENUINE multi-table star schema
+// (fact_sales with real FK fan-out to two dimensions) — this is the headline
+// scenario and must be asserted END-TO-END, not folded to OLTP: post-review
+// fix (reliability WARNING c, S1 review ledger), a lone single-column PK is
+// no longer sufficient corroboration (CRITICAL C1), so dim_product must
+// classify as a dimension via REAL fan-in from fact_sales, and
+// paradigm.Detect must genuinely return olap for the schema — only then is
+// its denormalized (repeating category columns) DB-003 item suppressed
+// (spec "Denormalized dimension table is not flagged").
+func TestSensorDB_3NFSuppression_AutoOLAP_DimensionTableNotFlagged(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+
+	// The star must genuinely auto-detect as olap, and dim_product must
+	// classify via REAL fan-in from fact_sales — not merely because it has a
+	// single-column PK (the vacuous corroboration this test used to,
+	// wrongly, rely on before the C1 fix).
+	cls := paradigm.Detect(r.Schema)
+	if cls.Paradigm != paradigm.ParadigmOLAP {
+		t.Fatalf("paradigm.Detect(r.Schema).Paradigm = %q, want olap (genuine multi-table star)", cls.Paradigm)
+	}
+	if got := cls.Roles["dim_product"]; got != paradigm.RoleDimension {
+		t.Fatalf("Roles[dim_product] = %q, want dimension (real fan-in from fact_sales)", got)
+	}
+
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
+		t.Error("DB-003 fired for dim_product under auto/olap-role detection, want suppressed")
+	}
+}
+
+// WARNING (risk R2), S1 review ledger: 3NF-suppression must not be silent —
+// "siempre se informan las consecuencias" (CLAUDE.md). When suppress3NF
+// withholds items, the sensor's Result.Note carries a factual trace of what
+// was withheld and how to see it (database.paradigm: oltp). The note must
+// stay empty (never spammed) when nothing was suppressed.
+func TestSensorDB_3NFSuppression_AuditTraceNote(t *testing.T) {
+	t.Run("note appears when items are suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note == "" {
+			t.Fatal("Note is empty, want a factual trace of what 3NF-suppression withheld")
+		}
+		if !strings.Contains(r.Note, "1") {
+			t.Errorf("Note = %q, want it to mention the suppressed count (1)", r.Note)
+		}
+		if !strings.Contains(r.Note, "database.paradigm") {
+			t.Errorf("Note = %q, want it to point at database.paradigm: oltp as the escape hatch", r.Note)
+		}
+	})
+
+	t.Run("note is empty when nothing is suppressed", func(t *testing.T) {
+		// yamlWithSchema has paradigm: oltp and happySchema has no
+		// fact_/dim_ tables — suppress3NF never drops anything here.
+		ctx := writeProject(t, "prisma/schema.prisma", happySchema, yamlWithSchema)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note != "" {
+			t.Errorf("Note = %q, want empty when nothing was suppressed (never spam)", r.Note)
+		}
+	})
+
+	t.Run("note pluralizes items and tables when more than one is withheld", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id     Int    @id
+  phone1 String
+  phone2 String
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if r.Note == "" {
+			t.Fatal("Note is empty, want a factual trace of what 3NF-suppression withheld")
+		}
+		if !strings.Contains(r.Note, "2 1NF surface items") {
+			t.Errorf("Note = %q, want it to pluralize \"items\" for a count of 2", r.Note)
+		}
+		if !strings.Contains(r.Note, "2 OLAP-classified tables") {
+			t.Errorf("Note = %q, want it to pluralize \"tables\" for a count of 2", r.Note)
+		}
+	})
+}
+
+// explicit-olap-override: database.paradigm: olap set explicitly, ANY table
+// (even one with no fact_/dim_/stg_/mart_ prefix) has its DB-003 item
+// dropped SCHEMA-WIDE — the dev asserts the whole schema is a warehouse.
+func TestSensorDB_3NFSuppression_ExplicitOLAPOverride_DropsSchemaWide(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model widgets {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: olap
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "widgets") {
+		t.Error("DB-003 fired for widgets (unclassified role) under explicit olap override, want schema-wide suppression")
+	}
+}
+
+// mixed-partial: mixed paradigm (explicit override here), a dimension-role
+// table's DB-003 item is dropped WHILE an unrelated unclassified-role
+// table's DB-003 item in the SAME schema still fires — proves NO
+// over-suppression on mixed.
+func TestSensorDB_3NFSuppression_Mixed_OnlyOLAPRoleSuppressed(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+}
+
+model dim_customer {
+  id     Int    @id
+  phone1 String
+  phone2 String
+}
+
+model orders {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: mixed
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_customer") {
+		t.Error("DB-003 fired for dim_customer (dimension role) under mixed, want suppressed")
+	}
+	if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "orders") {
+		t.Error("DB-003 did not fire for orders (unclassified role) under mixed, want NOT suppressed (over-suppression)")
+	}
+}
+
+// DB-002 (CategoryDBMultivalued) boundary tests (CRITICAL C2, S1 review
+// ledger): suppress3NF treats DB-002 and DB-003 identically (db.go
+// suppressedCategory), but until this fix ONLY DB-003 was ever exercised by
+// a test — a visible contract of one of the slice's two rules went
+// unverified. These lock the same auto-olap/mixed-partial boundaries
+// already locked for DB-003, above, for DB-002.
+func TestSensorDB_3NFSuppression_DB002_MultivaluedColumn(t *testing.T) {
+	t.Run("auto-olap: multivalued column on a dimension table is suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  product_id  Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_customer {
+  id Int @id
+}
+
+model dim_product {
+  id     Int      @id
+  labels String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "dim_product") {
+			t.Error("DB-002 fired for dim_product under auto/olap-role detection, want suppressed")
+		}
+	})
+
+	t.Run("mixed: dimension suppressed, unclassified table NOT over-suppressed", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_id Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+}
+
+model dim_customer {
+  id   Int      @id
+  tags String[]
+}
+
+model widgets {
+  id   Int      @id
+  tags String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: mixed
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "dim_customer") {
+			t.Error("DB-002 fired for dim_customer (dimension role) under mixed, want suppressed")
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "widgets") {
+			t.Error("DB-002 did not fire for widgets (unclassified role) under mixed, want NOT suppressed (over-suppression)")
+		}
+	})
+}
+
+// oltp-negative: an explicit oltp override on a dim_-prefixed schema with the
+// identical shape as the auto-olap case MUST still fire — explicit config
+// always wins, detection MUST NOT suppress. A detected-oltp schema (no
+// override, no recognized prefix) with the identical repeating-group shape
+// also fires unchanged.
+func TestSensorDB_3NFSuppression_OLTPNegative_StillFlagged(t *testing.T) {
+	t.Run("explicit oltp override on a dim_-prefixed table", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: oltp
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
+			t.Error("DB-003 did not fire for dim_product under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+	})
+
+	t.Run("explicit oltp override on a fact_-prefixed table", func(t *testing.T) {
+		// reliability WARNING (d), S1 review ledger: the doc names BOTH
+		// fact_/dim_ prefixes for this explicit-oltp-always-wins guarantee,
+		// but only dim_ had ever been exercised. Also covers DB-002
+		// (multivalued) alongside DB-003 (repeating groups) on the same
+		// table.
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id      Int      @id
+  amount1 Int
+  amount2 Int
+  tags    String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: oltp
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "fact_sales") {
+			t.Error("DB-003 did not fire for fact_sales under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "fact_sales") {
+			t.Error("DB-002 did not fire for fact_sales under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+	})
+
+	t.Run("detected-oltp, no prefix, same shape", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model widgets {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "widgets") {
+			t.Error("DB-003 did not fire for widgets under detected-oltp (no prefix), want NOT suppressed")
+		}
+	})
 }
 
 // A directory schema_path is expanded to its *.sql files in Flyway version order.

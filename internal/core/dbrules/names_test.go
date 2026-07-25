@@ -236,6 +236,34 @@ func TestDB003_GroupFires(t *testing.T) {
 	}
 }
 
+// DB-003 must carry a "table: <name>" StructuralSignal, same rationale as
+// DB-002 (design §2e): the paradigm-aware 3NF-suppression pass keys on it.
+func TestDB003_StructuralSignals_IncludesTable(t *testing.T) {
+	s := &db.Schema{Tables: []db.Table{{
+		Name: "dim_contact", PrimaryKey: []string{"id"},
+		Columns: []db.Column{
+			{Name: "id", Type: db.TypeInt},
+			{Name: "phone1", Type: db.TypeString, Pos: db.Pos{Line: 10}},
+			{Name: "phone2", Type: db.TypeString, Pos: db.Pos{Line: 11}},
+		},
+	}}}
+	_, items := dbrules.Run(s)
+	got := surfaceWithCategory(items, surface.CategoryDBRepeatingGroups)
+	if len(got) != 1 {
+		t.Fatalf("DB-003 = %d, want 1 group", len(got))
+	}
+	want := "table: dim_contact"
+	found := false
+	for _, sig := range got[0].StructuralSignals {
+		if sig == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DB-003 StructuralSignals = %v, want to contain %q", got[0].StructuralSignals, want)
+	}
+}
+
 func TestDB003_SingleDoesNotFire(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{{
 		Name: "T", PrimaryKey: []string{"id"},

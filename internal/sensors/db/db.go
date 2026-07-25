@@ -9,7 +9,9 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	coredb "github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/dbrules"
+	"github.com/codefit-cli/codefit/internal/core/dwrules"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/paradigm"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
@@ -108,9 +110,23 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	}
 
 	fs, surf := dbrules.Run(schema)
+
+	// Paradigm assembly (design §2c): the sensor is the natural join point —
+	// it already holds both schema AND ctx.Config, and the second input is
+	// pure-core (paradigm.Detect) plus a config string, no provider crossing
+	// (the deliberate divergence from ADR 0029's cross, which assembles in
+	// the MCP adapter because its second input comes FROM a provider).
+	override := toParadigmEnum(ctx.Config.Database.Paradigm)
+	cls := paradigm.Resolve(paradigm.Detect(schema), override)
+	dwF, dwS := dwrules.RunWith(schema, &cls, dwrules.All())
+	fs = append(fs, dwF...)
+	surf = append(surf, dwS...)
+
+	surf, note := suppress3NF(surf, cls, override)
+
 	stampFingerprints(fs, surf, content)
 
-	return Result{Measured: true, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
+	return Result{Measured: true, Note: note, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
 		Sensor:     "db",
 		Score:      scoring.DimensionScore(fs),
 		Findings:   fs,
@@ -120,6 +136,126 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 }
 
 func notMeasured(note string) Result { return Result{Measured: false, Note: note} }
+
+// suppress3NF drops DB-002 (CategoryDBMultivalued) / DB-003
+// (CategoryDBRepeatingGroups) surface items on OLAP-classified tables (design
+// §2e, spec "3NF-Suppression on OLAP-Classified Schemas"). DB-002/DB-003
+// themselves stay schema-only in dbrules (ADR-0015 untouched, no signature
+// change, no provider) — this is a sensor-level pass over the already-merged
+// surface, the layer that legitimately knows the paradigm.
+//
+// override (the RAW config value BEFORE Resolve, distinct from cls.Paradigm)
+// decides the suppression MODE, honoring developer autonomy — explicit
+// config always wins over detection:
+//   - explicit "oltp": NEVER suppress, regardless of any detected role (a
+//     dev who explicitly declares oltp gets the classic 1NF checks
+//     unconditionally, even on a fact_/dim_-prefixed schema).
+//   - explicit "olap": DROP schema-wide, regardless of role (the dev asserts
+//     the WHOLE schema is a warehouse — even an unclassified-role table's
+//     item is dropped).
+//   - auto/empty or explicit "mixed": per-table role — drop only tables
+//     whose cls.Roles entry is fact/dimension/mart; a table with no
+//     recognized role (unclassified/ordinary OLTP) keeps firing unchanged,
+//     preventing over-suppression on a mixed schema (design §7 boundary
+//     risk #3).
+//
+// R2 audit trace (WARNING, S1 review ledger — "siempre se informan las
+// consecuencias", CLAUDE.md): suppression is never silent. When one or more
+// items are withheld, the returned note records how many and on how many
+// OLAP-classified tables, and points at database.paradigm: oltp to reveal
+// them. The note is empty (never spammed) when nothing was suppressed.
+func suppress3NF(surf []findings.SurfaceItem, cls paradigm.Classification, override paradigm.Paradigm) ([]findings.SurfaceItem, string) {
+	if override == paradigm.ParadigmOLTP {
+		return surf, ""
+	}
+
+	suppressedCategory := func(c string) bool {
+		return c == string(surface.CategoryDBMultivalued) || c == string(surface.CategoryDBRepeatingGroups)
+	}
+
+	dropAll := override == paradigm.ParadigmOLAP
+
+	kept := surf[:0:0] //nolint:gocritic // deliberate zero-length, non-aliased slice: never mutate surf in place
+	droppedCount := 0
+	droppedTables := map[string]bool{}
+	for _, it := range surf {
+		if suppressedCategory(it.Category) {
+			if dropAll {
+				droppedCount++
+				droppedTables[itemTable(it)] = true
+				continue
+			}
+			if role, ok := tableRole(it, cls); ok && isOLAPRole(role) {
+				droppedCount++
+				droppedTables[itemTable(it)] = true
+				continue
+			}
+		}
+		kept = append(kept, it)
+	}
+
+	if droppedCount == 0 {
+		return kept, ""
+	}
+	return kept, suppressionNote(droppedCount, len(droppedTables))
+}
+
+// itemTable extracts a surface item's "table: <name>" StructuralSignal —
+// the same signal tableRole resolves a role from. Empty when absent (should
+// not happen for DB-002/DB-003, which always carry it).
+func itemTable(it findings.SurfaceItem) string {
+	for _, sig := range it.StructuralSignals {
+		if table, found := strings.CutPrefix(sig, "table: "); found {
+			return table
+		}
+	}
+	return ""
+}
+
+// suppressionNote renders the R2 audit trace: a factual, minimal statement
+// of what 3NF-suppression withheld and how to see it.
+func suppressionNote(items, tables int) string {
+	itemWord := "item"
+	if items != 1 {
+		itemWord += "s"
+	}
+	tableWord := "table"
+	if tables != 1 {
+		tableWord += "s"
+	}
+	return fmt.Sprintf(
+		"3NF-suppression withheld %d 1NF surface %s (DB-002/DB-003) on %d OLAP-classified %s "+
+			"(fact/dimension/mart); set database.paradigm: oltp to see them.",
+		items, itemWord, tables, tableWord,
+	)
+}
+
+// tableRole resolves a surface item's table via its "table: <name>"
+// StructuralSignal (added to DB-002/DB-003 for exactly this purpose) and
+// looks it up in cls.Roles. ok is false when the item carries no table
+// signal or the table has no role entry.
+func tableRole(it findings.SurfaceItem, cls paradigm.Classification) (paradigm.Role, bool) {
+	for _, sig := range it.StructuralSignals {
+		table, found := strings.CutPrefix(sig, "table: ")
+		if !found {
+			continue
+		}
+		role, ok := cls.Roles[table]
+		return role, ok
+	}
+	return "", false
+}
+
+func isOLAPRole(r paradigm.Role) bool {
+	return r == paradigm.RoleFact || r == paradigm.RoleDimension || r == paradigm.RoleMart
+}
+
+// toParadigmEnum maps ctx.Config.Database.Paradigm to a paradigm.Paradigm —
+// identity, since config validation already restricts the value to
+// auto/oltp/olap/mixed/"" and paradigm.Resolve treats ""/"auto" as
+// no-override. This is the ONE place config meets core, keeping the
+// paradigm/dwrules packages config-free (design §2c).
+func toParadigmEnum(s string) paradigm.Paradigm { return paradigm.Paradigm(s) }
 
 // enabled applies the three-state toggle: unset (nil) → on (opt-out default),
 // explicit true/false overrides.

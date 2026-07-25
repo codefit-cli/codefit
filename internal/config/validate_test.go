@@ -79,6 +79,29 @@ database:
 	}
 }
 
+func TestLoadAcceptsAutoParadigm(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+database:
+  paradigm: "auto"
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load should accept database.paradigm=auto, got: %v", err)
+	}
+}
+
+func TestLoadAcceptsEmptyParadigm(t *testing.T) {
+	// Empty (unset) paradigm is existing behavior: validate.go only checks
+	// non-empty values against the allow-list.
+	_, err := config.Load(writeConfig(t, validBody))
+	if err != nil {
+		t.Fatalf("Load should accept an unset database.paradigm, got: %v", err)
+	}
+}
+
 func TestLoadAcceptsSQLServerDBType(t *testing.T) {
 	body := `version: "1"
 project:

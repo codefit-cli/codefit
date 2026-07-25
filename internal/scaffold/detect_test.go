@@ -28,8 +28,8 @@ func TestDetectNextPrismaProject(t *testing.T) {
 	if info.DBType != "postgresql" {
 		t.Errorf("db type = %q, want postgresql", info.DBType)
 	}
-	if info.DBParadigm != "oltp" {
-		t.Errorf("db paradigm = %q, want oltp", info.DBParadigm)
+	if info.DBParadigm != "auto" {
+		t.Errorf("db paradigm = %q, want auto", info.DBParadigm)
 	}
 	if want := filepath.FromSlash("prisma/schema.prisma"); !slices.Contains(info.SchemaPaths, want) {
 		t.Errorf("schema paths = %v, want to contain %q", info.SchemaPaths, want)
