@@ -17,11 +17,15 @@ type Rule interface {
 	Check(*db.Schema, *paradigm.Classification) ([]findings.Finding, []findings.SurfaceItem)
 }
 
-// All is the enumerated DW rule set. Empty in S1 — this is the inert
-// skeleton; S2 adds DW-001 (fact without dimension FK), DW-002 (dimension
-// without surrogate key), DW-005 (no time dimension), DW-010 (SCD2 without
-// currency index), DW-011 (mixed SCD strategies).
-func All() []Rule { return []Rule{} }
+// All is the enumerated DW rule set, instantiated by hand exactly like
+// dbrules.All()/crossrules.All() — no registry (YAGNI). S2 (the star-schema +
+// SCD family) fills it; DW-020 (partitioning) and DW-021 (columnar index)
+// remain declared-not-covered until S4/S3.
+func All() []Rule {
+	return []Rule{
+		dw001{}, // S2 — fact table with no FK to any dimension (surface)
+	}
+}
 
 // OwnedCategories are the baseline Item categories the DW rules produce.
 // Empty in S1 — no DW rule owns a surface category yet; the sensor's own

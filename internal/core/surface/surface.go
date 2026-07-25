@@ -120,6 +120,25 @@ const (
 	// (emits nothing) on any inexact match.
 	CategoryDBNoCompositeIndex Category = "db-no-composite-index"
 
+	// DW (data-warehouse) surface categories — the star/snowflake + SCD rule
+	// family (DW-0xx, RF-03 OLAP closure, slice S2). They are produced by
+	// internal/core/dwrules, which reasons over the neutral schema PLUS the
+	// paradigm/table-role classification (ADR 0033), and they are ALL pure
+	// surface (ADR 0017): a warehouse-modelling choice is a design judgment,
+	// never a structurally undeniable defect, so codefit states the observed
+	// shape and the agent decides. One category per rule, same per-rule
+	// baseline-fingerprint reasoning as the DB-0xx categories above.
+	//
+	// Every one of these yields ZERO value on a Prisma-only project: a
+	// schema.prisma expresses no warehouse concept, so a Prisma schema whose
+	// models happen to be named fact_/dim_ is the only way any of them can
+	// even classify — see COVERAGE.md's Prisma-zero-value note.
+	CategoryDWNoFactDimensionFK       Category = "dw-fact-no-dimension-fk"       // DW-001: fact table with no FK to any dimension
+	CategoryDWDimensionNoSurrogateKey Category = "dw-dimension-no-surrogate-key" // DW-002: dimension keyed by a natural/composite business key
+	CategoryDWNoTimeDimension         Category = "dw-no-time-dimension"          // DW-005: facts present, no time dimension
+	CategoryDWSCD2NoCurrencyIndex     Category = "dw-scd2-no-currency-index"     // DW-010: SCD-2 dimension with no index serving its currency lookup
+	CategoryDWMixedSCDStrategies      Category = "dw-mixed-scd-strategies"       // DW-011: SCD-1 and SCD-2 dimensions mixed in one schema
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps

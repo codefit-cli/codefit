@@ -1,6 +1,7 @@
 package dwrules_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -83,31 +84,41 @@ func TestRunWith_NilClassification(t *testing.T) {
 	}
 }
 
-// TestRun_DelegatesToRunWithAll locks that Run calls RunWith(s, cls, All())
-// — in S1, All() is empty, so Run over a real schema returns (nil, nil).
+// TestRun_DelegatesToRunWithAll locks that Run calls RunWith(s, cls, All()).
+// The schema is a single table with NO recognized role, so every registered DW
+// rule abstains on it and Run returns (nil, nil) — the assertion stays valid as
+// the rule set grows, and doubles as the spec's "rules do not fire on OLTP or
+// unclassified tables" guarantee at the runner level.
 func TestRun_DelegatesToRunWithAll(t *testing.T) {
 	schema := &db.Schema{Tables: []db.Table{{Name: "t"}}}
-	cls := &paradigm.Classification{}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"t": paradigm.RoleUnclassified}}
 
 	fs, surf := dwrules.Run(schema, cls)
 
 	if fs != nil || surf != nil {
-		t.Errorf("Run(...) = (%v, %v), want (nil, nil) while All() is empty", fs, surf)
+		t.Errorf("Run(...) = (%v, %v), want (nil, nil) — no DW rule may touch an unclassified table", fs, surf)
 	}
 }
 
-// TestOwnedCategories_EmptyInS1 locks that dwrules produces NO new surface
-// category yet — S2 adds DW-001/002/005/010/011 and their categories.
-func TestOwnedCategories_EmptyInS1(t *testing.T) {
-	if got := dwrules.OwnedCategories(); len(got) != 0 {
-		t.Errorf("OwnedCategories() = %v, want empty in S1", got)
+// TestAll_RuleIDsAreUniqueAndNonEmpty replaces S1's TestAll_EmptyInS1, whose
+// premise ("the skeleton holds no rule") broke the moment the first real DW
+// rule landed in S2. It is written to stay valid as the family grows: every
+// registered rule must carry a non-empty, DW-prefixed, UNIQUE ID — a
+// duplicate ID would silently collapse two rules' baseline identity.
+func TestAll_RuleIDsAreUniqueAndNonEmpty(t *testing.T) {
+	all := dwrules.All()
+	if len(all) == 0 {
+		t.Fatal("All() is empty — S2 registers the star-schema/SCD rule family")
 	}
-}
-
-// TestAll_EmptyInS1 locks that the S1 rule set is empty — the skeleton, not
-// yet a real DW rule.
-func TestAll_EmptyInS1(t *testing.T) {
-	if got := dwrules.All(); len(got) != 0 {
-		t.Errorf("All() = %v, want empty in S1", got)
+	seen := map[string]bool{}
+	for _, r := range all {
+		id := r.ID()
+		if !strings.HasPrefix(id, "DW-") {
+			t.Errorf("rule ID %q must carry the DW- prefix", id)
+		}
+		if seen[id] {
+			t.Errorf("duplicate rule ID %q — two rules would share one baseline identity", id)
+		}
+		seen[id] = true
 	}
 }
