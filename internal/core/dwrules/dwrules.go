@@ -24,6 +24,7 @@ type Rule interface {
 func All() []Rule {
 	return []Rule{
 		dw001{}, // S2 — fact table with no FK to any dimension (surface)
+		dw002{}, // S2 — dimension without a surrogate key (surface)
 	}
 }
 
