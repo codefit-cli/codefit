@@ -560,6 +560,49 @@ database:
 		}
 	})
 
+	t.Run("explicit oltp override on a fact_-prefixed table", func(t *testing.T) {
+		// reliability WARNING (d), S1 review ledger: the doc names BOTH
+		// fact_/dim_ prefixes for this explicit-oltp-always-wins guarantee,
+		// but only dim_ had ever been exercised. Also covers DB-002
+		// (multivalued) alongside DB-003 (repeating groups) on the same
+		// table.
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id      Int      @id
+  amount1 Int
+  amount2 Int
+  tags    String[]
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: oltp
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "fact_sales") {
+			t.Error("DB-003 did not fire for fact_sales under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBMultivalued), "fact_sales") {
+			t.Error("DB-002 did not fire for fact_sales under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+	})
+
 	t.Run("detected-oltp, no prefix, same shape", func(t *testing.T) {
 		schema := `datasource db {
   provider = "postgresql"
