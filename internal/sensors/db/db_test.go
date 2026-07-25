@@ -244,6 +244,220 @@ func TestSensorDB_ParadigmAssembly_NoChangeWhileDWRulesEmpty(t *testing.T) {
 	}
 }
 
+// --- 3NF-suppression boundary tests (design §2e, §7 boundary risk #3) ---
+
+// hasSurfaceForTable reports whether items contains a category item whose
+// "table: <name>" StructuralSignal equals table.
+func hasSurfaceForTable(items []findings.SurfaceItem, category, table string) bool {
+	want := "table: " + table
+	for _, it := range items {
+		if it.Category != category {
+			continue
+		}
+		for _, sig := range it.StructuralSignals {
+			if sig == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// auto-olap: default/"auto" config, a dim_-prefixed table (denormalized,
+// repeating category columns, role=dimension by prefix+surrogate-key
+// corroboration) must NOT be flagged by DB-003 (spec "Denormalized dimension
+// table is not flagged").
+func TestSensorDB_3NFSuppression_AutoOLAP_DimensionTableNotFlagged(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
+		t.Error("DB-003 fired for dim_product under auto/olap-role detection, want suppressed")
+	}
+}
+
+// explicit-olap-override: database.paradigm: olap set explicitly, ANY table
+// (even one with no fact_/dim_/stg_/mart_ prefix) has its DB-003 item
+// dropped SCHEMA-WIDE — the dev asserts the whole schema is a warehouse.
+func TestSensorDB_3NFSuppression_ExplicitOLAPOverride_DropsSchemaWide(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model widgets {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: olap
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "widgets") {
+		t.Error("DB-003 fired for widgets (unclassified role) under explicit olap override, want schema-wide suppression")
+	}
+}
+
+// mixed-partial: mixed paradigm (explicit override here), a dimension-role
+// table's DB-003 item is dropped WHILE an unrelated unclassified-role
+// table's DB-003 item in the SAME schema still fires — proves NO
+// over-suppression on mixed.
+func TestSensorDB_3NFSuppression_Mixed_OnlyOLAPRoleSuppressed(t *testing.T) {
+	schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model dim_customer {
+  id     Int    @id
+  phone1 String
+  phone2 String
+}
+
+model orders {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+	yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: mixed
+  schema_paths:
+    - prisma/schema.prisma
+`
+	ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	r, err := sdb.New(typescript.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_customer") {
+		t.Error("DB-003 fired for dim_customer (dimension role) under mixed, want suppressed")
+	}
+	if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "orders") {
+		t.Error("DB-003 did not fire for orders (unclassified role) under mixed, want NOT suppressed (over-suppression)")
+	}
+}
+
+// oltp-negative: an explicit oltp override on a dim_-prefixed schema with the
+// identical shape as the auto-olap case MUST still fire — explicit config
+// always wins, detection MUST NOT suppress. A detected-oltp schema (no
+// override, no recognized prefix) with the identical repeating-group shape
+// also fires unchanged.
+func TestSensorDB_3NFSuppression_OLTPNegative_StillFlagged(t *testing.T) {
+	t.Run("explicit oltp override on a dim_-prefixed table", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model dim_product {
+  id        Int    @id
+  category1 String
+  category2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  paradigm: oltp
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
+			t.Error("DB-003 did not fire for dim_product under explicit oltp override, want NOT suppressed (explicit config always wins)")
+		}
+	})
+
+	t.Run("detected-oltp, no prefix, same shape", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model widgets {
+  id     Int    @id
+  color1 String
+  color2 String
+}
+`
+		yaml := `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  orm: prisma
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "widgets") {
+			t.Error("DB-003 did not fire for widgets under detected-oltp (no prefix), want NOT suppressed")
+		}
+	})
+}
+
 // A directory schema_path is expanded to its *.sql files in Flyway version order.
 // V2 creates the table, V10 alters it — lexical order (V10 < V2) would break the
 // reduction; the numeric Flyway sort must apply V2 first.
