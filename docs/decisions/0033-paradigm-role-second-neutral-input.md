@@ -35,11 +35,24 @@ second neutral input. A layering contract test
 
 `paradigm.Detect(s)` uses table-name prefixes (`fact_`/`dim_`/`stg_`/`mart_`)
 as the PRIMARY signal — name-only was rejected as too noisy (locked decision
-A5) — corroborated by structure: a single-column primary key reads as a
-surrogate key; a `fact_`-prefixed table additionally needs foreign-key
-fan-out to 2+ distinct tables. A table with no recognized prefix is always
-`unclassified`, regardless of structure — structure corroborates a name
-candidate, it never substitutes for one.
+A5) — corroborated by REAL relational structure: a `fact_`-prefixed table
+needs foreign-key fan-out to 2+ distinct tables (`factFanOutMin`); a
+`dim_`-prefixed table needs to be referenced (fan-in) by at least one other
+table. A table with no recognized prefix is always `unclassified`,
+regardless of structure — structure corroborates a name candidate, it never
+substitutes for one.
+
+**Post-review correction (CRITICAL C1, S1 4R review):** the shape shipped
+initially also accepted a lone single-column (surrogate) primary key, BY
+ITSELF, as sufficient corroboration for either role. Nearly every ordinary
+OLTP table has a single-column surrogate PK, so that shortcut made the
+corroboration vacuous — under the `auto` default, any `fact_`/`dim_`-prefixed
+table with a plain `id` PK classified as warehouse-role regardless of real
+fan-out/fan-in, silently suppressing its DB-002/DB-003 findings (the false
+negative CRITICAL-1 in the review ledger). The surrogate-PK shortcut is
+removed; only real fan-out (fact_) / real fan-in (dim_) corroborates.
+`stg_`/`mart_` still need no structural signal in S1 (design §2a) — no
+structural corroboration was ever specified for them.
 
 `paradigm.Resolve(detected, override)` applies `database.paradigm` on top.
 `database.paradigm` gains `"auto"` as its documented default (resolving the
@@ -111,6 +124,16 @@ for a table structural detection could not otherwise classify). An explicit
 so the suppression pass gates on the RAW override value, not
 `cls.Paradigm`, to honor the spec's explicit requirement that an explicit
 `oltp` config value defeats detection outright.
+
+**Post-review addition (WARNING risk R2, S1 4R review):** suppression was
+initially silent — a withheld DB-002/DB-003 item left no trace. That
+contradicts CLAUDE.md's non-negotiable "siempre se informan las
+consecuencias" (developer autonomy is never silent about what codefit did
+on the developer's behalf). `suppress3NF` now also returns a factual note —
+how many 1NF surface items were withheld and on how many OLAP-classified
+tables, plus the `database.paradigm: oltp` escape hatch — threaded into the
+sensor's `Result.Note` (already exposed by `codefit-scan-db`). The note is
+empty when nothing was suppressed, so it never spams the common case.
 
 ## Consequences
 

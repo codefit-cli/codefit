@@ -403,20 +403,27 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
   `dimension` | `staging` | `mart` | `unclassified`) as a pure function of the
   schema: table-name prefixes (`fact_`/`dim_`/`stg_`/`mart_`) are the
-  **primary** signal, corroborated by structure (a single-column surrogate
-  primary key; for `fact_` tables, foreign-key fan-out to 2+ distinct tables).
-  `database.paradigm` defaults to `"auto"` (detection decides); an **explicit**
-  `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins** over
-  detection — developer autonomy is innegotiable. This slice's first consumer:
-  DB-002 (multivalued column) and DB-003 (repeating groups) — still
+  **primary** signal, corroborated by **real relational structure** — `fact_`
+  tables need foreign-key fan-out to 2+ distinct tables, `dim_` tables need to
+  be **referenced** (fan-in) by at least one other table. A lone single-column
+  surrogate primary key is deliberately **not**, by itself, sufficient
+  corroboration (nearly every ordinary OLTP table has one, so it would
+  classify almost anything prefixed `fact_`/`dim_` as warehouse-role — fixed
+  post-review, see ADR 0033). `stg_`/`mart_` still need no structural signal
+  in S1. `database.paradigm` defaults to `"auto"` (detection decides); an
+  **explicit** `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins**
+  over detection — developer autonomy is innegotiable. This slice's first
+  consumer: DB-002 (multivalued column) and DB-003 (repeating groups) — still
   schema-only, deterministic 1NF checks, unchanged in shape — are
   **suppressed** for fact/dimension/mart-role tables under auto detection or
   an explicit `mixed` override (an intentionally denormalized warehouse table
   is not a 1NF violation), or dropped **schema-wide** under an explicit `olap`
   override. An explicit `oltp` override **never** suppresses, regardless of
   any detected role — the identical shape still fires exactly as before this
-  slice. The DW-0xx star/snowflake/SCD/columnar/partitioning rule family is
-  **not yet built** (see Not covered, below).
+  slice. Suppression is never silent: when items are withheld, the note
+  records how many and on how many tables, plus the `database.paradigm: oltp`
+  escape hatch to see them. The DW-0xx star/snowflake/SCD/columnar/
+  partitioning rule family is **not yet built** (see Not covered, below).
 
 ### Not covered (declared, not silent)
 
