@@ -60,6 +60,7 @@ func (*Sensor) OwnedCategories() []string {
 		string(surface.CategoryDBRepeatingGroups),
 		string(surface.CategoryDBViewSensitiveColumn),
 		string(surface.CategoryDBPrefixRedundantIndex),
+		string(surface.CategoryDBTableStructureUnproven),
 	}
 	return append(own, dwrules.OwnedCategories()...)
 }

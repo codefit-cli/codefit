@@ -83,6 +83,11 @@ func (db052) ID() string { return "DB-052" }
 func (db052) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem
 	for _, t := range s.Tables {
+		if !t.StructureProven() {
+			// ABSTAIN (D4, design SS4): a dropped ADD COLUMN might have
+			// declared created_at/updated_at.
+			continue
+		}
 		hasCreated, hasUpdated := false, false
 		names := make([]string, 0, len(t.Columns))
 		for _, c := range t.Columns {

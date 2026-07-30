@@ -90,7 +90,7 @@ func TestDB051_UnresolvableDoesNotFire(t *testing.T) {
 
 func TestDB052_BothMissingFires(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{{
-		Name: "T", Pos: db.Pos{File: "s.prisma", Line: 3}, PrimaryKey: []string{"id"},
+		Name: "T", Pos: db.Pos{File: "s.prisma", Line: 3}, Complete: true, PrimaryKey: []string{"id"},
 		Columns: []db.Column{{Name: "id", Type: db.TypeInt}, {Name: "name", Type: db.TypeString}},
 	}}}
 	_, items := dbrules.Run(s)
@@ -138,7 +138,7 @@ func TestDB052_OnlyOneMissingDoesNotFire(t *testing.T) {
 
 func TestDB052_JoinTableFactSet(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{{
-		Name: "Link", PrimaryKey: []string{"aId", "bId"},
+		Name: "Link", Complete: true, PrimaryKey: []string{"aId", "bId"},
 		Columns: []db.Column{{Name: "aId", Type: db.TypeInt}, {Name: "bId", Type: db.TypeInt}},
 	}}}
 	_, items := dbrules.Run(s)

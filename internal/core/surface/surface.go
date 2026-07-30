@@ -144,4 +144,18 @@ const (
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps
 	CategoryDBSensitiveUnencrypted Category = "db-sensitive-unencrypted" // DB-053: sensitive-looking column stored in the clear
 	CategoryDBRepeatingGroups      Category = "db-repeating-groups"      // DB-003: repeating groups (1NF smell)
+
+	// CategoryDBTableStructureUnproven (db-model-completeness-contract,
+	// design SS5): codefit could not reduce one or more statements affecting
+	// this table, so it CANNOT TELL whether the table declares a primary
+	// key. This is DB-050's ROUTED item for a table whose structure is
+	// unproven (Table.Complete==false) — its OWN category, never a reuse of
+	// any existing one: "this table has no primary key" and "codefit cannot
+	// tell whether this table has a primary key" are different claims, and
+	// blurring them is the exact sin this contract exists to kill. Emitted
+	// ONLY as DB-050's routed affirmation — never widened into a generic
+	// per-table "unproven" item for the other seven absence-based rules,
+	// which abstain silently instead (the per-scan Result.Note inventory is
+	// their carrier, design SS7a).
+	CategoryDBTableStructureUnproven Category = "db-table-structure-unproven"
 )
