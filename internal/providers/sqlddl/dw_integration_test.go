@@ -37,8 +37,9 @@ import (
 //	LIMIT 2 (T-SQL ALTER reduction, a PRE-EXISTING parser gap discovered while
 //	vendoring this fixture — NOT introduced by the DW rules). Three shapes of
 //	ALTER TABLE ... ADD CONSTRAINT are dropped by the reducer, and
-//	AdventureWorksDW's real DDL uses all three, so the warehouse's real primary
-//	keys and 7 of its 8 real foreign keys are invisible to every DB and DW rule.
+//	AdventureWorksDW's real DDL uses all three, so the warehouse's three real
+//	primary keys and all eight of its real foreign keys are invisible to every
+//	DB and DW rule.
 //	Consequence beyond the DW family: DB-050 ("table without a primary key")
 //	AFFIRMS, at confidence 1.0, that all three tables lack a primary key — a
 //	false affirmation over DDL that plainly declares them. See
@@ -107,8 +108,8 @@ func TestDW_AdventureWorksDW_PascalCaseNaming_ClassifiesUnclassified(t *testing.
 
 // LIMIT 2 on the real corpus: even after renaming the tables so role detection
 // CAN see them, AdventureWorksDW still classifies OLTP — because the parser
-// dropped every primary key and 7 of the 8 foreign keys, so fact_internet_sales
-// shows a fan-out of 1 (below the corroboration threshold) and the dimensions
+// dropped every primary key and all eight foreign keys, so fact_internet_sales
+// shows a fan-out of 0 (below the corroboration threshold) and the dimensions
 // show a fan-in of 0. The star is real in the DDL and invisible in the model.
 func TestDW_AdventureWorksDW_SnakeCaseRenamed_StarStillInvisible_DeclaredLimit(t *testing.T) {
 	s := awdwSchema(t, kimballToSnakeCase...)

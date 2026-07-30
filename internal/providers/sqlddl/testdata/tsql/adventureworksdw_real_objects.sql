@@ -31,7 +31,7 @@
 -- recognizes only the snake_case prefixes fact_/dim_/stg_/mart_ (locked
 -- decision A5, ADR 0033). So EVERY table in this file classifies as
 -- "unclassified" and NO DW-0xx rule fires on it as written. That gap is
--- test-locked, not silent — see internal/sensors/db/adventureworksdw_test.go.
+-- test-locked, not silent — see internal/providers/sqlddl/dw_integration_test.go.
 --
 -- License: MIT (Microsoft SQL Server Sample Code)
 --   Copyright (c) Microsoft Corporation. All rights reserved.
