@@ -39,6 +39,18 @@ const (
 type Classification struct {
 	Paradigm Paradigm
 	Roles    map[string]Role
+
+	// Unprovable names tables whose role could not be DECIDED because the
+	// model does not prove their structure complete (db-model-completeness-
+	// contract, design SS6). Distinct from an ordinary RoleUnclassified ("no
+	// recognized prefix"): a table demoted to RoleUnclassified is ALSO in
+	// Unprovable only when its demotion cause might be a dropped statement
+	// rather than a genuine structural absence. Never set for a table with no
+	// recognized prefix (that demotion's cause is vocabulary, not
+	// structure), and never set for a PROMOTED table (promotion is
+	// unconditionally safe — a dropped FK can only undercount fan-out/fan-in,
+	// never fabricate it).
+	Unprovable map[string]bool
 }
 
 // factFanOutMin is the minimum distinct-table FK fan-out that corroborates a
@@ -80,8 +92,43 @@ func Detect(s *db.Schema) Classification {
 		cls.Roles[t.Name] = roleFor(s, t, fanIn)
 	}
 
+	cls.Unprovable = unprovableDemotions(s, cls.Roles)
 	cls.Paradigm = fold(cls.Roles)
 	return cls
+}
+
+// unprovableDemotions computes Classification.Unprovable (design SS6):
+// promotion is unconditionally safe (a dropped FK can only UNDERcount
+// fan-out/fan-in, never fabricate it), so only a DEMOTION is ever suspect —
+// and only when the table carried a recognized prefix in the first place (a
+// table with no recognized prefix is unclassified for a vocabulary reason,
+// never a structural one). A recognized-prefix demotion is marked unprovable
+// when EITHER the table's own structure is unproven OR any OTHER table in
+// the schema is (a lost FK anywhere could be the one that would have
+// referenced/been-referenced-by this table — the schema-wide half of the
+// corroboration is fan-in, computed over every table's foreign keys).
+func unprovableDemotions(s *db.Schema, roles map[string]Role) map[string]bool {
+	anyIncomplete := false
+	for _, t := range s.Tables {
+		if !t.StructureProven() {
+			anyIncomplete = true
+			break
+		}
+	}
+
+	out := map[string]bool{}
+	for _, t := range s.Tables {
+		if roles[t.Name] != RoleUnclassified {
+			continue // promoted — unconditionally safe, never unprovable
+		}
+		if _, ok := prefixRole(t.Name); !ok {
+			continue // no recognized prefix — vocabulary, not structure
+		}
+		if !t.StructureProven() || anyIncomplete {
+			out[t.Name] = true
+		}
+	}
+	return out
 }
 
 // roleFor determines one table's role: name prefix as the primary signal,
@@ -196,5 +243,5 @@ func Resolve(detected Classification, override Paradigm) Classification {
 	if override == "" || override == ParadigmAuto {
 		return detected
 	}
-	return Classification{Paradigm: override, Roles: detected.Roles}
+	return Classification{Paradigm: override, Roles: detected.Roles, Unprovable: detected.Unprovable}
 }
