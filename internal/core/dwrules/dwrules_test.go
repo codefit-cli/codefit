@@ -46,8 +46,9 @@ func TestRunWith_NilSchema(t *testing.T) {
 }
 
 // fakeRule is a minimal Rule implementation used only to exercise RunWith's
-// merge loop and Run's All()-delegation, since dwrules.All() is itself empty
-// in S1 (no real rule exists yet to exercise these paths otherwise).
+// merge loop and Run's All()-delegation in isolation, independent of any real
+// rule's behavior (dwrules.All() now holds the S2 family — see
+// TestAll_RegistersTheS2Family below).
 type fakeRule struct{ id string }
 
 func (r fakeRule) ID() string { return r.id }
@@ -56,9 +57,9 @@ func (fakeRule) Check(*db.Schema, *paradigm.Classification) ([]findings.Finding,
 	return []findings.Finding{{ID: "FAKE-1"}}, []findings.SurfaceItem{{Category: "fake"}}
 }
 
-// TestRunWith_MergesRuleOutput exercises RunWith's merge loop over a
-// non-empty rule set — dwrules.All() is empty in S1, so this is the only way
-// to prove the merge mechanism actually appends a rule's output.
+// TestRunWith_MergesRuleOutput exercises RunWith's merge loop over an
+// injected rule set, isolated from dwrules.All() so it proves the merge
+// mechanism itself appends a rule's output, independent of any real rule.
 func TestRunWith_MergesRuleOutput(t *testing.T) {
 	schema := &db.Schema{Tables: []db.Table{{Name: "t"}}}
 	cls := &paradigm.Classification{}
