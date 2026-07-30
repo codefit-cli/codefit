@@ -36,6 +36,11 @@ func (dw001) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 		if cls.Roles[t.Name] != paradigm.RoleFact {
 			continue
 		}
+		if !t.StructureProven() {
+			// ABSTAIN (D4, design SS4): a dropped FK statement might have
+			// declared the very dimension join this rule is asking about.
+			continue
+		}
 		refs := referencedTables(t)
 		if anyDimension(refs, cls) {
 			continue

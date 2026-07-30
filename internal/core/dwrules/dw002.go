@@ -46,6 +46,13 @@ func (dw002) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 		if cls.Roles[t.Name] != paradigm.RoleDimension {
 			continue
 		}
+		if !t.StructureProven() {
+			// ABSTAIN (D4, design SS4) — guarded BEFORE the len(PrimaryKey)==0
+			// check on purpose: a dropped statement might have declared the
+			// surrogate key, so primary_key_column_resolved=false must never
+			// arise from a dropped column rather than a genuinely absent one.
+			continue
+		}
 		if len(t.PrimaryKey) == 0 {
 			continue // DB-050 owns the no-primary-key case
 		}

@@ -67,6 +67,11 @@ func (dw010) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 		if cls.Roles[t.Name] != paradigm.RoleDimension {
 			continue
 		}
+		if !t.StructureProven() {
+			// ABSTAIN (D4, design SS4): a dropped statement might have
+			// declared the currency-covering index this rule asks about.
+			continue
+		}
 		scd, currency := scdColumns(t)
 		if len(scd) == 0 || len(currency) == 0 {
 			// Not an SCD-2 dimension, or no currency lookup to serve.

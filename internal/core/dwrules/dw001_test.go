@@ -33,7 +33,7 @@ import (
 
 // dwtbl builds a positioned table.
 func dwtbl(name string, cols ...db.Column) db.Table {
-	return db.Table{Name: name, Pos: db.Pos{File: "schema.sql", Line: 1}, Columns: cols}
+	return db.Table{Name: name, Pos: db.Pos{File: "schema.sql", Line: 1}, Complete: true, Columns: cols}
 }
 
 // dwcol builds a typed column.

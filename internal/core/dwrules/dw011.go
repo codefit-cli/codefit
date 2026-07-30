@@ -46,6 +46,19 @@ func (dw011) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 	var anchor db.Pos
 	anchored := false
 
+	// D4 (design SS4): SCHEMA-LEVEL ABSTAIN, same rationale as DW-005 — this
+	// is a census judgment over every COMPARED dimension (time dimensions
+	// excluded), so a per-table continue would silently shrink the census
+	// and still emit. ANY unproven, non-time dimension aborts the whole rule.
+	for _, t := range s.Tables {
+		if cls.Roles[t.Name] != paradigm.RoleDimension || isTimeDimension(t) {
+			continue
+		}
+		if !t.StructureProven() {
+			return nil, nil
+		}
+	}
+
 	for _, t := range s.Tables {
 		if cls.Roles[t.Name] != paradigm.RoleDimension || isTimeDimension(t) {
 			continue
