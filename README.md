@@ -117,8 +117,15 @@ independent audit layer that validates AI-generated code is secure and correct
   the **routine bodies** of stored procedures, functions, and triggers (dynamic SQL,
   missing exception handling, cross-table cascades, external-effecting calls), and
   **code×schema crosses** that check whether the columns the code actually filters on
-  are backed by an index. One structural fact is affirmed (a table with no primary
-  key); everything else is surface the agent reasons. Run it standalone with
+  are backed by an index. It also **detects the schema's paradigm** (OLTP vs OLAP,
+  overridable by `database.paradigm`) so an OLAP schema's intentional denormalization
+  is not flagged as a normalization violation, and on a schema it classifies as a
+  warehouse it audits the **star-schema and slowly-changing-dimension shape** (a fact
+  joining no dimension, a business key where a surrogate belongs, facts with no time
+  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) — the
+  columnar-index and partitioning checks are **not** built yet. One structural fact is
+  affirmed (a table with no primary key); everything else is surface the agent
+  reasons. Run it standalone with
   `codefit-scan-db`; it also runs inside `scan-all` as its own section with a
   per-dimension score. The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
