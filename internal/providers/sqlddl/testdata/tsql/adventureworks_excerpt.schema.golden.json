@@ -84,7 +84,10 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "SalesOrderHeader",
@@ -161,7 +164,10 @@
           ]
         }
       ],
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "SalesOrderDetail",
@@ -227,10 +233,14 @@
           ]
         }
       ],
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     }
   ],
   "Views": null,
   "Procedures": null,
-  "Triggers": null
+  "Triggers": null,
+  "Unreduced": null
 }

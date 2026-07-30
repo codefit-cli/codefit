@@ -59,7 +59,10 @@
       ],
       "PrimaryKey": null,
       "ForeignKeys": null,
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "customer",
@@ -215,7 +218,10 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "address",
@@ -335,7 +341,10 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "rental",
@@ -445,7 +454,10 @@
           ],
           "Unique": true
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "payment_p2022_01",
@@ -565,7 +577,10 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     }
   ],
   "Views": [
@@ -637,5 +652,6 @@
       },
       "ExecutesFunction": "tsvector_update_trigger"
     }
-  ]
+  ],
+  "Unreduced": null
 }
