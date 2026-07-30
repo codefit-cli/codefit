@@ -205,7 +205,12 @@ func (b *builder) triggerBody(st stmt) db.Body {
 func (b *builder) getTable(name string) *db.Table {
 	t := b.tables[name]
 	if t == nil {
-		t = &db.Table{Name: name}
+		// Complete starts true (N1, design §1-D1b): db.Table.Complete's zero
+		// value is false (fail-closed), so every construction site must set
+		// it explicitly or the whole DB dimension mutes itself on this
+		// provider. A table is demoted to Complete=false only when a later
+		// statement affecting it cannot be reduced (MarkUnproven).
+		t = &db.Table{Name: name, Complete: true}
 		b.tables[name] = t
 		b.order = append(b.order, name)
 	}
