@@ -422,8 +422,78 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   any detected role — the identical shape still fires exactly as before this
   slice. Suppression is never silent: when items are withheld, the note
   records how many and on how many tables, plus the `database.paradigm: oltp`
-  escape hatch to see them. The DW-0xx star/snowflake/SCD/columnar/
-  partitioning rule family is **not yet built** (see Not covered, below).
+  escape hatch to see them. The DW-0xx columnar-index and partitioning rules
+  are **not yet built** (see Not covered, below); the star-schema/SCD half
+  landed in S2 — next entry.
+- **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
+  S2, RF-03 OLAP closure).** Five rules reading the schema **plus** the S1
+  paradigm/role classification. They reach **only** fact- and dimension-role
+  tables — an `oltp` or `unclassified` table is never evaluated — and all five
+  are **pure surface, never affirmations**: a warehouse-modelling choice is a
+  design judgment, not a structurally undeniable defect.
+  - **DW-001, fact table with no dimension FK.** A fact-role table whose
+    foreign keys reach no dimension-role table. A FK to another **fact**, to
+    staging, or to an unclassified table deliberately does **not** count — a
+    fact-to-fact bridge looks joined but carries no dimensional context. A fact
+    with zero FKs fires too, and says so (`foreign_keys: (none)`).
+  - **DW-002, dimension without a surrogate key.** A dimension-role table whose
+    primary key is **composite**, or a single column that is **not provably an
+    integer** surrogate. The test is structural and narrow on purpose — a
+    one-column integer primary key, the shape every well-modelled warehouse
+    uses — so no name guessing is involved. **Declared limit:** a UUID/GUID
+    surrogate types as a *string* in the neutral model and therefore **fires**;
+    the emitted facts (`composite_primary_key`, `integer_primary_key`,
+    `primary_key_column_resolved`) are what the agent needs to dismiss it in
+    one step. A dimension with **no** primary key **abstains** — DB-050 already
+    affirms that case, and two IDs for one defect is noise.
+  - **DW-005, facts present but no time dimension.** Schema-level, at most
+    **one** item, anchored on the first fact table. A time dimension is
+    recognized by **either** the conventional name (`dim_date`/`dim_time`/
+    `dim_calendar`, separator-insensitive) **or** the structural grain — a
+    dimension whose primary key is a single date/datetime column. The
+    structural signal keys on the **primary key**, not on "contains a date
+    column": an `updated_at` stamp is not a calendar, and accepting any date
+    column would suppress the rule on almost every schema (a silent false
+    negative). **Declared limit:** a calendar keyed by an integer `yyyymmdd`
+    smart key — AdventureWorksDW's own `DimDate` — is recognized only by
+    **name**, since that key is structurally indistinguishable from any other
+    surrogate.
+  - **DW-010, SCD-2 dimension without a currency index.** A dimension carrying
+    slowly-changing columns (`valid_from`/`valid_to`/`is_current`/
+    `effective_date`, separator-insensitive so `validTo`/`isCurrent` match too)
+    where **no index leads with** `valid_to` or `is_current` — so every "give
+    me the current version" query scans the whole version history, the part
+    that grows without bound. Coverage is delegated to the **same** shared
+    helpers DB-001 and DB-010 use (`db.IndexLike` / `db.CoveredByOrderedPrefix`),
+    so "what serves a lookup" is defined once: the primary key counts as an
+    implicit index, and a composite index **not leading** on the currency
+    column does **not** cover it. Either currency column being covered is
+    enough to go quiet. A dimension with no slowly-changing columns is never
+    evaluated; one with history columns but **neither** currency column
+    abstains rather than demanding an index no query would use.
+  - **DW-011, mixed SCD strategies.** Schema-level, one item, when some
+    dimensions keep history and others overwrite in place — a report joining
+    both mixes point-in-time with as-of-today attributes. **Time dimensions are
+    excluded** from the comparison (a calendar is not slowly-changing by
+    definition); counting one as SCD-1 would fire this rule on essentially
+    every correctly built warehouse. A genuine split between two other
+    dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
+    its **declared limit**: a dimension using a different vocabulary
+    (AdventureWorksDW's `DimProduct` uses `StartDate`/`EndDate`/`Status`) reads
+    as SCD-1.
+  - **Dogfood status — stated plainly, not implied.** The positive and trap
+    fire paths of all five rules are proven by **constructed** (declared
+    synthetic, ADR 0028) schemas, **not** by real vendored DDL. Microsoft's
+    AdventureWorksDW **is** vendored
+    (`testdata/tsql/adventureworksdw_real_objects.sql`, MIT) and yields **no**
+    DW finding, for two independent, test-locked reasons: its PascalCase
+    Kimball names (`FactInternetSales`, `DimCustomer`) fall outside the
+    recognized snake_case prefix vocabulary, and the T-SQL reducer drops the
+    `ALTER TABLE ... ADD CONSTRAINT` shapes it uses, so its real primary and
+    foreign keys never reach the model at all (see SQL-DDL known limits (6)).
+  - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
+    warehouse concept, so these rules can only classify a Prisma project whose
+    models happen to be named `fact_`/`dim_`.
 
 ### Not covered (declared, not silent)
 
@@ -465,18 +535,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse rule family (DW-0xx), narrowed as of S1.** Paradigm/
-  table-role detection and 3NF-suppression on OLAP-classified tables **are now
-  covered** (see above) — this entry no longer means "OLAP is entirely out of
-  scope". What **remains** not covered: the star/snowflake shape checks (fact
-  table without a dimension FK, dimension without a surrogate key, schema with
-  facts but no time dimension), slowly-changing-dimension checks (SCD-2
-  currency index, mixed SCD strategies), a columnar/analytic-index check, and
-  a partitioning check — the DW-001/002/005/010/011/020/021 rule family,
-  planned for slices S2-S4 of this same RF-03 OLAP-closure change.
+- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S2.**
+  Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
+  **and** the star-schema/SCD checks — DW-001, DW-002, DW-005, DW-010, DW-011 —
+  **are now covered** (see above). What **remains** not covered: a
+  columnar/analytic-index check (**DW-021**, planned for S3) and a partitioning
+  check (**DW-020**, planned for S4). Neither fires today, under any dialect.
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
+  Separately from the rules: table-role detection recognizes only the
+  snake_case prefixes `fact_`/`dim_`/`stg_`/`mart_`, so a warehouse using
+  **PascalCase Kimball naming** (`FactInternetSales`, `DimCustomer` — as
+  Microsoft's own AdventureWorksDW does) classifies entirely as `unclassified`
+  and gets **no value** from any DW rule. That is a naming-vocabulary limit,
+  not a rule gap, and it is locked as a test against the vendored
+  AdventureWorksDW DDL rather than left silent.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
@@ -508,7 +582,21 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **same** inline-index-shorthand heuristic from a different direction: the
   column is silently dropped and a phantom zero-column index is fabricated in
   its place instead. Confirmed against real vendored Pagila DDL; **not yet
-  fixed**.
+  fixed**. (6) **Three shapes of `ALTER TABLE ... ADD CONSTRAINT` are dropped**
+  by the reducer, so the keys they declare never reach the model: T-SQL's
+  `WITH CHECK` / `WITH NOCHECK` prefix (`ALTER TABLE x WITH CHECK ADD
+  CONSTRAINT ...`); any whitespace other than a single space between `ADD` and
+  `CONSTRAINT` (a newline, as formatted DDL commonly writes it); and
+  comma-chained constraint lists (`ADD CONSTRAINT a ..., CONSTRAINT b ...`),
+  where every constraint after the first is lost because it does not repeat
+  `ADD`. Confirmed against real vendored AdventureWorksDW DDL, which uses **all
+  three** — its three real primary keys and all eight real foreign keys are
+  invisible. The most serious consequence: **DB-050 ("table without a primary
+  key"), a deterministic affirmation at confidence 1.0, is WRONG on that DDL** —
+  it reports three tables as having no primary key over a script that plainly
+  declares one for each. A genuine false affirmation, not a surface question;
+  stated here rather than left silent, locked as a test in
+  `internal/providers/sqlddl/dw_integration_test.go`, and **not yet fixed**.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

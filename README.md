@@ -123,8 +123,10 @@ independent audit layer that validates AI-generated code is secure and correct
   per-dimension score. The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
-**On the roadmap (not yet in `main`):** the HTTP/SSE transport; OLAP / data-warehouse
-DB rules; **literal values in the query model** — carrying the WHERE's literals so the
+**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the two remaining
+OLAP / data-warehouse rules — a columnar/analytic-index check and a partitioning
+check (the star-schema and slowly-changing-dimension rules already landed);
+**literal values in the query model** — carrying the WHERE's literals so the
 cross can infer cardinality from usage (a `String` used as an enum, a `DateTime` used
 as a flag) and tell an equality filter from a range, the two field-observed limits of
 the index-vs-query cross; Phase 3 code review / best practices / tests; Phase 4
@@ -176,10 +178,17 @@ Concretely, on `main` — so you know exactly what to expect without reading
   key); everything else is surface the agent judges, all dialect-agnostic over the
   reconstructed neutral schema. codefit also **detects the schema's paradigm** (OLTP vs
   OLAP, by table naming and structure — `database.paradigm` overrides it) and does **not**
-  flag an OLAP schema's intentional denormalization as a normalization violation. The OLAP
-  **rule family** (star-schema, SCD, partitioning findings) is **not** built yet — declared,
-  not silent. See [COVERAGE.md](COVERAGE.md) for the full rule inventory and the declared
-  SQL-DDL dialect limits.
+  flag an OLAP schema's intentional denormalization as a normalization violation. On a
+  schema it classifies as a warehouse it additionally audits the **star-schema and
+  slowly-changing-dimension shape**: a fact table joining no dimension, a dimension keyed
+  by a business key instead of a surrogate, facts with no time dimension, an SCD-2
+  dimension whose "current version" lookup no index serves, and SCD-1 and SCD-2
+  dimensions mixed in one schema. All five are surface, never affirmations. Two OLAP
+  rules are **not** built yet — a columnar/analytic-index check and a partitioning check
+  — declared, not silent. Table roles are recognized from `fact_`/`dim_`/`stg_`/`mart_`
+  **snake_case** prefixes only, so a warehouse using PascalCase Kimball naming
+  (`FactInternetSales`) gets no value from them today. See [COVERAGE.md](COVERAGE.md)
+  for the full rule inventory and the declared SQL-DDL dialect limits.
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by
