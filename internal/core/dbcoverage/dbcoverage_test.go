@@ -1,6 +1,7 @@
 package dbcoverage_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -111,3 +112,60 @@ func TestManifest_UndeclaredRule_Fails(t *testing.T) {
 		t.Fatal("DB-999 is not a real rule ID and must not appear in the manifest — fixture sanity check failed")
 	}
 }
+
+// ruleIDToken matches an "XX-###" or "XX-###a" rule-ID-shaped token anywhere
+// in prose — used by Control B to find every ID the manifest MENTIONS,
+// independent of whether it is registered.
+var ruleIDToken = regexp.MustCompile(`\bD[BW]-[0-9]+[a-z]?\b`)
+
+// TestManifest_NoPhantomCapability is Control B (secondary, design SS9):
+// every rule-ID-shaped token the manifest MENTIONS in Deterministic()/
+// Reasoning() must be either a REGISTERED rule, or ALSO named in
+// NotCovered() — the legitimate way to describe a not-yet-built rule (e.g.
+// DW-020/DW-021, which Reasoning names as future work and NotCovered
+// explicitly declares not covered). A token that is neither is a phantom
+// capability: prose describing a rule that does not exist and is not
+// declared absent either.
+func TestManifest_NoPhantomCapability(t *testing.T) {
+	registered := map[string]bool{}
+	for _, id := range registeredIDs() {
+		registered[id] = true
+	}
+	notCovered := strings.Join(dbcoverage.NotCovered(), "\n")
+
+	seen := map[string]bool{}
+	for _, id := range ruleIDToken.FindAllString(manifestText(), -1) {
+		if seen[id] || registered[id] {
+			continue
+		}
+		seen[id] = true
+		if !containsWholeToken(notCovered, id) {
+			t.Errorf("manifest mentions %q in Deterministic()/Reasoning() — it is neither a registered rule "+
+				"nor named in NotCovered() — a phantom capability", id)
+		}
+	}
+}
+
+// Control C (design SS9) — DELIBERATELY NOT IMPLEMENTED, stated rather than
+// faked.
+//
+// internal/core/paradigm/ registers NO rules: it exposes no All() and no
+// ID(), unlike dbrules/dwrules/crossrules. Controls A and B above both
+// depend on that shape (a rule set to iterate, IDs to search for) and it does
+// not exist here. A rule↔manifest correspondence test is IMPOSSIBLE for this
+// root, not merely unwritten — claiming otherwise would be exactly the kind
+// of over-promising manifest this whole enforcement effort exists to kill.
+//
+// The design's OPTIONAL fallback — adding paradigm.AllRoles()/AllParadigms()
+// returning the closed Role/Paradigm sets, then asserting every value's
+// string appears in Reasoning() — was considered and NOT implemented here.
+// It would not eliminate the drift Control A/B close for the other three
+// roots; it would only MOVE it three lines, from the const block that
+// defines Role/Paradigm to a second hand-maintained AllRoles()/AllParadigms()
+// function that could itself drift from the const block. That is a real,
+// if smaller, improvement (a missing entry becomes visible in a 3-line
+// review diff instead of 400 lines away) — but it is not the same guarantee
+// Control A gives, and dressing it up as equivalent would be dishonest. Per
+// architect direction (2026-07-30): "a test that pretends to a guarantee it
+// does not provide is not acceptable" — so this control is left unwritten,
+// documented here, rather than shipped as a false mechanical guarantee.

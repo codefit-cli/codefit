@@ -61,6 +61,15 @@ func (*Sensor) OwnedCategories() []string {
 		string(surface.CategoryDBViewSensitiveColumn),
 		string(surface.CategoryDBPrefixRedundantIndex),
 		string(surface.CategoryDBTableStructureUnproven),
+		// Routine-body rule family (DB-030/031/040/041, 0.2.3) — pre-existing
+		// gap found by the dbcoverage enforcement work
+		// (db-model-completeness-contract, Control D): these four categories
+		// were emitted by dbrules but never declared here, the one way to
+		// corrupt an existing baseline (ADR 0019).
+		string(surface.CategoryDBRoutineNoExceptionHandling),
+		string(surface.CategoryDBTriggerCrossTableCascade),
+		string(surface.CategoryDBTriggerExternalCall),
+		string(surface.CategoryDBDynamicSQLInRoutine),
 	}
 	return append(own, dwrules.OwnedCategories()...)
 }
