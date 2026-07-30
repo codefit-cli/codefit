@@ -156,7 +156,16 @@ func parseModel(b prismaBlock, models, enums map[string]bool) db.Table {
 		}
 		m := fieldLine.FindStringSubmatch(ln.text)
 		if m == nil {
-			continue // not a field line — skip leniently
+			// A body line that is neither a @@-attribute nor a field line:
+			// the parser does not know what it declared, so it cannot rule
+			// out that it declared a key, an index or a column. Recording it
+			// honours the same contract the SQL-DDL reducer does (ADR 0034,
+			// design SS7b) — the neutral model, not the provider, defines
+			// what "unproven" means. Distinct from the deferred, test-locked
+			// debt at splitBlocks' stray TOP-LEVEL line skip (:92 — no
+			// *db.Table in scope there, a different granularity).
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, ln.text, pos)
+			continue
 		}
 		name, typeTok, rest := m[1], m[2], m[3]
 		base, nullable, list := parseTypeToken(typeTok)
