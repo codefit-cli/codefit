@@ -246,9 +246,20 @@ de oro: se edita la FUENTE, después se espeja.**
 **Cadena de verdad de cobertura (3 niveles):**
 `reglas (código)` → `dbcoverage.go` (DB) + `coverage.go` (por lenguaje) → `COVERAGE.md`.
 - **Fuente-raíz:** `rules/<lang>/` + los sensores (`internal/sensors/`) + las reglas
-  DB del núcleo (`internal/core/dbrules/` — las 10 reglas DB viven ahí; `internal/core/db/`
-  es solo el modelo neutro `Schema`/`Table`/…, NO las reglas). Es lo que codefit realmente
-  detecta.
+  de la dimensión DB, que **NO viven todas en un solo paquete** — son CUATRO raíces
+  distintas (`internal/core/db/` no es ninguna de ellas: es solo el modelo neutro
+  `Schema`/`Table`/…, NO las reglas):
+  - `internal/core/dbrules/` — las 14 reglas schema-only (`dbrules.All()`), contadas
+    contra el código, no contra este archivo: si agregás o quitás una, actualizá el
+    número acá en el mismo cambio.
+  - `internal/core/dwrules/` — la familia DW-0xx (star schema / SCD), que corre
+    DENTRO del sensor DB con la clasificación de paradigma como segundo input.
+  - `internal/core/paradigm/` — detección de paradigma y rol de tabla, más la
+    supresión 3NF que aplica el sensor (`internal/sensors/db/`).
+  - `internal/core/crossrules/` — el cruce código×schema (DB-010/DB-013), que corre
+    fuera del sensor, solo en `scan-all`, y cuyas categorías se unen al scope del
+    baseline de db (ADR 0019/0029).
+  Es lo que codefit realmente detecta.
 - **Espejo-a-mano:** `internal/providers/<lang>/coverage.go` — NO es fuente pura; debe
   verificarse contra las reglas reales. El cierre lo chequea contra la raíz antes de
   espejar. Declararlo fuente pura reintroduce el drift un nivel más abajo — el drift
@@ -260,9 +271,17 @@ de oro: se edita la FUENTE, después se espeja.**
   antes vivía EMBEBIDA en `internal/providers/typescript/coverage.go` está PAGADA**
   (relocada en 0.2.2). Cada `coverage.go` per-lang la compone por `append`, nunca la
   duplica a mano; `dbcoverage` no importa ningún provider (leaf puro). Al cerrar una
-  dimensión transversal se verifica y edita `dbcoverage.go` contra las reglas reales
-  (`internal/core/dbrules/`), ANTES de espejar a `COVERAGE.md` — la misma disciplina
-  fuente-antes-que-espejo del resto de esta tabla.
+  dimensión transversal se verifica y edita `dbcoverage.go` contra **las CUATRO raíces
+  de reglas** que espeja — `internal/core/dbrules/`, `internal/core/dwrules/`,
+  `internal/core/paradigm/` y `internal/core/crossrules/` — ANTES de espejar a
+  `COVERAGE.md`, la misma disciplina fuente-antes-que-espejo del resto de esta tabla.
+  **Verificar contra una sola de las cuatro es exactamente cómo se cuela el drift:** ya
+  pasó dos veces, y en la peor dirección posible — la FUENTE quedó menos veraz que su
+  espejo. `dbcoverage.go` llegó a declarar que la familia DW no estaba construida
+  (estaba, y el mismo archivo se contradecía en otras dos entradas) y a NEGAR el cruce
+  código×schema (DB-010/DB-013 shippearon en 0.2.4), mientras `COVERAGE.md` ya decía
+  lo correcto. Es la fuente la que sirve `codefit-coverage` al agente: si miente, el
+  agente le cree.
 - **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;
   verificado: sin `go:generate`, ningún `.go` emite markdown). Su encabezado promete
   auto-generación futura que no existe — claim stale, verificar la línea antes de tocar.
@@ -273,7 +292,7 @@ de oro: se edita la FUENTE, después se espeja.**
 | `CHANGELOG.md` | fuente | resumen | Por release; lo realmente mergeado. Sin tags inventados. |
 | `VERSIONING.md` | fuente | resumen | SemVer↔fase + estado actual. |
 | `COVERAGE.md` | espejo (ver cadena) | resumen | Espejo 2º nivel, a mano. |
-| `internal/core/dbcoverage/dbcoverage.go` | fuente neutra de la dimensión DB | resumen | Se verifica contra `internal/core/dbrules/`; se edita ANTES que COVERAGE.md. |
+| `internal/core/dbcoverage/dbcoverage.go` | fuente neutra de la dimensión DB | resumen | Se verifica contra las CUATRO raíces: `dbrules/`, `dwrules/`, `paradigm/`, `crossrules/`. Se edita ANTES que COVERAGE.md. |
 | `internal/providers/<lang>/coverage.go` | espejo-a-mano de las reglas | resumen | Se verifica contra la raíz; se edita ANTES que COVERAGE.md. |
 | `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
 | `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
