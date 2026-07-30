@@ -32,7 +32,13 @@ builds:
         goarch: amd64
     ldflags:
       - -s -w
-      - -X github.com/codefit-cli/codefit/internal/version.Version={{ .Version }}
+      # {{ .Tag }}, NOT {{ .Version }}: goreleaser's .Version is the tag with the
+      # leading "v" stripped, so a v0.2.4 tag shipped a binary reporting "0.2.4"
+      # while the release, the tag and VERSIONING.md all say "v0.2.4". The binary
+      # must report the tag it was built from, verbatim. The archive name below
+      # deliberately keeps .Version — that is goreleaser's naming convention and
+      # changing it would break existing download URLs.
+      - -X github.com/codefit-cli/codefit/internal/version.Version={{ .Tag }}
       - -X github.com/codefit-cli/codefit/internal/version.Commit={{ .ShortCommit }}
       - -X github.com/codefit-cli/codefit/internal/version.BuildDate={{ .Date }}
 

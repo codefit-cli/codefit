@@ -4,8 +4,10 @@
 package version
 
 var (
-	// Version is the semantic version (e.g. "v0.1.0").
-	Version = "0.1.0-dev"
+	// Version is the semantic version, carrying the leading "v" of the git tag
+	// it was built from (e.g. "v0.1.0"). The default below keeps that prefix so
+	// a plain `go build` reports the same shape a released binary does.
+	Version = "v0.1.0-dev"
 	// Commit is the short git commit the binary was built from.
 	Commit = "none"
 	// BuildDate is the RFC3339 build timestamp.

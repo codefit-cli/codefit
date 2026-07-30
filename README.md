@@ -241,7 +241,7 @@ checkout with `make build`.
 codefit version
 # example output — your version, commit, and date will differ:
 # release binary →  codefit <version> (commit <commit>, built <date>)
-# go install     →  codefit 0.1.0-dev (commit none, built unknown)
+# go install     →  codefit v0.1.0-dev (commit none, built unknown)
 ```
 
 A single static binary, no runtime dependencies (`CGO_ENABLED=0`), cross-compiling
