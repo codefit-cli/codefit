@@ -58,30 +58,44 @@ func TestSQLDDL_R1_FabricationHypothesis(t *testing.T) {
 		}
 	})
 
-	// R1-a/b predict CONFIRMED fabrication (design §8a code read): "PRIMARY" is
-	// in sqlserverModifiers() (types.go:105-111), so applyColumn's modifier
-	// scan (splitTypeAndMods) swallows "PRIMARY KEY (...)" / "FOREIGN KEY
-	// (...) REFERENCES ..." as a column's trailing modifiers, fabricating a
-	// phantom column literally named "CONSTRAINT" plus a phantom key. Hard
-	// assertions on the prediction: if they fail, that failure IS the branch
-	// signal (REFUTED) and this test must be corrected to lock the real
-	// output, never loosened to hide the mismatch.
-	t.Run("R1-a: ADD  CONSTRAINT (double space) before a PRIMARY KEY — predicts CONFIRMED fabrication", func(t *testing.T) {
+	// R1-a/b originally CONFIRMED fabrication (design §8a code read):
+	// "PRIMARY" is in sqlserverModifiers() (types.go:105-111), so
+	// applyColumn's modifier scan (splitTypeAndMods) swallowed "PRIMARY KEY
+	// (...)" / "FOREIGN KEY (...) REFERENCES ..." as a column's trailing
+	// modifiers, fabricating a phantom column literally named "CONSTRAINT"
+	// plus a phantom key (see this file's history / commit "test(sqlddl):
+	// settle R1 fabrication hypothesis — CONFIRMED" for the original verbatim
+	// output). Design §8c's disposition — narrowing the fabrication at its
+	// source in applyAlterAction via leadingKeyword(rest), converting it to
+	// MarkUnproven instead of applyColumn — is now implemented, so these
+	// assertions are UPDATED (not loosened) to lock the CORRECTED behavior:
+	// no phantom column/key, Complete=false, one Unreduced entry.
+	t.Run("R1-a: ADD  CONSTRAINT (double space) before a PRIMARY KEY — fabrication FIXED, now recorded as a drop", func(t *testing.T) {
 		got := parse(t, tableDecl+"ALTER TABLE [dbo].[f] ADD  CONSTRAINT [pk] PRIMARY KEY ([a]);\nGO\n")
-		t.Logf("R1-a actual output: PrimaryKey=%v Columns=%v", got.PrimaryKey, columnNames(got))
-		if len(got.PrimaryKey) != 1 || got.PrimaryKey[0] != "CONSTRAINT" {
-			t.Errorf("PrimaryKey = %v, want [CONSTRAINT] (predicted fabrication per design §8a)", got.PrimaryKey)
+		if len(got.PrimaryKey) != 0 {
+			t.Errorf("PrimaryKey = %v, want empty (no more phantom key)", got.PrimaryKey)
 		}
-		if !hasColumn(got, "CONSTRAINT") {
-			t.Errorf("columns = %v, want a phantom column named CONSTRAINT (predicted fabrication per design §8a)", columnNames(got))
+		if hasColumn(got, "CONSTRAINT") {
+			t.Errorf("columns = %v, want no phantom CONSTRAINT column", columnNames(got))
+		}
+		if got.Complete {
+			t.Error("Complete = true, want false — the dropped ADD CONSTRAINT must be recorded, not silently believed complete")
+		}
+		if len(got.Unreduced) != 1 {
+			t.Errorf("Unreduced = %d entries, want 1", len(got.Unreduced))
 		}
 	})
 
-	t.Run("R1-b: ADD  CONSTRAINT (double space) before a FOREIGN KEY — predicts CONFIRMED fabrication", func(t *testing.T) {
+	t.Run("R1-b: ADD  CONSTRAINT (double space) before a FOREIGN KEY — fabrication FIXED, now recorded as a drop", func(t *testing.T) {
 		got := parse(t, tableDecl+"ALTER TABLE [dbo].[f] ADD  CONSTRAINT [fk] FOREIGN KEY ([a]) REFERENCES [dbo].[d]([a]);\nGO\n")
-		t.Logf("R1-b actual output: ForeignKeys=%v Columns=%v", got.ForeignKeys, columnNames(got))
-		if len(got.ForeignKeys) != 1 || got.ForeignKeys[0].RefTable != "d" {
-			t.Errorf("ForeignKeys = %v, want one phantom FK to d (predicted fabrication per design §8a)", got.ForeignKeys)
+		if len(got.ForeignKeys) != 0 {
+			t.Errorf("ForeignKeys = %v, want empty (no more phantom FK)", got.ForeignKeys)
+		}
+		if hasColumn(got, "CONSTRAINT") {
+			t.Errorf("columns = %v, want no phantom CONSTRAINT column", columnNames(got))
+		}
+		if got.Complete {
+			t.Error("Complete = true, want false — the dropped ADD CONSTRAINT must be recorded, not silently believed complete")
 		}
 	})
 
