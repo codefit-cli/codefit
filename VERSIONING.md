@@ -34,7 +34,7 @@ pieces of it are still stubs.
 | `0.2.2`  | Phase 2.2 | DB debt Slice A: N+1 surface (RF-04), view sensitive-column (DB-020), prefix-redundant index (DB-011b), neutral DB coverage source (ADRs 0023–0026) |
 | `0.2.3`  | Phase 2.3 | Routine-body rules: dynamic SQL (DB-030), exception handling (DB-031), trigger cross-table cascade (DB-040), trigger external call (DB-041), over de-truncated T-SQL bodies (ADRs 0027–0028) |
 | `0.2.4`  | Phase 2.4 | Index-vs-query cross (a Phase-2 debt deferred in `0.2.0`; OLAP still open): filtered column without an index (DB-010), multi-column filter without a composite index (DB-013), neutral cross infrastructure + four dogfood-driven noise corrections (ADRs 0029–0032) |
-| `0.2.5`  | Phase 2.5 | RF-03 OLAP closure (the last Phase-2 debt): paradigm/table-role detection + 3NF-suppression on OLAP, star-schema/SCD rules (DW-001/002/005/010/011), columnar index (DW-021) and partitioning (DW-020). DW-022 permanently dropped (ADR 0033) |
+| `0.2.5`  | Phase 2.5 | RF-03 OLAP closure (the last Phase-2 debt): paradigm/table-role detection + 3NF-suppression on OLAP, star-schema/SCD rules (DW-001/002/005/010/011), columnar index (DW-021) and partitioning (DW-020). Paradigm/role architecture in ADR 0033. DW-022 permanently dropped — recorded in the coverage manifest; its ADR is still owed, unlike the structurally identical DB-012 exclusion (ADR 0024) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
