@@ -34,6 +34,7 @@ pieces of it are still stubs.
 | `0.2.2`  | Phase 2.2 | DB debt Slice A: N+1 surface (RF-04), view sensitive-column (DB-020), prefix-redundant index (DB-011b), neutral DB coverage source (ADRs 0023–0026) |
 | `0.2.3`  | Phase 2.3 | Routine-body rules: dynamic SQL (DB-030), exception handling (DB-031), trigger cross-table cascade (DB-040), trigger external call (DB-041), over de-truncated T-SQL bodies (ADRs 0027–0028) |
 | `0.2.4`  | Phase 2.4 | Index-vs-query cross (a Phase-2 debt deferred in `0.2.0`; OLAP still open): filtered column without an index (DB-010), multi-column filter without a composite index (DB-013), neutral cross infrastructure + four dogfood-driven noise corrections (ADRs 0029–0032) |
+| `0.2.5`  | Phase 2.5 | RF-03 OLAP closure (the last Phase-2 debt): paradigm/table-role detection + 3NF-suppression on OLAP, star-schema/SCD rules (DW-001/002/005/010/011), columnar index (DW-021) and partitioning (DW-020). DW-022 permanently dropped (ADR 0033) |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -61,6 +62,19 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
+  warehouse from a transactional database and audits its modelling: paradigm/table-role
+  detection as a pure core leaf (prefixes corroborated by real FK fan-out/fan-in, never by a
+  lone surrogate key), `database.paradigm: auto` where detection seeds and an explicit value
+  overrides, 3NF-suppression on fact/dimension/mart tables with an audit trace in the sensor's
+  `Note`, and the star-schema/SCD family DW-001/002/005/010/011 — all **surface**, never
+  affirmations (ADR 0017), wired into `scan-db` and the DB bucket of `scan-all`, and
+  baselineable (ADR 0019). **Alpha, not `0.2.5`:** two of the eight items in the PRD's OLAP
+  scope remain — DW-021 (columnar index) and DW-020 (partitioning) — and neither is a
+  rule-only slice: DW-021 needs a `Method` field the neutral `db.Index` does not have yet, and
+  DW-020 needs the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it currently
+  declares as a limit and skips, per dialect. Role detection is snake_case only, so PascalCase
+  Kimball naming yields no DW value; declared, test-locked, not silent.
 - **`v0.2.4` — Phase 2.4 complete (index-vs-query).** The index-vs-query DB debt deferred in
   `0.2.0` is paid (OLAP remains the open Phase-2 debt): the first rules that cross the code's
   queries against the schema. A filtered

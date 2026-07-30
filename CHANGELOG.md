@@ -12,6 +12,106 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [0.2.5-alpha.1] — 2026-07-30
+
+**On the way to Phase 2.5 (RF-03 OLAP closure) — the OLAP rules that read the neutral
+model as it already is.** codefit learns to tell a data warehouse from a transactional
+database and audits its modelling. Two of the eight items in the PRD's OLAP scope
+(§RF-03, lines 377-382) remain, so this is an **alpha**: it does not claim `0.2.5`.
+
+### Added
+
+- **Paradigm and table-role detection** (`internal/core/paradigm/`, a pure core leaf).
+  A schema classifies `oltp` / `olap` / `mixed`, and each table `fact` / `dimension` /
+  `staging` / `mart` / `unclassified`, as a pure function of the neutral `db.Schema`.
+  Name prefixes (`fact_` / `dim_` / `stg_` / `mart_`) are the primary signal,
+  **corroborated by real relational structure** — a fact needs FK fan-out to 2+ tables,
+  a dimension needs fan-in ≥ 1. A lone surrogate primary key is deliberately **not**
+  corroboration: that was caught in review, where it was silently classifying ordinary
+  OLTP tables as warehouse-role.
+- **`database.paradigm` config, default `auto`.** Detection **seeds** the classification;
+  an explicit `oltp` / `olap` / `mixed` **overrides** it entirely. The developer always
+  has the last word (ADR 0033).
+- **3NF-suppression on OLAP tables.** DB-002 (multivalued attributes) and DB-003
+  (repeating groups) no longer fire as normalization violations on fact/dimension/mart
+  tables — intentional denormalization is the point of a warehouse — while firing
+  unchanged on OLTP and unclassified tables. Every suppression leaves an audit trace in
+  the sensor's `Note`, naming what was withheld and that `paradigm: oltp` reveals it.
+- **Star-schema and slowly-changing-dimension rules** (`internal/core/dwrules/`), all
+  **surface, never affirmations** (ADR 0017) — a modelling choice is a design judgment,
+  not an undeniable defect, so codefit states the observed shape and the agent decides:
+  - **DW-001** — a fact-role table whose foreign keys reach no dimension-role table. An
+    FK to another fact, to staging, or to an unclassified table deliberately does not
+    count. A fact with zero FKs fires and says `foreign_keys: (none)`.
+  - **DW-002** — a dimension whose primary key is composite, or a single column not
+    provably an integer surrogate. A dimension with **no** primary key abstains: DB-050
+    already affirms that case.
+  - **DW-005** — schema-level, one item: fact tables present with no time dimension.
+    Recognized by conventional name (`dim_date`/`dim_time`/`dim_calendar`) **or** by
+    grain (a primary key that is a single date/datetime column). Keyed on the primary
+    key, not "contains a date column", so an `updated_at` stamp does not suppress it.
+  - **DW-010** — a dimension carrying `valid_from`/`valid_to`/`is_current`/
+    `effective_date` where no index leads with `valid_to` or `is_current`, so every
+    "current version" query scans the whole history. Index coverage is delegated to the
+    same shared helpers DB-001 and DB-010 use, so "what serves a lookup" is defined once.
+  - **DW-011** — schema-level: some dimensions keep history while others overwrite in
+    place. Time dimensions are excluded from the comparison — a calendar is not
+    slowly-changing, and counting it would fire on nearly every correct warehouse.
+- The DW categories are appended to the DB sensor's `OwnedCategories()`, so DW surface
+  is baselineable and prunable like every other DB item (ADR 0019), and the family runs
+  in both `codefit-scan-db` and the DB bucket of `codefit-scan-all`.
+
+### Declared limits — stated, not hidden
+
+- **Role detection is snake_case only.** PascalCase Kimball naming (Microsoft's
+  `FactInternetSales`, `DimCustomer`) classifies as `unclassified`, so the DW family
+  yields **no value** on it. Test-locked, not silent.
+- **DW-002 fires on a UUID/GUID surrogate** — it types as a string in the neutral model.
+  The emitted facts are what the agent needs to dismiss it in one step.
+- **DW-002 also fires when the parser did not reconstruct the primary key's column**
+  (`primary_key_column_resolved=false`) — not-provably-a-surrogate rather than assumed
+  fine. Reachable through the known SQL-DDL limit where a column named after an index
+  keyword with an unrecognized type is dropped while a table-level PK naming it survives.
+- **DW-005 sees an integer `yyyymmdd` smart key only by name**; that key is structurally
+  indistinguishable from any other surrogate.
+- **DW-010 and DW-011 share one history vocabulary**, so a dimension using a different
+  one (`StartDate`/`EndDate`/`Status`) reads as SCD-1.
+- **Zero value on Prisma.** A `schema.prisma` expresses no warehouse concept.
+- **Dogfood status.** All five rules' fire and trap paths are proven by constructed,
+  declared-synthetic schemas (ADR 0028). Microsoft's AdventureWorksDW **is** vendored
+  (MIT) and yields no DW finding, for two independent test-locked reasons: its PascalCase
+  names, and a pre-existing T-SQL reducer gap.
+
+### Known issues
+
+- **A pre-existing T-SQL reducer gap became visible** while vendoring AdventureWorksDW:
+  three shapes of `ALTER TABLE … ADD CONSTRAINT` are dropped, so that script's three real
+  primary keys and all eight real foreign keys never reach the model. The worst
+  consequence is that **DB-050 — a deterministic affirmation at certainty 1.0 — reports
+  three tables as having no primary key over DDL that plainly declares one for each.**
+  Not introduced here and not fixed here; documented in the coverage manifest and locked
+  by tests written to go red once the reducer is fixed.
+
+### Not yet covered (Phase 2.5 remainder)
+
+- **DW-021** (fact table without a columnar/analytic index) and **DW-020** (fact table
+  without partitioning). Both need the neutral model and the SQL-DDL reducer enriched
+  first, not just a new rule. **DW-022** (materialized views without refresh) is
+  permanently dropped — refresh cadence lives in scheduler state absent from static DDL.
+
+### Fixed
+
+- **A binary downloaded from a release reported the wrong version.** goreleaser's
+  `{{ .Version }}` strips the tag's leading `v`, so the `v0.2.4` release shipped a binary
+  reporting `0.2.4`. The ldflag now uses `{{ .Tag }}` and the binary reports the tag
+  verbatim. Archive names keep the goreleaser convention, so existing download URLs are
+  unaffected.
+- **The coverage manifest denied capabilities codefit actually ships.** The manifest that
+  `codefit-coverage` serves to agents claimed the DW family was "not yet built" (it was —
+  the same file contradicted itself twice) and that index-vs-query analysis was "not
+  covered" (DB-010/DB-013 shipped in `0.2.4`). Both corrected at the source, then
+  mirrored. `CONTRIBUTING.md` likewise still said `scan-all` ran only security.
+
 ## [0.2.4] — 2026-07-24
 
 **Phase 2.4 — index-vs-query.** codefit pays the index-vs-query DB debt deferred in
