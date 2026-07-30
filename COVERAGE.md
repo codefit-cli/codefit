@@ -440,12 +440,26 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     primary key is **composite**, or a single column that is **not provably an
     integer** surrogate. The test is structural and narrow on purpose — a
     one-column integer primary key, the shape every well-modelled warehouse
-    uses — so no name guessing is involved. **Declared limit:** a UUID/GUID
+    uses — so no name guessing is involved. **Declared limit (a):** a UUID/GUID
     surrogate types as a *string* in the neutral model and therefore **fires**;
     the emitted facts (`composite_primary_key`, `integer_primary_key`,
     `primary_key_column_resolved`) are what the agent needs to dismiss it in
-    one step. A dimension with **no** primary key **abstains** — DB-050 already
-    affirms that case, and two IDs for one defect is noise.
+    one step. **Declared limit (b) — the incomplete-reconstruction path:** when
+    the primary key names a **single column the parser did not reconstruct onto
+    the table**, proving an integer surrogate would require reading that
+    column's type, so the rule **fires** as not-provably-a-surrogate and names
+    the reason instead of hiding it — `primary_key_column_resolved=false`, with
+    `primary_key_type` reading `(column not declared in the parsed schema)`.
+    Deliberate and test-locked, and the **opposite** choice from DB-051, which
+    does **not** fire on an unresolvable reference: DB-051 compares two types
+    and has nothing to compare, while DW-002 asks whether a surrogate is
+    *proven*, and an unread column proves nothing. Reachable, not hypothetical:
+    SQL-DDL known limit (5) drops a column whose name is an index keyword and
+    whose type is outside the dialect's vocabulary (real Pagila's
+    `film.fulltext`) while a table-level `PRIMARY KEY (fulltext)` naming it
+    survives into the model. A dimension with **no** primary key at all
+    **abstains** — DB-050 already affirms that case, and two IDs for one defect
+    is noise.
   - **DW-005, facts present but no time dimension.** Schema-level, at most
     **one** item, anchored on the first fact table. A time dimension is
     recognized by **either** the conventional name (`dim_date`/`dim_time`/

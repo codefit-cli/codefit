@@ -151,8 +151,10 @@ the same way every time. The doctrine is **ADR 0016**; this is the short version
    assumption.
 
 4. **Definition of Done = wire it into `scan-all`.** A dimension is not "ready"
-   until `scan-all` runs it; that is why `scan-all` running only security today is
-   the honest state, not a bug. Design every slice toward this wiring from slice 1.
+   until `scan-all` runs it. Today `scan-all` runs **security and DB** — DB as its
+   own section, including the DW star-schema/SCD family and the code×schema cross;
+   review, complexity, and tests are **not** wired yet, and saying so is the honest
+   state, not a bug. Design every slice toward this wiring from slice 1.
 
 5. **Non-endpoint dimensions** (e.g. DB — a table without a primary key does not
    hang off an HTTP route) get their **own section/bucket** in the `scan-all`
