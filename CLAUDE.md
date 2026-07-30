@@ -279,7 +279,7 @@ de oro: se edita la FUENTE, después se espeja.**
   pasó dos veces, y en la peor dirección posible — la FUENTE quedó menos veraz que su
   espejo. `dbcoverage.go` llegó a declarar que la familia DW no estaba construida
   (estaba, y el mismo archivo se contradecía en otras dos entradas) y a NEGAR el cruce
-  código×schema (DB-010/DB-013 shippearon en 0.2.4), mientras `COVERAGE.md` ya decía
+  código×schema (DB-010/DB-013 salieron en `v0.2.4`), mientras `COVERAGE.md` ya decía
   lo correcto. Es la fuente la que sirve `codefit-coverage` al agente: si miente, el
   agente le cree.
 - **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;

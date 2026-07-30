@@ -124,10 +124,10 @@ independent audit layer that validates AI-generated code is secure and correct
   joining no dimension, a business key where a surrogate belongs, facts with no time
   dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) — the
   columnar-index and partitioning checks are **not** built yet. One structural fact is
-  affirmed (a table with no primary key); everything else is surface the agent
-  reasons. Run it standalone with
-  `codefit-scan-db`; it also runs inside `scan-all` as its own section with a
-  per-dimension score. The rule inventory lives in [COVERAGE.md](COVERAGE.md).
+  affirmed (a table with no primary key); everything else is surface the agent reasons.
+  Run it standalone with `codefit-scan-db`; it also runs inside `scan-all` as its own
+  section with a per-dimension score (the code×schema cross runs in `scan-all` only).
+  The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
 **On the roadmap (not yet in `main`):** the HTTP/SSE transport; the two remaining
