@@ -56,9 +56,11 @@ type Classification struct {
 	// fan-out/fan-in, never fabricate it).
 	//
 	// Membership is therefore the one PUBLIC signal that separates the two
-	// demotion causes, and the only way a caller can observe that a name was
-	// recognized at all: candidateRole is unexported, and a name-demoted and a
-	// structure-demoted table carry the identical RoleUnclassified.
+	// demotion causes: candidateRole is unexported, and a name-demoted and a
+	// structure-demoted table carry the identical RoleUnclassified. (A caller
+	// can also ask StripRoleToken whether a name carries a recognized token at
+	// all — but that answers a question about the NAME alone, and says nothing
+	// about which of the two causes demoted a given table.)
 	Unprovable map[string]bool
 }
 
@@ -230,42 +232,79 @@ var (
 // warehouse corpora used the exact Kimball convention this package already
 // knew, only capitalized.
 func candidateRole(name string) (Role, bool) {
-	if r, ok := segmentRole(name); ok {
-		return r, true
-	}
-	if r, ok := pascalRole(name); ok {
-		return r, true
-	}
-	return RoleUnclassified, false
+	r, _, ok := roleToken(name)
+	return r, ok
 }
 
-// segmentRole matches an underscore-delimited leading or trailing token. A
-// name with no underscore has no delimited token and never matches here: the
-// delimiter IS the word boundary that keeps "factory_settings" (first segment
-// "factory") and "dimension_config" (first segment "dimension") out of the
-// vocabulary. Without it, a bare "fact"/"dim" prefix would swallow ordinary
-// English words and silence their 1NF findings.
-func segmentRole(name string) (Role, bool) {
-	segs := strings.Split(strings.ToLower(name), "_")
+// StripRoleToken removes the recognized warehouse role token from name and
+// returns the REMAINDER, preserving that remainder's original spelling
+// ("D_DATE" → "DATE", "date_dim" → "date", "DimDate" → "Date"). ok is false
+// when the name carries no recognized token, in exactly the cases candidateRole
+// refuses — the two share one implementation, which is the entire point.
+//
+// WHY THIS IS EXPORTED. A second, parallel name vocabulary lived in
+// internal/core/dwrules (DW-005's time-dimension list: dim_date / dim_time /
+// dim_calendar) and did NOT move when this package's vocabulary widened. The
+// result was measured over 22 real corpora: two warehouses spelling their
+// calendar D_DATE / D_Date went from "no fact table, rule abstains" to a
+// confident "this fact table reaches no time dimension" — over schemas that
+// plainly declare one. Composing on this seam means the next widening here
+// cannot silently re-open that hole; a copied token list would.
+//
+// It deliberately does NOT return the nominated Role. A caller that wanted the
+// role would be doing name-only classification, and the A5 corroboration gate
+// (structure corroborates a name, it never substitutes for one) is not
+// something this package hands out a bypass for. Callers get the remainder, so
+// they can ask their own question about the rest of the name, and nothing else.
+func StripRoleToken(name string) (string, bool) {
+	_, rest, ok := roleToken(name)
+	return rest, ok
+}
+
+// roleToken is the single matcher behind candidateRole and StripRoleToken. It
+// returns the nominated role, the name with the matched token removed, and
+// whether anything matched. Three spellings, in order: underscore-delimited
+// leading token, underscore-delimited trailing token, separator-free
+// PascalCase.
+func roleToken(name string) (Role, string, bool) {
+	if r, rest, ok := segmentRole(name); ok {
+		return r, rest, true
+	}
+	if r, rest, ok := pascalRole(name); ok {
+		return r, rest, true
+	}
+	return RoleUnclassified, "", false
+}
+
+// segmentRole matches an underscore-delimited leading or trailing token, and
+// returns the remaining segments rejoined. A name with no underscore has no
+// delimited token and never matches here: the delimiter IS the word boundary
+// that keeps "factory_settings" (first segment "factory") and
+// "dimension_config" (first segment "dimension") out of the vocabulary.
+// Without it, a bare "fact"/"dim" prefix would swallow ordinary English words
+// and silence their 1NF findings.
+func segmentRole(name string) (Role, string, bool) {
+	segs := strings.Split(name, "_")
 	if len(segs) < 2 {
-		return RoleUnclassified, false
+		return RoleUnclassified, "", false
 	}
 	for _, nt := range prefixTokens {
-		if segs[0] == nt.token {
-			return nt.role, true
+		if strings.EqualFold(segs[0], nt.token) {
+			return nt.role, strings.Join(segs[1:], "_"), true
 		}
 	}
 	for _, nt := range suffixTokens {
-		if segs[len(segs)-1] == nt.token {
-			return nt.role, true
+		if strings.EqualFold(segs[len(segs)-1], nt.token) {
+			return nt.role, strings.Join(segs[:len(segs)-1], "_"), true
 		}
 	}
-	return RoleUnclassified, false
+	return RoleUnclassified, "", false
 }
 
-// pascalRole matches a leading token in separator-free PascalCase. The word
-// boundary is PascalCase's OWN signal: the token is followed by an uppercase
-// character AND THEN a lowercase one — "Fact" + "In" of FactInternetSales.
+// pascalRole matches a leading token in separator-free PascalCase, and returns
+// the rest of the name. The word boundary is PascalCase's OWN signal: the token
+// is followed by an uppercase character AND THEN a lowercase one — "Fact" +
+// "In" of FactInternetSales.
 //
 // Requiring BOTH is what makes this discriminating rather than greedy.
 // "Uppercase follows the token" alone also accepts FACTORY_SETTINGS ('O' is
@@ -273,7 +312,7 @@ func segmentRole(name string) (Role, bool) {
 // and DB2 DDL routinely use. "FACT" + "OR" fails the lowercase half, so an
 // all-caps name stays unclassified: genuinely ambiguous, and this package
 // declares ambiguity rather than guessing at it.
-func pascalRole(name string) (Role, bool) {
+func pascalRole(name string) (Role, string, bool) {
 	for _, nt := range pascalTokens {
 		n := len(nt.token)
 		if len(name) <= n+1 {
@@ -283,10 +322,10 @@ func pascalRole(name string) (Role, bool) {
 			continue
 		}
 		if isUpperASCII(name[n]) && isLowerASCII(name[n+1]) {
-			return nt.role, true
+			return nt.role, name[n:], true
 		}
 	}
-	return RoleUnclassified, false
+	return RoleUnclassified, "", false
 }
 
 func isUpperASCII(c byte) bool { return c >= 'A' && c <= 'Z' }

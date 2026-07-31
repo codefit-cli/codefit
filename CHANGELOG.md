@@ -30,6 +30,22 @@ All notable changes to codefit are documented here. The format is based on
   substitutes for structure. Declared limits kept on purpose: an **all-caps** name
   (`FACTORY_SETTINGS`) and a name with neither a delimiter nor a PascalCase boundary stay
   unclassified, because a false promotion would silence that table's DB-002/DB-003 1NF findings.
+- **DW-005 recognizes a time dimension by the same vocabulary, instead of its own copy.** The
+  time-dimension **name** test now composes on the role-name vocabulary above — strip the
+  recognized role token off either end of the table name, then check that what remains is
+  exactly `date`, `time` or `calendar` — so `D_DATE`, `d_date`, `date_dim`, `DATE_DIM` and
+  `DimCalendar` are recognized alongside the `dim_date`/`dim_time`/`dim_calendar` that already
+  were. This closes a regression the widening above opened **within this same unreleased
+  cycle**: DW-005 kept a second, hardcoded three-spelling list, so two real corpora spelling
+  their calendar `D_DATE`/`D_Date` began classifying as dimensions while staying invisible to
+  DW-005 — which then reported "this fact table reaches no time dimension" over schemas that
+  plainly declare one. A silent miss had become a **confident false claim**, which is strictly
+  worse. The remainder is matched by **equality, never containment**: separators are stripped
+  before comparison, so a substring test for "date" would swallow `dim_update`/`dim_candidate`/
+  `dim_validate` and silence the rule on a warehouse that genuinely has no calendar.
+  **Declared limit kept:** a spelled-out or qualified calendar name (`date_dimension`,
+  `dim_date_full`, `dim_fiscal_date`) is still not recognized by name — a miss, never a false
+  claim. DW-011's time-dimension exclusion uses the same test, so the two cannot drift.
 - **The vendored AdventureWorksDW corpus is now recognized by name.** Microsoft's real DDL
   previously matched nothing; its three tables are now recognized candidates, locked against
   the **real parsed corpus**. It still yields no DW finding, but for **one** remaining reason

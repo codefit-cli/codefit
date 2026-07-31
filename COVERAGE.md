@@ -537,7 +537,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     here does not merely add noise — it **silences** that table's DB-002/DB-003
     1NF findings through the 3NF-suppression pass below. The widening changed
     **names only**: the ADR 0033 structural corroboration gate is untouched,
-    and a wider name never substitutes for structure.
+    and a wider name never substitutes for structure. This vocabulary is the
+    **single source** for every name-shaped warehouse question codefit asks:
+    DW-005's time-dimension name test consumes it through an exported
+    strip-the-role-token seam rather than keeping a copy, because a copy
+    already drifted once and turned DW-005 into a confident false claim on two
+    real corpora (see DW-005 below). Widening it here therefore widens what
+    DW-005 can see, in the same change.
 
   `database.paradigm` defaults to `"auto"` (detection decides); an
   **explicit** `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins**
@@ -592,16 +598,36 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     is noise.
   - **DW-005, facts present but no time dimension.** Schema-level, at most
     **one** item, anchored on the first fact table. A time dimension is
-    recognized by **either** the conventional name (`dim_date`/`dim_time`/
-    `dim_calendar`, separator-insensitive) **or** the structural grain — a
-    dimension whose primary key is a single date/datetime column. The
-    structural signal keys on the **primary key**, not on "contains a date
-    column": an `updated_at` stamp is not a calendar, and accepting any date
-    column would suppress the rule on almost every schema (a silent false
-    negative). **Declared limit:** a calendar keyed by an integer `yyyymmdd`
-    smart key — AdventureWorksDW's own `DimDate` — is recognized only by
-    **name**, since that key is structurally indistinguishable from any other
-    surrogate.
+    recognized by **either** the **name** or the structural grain. The name
+    test **composes on the same role-name vocabulary** documented above: it
+    strips the recognized warehouse role token off either end of the table name
+    and checks that what **remains** is exactly `date`, `time` or `calendar`
+    (separator-insensitive) — so `dim_date`, `D_DATE`, `d_date`, `date_dim`,
+    `DATE_DIM`, `DimDate` and `DimCalendar` all match. Composing rather than
+    keeping a second spelling list is a **fix**, not a flourish: this rule used
+    to carry its own hardcoded `dim_date`/`dim_time`/`dim_calendar`, and when
+    the role vocabulary widened the two drifted — two real corpora spelling
+    their calendar `D_DATE`/`D_Date` began classifying as dimensions while
+    staying invisible here, so DW-005 reported "this fact table reaches no time
+    dimension" over schemas that plainly declare one. A silent miss became a
+    confident false claim. The remainder is matched by **equality, never
+    containment**: separators are stripped before comparison, so a substring
+    test for "date" would swallow `dim_update`, `dim_candidate` and
+    `dim_validate` and **silence** the rule on a warehouse that genuinely has
+    no calendar. The structural signal keys on the **primary key**, not on
+    "contains a date column": an `updated_at` stamp is not a calendar, and
+    accepting any date column would suppress the rule on almost every schema (a
+    silent false negative). **Declared limits,** both in the *miss* direction by
+    design — the rule asks a question the agent can answer from the schema
+    rather than making a claim codefit cannot back: **(a)** a calendar keyed by
+    an integer `yyyymmdd` smart key — AdventureWorksDW's own `DimDate` — is
+    recognized only by **name**, since that key is structurally
+    indistinguishable from any other surrogate; **(b)** by name, only a role
+    token plus *exactly* `date`/`time`/`calendar` matches — a spelled-out or
+    qualified calendar name (`date_dimension`, `dim_date_full`,
+    `dim_fiscal_date`, `dim_datetime`) does **not**, and neither does a bare
+    `calendar` carrying no role token (which the role vocabulary would never
+    classify as a dimension in the first place).
   - **DW-010, SCD-2 dimension without a currency index.** A dimension carrying
     slowly-changing columns (`valid_from`/`valid_to`/`is_current`/
     `effective_date`, separator-insensitive so `validTo`/`isCurrent` match too)
@@ -620,8 +646,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     both mixes point-in-time with as-of-today attributes. **Time dimensions are
     excluded** from the comparison (a calendar is not slowly-changing by
     definition); counting one as SCD-1 would fire this rule on essentially
-    every correctly built warehouse. A genuine split between two other
-    dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
+    every correctly built warehouse. The exclusion uses the **same**
+    time-dimension test as DW-005 above, so widening one never leaves the other
+    behind. A genuine split between two other dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
     its **declared limit**: a dimension using a different vocabulary
     (AdventureWorksDW's `DimProduct` uses `StartDate`/`EndDate`/`Status`) reads
     as SCD-1.
