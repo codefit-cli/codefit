@@ -43,7 +43,7 @@ func (b *builder) schema() *db.Schema {
 
 var (
 	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
-	reAlterTable = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
+	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
 
 	// reCreateIndex submatches: 1=UNIQUE, 2=IF NOT EXISTS, 3=index name,
 	// 4=table name, 5=method (S3, db-olap-rules — the "USING <method>" clause,

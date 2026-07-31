@@ -463,9 +463,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   any detected role — the identical shape still fires exactly as before this
   slice. Suppression is never silent: when items are withheld, the note
   records how many and on how many tables, plus the `database.paradigm: oltp`
-  escape hatch to see them. The DW-0xx columnar-index and partitioning rules
-  are **not yet built** (see Not covered, below); the star-schema/SCD half
-  landed in S2 — next entry.
+  escape hatch to see them. The DW-0xx partitioning rule is **not yet built**
+  (see Not covered, below); the star-schema/SCD half landed in S2 and the
+  columnar-index rule landed in S3 — next two entries.
 - **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
   S2, RF-03 OLAP closure).** Five rules reading the schema **plus** the S1
   paradigm/role classification. They reach **only** fact- and dimension-role
@@ -549,6 +549,42 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
     warehouse concept, so these rules can only classify a Prisma project whose
     models happen to be named `fact_`/`dim_`.
+- **Fact table without a columnar/analytic index (DW-021, S3, RF-03 OLAP
+  closure).** A fact-role table with no index whose declared access method is
+  recognized analytic/columnar vocabulary, read from `db.Index.Method`
+  (populated from the SQL-DDL reducer's `USING <method>` capture). **Pure
+  surface, never an affirmation** (ADR 0017): whether the absence matters
+  depends on the table's real size and query pattern, which static DDL cannot
+  reveal. **Vocabulary** is deliberately small and PostgreSQL-only today:
+  `brin` and `gin`; a plain default (`btree`, or no `USING` clause at all)
+  fires — `Method` reads "unspecified" as absent, never guessed. **No
+  separate index-incompleteness channel:** `Method` is either genuinely,
+  provably empty, or inherits the enclosing table's completeness through the
+  ordinary `StructureProven()` gate (ADR 0034) DW-021 already consults per
+  table, exactly like DW-001/002/010 — a dropped `CREATE INDEX` statement
+  already marks the whole table unproven at the statement level.
+  - **Declared limit 1 (T-SQL).** SQL Server's analytic indexing is a
+    **separate statement**, `CREATE [CLUSTERED] COLUMNSTORE INDEX`, which the
+    SQL-DDL reducer's dispatcher does not recognize at all — a T-SQL fact
+    table with a real columnstore index still fires this rule (a false
+    surface, stated here rather than silently mis-cleared).
+  - **Declared limit 2 (MySQL — a dialect-wide abstain).** MySQL's `CREATE
+    INDEX` grammar allows `USING BTREE|HASH` in a **second** grammar position
+    — an `index_option` AFTER the column list — that the reducer's regex does
+    not capture (only the pre-column-list position is read), so `Method`
+    would be systematically empty on MySQL even when genuinely declared.
+    Answering "no columnar index" from that structural blindness would be
+    concluding from parser silence (ADR 0034), even though MySQL genuinely has
+    no BRIN/GIN vocabulary to miss either way — that semantic argument does
+    **not** license answering from non-observation. DW-021 reads the new
+    `Schema.Dialect` field (set only by the SQL-DDL provider; empty on a
+    Prisma-parsed schema) and **abstains the whole check** when it equals
+    `"mysql"`, checked once per schema rather than per table, since a schema
+    is parsed under exactly one dialect (ADR 0018). This is a deliberate,
+    declared exception to the DB dimension's usual dialect-agnostic doctrine
+    — it lives in `dwrules`, never in `dbrules`.
+  - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
+    index-method concept at all.
 
 ### Not covered (declared, not silent)
 
@@ -590,13 +626,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S2.**
+- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S3.**
   Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
-  **and** the star-schema/SCD checks — DW-001, DW-002, DW-005, DW-010, DW-011 —
-  **are now covered** (see above). What **remains** not covered: a
-  columnar/analytic-index check (**DW-021**, planned for S3) and a partitioning
-  check (**DW-020**, planned for S4). Neither fires today, under any dialect.
-  Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
+  the star-schema/SCD checks — DW-001, DW-002, DW-005, DW-010, DW-011 — **and**
+  the columnar/analytic-index check (**DW-021**) **are now covered** (see
+  above). What **remains** not covered: a partitioning check (**DW-020**,
+  planned for S4); it does not fire today, under any dialect. DW-021 itself
+  carries two of its own declared per-dialect limits (T-SQL columnstore is a
+  separate, unrecognized statement; MySQL is a dialect-wide abstain because the
+  parser cannot reliably read an index's method there) — see the DW-021 entry
+  above for both, not restated here. Materialized-view refresh staleness (a
+  DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
   Separately from the rules: table-role detection recognizes only the

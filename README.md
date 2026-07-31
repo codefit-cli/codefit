@@ -122,17 +122,18 @@ independent audit layer that validates AI-generated code is secure and correct
   is not flagged as a normalization violation, and on a schema it classifies as a
   warehouse it audits the **star-schema and slowly-changing-dimension shape** (a fact
   joining no dimension, a business key where a surrogate belongs, facts with no time
-  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) — the
-  columnar-index and partitioning checks are **not** built yet. One structural fact is
+  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) and
+  whether a fact table carries a **columnar/analytic index** — the partitioning check is
+  the one piece **not** built yet. One structural fact is
   affirmed (a table with no primary key); everything else is surface the agent reasons.
   Run it standalone with `codefit-scan-db`; it also runs inside `scan-all` as its own
   section with a per-dimension score (the code×schema cross runs in `scan-all` only).
   The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
-**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the two remaining
-OLAP / data-warehouse rules — a columnar/analytic-index check and a partitioning
-check (the star-schema and slowly-changing-dimension rules already landed);
+**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the one remaining
+OLAP / data-warehouse rule — a partitioning check (the star-schema/slowly-changing-
+dimension rules and the columnar-index check already landed);
 **literal values in the query model** — carrying the WHERE's literals so the
 cross can infer cardinality from usage (a `String` used as an enum, a `DateTime` used
 as a flag) and tell an equality filter from a range, the two field-observed limits of
@@ -190,9 +191,11 @@ Concretely, on `main` — so you know exactly what to expect without reading
   slowly-changing-dimension shape**: a fact table joining no dimension, a dimension keyed
   by a business key instead of a surrogate, facts with no time dimension, an SCD-2
   dimension whose "current version" lookup no index serves, and SCD-1 and SCD-2
-  dimensions mixed in one schema. All five are surface, never affirmations. Two OLAP
-  rules are **not** built yet — a columnar/analytic-index check and a partitioning check
-  — declared, not silent. Table roles are recognized from `fact_`/`dim_`/`stg_`/`mart_`
+  dimensions mixed in one schema — plus whether a fact table carries a **columnar/analytic
+  index** (PostgreSQL `brin`/`gin`; a declared, dialect-wide abstain on MySQL, where the
+  parser cannot reliably read an index's method). All six are surface, never affirmations.
+  One OLAP rule is **not** built yet — a partitioning check — declared, not silent. Table
+  roles are recognized from `fact_`/`dim_`/`stg_`/`mart_`
   **snake_case** prefixes only, so a warehouse using PascalCase Kimball naming
   (`FactInternetSales`) gets no value from them today. See [COVERAGE.md](COVERAGE.md)
   for the full rule inventory and the declared SQL-DDL dialect limits.

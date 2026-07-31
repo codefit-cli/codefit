@@ -12,6 +12,57 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [Unreleased]
+
+**S3 of the RF-03 OLAP closure — the columnar-index rule.** Closes one of the
+two items `0.2.5-alpha.1` left open. The exact version this lands under
+(another alpha, or holding for the full `0.2.5` at S4 close) is an explicit
+architect decision made at close time, not pre-empted here.
+
+### Added
+
+- **`db.Index.Method`** (`internal/core/db/db.go`) — the neutral model now
+  carries an index's declared access method (PostgreSQL `USING brin`/
+  `USING gin`/`USING btree` → `"brin"`/`"gin"`/`"btree"`, lowercased). Empty
+  means no `USING` clause was present — the same honest, never-guessed-default
+  convention `Table.DBName` already uses.
+- **`db.Schema.Dialect`** — the SQL dialect a schema was parsed from
+  (`"postgresql"`/`"mysql"`/`"sqlserver"`), set only by the SQL-DDL provider;
+  empty on a Prisma-parsed schema. A deliberately narrow field: every DB-0xx
+  rule stays dialect-agnostic exactly as documented; only DW-021 (below) reads
+  it, for its own declared, test-locked limit.
+- **SQL-DDL: `USING <method>` is now captured**, not discarded. `reCreateIndex`'s
+  method group was non-capturing; it is now capturing, populating
+  `db.Index.Method`. Golden fixtures regenerated (Pagila gains 6 `"btree"`
+  entries — its real `USING btree` indexes; Sakila/AdventureWorks gain `""` on
+  their existing indexes, neither uses `USING`).
+- **DW-021 — fact table without a columnar/analytic index**
+  (`internal/core/dwrules/dw021.go`), surface only (ADR 0017). Fires on a
+  fact-role table whose indexes carry no recognized columnar method (`brin`,
+  `gin` today). Gates per table on `StructureProven()` (ADR 0034) exactly like
+  DW-001/002/010 — a dropped `CREATE INDEX` statement might have declared the
+  very method this rule asks about.
+- Registered in `dwrules.All()`/`OwnedCategories()`, wired through the DB
+  sensor into both `codefit-scan-db` and `codefit-scan-all` like every other
+  DW rule.
+
+### Declared limits — stated, not hidden
+
+- **T-SQL columnstore is invisible.** `CREATE [CLUSTERED] COLUMNSTORE INDEX`
+  is a separate statement the SQL-DDL dispatcher does not recognize; a T-SQL
+  fact table with a real columnstore index still fires DW-021.
+- **DW-021 abstains entirely on MySQL.** MySQL's `CREATE INDEX` grammar allows
+  `USING BTREE|HASH` in a second position, after the column list, that the
+  capturing regex above does not reach — `Method` would be systematically
+  empty on MySQL even when genuinely declared. Answering "no columnar index"
+  from that blindness would be concluding from parser silence (ADR 0034), so
+  DW-021 reads `Schema.Dialect` and abstains the whole rule when it is
+  `"mysql"` — deliberately, even though MySQL has no BRIN/GIN vocabulary to
+  miss either way; that semantic argument does not license answering from
+  non-observation.
+- **Zero value on Prisma.** A `schema.prisma` expresses no index-method
+  concept.
+
 ## [0.2.5-alpha.1] — 2026-07-30
 
 **On the way to Phase 2.5 (RF-03 OLAP closure) — the OLAP rules that read the neutral

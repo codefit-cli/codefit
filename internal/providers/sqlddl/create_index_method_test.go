@@ -81,9 +81,9 @@ func TestCreateIndex_MethodCapture(t *testing.T) {
 // — the signal DW-021 consults to abstain honestly on MySQL.
 func TestParseSchema_SetsDialect(t *testing.T) {
 	cases := []struct {
-		name    string
-		opt     sqlddl.Option
-		want    string
+		name string
+		opt  sqlddl.Option
+		want string
 	}{
 		{"default (no WithDialect) is postgresql", nil, "postgresql"},
 		{"explicit Postgres()", sqlddl.WithDialect(sqlddl.Postgres()), "postgresql"},
