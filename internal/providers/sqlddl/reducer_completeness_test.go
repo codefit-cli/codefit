@@ -49,7 +49,7 @@ func TestSQLDDL_MalformedCreateTableBody_MarksUnproven(t *testing.T) {
 	if tb.Complete {
 		t.Error("Complete = true, want false — a malformed CREATE TABLE body cannot be proven complete")
 	}
-	if !strings.Contains(tb.Note, db.ReasonMalformedTableBody) {
+	if !strings.Contains(tb.Note, string(db.ReasonMalformedTableBody)) {
 		t.Errorf("Note = %q, want it to contain ReasonMalformedTableBody", tb.Note)
 	}
 }
@@ -107,7 +107,7 @@ func TestSQLDDL_AlterAction_UnrecognizedForm_MarksUnproven(t *testing.T) {
 	if tb.Complete {
 		t.Error("Complete = true, want false — an unrecognized ALTER TABLE action must mark the table unproven")
 	}
-	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
 	}
 	if len(tb.Unreduced) != 1 || !strings.Contains(tb.Unreduced[0].Text, "INHERIT") {
@@ -126,7 +126,7 @@ func TestSQLDDL_TableConstraint_UnrecognizedForm_MarksUnproven(t *testing.T) {
 	if tb.Complete {
 		t.Error("Complete = true, want false — an unrecognized table constraint form must mark the table unproven")
 	}
-	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
 	}
 	if len(tb.Unreduced) != 1 || !strings.Contains(tb.Unreduced[0].Text, "EXCLUSIONISH") {

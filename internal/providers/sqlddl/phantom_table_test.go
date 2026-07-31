@@ -27,7 +27,7 @@ func TestSQLDDL_PhantomTable_ViaCreateIndex_MarksUnprovenNeverDeclared(t *testin
 	if tb.Complete {
 		t.Error("Complete = true, want false — this table has zero genuine structure, no CREATE TABLE ever declared it")
 	}
-	if !strings.Contains(tb.Note, db.ReasonTableNeverDeclared) {
+	if !strings.Contains(tb.Note, string(db.ReasonTableNeverDeclared)) {
 		t.Errorf("Note = %q, want it to contain ReasonTableNeverDeclared", tb.Note)
 	}
 
@@ -47,7 +47,7 @@ func TestSQLDDL_PhantomTable_ViaAlterTable_MarksUnprovenNeverDeclared(t *testing
 	if tb.Complete {
 		t.Error("Complete = true, want false — this table has zero genuine structure, no CREATE TABLE ever declared it")
 	}
-	if !strings.Contains(tb.Note, db.ReasonTableNeverDeclared) {
+	if !strings.Contains(tb.Note, string(db.ReasonTableNeverDeclared)) {
 		t.Errorf("Note = %q, want it to contain ReasonTableNeverDeclared", tb.Note)
 	}
 }

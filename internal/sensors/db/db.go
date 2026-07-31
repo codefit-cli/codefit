@@ -190,11 +190,11 @@ const (
 // many of a reason group's unproven tables DB-050 actually routed (those
 // with no primary key currently in the model); total is the group's size.
 func routingClause(routed, total int) string {
-	switch {
-	case routed == 0:
+	switch routed {
+	case 0:
 		return "None of them currently show a missing primary key in the model, so DB-050 did not route any " +
 			"of them to a surface item — this note is their only trace in scan output."
-	case routed == total:
+	case total:
 		return "DB-050 routed them to the db-table-structure-unproven surface items rather than affirming. " +
 			"Read those items for the raw statements and their file:line."
 	default:

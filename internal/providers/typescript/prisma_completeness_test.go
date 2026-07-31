@@ -35,7 +35,7 @@ func TestPrisma_UnrecognizedModelBodyLine_MarksUnproven(t *testing.T) {
 	if tb.Complete {
 		t.Fatal("Complete = true, want false — the unrecognized continuation line must mark the table unproven")
 	}
-	if tb.Note == "" || !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if tb.Note == "" || !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
 	}
 	if len(tb.Unreduced) != 1 {

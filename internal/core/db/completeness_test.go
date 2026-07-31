@@ -42,7 +42,7 @@ func TestTable_MarkUnproven_SetsIncompleteAndRecordsRawText(t *testing.T) {
 	if tb.Unreduced[0].Pos != pos {
 		t.Errorf("Unreduced[0].Pos = %+v, want %+v", tb.Unreduced[0].Pos, pos)
 	}
-	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to contain the reason %q", tb.Note, db.ReasonUnreducedTableStatement)
 	}
 }
@@ -56,7 +56,7 @@ func TestTable_MarkUnproven_DedupesNoteByReason_KeepsEveryUnreducedStatement(t *
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "stmt one", db.Pos{File: "x.sql", Line: 1})
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "stmt two", db.Pos{File: "x.sql", Line: 2})
 
-	if n := strings.Count(tb.Note, db.ReasonUnreducedTableStatement); n != 1 {
+	if n := strings.Count(tb.Note, string(db.ReasonUnreducedTableStatement)); n != 1 {
 		t.Errorf("Note contains the reason %d times, want exactly 1 (deduplicated): %q", n, tb.Note)
 	}
 	if len(tb.Unreduced) != 2 {
@@ -70,10 +70,10 @@ func TestTable_MarkUnproven_TwoDistinctReasons_BothRecorded(t *testing.T) {
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "stmt one", db.Pos{File: "x.sql", Line: 1})
 	tb.MarkUnproven(db.ReasonMalformedTableBody, "stmt two", db.Pos{File: "x.sql", Line: 2})
 
-	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to still contain the first reason", tb.Note)
 	}
-	if !strings.Contains(tb.Note, db.ReasonMalformedTableBody) {
+	if !strings.Contains(tb.Note, string(db.ReasonMalformedTableBody)) {
 		t.Errorf("Note = %q, want it to also contain the second, distinct reason", tb.Note)
 	}
 }

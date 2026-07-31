@@ -22,7 +22,7 @@ import (
 // directly against the aggregation function rather than left unreachable
 // and unverified.
 
-func unprovenSyntheticTable(name, reason string) coredb.Table {
+func unprovenSyntheticTable(name string, reason coredb.Reason) coredb.Table {
 	tb := coredb.Table{Name: name}
 	tb.MarkUnproven(reason, "-- synthetic, for cap testing only --", coredb.Pos{File: "x.sql", Line: 1})
 	return tb
@@ -65,7 +65,7 @@ func TestCompletenessNote_ReasonCap_BoundsDistinctReasons(t *testing.T) {
 	var tables []coredb.Table
 	reasons := []string{"synthetic-reason-A", "synthetic-reason-B", "synthetic-reason-C", "synthetic-reason-D"}
 	for i, reason := range reasons {
-		tables = append(tables, unprovenSyntheticTable(sprintfTable(i+1), reason))
+		tables = append(tables, unprovenSyntheticTable(sprintfTable(i+1), coredb.Reason(reason)))
 	}
 	note := completenessNote(&coredb.Schema{Tables: tables})
 

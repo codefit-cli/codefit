@@ -46,7 +46,7 @@ func TestSQLDDL_DuplicateCreateTable_WithoutIfNotExists_MarksUnproven(t *testing
 		t.Error("Complete = true, want false — a second, non-IF-NOT-EXISTS CREATE TABLE for the same " +
 			"normalized name silently discarded real declared structure")
 	}
-	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
 		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
 	}
 	if len(tb.Unreduced) != 1 || !strings.Contains(tb.Unreduced[0].Text, "audit.users") {

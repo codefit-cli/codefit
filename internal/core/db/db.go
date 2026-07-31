@@ -93,16 +93,31 @@ type Unreduced struct {
 	Pos  Pos
 }
 
+// Reason is why a table's structure could not be proven complete. A distinct
+// named type (F7, 4R ledger obs #1282, verified — one lens declared the
+// closed-vocabulary claim clean and was WRONG): MarkUnproven previously took
+// a plain string, and the Reason* values were untyped constants, so the
+// "type-level control" ADR 0034 and two doc comments claimed did not exist —
+// the ONLY barrier was a doc comment. A provider computing a diagnostic
+// string at runtime (a reducer function name, a dispatch branch) could pass
+// it straight through with zero compiler friction. Making Reason its own
+// type does not make it impossible to violate — an untyped string constant
+// (a literal, visible in code review) still converts implicitly — but it
+// DOES make it impossible to pass a computed `string` VARIABLE (the actual
+// runtime-diagnostic-leak shape ADR 0034 §2.8 forbids) without an explicit,
+// reviewable `db.Reason(...)` conversion at the call site.
+type Reason string
+
 // Reasons a table's structure could not be proven complete. A CLOSED set,
 // defined in this package (never provider-authored prose) — the type-level
 // half of the measurement/diagnostics boundary (ADR 0034).
 const (
 	// ReasonUnreducedTableStatement: a statement affecting this table could
 	// not be reduced by the parser.
-	ReasonUnreducedTableStatement = "a statement affecting this table could not be reduced"
+	ReasonUnreducedTableStatement Reason = "a statement affecting this table could not be reduced"
 	// ReasonMalformedTableBody: the table's declaration body could not be
 	// parsed at all (e.g. an unbalanced CREATE TABLE(...) body).
-	ReasonMalformedTableBody = "the table's declaration body could not be parsed"
+	ReasonMalformedTableBody Reason = "the table's declaration body could not be parsed"
 	// ReasonTableNeverDeclared: this table entry was materialized by a
 	// statement that REFERENCES a table (e.g. ALTER TABLE, CREATE INDEX ...
 	// ON) before any CREATE TABLE for that name was ever seen. It has zero
@@ -110,25 +125,27 @@ const (
 	// rule that affirms over it (F4, 4R ledger obs #1282) would be affirming
 	// over a table the parser never actually read at all, not merely one it
 	// read incompletely.
-	ReasonTableNeverDeclared = "no CREATE TABLE statement was ever seen for this table"
+	ReasonTableNeverDeclared Reason = "no CREATE TABLE statement was ever seen for this table"
 )
 
 // MarkUnproven records that a statement affecting t could not be reduced. It
 // sets Complete=false (fail-closed), appends the verbatim statement to
 // Unreduced, and adds reason to Note exactly once (deduplicated by reason —
-// architect resolved decision #3). reason MUST be one of this package's
-// Reason* constants; text is the VERBATIM source statement, never a
-// diagnostic. This is a CORE method (ADR 0014), not a reducer-local function,
-// because more than one provider needs it (the sqlddl reducer and the Prisma
-// parser) and both must dedupe identically.
-func (t *Table) MarkUnproven(reason, text string, pos Pos) {
+// architect resolved decision #3). reason is TYPE-CONSTRAINED to this
+// package's Reason* constants (F7) — not merely documented as such; text is
+// the VERBATIM source statement, never a diagnostic. This is a CORE method
+// (ADR 0014), not a reducer-local function, because more than one provider
+// needs it (the sqlddl reducer and the Prisma parser) and both must dedupe
+// identically.
+func (t *Table) MarkUnproven(reason Reason, text string, pos Pos) {
 	t.Complete = false
 	t.Unreduced = append(t.Unreduced, Unreduced{Text: text, Pos: pos})
-	if !strings.Contains(t.Note, reason) {
+	reasonStr := string(reason)
+	if !strings.Contains(t.Note, reasonStr) {
 		if t.Note != "" {
 			t.Note += "; "
 		}
-		t.Note += reason
+		t.Note += reasonStr
 	}
 }
 
