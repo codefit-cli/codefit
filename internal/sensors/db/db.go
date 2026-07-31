@@ -285,6 +285,23 @@ func completenessNote(s *coredb.Schema) string {
 		))
 	}
 
+	if len(parts) > 0 {
+		// F5 (4R ledger obs #1282): "Absence-based DB/DW rules abstained on
+		// them" is true for dbrules/dwrules, but a reader could reasonably
+		// take it as comprehensive. It is not: internal/core/crossrules
+		// (DB-010/DB-013) is a SEPARATE, absence-based rule family that runs
+		// in scan-all and does NOT consult StructureProven() today — a real,
+		// if bounded, limit (crossrules only emits surface, never an
+		// affirmation, so the blast radius is a possible surface item over
+		// unproven structure, not a false deterministic finding). Stated
+		// once, not per reason group, so it never spams a clean scan and
+		// never repeats per reason (ADR 0018's corollary: a declared limit
+		// must be machine-visible, not left to prose alone — locked by
+		// TestSensorDB_CompletenessNote_DeclaresCrossrulesExceptionWhenNonEmpty).
+		parts = append(parts, "Declared exception: the code×schema cross (DB-010/DB-013) does not consult "+
+			"this completeness signal and may still emit surface items over these tables.")
+	}
+
 	return strings.Join(parts, " ")
 }
 
