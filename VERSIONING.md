@@ -91,10 +91,13 @@ stage" — it does **not** claim `0.1.0` is done.
   scope remained — DW-021 (columnar index) and DW-020 (partitioning) — and neither was a
   rule-only slice: DW-021 needed a `Method` field the neutral `db.Index` did not yet have, and
   DW-020 needs the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it currently
-  declares as a limit and skips, per dialect. Role detection is snake_case only, so PascalCase
-  Kimball naming yields no DW value; declared, test-locked, not silent. (`db.Index.Method` has
-  since landed on `main`, past this tag and still untagged as of this writing — see the
-  `alpha.2` entry above.)
+  declares as a limit and skips, per dialect. Role detection reached only a leading snake_case
+  segment at this tag; declared, test-locked, not silent. (Both of that bullet's limits have
+  since moved on `main`, past this tag and still untagged as of this writing: `db.Index.Method`
+  landed — see the `alpha.2` entry above — and the role vocabulary now recognizes
+  underscore-delimited leading **and** trailing tokens plus separator-free PascalCase, all
+  case-insensitively, so Kimball's `FactInternetSales`/`DimCustomer` spelling is recognized;
+  all-caps names remain unclassified by design.)
 - **`v0.2.4` — Phase 2.4 complete (index-vs-query).** The index-vs-query DB debt deferred in
   `0.2.0` is paid (OLAP remains the open Phase-2 debt): the first rules that cross the code's
   queries against the schema. A filtered

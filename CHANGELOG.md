@@ -12,6 +12,31 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [Unreleased]
+
+### Changed
+
+- **Table-role detection recognizes the naming real warehouses actually use.** An empirical
+  yield measurement over 22 real public corpora found the DW-0xx family measuring near-zero
+  because of its **name vocabulary**, not its rule logic: it matched four snake_case prefixes
+  (`fact_`/`dim_`/`stg_`/`mart_`) case-**sensitively**, and 4 of 9 real warehouse corpora used
+  exactly that Kimball convention, only capitalized. Role names are now matched
+  case-insensitively in three spellings — an underscore-delimited **leading** segment
+  (adding `fct_`, `f_`, `d_`), an underscore-delimited **trailing** segment (`_fact`/`_facts`,
+  `_dim`/`_dims`, for TPC-DS's `date_dim`), and separator-free **PascalCase** (`FactInternetSales`,
+  `DimCustomer`). Every entry is evidence-backed by that measurement, never speculative.
+  **Structure still decides:** ADR 0033's corroboration gate is untouched — a fact candidate
+  still needs FK fan-out ≥ 2 and a dimension candidate fan-in ≥ 1, so a wider name never
+  substitutes for structure. Declared limits kept on purpose: an **all-caps** name
+  (`FACTORY_SETTINGS`) and a name with neither a delimiter nor a PascalCase boundary stay
+  unclassified, because a false promotion would silence that table's DB-002/DB-003 1NF findings.
+- **The vendored AdventureWorksDW corpus is now recognized by name.** Microsoft's real DDL
+  previously matched nothing; its three tables are now recognized candidates, locked against
+  the **real parsed corpus**. It still yields no DW finding, but for **one** remaining reason
+  instead of two: the T-SQL reducer still drops the `ALTER TABLE ... ADD CONSTRAINT` shapes it
+  uses, so its real keys never reach the model and the corroboration gate has nothing to work
+  with. That limit is unchanged and still declared.
+
 ## [0.2.5-alpha.2] — 2026-07-31
 
 **Still on the way to Phase 2.5 — this release is a correctness fix, not new coverage.**
