@@ -209,6 +209,30 @@ type Index struct {
 	Pos     Pos
 	Columns []string // composite supported (DB-013)
 	Unique  bool
+
+	// Method is the index's declared access method/type (PostgreSQL's `USING
+	// <method>`, MySQL's `USING BTREE|HASH`, T-SQL's CLUSTERED/NONCLUSTERED/
+	// COLUMNSTORE kind, Prisma's `@@index(..., type: ...)`), lowercased at
+	// every capture site so one convention holds across dialects. EMPTY means
+	// "no access method declared in source" — the same empty-means-none
+	// convention as Table.DBName and Trigger.ExecutesFunction — and is
+	// deliberately NEVER defaulted to a guessed vocabulary word like "btree":
+	// a consumer that needs a default applies its own, this field only
+	// reports what the source actually said.
+	//
+	// A dialect that does not (yet) capture Method for a given statement
+	// shape leaves it empty exactly like a dialect that never declared one —
+	// the two are indistinguishable through this field alone (architecture/
+	// two-classes-of-parser-blindness, "ceguera por omisión"); a provider's
+	// own coverage manifest (internal/core/dbcoverage) is the place that
+	// states which shapes it does and does not read.
+	//
+	// Prisma's `type:` vocabulary is NOT codefit-maintained: whatever value
+	// the schema declares is captured verbatim (lowercased), never validated
+	// against an assumed enum — codefit has not verified Prisma's own
+	// documented set of accepted index types against every provider, so it
+	// makes no claim here beyond "this is what the source said".
+	Method string
 }
 
 // View, Procedure and Trigger complete the OLTP surface. They are DEFINED here so
