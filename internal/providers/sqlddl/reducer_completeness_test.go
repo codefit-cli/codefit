@@ -115,6 +115,65 @@ func TestSQLDDL_AlterAction_UnrecognizedForm_MarksUnproven(t *testing.T) {
 	}
 }
 
+// Site: applyTableConstraint default (reduce.go:392-397) — a genuinely
+// UNRECOGNIZED table constraint form (sdd-verify W1, obs #1279: survived
+// deletion of the MarkUnproven call with the suite green, S2). "EXCLUSIONISH"
+// deliberately shares a prefix with the recognized-skip "EXCLUDE" so this
+// test also proves the kw comparison is exact, not a prefix match.
+func TestSQLDDL_TableConstraint_UnrecognizedForm_MarksUnproven(t *testing.T) {
+	base := "CREATE TABLE t (id int);\n"
+	tb := parsePGTable(t, base+"ALTER TABLE t ADD CONSTRAINT c EXCLUSIONISH (id);\n")
+	if tb.Complete {
+		t.Error("Complete = true, want false — an unrecognized table constraint form must mark the table unproven")
+	}
+	if !strings.Contains(tb.Note, db.ReasonUnreducedTableStatement) {
+		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
+	}
+	if len(tb.Unreduced) != 1 || !strings.Contains(tb.Unreduced[0].Text, "EXCLUSIONISH") {
+		t.Errorf("Unreduced = %v, want one entry carrying the verbatim EXCLUSIONISH constraint", tb.Unreduced)
+	}
+}
+
+// TestSQLDDL_OneDroppedStatement_DemotesOnlyItsTable is the spec's own
+// isolation scenario made executable (spec, Domain "Table Completeness
+// Carrier": "GIVEN a 200-table schema where one statement for table T is
+// dropped ... THEN only T reads incomplete; the other 199 tables remain
+// complete"). Before this test, no fixture mixed proven and unproven tables
+// from ONE parse: reducer_completeness_test.go's other cases use
+// single-table schemas, and the AdventureWorksDW fixture is exactly the 3
+// affected tables (every table in it is unproven, so isolation across
+// proven/unproven siblings was never exercised). A regression that demotes
+// EVERY table in the builder (a shared, un-isolated completeness state)
+// would leave the rest of this file green.
+func TestSQLDDL_OneDroppedStatement_DemotesOnlyItsTable(t *testing.T) {
+	sql := "CREATE TABLE a (id int);\n" +
+		"CREATE TABLE b (id int);\n" +
+		"CREATE TABLE c (id int);\n" +
+		// Only b's statement is unrecognized.
+		"ALTER TABLE b INHERIT parent_t;\n"
+	p := sqlddl.New()
+	s, err := p.ParseSchema([]providers.SourceFile{{Path: "x.sql", Content: []byte(sql)}})
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if len(s.Tables) != 3 {
+		t.Fatalf("parsed %d tables, want 3 (a, b, c)", len(s.Tables))
+	}
+	byName := map[string]db.Table{}
+	for _, tb := range s.Tables {
+		byName[tb.Name] = tb
+	}
+	if !byName["a"].Complete {
+		t.Errorf("a.Complete = false, want true — a's own statements were all reduced; b's drop must not leak onto it")
+	}
+	if byName["b"].Complete {
+		t.Error("b.Complete = true, want false — b's own ALTER TABLE was dropped")
+	}
+	if !byName["c"].Complete {
+		t.Errorf("c.Complete = false, want true — c's own statements were all reduced; b's drop must not leak onto it")
+	}
+}
+
 // Site: apply's own default (out-of-declared-subset statements — INSERT,
 // GRANT, COMMENT, CREATE TYPE, ...) must NOT record anything: these are never
 // classified as table-affecting at all, so there is no table to demote.
@@ -151,10 +210,18 @@ func TestSQLDDL_AlterTable_UnattributableRegexMiss_RecordsOnSchema(t *testing.T)
 // N2 positive control (design §3c) — the vocabulary this test locks (OWNER
 // TO, RENAME, ENABLE, ALTER COLUMN, CHECK) is real PostgreSQL and MUST leave
 // Complete=true, exactly as TestSQLDDL_AlterAction_RecognizedSkip_StaysComplete
-// and TestSQLDDL_TableConstraint_RecognizedSkip_StaysComplete lock above; this
-// test additionally proves DB-050 still affirms a genuinely missing PK on
-// that same table (the "honesty must not cost capability" requirement).
-func TestSQLDDL_N2_RecognizedSkips_DoNotMuteDB050(t *testing.T) {
+// and TestSQLDDL_TableConstraint_RecognizedSkip_StaysComplete lock above —
+// PARSER-LAYER ONLY: it stops at Complete/PrimaryKey, it does NOT invoke
+// dbrules (sdd-verify W6, obs #1279: the ORIGINAL name of this test,
+// TestSQLDDL_N2_RecognizedSkips_DoNotMuteDB050, overstated what it proves —
+// "DoNotMuteDB050" implies DB-050 was invoked and observed to affirm, and it
+// never was). The GENUINE positive control that actually runs dbrules.Run
+// and asserts a DB-050 affirmation lives in two places: this package's own
+// TestSQLDDL_N2_Fixture_RecognizedSkipsDoNotMuteCompleteness
+// (n2_fixture_test.go, against the authored fixture file) and
+// internal/core/dbrules/completeness_gate_test.go's
+// TestDB050_ProvenTable_MissingPK_StillAffirms_PositiveControl.
+func TestSQLDDL_N2_RecognizedSkips_LeaveTableCompleteWithNoPK(t *testing.T) {
 	tb := parsePGTable(t, "CREATE TABLE t (id int NOT NULL);\n"+
 		"ALTER TABLE t OWNER TO postgres;\n"+
 		"ALTER TABLE t ALTER COLUMN id SET NOT NULL;\n")

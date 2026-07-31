@@ -4,7 +4,7 @@
 
 ## Context
 
-`internal/core/db.Body{Text,Complete,Note}` (`db.go:153-166`) already declares
+`internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares
 a load-bearing doctrine for ROUTINE bodies: a reader "MUST treat
 `Complete==false` as grounds to abstain or downgrade to a surface item, never
 to emit a deterministic finding" (ADR 0004/0025). Four rules already honour

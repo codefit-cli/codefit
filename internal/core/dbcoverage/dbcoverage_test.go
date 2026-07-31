@@ -105,11 +105,28 @@ func TestManifest_CurrentRuleSet_Passes(t *testing.T) {
 
 // TestManifest_UndeclaredRule_Fails is the spec's negative scenario ("Given
 // a rule ID registered in one of the four roots with no manifest entry, the
-// enforcement test fails, naming the missing ID") — proven directly against
-// containsWholeToken/manifestText rather than by mutating production All().
+// enforcement test fails, naming the missing ID").
+//
+// sdd-verify W5 (obs #1279): the original version only asserted "DB-999 is
+// absent from the manifest today" — a fixture sanity check, not a proof that
+// Control A's own CHECK LOGIC fires on an undeclared ID. This version feeds
+// the exact loop Control A runs (registeredIDs() + containsWholeToken against
+// manifestText()) a FABRICATED extra ID appended to the real registered set —
+// exercising the real check, not a description of it — and asserts it is the
+// ONLY one reported missing (proving the negative fires on the fabricated ID
+// specifically, not as a side effect of some other, real gap).
 func TestManifest_UndeclaredRule_Fails(t *testing.T) {
-	if containsWholeToken(manifestText(), "DB-999") {
-		t.Fatal("DB-999 is not a real rule ID and must not appear in the manifest — fixture sanity check failed")
+	ids := append(append([]string(nil), registeredIDs()...), "DB-999")
+	text := manifestText()
+	var missing []string
+	for _, id := range ids {
+		if !containsWholeToken(text, id) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) != 1 || missing[0] != "DB-999" {
+		t.Fatalf("missing = %v, want exactly [DB-999] — the negative scenario must fire on the fabricated "+
+			"undeclared ID and nothing else", missing)
 	}
 }
 

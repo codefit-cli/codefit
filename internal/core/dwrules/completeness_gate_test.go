@@ -41,15 +41,41 @@ func TestDW002_UnprovenDimensionTable_Abstains(t *testing.T) {
 	}
 }
 
+// TestDW005_AnyUnprovenFactOrDimension_AbstainsWholeRule is a DISCRIMINATING
+// fixture (sdd-verify C1, obs #1279): the original version used a proven
+// dim_date, which short-circuits identically under EVERY implementation
+// (timeDim != "" is decided before completeness is even consulted) — the
+// test passed against the shipped code, a per-table shrink, AND the gate
+// removed entirely, so it proved nothing.
+//
+// dim_period is deliberately UNPROVEN, non-time-NAMED (does not match
+// dim_date/dim_time/dim_calendar) and carries NO primary key / columns — this
+// models the real target scenario: the ALTER TABLE that would have declared
+// its date-grained key was dropped, so as CURRENTLY parsed it looks like
+// nothing at all. Whether the real schema's dim_period genuinely is a time
+// dimension is exactly what codefit cannot tell — which is why the whole
+// rule must abstain, not guess from a hole in the model.
+//
+//   - Shipped code: dim_period is Dimension-role and !StructureProven() ->
+//     the pre-scan returns nil,nil before any census is built. No item.
+//   - Per-table-shrink mutation (the natural "continue instead of abstain"
+//     rewrite): dim_period is skipped from the census entirely -> dims=(none),
+//     timeDim="" -> WRONGLY fires "no time dimension" over a schema where a
+//     table that dim_period is not disproven from ever being reported.
+//   - Gate-removed-entirely mutation: dim_period is evaluated at face value
+//     (StructureProven() forced true) -> included in dims, but its empty
+//     PK/columns don't match isTimeDimension by name or grain -> timeDim
+//     stays "" -> WRONGLY fires the same false item, just naming dim_period.
+//
+// Both wrong outcomes are a `len(surf) != 0` this test catches; the correct
+// outcome (abstain) is `len(surf) == 0`. Proven live by mutation before this
+// test shipped — see the commit message for the exact FAIL/PASS transcript.
 func TestDW005_AnyUnprovenFactOrDimension_AbstainsWholeRule(t *testing.T) {
-	// A proper time dimension is present, so a PROVEN schema would NOT fire —
-	// but one fact table is unproven, so the rule must abstain WHOLE, not
-	// silently shrink its census by skipping just that table.
-	fact := unprovenDWTable("fact_sales")
-	timeDim := db.Table{Name: "dim_date", Complete: true, PrimaryKey: []string{"date_key"},
-		Columns: []db.Column{{Name: "date_key", Type: db.TypeDateTime}}}
-	s := &db.Schema{Tables: []db.Table{fact, timeDim}}
-	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact, "dim_date": paradigm.RoleDimension}}
+	fact := db.Table{Name: "fact_sales", Complete: true, Pos: db.Pos{File: "x.sql", Line: 1}}
+	dimPeriod := db.Table{Name: "dim_period", Pos: db.Pos{File: "x.sql", Line: 2}}
+	dimPeriod.MarkUnproven(db.ReasonUnreducedTableStatement, "ALTER TABLE dim_period ADD CONSTRAINT ...;", db.Pos{File: "x.sql", Line: 3})
+	s := &db.Schema{Tables: []db.Table{fact, dimPeriod}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact, "dim_period": paradigm.RoleDimension}}
 	fs, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-005")})
 	if len(fs) != 0 || len(surf) != 0 {
 		t.Errorf("DW-005 must abstain the WHOLE rule when any fact/dimension table is unproven, got findings=%v surface=%v", fs, surf)
@@ -67,11 +93,42 @@ func TestDW010_UnprovenSCD2Dimension_Abstains(t *testing.T) {
 	}
 }
 
+// TestDW011_AnyUnprovenDimension_AbstainsWholeRule is a DISCRIMINATING
+// fixture (sdd-verify C1, obs #1279): the original 2-dimension version left
+// scd1 EMPTY after a per-table shrink (only the unproven table would have
+// been scd1), so `len(scd1)==0` short-circuited identically under the
+// shipped code AND the mutation — it never reached the branch it claimed to
+// protect.
+//
+// This version carries THREE dimensions: dim_product (PROVEN SCD-2, has
+// valid_to), dim_category (PROVEN SCD-1, no history columns), and
+// dim_region (UNPROVEN, no history columns as parsed — the same "the
+// declaring statement was dropped" scenario as DW-005's fixture above).
+//
+//   - Shipped code: dim_region is Dimension-role, non-time, and
+//     !StructureProven() -> the pre-scan returns nil,nil. No item.
+//   - Per-table-shrink mutation: dim_region is skipped from the census ->
+//     scd2=[dim_product] (non-empty, from the ALREADY-proven dimension),
+//     scd1=[dim_category] (non-empty, likewise) -> WRONGLY fires, having
+//     never asked whether dim_region's true (unread) shape would have
+//     changed the count.
+//   - Gate-removed mutation: dim_region is evaluated at face value -> no
+//     scd markers as parsed -> joins scd1 -> STILL fires (scd2 non-empty,
+//     scd1 now [dim_category, dim_region]) — the same wrong "yes, mixed"
+//     conclusion reached over an incomplete census, just with one more name
+//     in it.
+//
+// Proven live by mutation before this test shipped — see the commit message.
 func TestDW011_AnyUnprovenDimension_AbstainsWholeRule(t *testing.T) {
-	scd2 := db.Table{Name: "dim_product", Complete: true, Columns: []db.Column{{Name: "valid_to", Type: db.TypeDateTime}}}
-	scd1 := unprovenDWTable("dim_category")
-	s := &db.Schema{Tables: []db.Table{scd2, scd1}}
-	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"dim_product": paradigm.RoleDimension, "dim_category": paradigm.RoleDimension}}
+	scd2 := db.Table{Name: "dim_product", Complete: true, Pos: db.Pos{File: "x.sql", Line: 1},
+		Columns: []db.Column{{Name: "valid_to", Type: db.TypeDateTime}}}
+	scd1 := db.Table{Name: "dim_category", Complete: true, Pos: db.Pos{File: "x.sql", Line: 2}}
+	dimRegion := db.Table{Name: "dim_region", Pos: db.Pos{File: "x.sql", Line: 3}}
+	dimRegion.MarkUnproven(db.ReasonUnreducedTableStatement, "ALTER TABLE dim_region ADD CONSTRAINT ...;", db.Pos{File: "x.sql", Line: 4})
+	s := &db.Schema{Tables: []db.Table{scd2, scd1, dimRegion}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{
+		"dim_product": paradigm.RoleDimension, "dim_category": paradigm.RoleDimension, "dim_region": paradigm.RoleDimension,
+	}}
 	fs, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-011")})
 	if len(fs) != 0 || len(surf) != 0 {
 		t.Errorf("DW-011 must abstain the WHOLE rule when any compared dimension is unproven, got findings=%v surface=%v", fs, surf)
