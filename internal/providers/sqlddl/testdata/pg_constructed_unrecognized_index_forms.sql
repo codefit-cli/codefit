@@ -43,3 +43,42 @@ CREATE TABLE metrics_partitioned (
 -- table's own index declaration; reCreateIndex has no ONLY vocabulary
 -- either.
 CREATE INDEX idx_metrics_value ON ONLY metrics_partitioned (value);
+
+CREATE TABLE articles (
+    article_id integer NOT NULL,
+    body text
+);
+
+-- MySQL/T-SQL: CREATE FULLTEXT INDEX — a distinct standalone-statement
+-- vocabulary reCreateIndex does not know at all, even though this package
+-- already recognizes FULLTEXT as inline/ADD index vocabulary elsewhere
+-- (reduce.go's isInlineKeyIndexForm/isAddKeyIndexForm) — an inconsistency
+-- internal to this reducer, not a new dialect gap.
+CREATE FULLTEXT INDEX idx_articles_body ON articles (body);
+
+CREATE TABLE venues (
+    venue_id integer NOT NULL,
+    location geometry
+);
+
+-- MySQL/T-SQL: CREATE SPATIAL INDEX — same standalone-statement gap as
+-- FULLTEXT above.
+CREATE SPATIAL INDEX idx_venues_location ON venues (location);
+
+CREATE TABLE documents (
+    document_id integer NOT NULL,
+    payload_xml xml
+);
+
+-- T-SQL: CREATE XML INDEX — an XML-typed column's index, unrelated to
+-- reCreateIndex's grammar.
+CREATE XML INDEX idx_documents_payload ON documents (payload_xml);
+
+CREATE TABLE catalog_items (
+    catalog_item_id integer NOT NULL,
+    payload_xml xml
+);
+
+-- T-SQL: CREATE PRIMARY XML INDEX — the mandatory first XML index on a
+-- table before any secondary XML index can be declared.
+CREATE PRIMARY XML INDEX idx_catalog_items_payload ON catalog_items (payload_xml);

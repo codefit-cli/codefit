@@ -54,14 +54,20 @@ var (
 	// reIndexShapedHead recognizes a CREATE INDEX-family statement head
 	// BROADER than reCreateIndex — including forms reCreateIndex's own
 	// grammar does not cover (an anonymous PostgreSQL index with no index
-	// name, an "ON ONLY" partitioned-table index, or T-SQL's
-	// CLUSTERED/NONCLUSTERED/COLUMNSTORE index kinds) — so apply()'s
-	// default: branch can tell "this dispatch genuinely has no branch for
-	// this INDEX form" apart from a statement that is out of the declared
-	// subset entirely (INSERT, GRANT, COMMENT, CREATE TYPE, ...), which must
-	// stay silent (ADR 0034 SS2.4;
+	// name, an "ON ONLY" partitioned-table index, T-SQL's
+	// CLUSTERED/NONCLUSTERED/COLUMNSTORE index kinds, and the standalone
+	// FULLTEXT/SPATIAL/XML/PRIMARY XML CREATE INDEX statement forms — this
+	// package already treats FULLTEXT/SPATIAL as recognized index vocabulary
+	// for the INLINE and ALTER...ADD shorthand forms
+	// (isInlineKeyIndexForm/isAddKeyIndexForm), so leaving the standalone
+	// CREATE form out here would be an internal inconsistency, not a new
+	// dialect gap, REL-001) — so apply()'s default: branch can tell "this
+	// dispatch genuinely has no branch for this INDEX form" apart from a
+	// statement that is out of the declared subset entirely (INSERT, GRANT,
+	// COMMENT, CREATE TYPE, ...), which must stay silent (ADR 0034 SS2.4;
 	// TestSQLDDL_OutOfSubsetStatement_RecordsNothing locks that boundary).
-	reIndexShapedHead = regexp.MustCompile(`(?is)^create\s+(?:unique\s+)?(?:clustered\s+|nonclustered\s+)?(?:columnstore\s+)?index\b`)
+	reIndexShapedHead = regexp.MustCompile(`(?is)^create\s+(?:unique\s+)?(?:clustered\s+|nonclustered\s+)?` +
+		`(?:columnstore\s+|fulltext\s+|spatial\s+|primary\s+xml\s+|xml\s+)?index\b`)
 
 	// reIndexShapedTarget extracts the target table from a CREATE
 	// INDEX-shaped statement default() could not fully parse — the
@@ -146,8 +152,19 @@ func (b *builder) apply(file string, st stmt) {
 		// whether it declares an index, so it must mark the table unproven
 		// instead of vanishing silently.
 		if tm := reIndexShapedTarget.FindStringSubmatch(st.text); tm != nil {
-			t, _ := b.getTable(normalizeName(tm[1]), pos)
-			t.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, pos)
+			t, created := b.getTable(normalizeName(tm[1]), pos)
+			if created {
+				// F4 pattern (4R ledger obs #1282), same disposition as
+				// applyAlterTable/applyCreateIndex above (REL-002, 4R
+				// reliability lens): this is the FIRST time this table name
+				// was ever seen — no CREATE TABLE declared it. The accurate
+				// claim reaching the agent through routeUnprovenTable is "no
+				// CREATE TABLE was ever seen for this table", not "a
+				// statement affecting this table could not be reduced".
+				t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, pos)
+			} else {
+				t.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, pos)
+			}
 		} else {
 			// No attributable table (a wrong attribution is worse than
 			// none, design §2) — recorded at schema level; gates nothing
