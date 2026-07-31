@@ -184,6 +184,30 @@ const (
 	completenessInventoryReasonCap = 3
 )
 
+// routingClause renders the note's claim about DB-050 routing, ACCURATELY
+// scoped to what actually happened (F2, 4R ledger obs #1282, CRITICAL): the
+// note must never promise a surface item that does not exist. routed is how
+// many of a reason group's unproven tables DB-050 actually routed (those
+// with no primary key currently in the model); total is the group's size.
+func routingClause(routed, total int) string {
+	switch {
+	case routed == 0:
+		return "None of them currently show a missing primary key in the model, so DB-050 did not route any " +
+			"of them to a surface item — this note is their only trace in scan output."
+	case routed == total:
+		return "DB-050 routed them to the db-table-structure-unproven surface items rather than affirming. " +
+			"Read those items for the raw statements and their file:line."
+	default:
+		return fmt.Sprintf(
+			"DB-050 routed %d of them (those with no primary key currently in the model) to the "+
+				"db-table-structure-unproven surface items rather than affirming — read those items for the raw "+
+				"statements and their file:line. The rest already show a primary key and have no further trace "+
+				"beyond this note.",
+			routed,
+		)
+	}
+}
+
 // completenessNote is the per-scan INVENTORY of what codefit could not
 // measure (design SS7a, ADR 0034's measurement/diagnostics boundary). It
 // aggregates by REASON, never by table, and states the fact — "codefit could
@@ -198,6 +222,15 @@ func completenessNote(s *coredb.Schema) string {
 	}
 	byReason := map[string][]string{}
 	var reasonOrder []string
+	// routedCount tracks, per reason, how many of that reason's unproven
+	// tables were ACTUALLY routed by DB-050 (F2, 4R ledger obs #1282,
+	// CRITICAL, verified: DB-050's own guard clause — dbrules/rules.go,
+	// `if len(t.PrimaryKey) > 0 { continue }` — runs BEFORE the routing
+	// check, so an unproven table that already shows a primary key in the
+	// model is never routed. The note must not claim otherwise for those
+	// tables; a rule about the ABSENCE of a primary key has nothing to
+	// route when a key is already visible, proven or not).
+	routedCount := map[string]int{}
 	for _, t := range s.Tables {
 		if t.StructureProven() || t.Note == "" {
 			continue
@@ -206,6 +239,9 @@ func completenessNote(s *coredb.Schema) string {
 			reasonOrder = append(reasonOrder, t.Note)
 		}
 		byReason[t.Note] = append(byReason[t.Note], t.Name)
+		if len(t.PrimaryKey) == 0 {
+			routedCount[t.Note]++
+		}
 	}
 
 	var parts []string
@@ -224,10 +260,9 @@ func completenessNote(s *coredb.Schema) string {
 		}
 		parts = append(parts, fmt.Sprintf(
 			"codefit could not prove the structure of %d table(s) complete — %s: %s%s. "+
-				"Absence-based DB/DW rules abstained on them, and DB-050 routed them to the "+
-				"db-table-structure-unproven surface items rather than affirming. Read those "+
-				"items for the raw statements and their file:line.",
+				"Absence-based DB/DW rules abstained on them. %s",
 			len(names), reason, strings.Join(shown, ", "), suffix,
+			routingClause(routedCount[reason], len(names)),
 		))
 		reasonsShown++
 	}
