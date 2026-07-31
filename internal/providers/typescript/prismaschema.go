@@ -270,7 +270,7 @@ func parseBlockAttr(t *db.Table, text string, pos db.Pos) {
 	case strings.HasPrefix(text, "@@unique"):
 		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: bracketList(text), Unique: true})
 	case strings.HasPrefix(text, "@@index"):
-		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: bracketList(text), Unique: false})
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: bracketList(text), Unique: false, Method: indexTypeArg(text)})
 	}
 }
 
@@ -302,7 +302,25 @@ var (
 	firstBracket = regexp.MustCompile(`\[([^\]]*)\]`)
 	relFieldsRe  = regexp.MustCompile(`fields\s*:\s*\[([^\]]*)\]`)
 	relRefsRe    = regexp.MustCompile(`references\s*:\s*\[([^\]]*)\]`)
+	indexTypeRe  = regexp.MustCompile(`type\s*:\s*(\w+)`)
 )
+
+// indexTypeArg returns the access-method argument of a Prisma @@index(...,
+// type: X) attribute, lowercased, or "" when no type: argument is present
+// (index-method-capture, mirroring stringArg/relRefsRe's own convention of
+// one small regex per attribute argument, next to those helpers).
+//
+// This is DELIBERATELY not validated against any assumed Prisma vocabulary:
+// codefit has not verified Prisma's own documented set of accepted index
+// types against every provider it supports, so whatever value the schema
+// text declares is captured verbatim (only case-normalized) — parse what is
+// there, never assume what SHOULD be there.
+func indexTypeArg(text string) string {
+	if m := indexTypeRe.FindStringSubmatch(text); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
 
 // bracketList returns the comma-separated identifiers inside the first [...] of s.
 func bracketList(s string) []string {
