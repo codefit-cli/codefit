@@ -18,6 +18,22 @@ type Schema struct {
 	// gates NOTHING per-table (there is no table to gate); it surfaces only in
 	// the per-scan completeness inventory (sensors/db.Result.Note).
 	Unreduced []Unreduced
+
+	// Dialect is the SQL dialect this schema was parsed from ("postgresql",
+	// "mysql", "sqlserver" — the same strings database.type/sqlddl.Dialect.Name
+	// already use), set ONLY by the SQL-DDL provider at its one schema-assembly
+	// site (sqlddl's builder.schema()). EMPTY means "not applicable" — the
+	// Prisma provider leaves it unset (schema.prisma has no per-dialect
+	// grammar), the same empty-means-none convention as Table.DBName.
+	//
+	// This is a DELIBERATELY NARROW escape hatch, not a general invitation to
+	// branch on dialect: every DB-0xx rule (internal/core/dbrules) stays
+	// dialect-agnostic exactly as documented in dbcoverage.go's Reasoning() —
+	// none of them may read this field. Only a DW rule with its OWN declared,
+	// test-locked per-dialect limit may consult it (DW-021 is the first:
+	// internal/core/dwrules/dw021.go abstains on "mysql" because the parser
+	// cannot reliably read an index's Method there — see db.Index.Method).
+	Dialect string
 }
 
 // Pos is the origin of a schema element: the file it was parsed from and its
@@ -209,6 +225,25 @@ type Index struct {
 	Pos     Pos
 	Columns []string // composite supported (DB-013)
 	Unique  bool
+
+	// Method is the index's access method as declared in the source DDL
+	// (PostgreSQL "USING brin"/"USING gin"/"USING btree" -> "brin"/"gin"/
+	// "btree", lowercased). EMPTY means no USING clause was present in the
+	// DDL — the honest default/unspecified case, the SAME empty-means-none
+	// convention Table.DBName and Trigger.ExecutesFunction already use. It is
+	// deliberately NEVER defaulted to a guessed "btree": a dialect's own
+	// implicit default is that dialect's business, not this model's to infer.
+	//
+	// DECLARED LIMIT (S3, db-olap-rules): MySQL's CREATE INDEX grammar allows
+	// "USING BTREE|HASH" in a SECOND position — an index_option AFTER the
+	// column list — that the SQL-DDL reducer's regex does not capture (only
+	// the PRE-column-list "index_type" position is read). A rule reading
+	// Method on a MySQL-sourced schema cannot tell "no method declared" from
+	// "method declared in the position this parser cannot read" — see
+	// Schema.Dialect and DW-021 (internal/core/dwrules/dw021.go), which
+	// consults Dialect specifically to abstain rather than answer from that
+	// blindness.
+	Method string
 }
 
 // View, Procedure and Trigger complete the OLTP surface. They are DEFINED here so
