@@ -206,7 +206,8 @@
           "Columns": [
             "address_id"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": "btree"
         },
         {
           "Pos": {
@@ -216,7 +217,8 @@
           "Columns": [
             "last_name"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": "btree"
         }
       ],
       "Complete": true,
@@ -339,7 +341,8 @@
           "Columns": [
             "city_id"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": "btree"
         }
       ],
       "Complete": true,
@@ -452,7 +455,8 @@
             "inventory_id",
             "customer_id"
           ],
-          "Unique": true
+          "Unique": true,
+          "Method": "btree"
         }
       ],
       "Complete": true,
@@ -565,7 +569,8 @@
           "Columns": [
             "customer_id"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": "btree"
         },
         {
           "Pos": {
@@ -575,7 +580,8 @@
           "Columns": [
             "customer_id"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": "btree"
         }
       ],
       "Complete": true,
