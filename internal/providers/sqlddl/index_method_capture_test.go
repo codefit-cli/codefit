@@ -1,6 +1,7 @@
 package sqlddl_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -8,14 +9,21 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
 
-// index-method-capture: reCreateIndex (reduce.go) is widened to actually READ
-// three forms it previously only recognized as a genuinely unrecognized
-// CREATE INDEX-shaped head (reIndexShapedHead) and dropped, marking the table
-// unproven: T-SQL CLUSTERED/NONCLUSTERED, PostgreSQL's anonymous (unnamed)
-// index, and MySQL's post-column-list USING BTREE|HASH. This file drives the
-// REAL parser end to end (ParseSchema), never a hand-built db.Index literal —
-// a hand-built fixture holding values production cannot produce is the
-// recurring defect this project's own history names explicitly.
+// index-method-capture: reCreateIndex (reduce.go) is taught to actually READ
+// two forms it previously only recognized as a genuinely unrecognized CREATE
+// INDEX-shaped head (reIndexShapedHead) and DROPPED, marking the table
+// unproven — a "discard" class of parser blindness (obs #1307): T-SQL's
+// CLUSTERED/NONCLUSTERED ordinary index, and PostgreSQL's anonymous
+// (unnamed) index. MySQL's post-column-list USING BTREE|HASH is DIFFERENT:
+// that statement ALWAYS matched reCreateIndex's grammar, even before this
+// slice — the VALUE was silently discarded, never the statement dropped —
+// an "omission" class of blindness (obs #1307) this slice closes by actually
+// extracting it, not by teaching the parser a new statement shape. Collapsing
+// that distinction is exactly the mistake obs #1307 exists to prevent. This
+// file drives the REAL parser end to end (ParseSchema), never a hand-built
+// db.Index literal — a hand-built fixture holding values production cannot
+// produce is the recurring defect this project's own history names
+// explicitly.
 
 // parseTable parses sql under dialect and returns the table matching name.
 func parseTable(t *testing.T, dialect sqlddl.Dialect, sql, name string) db.Table {
@@ -172,6 +180,31 @@ func TestSQLDDL_MySQL_PostColumnListUsing_ParsesWithMethod(t *testing.T) {
 				t.Errorf("Method = %q, want %q", got, tt.wantMethod)
 			}
 		})
+	}
+}
+
+// TestSQLDDL_MySQL_UsingBetweenNameAndOn_FallsToFloor (F7, coordinator
+// review) locks a FOURTH USING position MySQL's grammar also allows — between
+// the index name and ON — that reCreateIndex genuinely does NOT match: it
+// requires "on\s+" right after the optional name group, and this shape puts
+// "USING BTREE" there instead. Unlike the other three positions this file
+// covers (all now captured), this one is NOT parsed. Behavior here is
+// CORRECT, not a regression: the statement falls to the floor via
+// reIndexShapedHead/markUnrecognizedIndexShape exactly like any other
+// genuinely unrecognized CREATE INDEX-shaped form, and is recorded rather
+// than silently dropped. This test exists so NotCovered's enumeration of this
+// gap (dbcoverage.go) stays backed by an executable lock, not prose alone.
+func TestSQLDDL_MySQL_UsingBetweenNameAndOn_FallsToFloor(t *testing.T) {
+	sql := "CREATE TABLE t (a int);\nCREATE INDEX ix USING BTREE ON t (a);\n"
+	tb := parseTable(t, sqlddl.MySQL(), sql, "t")
+	if tb.Complete {
+		t.Fatalf("Complete = true, want false — this USING position is genuinely unrecognized by reCreateIndex")
+	}
+	if !strings.Contains(tb.Note, string(db.ReasonUnreducedTableStatement)) {
+		t.Errorf("Note = %q, want it to contain ReasonUnreducedTableStatement", tb.Note)
+	}
+	if len(tb.Indexes) != 0 {
+		t.Errorf("Indexes = %+v, want empty — nothing fabricated", tb.Indexes)
 	}
 }
 
