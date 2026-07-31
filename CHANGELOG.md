@@ -12,6 +12,59 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [0.2.5-alpha.2] — 2026-07-31
+
+**Still on the way to Phase 2.5 — this release is a correctness fix, not new coverage.**
+codefit's database rules stop concluding from what its parser could not read. The two
+remaining OLAP items (DW-021 columnar index, DW-020 partitioning) are **still open**, so
+this remains an alpha and does not claim `0.2.5`.
+
+### Fixed
+
+- **codefit no longer invents database findings it cannot prove.** `DB-050` was emitting
+  `AFFIRMED (confidence 1.0): table has no primary key` over real vendored AdventureWorksDW
+  DDL that plainly declares all three keys. The SQL-DDL reducer discarded `ALTER TABLE`
+  shapes outside its declared subset **silently**, and the rule read that silence as
+  evidence. For an auditor, inventing a problem costs more trust than missing one — and
+  `1.0` is the strongest claim codefit can make.
+- **Four surface categories were emitted without being declared** since `v0.2.3`:
+  `db-routine-no-exception-handling`, `db-trigger-cross-table-cascade`,
+  `db-trigger-external-call` and `db-dynamic-sql-in-routine`. Per ADR 0019 an
+  emitted-but-undeclared category can never be baselined or pruned, which is the one way to
+  corrupt a committed `.codefit-baseline`. Found by the new coverage-manifest enforcement
+  test on its first run.
+
+### Added
+
+- **A per-table structural completeness contract on the neutral model** (ADR **0034**),
+  generalising the existing `db.Body{Complete,Note}` precedent (ADR 0025) from routine
+  bodies to the table's structural set. `db.Table` now carries `Complete`, `Note` and the
+  raw `Unreduced` statements, and the reducer records a drop instead of swallowing it.
+  Written as neutral-model doctrine; implemented for the DB dimension only.
+- **The eight absence-based DB/DW rules now gate on completeness.** Seven abstain;
+  `DB-050` — the dimension's only affirmation — **routes to a new
+  `db-table-structure-unproven` surface item** carrying the raw statement and its
+  `file:line`, so the agent reads the DDL itself rather than losing the signal entirely.
+  `DW-005`/`DW-011` abstain as a whole rule, since a per-table skip would shrink a census
+  and still emit.
+- **A per-scan incompleteness inventory** on the DB result note, aggregated by reason and
+  capped, so a systematic parser gap across 200 tables is one bounded line rather than 200
+  items. The measured `scan-all` path now carries that note (it was being dropped).
+- **Tests for `internal/core/dbcoverage/`**, which previously had none — including a
+  correspondence check that fails when a registered rule has no manifest entry. That is the
+  control that caught the undeclared-category defect above.
+- **Executable debt locks** for TypeScript's unconsulted `HasError()` and Go's fail-loud
+  parse behaviour: both assert today's actual behaviour, so the limits are machine-visible
+  rather than prose.
+
+### Notes
+
+- The Prisma parser's model-body skip now marks its table unproven, so completeness is not
+  affirmed on the most-used path without evidence.
+- `db.Table.Complete` covers **drops**, not **fabrications** — a reducer bug that produces a
+  wrong value rather than none is a separate class, documented in ADR 0034 §2.6 with its own
+  characterisation test.
+
 ## [0.2.5-alpha.1] — 2026-07-30
 
 **On the way to Phase 2.5 (RF-03 OLAP closure) — the OLAP rules that read the neutral

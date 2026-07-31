@@ -62,6 +62,20 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.5-alpha.2` — still on the way to Phase 2.5; a correctness fix, not new coverage.**
+  The database dimension stops concluding from parser silence. `DB-050` was affirming "no
+  primary key" at confidence 1.0 over vendored DDL that declares the keys, because the
+  SQL-DDL reducer discarded shapes outside its declared subset without signalling it. ADR
+  **0034** generalises the `db.Body{Complete,Note}` precedent to the table's structural set:
+  the eight absence-based DB/DW rules now gate on completeness — seven abstain, and `DB-050`
+  routes to a `db-table-structure-unproven` surface item carrying the raw statement and
+  `file:line` rather than losing the signal. Also fixed: four surface categories emitted
+  since `v0.2.3` without being declared in `OwnedCategories()` (ADR 0019 — the one way to
+  corrupt a committed baseline), caught by the new `dbcoverage` enforcement test on its first
+  run. **Alpha, not `0.2.5`:** DW-021 and DW-020 are still open — see the `alpha.1` entry
+  below for what each needs. DW-021 has an implementation on the `feat/olap-columnar-index`
+  branch that a full 4R found unsound on every input path; it is deliberately unmerged
+  pending an architect decision (draft PR #75).
 - **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
   warehouse from a transactional database and audits its modelling: paradigm/table-role
   detection as a pure core leaf (prefixes corroborated by real FK fan-out/fan-in, never by a
