@@ -49,17 +49,35 @@ func (db050) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	return findingsOut, surfaceOut
 }
 
+// routeUnprovenTableStatementCap and routeUnprovenTableStatementMaxLen bound
+// routeUnprovenTable's payload (F6, 4R ledger obs #1282): every sibling
+// carrier in this change caps its output (sensors/db's inventory: 5 tables /
+// 3 reasons per note) — this one did not, so a pathological migration
+// (hundreds of dropped ALTERs on one table, or one absurdly long statement)
+// could balloon a single surface item unboundedly.
+const (
+	routeUnprovenTableStatementCap    = 5
+	routeUnprovenTableStatementMaxLen = 500
+)
+
 // routeUnprovenTable builds DB-050's routed surface item for a table whose
 // structure could not be proven complete (design SS5): "this table has no
 // primary key" and "codefit cannot tell whether this table has a primary
 // key" are different claims, so this is its OWN category, never a reuse.
 func routeUnprovenTable(t db.Table) findings.SurfaceItem {
 	signals := []string{"table: " + t.Name}
-	for _, u := range t.Unreduced {
+	shown := t.Unreduced
+	if len(shown) > routeUnprovenTableStatementCap {
+		shown = shown[:routeUnprovenTableStatementCap]
+	}
+	for _, u := range shown {
 		signals = append(signals,
-			"unreduced_statement: "+u.Text,
+			"unreduced_statement: "+truncateStatement(u.Text, routeUnprovenTableStatementMaxLen),
 			"unreduced_at: "+u.Pos.File+":"+strconv.Itoa(u.Pos.Line),
 		)
+	}
+	if omitted := len(t.Unreduced) - len(shown); omitted > 0 {
+		signals = append(signals, strconv.Itoa(omitted)+" more unreduced statement(s) omitted for brevity")
 	}
 	signals = append(signals, "reason: "+t.Note)
 	return findings.SurfaceItem{
@@ -75,6 +93,16 @@ func routeUnprovenTable(t db.Table) findings.SurfaceItem {
 			t.Name + ", so it cannot tell whether " + t.Name + " declares a primary key. The statement(s) are " +
 			"quoted above with their file:line — read the DDL: does " + t.Name + " declare one?",
 	}
+}
+
+// truncateStatement bounds a single unreduced statement's length (F6),
+// appending a marker so the agent knows the quoted text is a prefix, not the
+// whole statement — never silently cutting it without saying so.
+func truncateStatement(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+	return text[:maxLen] + "... (truncated)"
 }
 
 // db001 — a foreign key with no covering index. Whether it matters depends on the
