@@ -144,19 +144,50 @@ func (db001) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	return nil, out
 }
 
-// describeIndexLike renders a table's index-like column lists for a signal. The
-// leftmost-prefix coverage logic itself now lives in core/db (db.IndexLike /
-// db.CoveredByOrderedPrefix), shared with the cross rules so it never drifts.
+// describeIndexLike renders a table's index-like column lists for a signal.
+// The leftmost-prefix coverage logic itself lives in core/db (db.IndexLike /
+// db.CoveredByOrderedPrefix), shared with the cross rules so it never drifts
+// — but that shared helper flattens each index down to a bare []string,
+// losing Method. This renders from t.Indexes directly (plus the primary key,
+// exactly like db.IndexLike composes its own list) so Method can be surfaced
+// (F4/index-method-capture, coordinator review): a T-SQL CLUSTERED COLUMNSTORE
+// INDEX carries Columns=nil, Method="columnstore" — rendering that as the
+// bare literal "[]" would be indistinguishable from a rendering bug (or from
+// "no index at all"), and would hide the one fact the agent needs to judge
+// whether an additional ordered index is still warranted. describeIndex below
+// renders that case explicitly instead.
 func describeIndexLike(t db.Table) string {
-	lists := db.IndexLike(t)
-	if len(lists) == 0 {
+	var parts []string
+	for _, ix := range t.Indexes {
+		parts = append(parts, describeIndex(ix))
+	}
+	if len(t.PrimaryKey) > 0 {
+		parts = append(parts, "["+strings.Join(t.PrimaryKey, ", ")+"]")
+	}
+	if len(parts) == 0 {
 		return "(none)"
 	}
-	parts := make([]string, 0, len(lists))
-	for _, l := range lists {
-		parts = append(parts, "["+strings.Join(l, ", ")+"]")
-	}
 	return strings.Join(parts, " ")
+}
+
+// describeIndex renders one index for a structural signal. A genuinely empty
+// column list (T-SQL's CLUSTERED COLUMNSTORE INDEX, which implicitly covers
+// every column and therefore names none in its own grammar) is rendered
+// explicitly as "(covers all columns)" rather than the bare "[]" a normal,
+// non-empty index list would produce for zero columns — the two must never
+// read as the same thing. Method is appended whenever the source declared
+// one, so the agent sees it even though CoveredByOrderedPrefix/
+// CoveredBySetPrefix correctly never treat a columnstore index as satisfying
+// an ordered/prefix lookup (it is not that kind of structure).
+func describeIndex(ix db.Index) string {
+	cols := "[" + strings.Join(ix.Columns, ", ") + "]"
+	if len(ix.Columns) == 0 {
+		cols = "(covers all columns)"
+	}
+	if ix.Method != "" {
+		cols += " method=" + ix.Method
+	}
+	return cols
 }
 
 // db011 — an EXACT duplicate index (same columns in order, same uniqueness). Even
@@ -187,6 +218,18 @@ func (db011) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 		}
 		seen := map[key]bool{}
 		for _, ix := range idxs {
+			if len(ix.Columns) == 0 {
+				// F4/index-method-capture (coordinator review): a zero-column
+				// index (T-SQL's CLUSTERED COLUMNSTORE INDEX) has no column
+				// list to compare AT ALL — without this guard, two such
+				// indexes collide on the SAME {"", Unique} key and this rule
+				// would claim "duplicates another index on the same columns
+				// []", a claim that means nothing (there is nothing to
+				// duplicate). Skip it from duplicate detection entirely
+				// rather than let it fabricate a comparison the source never
+				// declared.
+				continue
+			}
 			k := key{strings.Join(ix.Columns, "\x00"), ix.Unique}
 			if seen[k] {
 				out = append(out, findings.SurfaceItem{
