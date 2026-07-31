@@ -323,6 +323,100 @@ model dim_product {
 	}
 }
 
+// DW-021 measured through the REAL Prisma provider, not a hand-built
+// db.Index literal: Prisma's own `@@index([...], type: X)` syntax (the
+// `extendedIndexes` preview feature) DOES let a Prisma schema declare a
+// columnar/analytic method — a real capability, distinct from the sibling
+// DW-001/002/005/010/011 family's blanket "zero value on Prisma" (those ask
+// about partitioning/materialized-view/warehouse-modelling concepts Prisma's
+// schema.prisma has no syntax for at all; DW-021 only needs an index's
+// method, which Prisma DOES express). Both fire paths run the full pipeline:
+// ParseSchema -> paradigm.Detect -> dwrules, through Sensor.Audit, exactly
+// like TestSensorDB_ParadigmAssembly_DWRulesRunOnAStarSchema above.
+func TestSensorDB_DW021_RealPrismaProvider(t *testing.T) {
+	star := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id           Int          @id
+  customerKey  Int
+  productCode  String
+  amount       Float
+  dim_customer dim_customer @relation(fields: [customerKey], references: [customer_key])
+  dim_product  dim_product  @relation(fields: [productCode], references: [product_code])
+  %s
+}
+
+model dim_customer {
+  customer_key Int          @id
+  name         String
+  fact_sales   fact_sales[]
+}
+
+model dim_product {
+  product_code String       @id
+  category     String
+  fact_sales   fact_sales[]
+}
+`
+	yaml := strings.Replace(yamlWithSchema, "paradigm: oltp", "paradigm: auto", 1)
+
+	t.Run("no type: argument fires", func(t *testing.T) {
+		schema := strings.Replace(star, "%s", "@@index([amount])", 1)
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !r.Measured {
+			t.Fatalf("Measured=false: %q", r.Note)
+		}
+		found := false
+		for _, it := range r.Res.Surface {
+			if it.Category == string(surface.CategoryDWNoColumnarIndex) {
+				found = true
+				if it.Fingerprint == "" || it.ID == "" {
+					t.Errorf("DW-021 item is not stamped (fingerprint=%q id=%q)", it.Fingerprint, it.ID)
+				}
+			}
+		}
+		if !found {
+			t.Error("no DW-021 item — a plain @@index([amount]) carries no columnar method")
+		}
+	})
+
+	t.Run("type: Brin does not fire", func(t *testing.T) {
+		schema := strings.Replace(star, "%s", "@@index([amount], type: Brin)", 1)
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		r, err := sdb.New(typescript.New()).Audit(ctx)
+		if err != nil {
+			t.Fatalf("Audit: %v", err)
+		}
+		if !r.Measured {
+			t.Fatalf("Measured=false: %q", r.Note)
+		}
+		var fact *findings.SurfaceItem
+		for _, tb := range r.Schema.Tables {
+			if tb.Name == "fact_sales" {
+				if len(tb.Indexes) != 1 || tb.Indexes[0].Method != "brin" {
+					t.Fatalf("fact_sales.Indexes = %+v, want one index with Method=brin — the real Prisma "+
+						"provider did not capture what this test claims to exercise", tb.Indexes)
+				}
+			}
+		}
+		for _, it := range r.Res.Surface {
+			if it.Category == string(surface.CategoryDWNoColumnarIndex) {
+				fact = &it
+			}
+		}
+		if fact != nil {
+			t.Errorf("DW-021 fired despite a real Prisma @@index(..., type: Brin): %+v", fact)
+		}
+	})
+}
+
 // Every DW category must be in the sensor's baseline scope (ADR 0019), same
 // rationale as the DB-020 and prefix-redundant-index locks above: an
 // undeclared category can never be baselined or pruned.
@@ -337,6 +431,7 @@ func TestSensorDB_OwnedCategories_IncludesEveryDWCategory(t *testing.T) {
 		surface.CategoryDWNoTimeDimension,
 		surface.CategoryDWSCD2NoCurrencyIndex,
 		surface.CategoryDWMixedSCDStrategies,
+		surface.CategoryDWNoColumnarIndex,
 	} {
 		if !owned[string(want)] {
 			t.Errorf("OwnedCategories() missing %q", want)

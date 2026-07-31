@@ -139,6 +139,13 @@ const (
 	CategoryDWSCD2NoCurrencyIndex     Category = "dw-scd2-no-currency-index"     // DW-010: SCD-2 dimension with no index serving its currency lookup
 	CategoryDWMixedSCDStrategies      Category = "dw-mixed-scd-strategies"       // DW-011: SCD-1 and SCD-2 dimensions mixed in one schema
 
+	// CategoryDWNoColumnarIndex (DW-021, S3 of the RF-03 OLAP closure) — a
+	// fact-role table with no index using a recognized columnar/analytic
+	// access method (db.Index.Method). Same per-rule/one-category convention
+	// as the S2 family above; the DW-020 (partitioning, S4) category is not
+	// added here — that rule is not built yet.
+	CategoryDWNoColumnarIndex Category = "dw-fact-no-columnar-index" // DW-021: fact table with no recognized columnar/analytic index
+
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
 	CategoryDBNoTimestamps         Category = "db-no-timestamps"         // DB-052: missing audit timestamps

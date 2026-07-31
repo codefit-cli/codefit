@@ -82,6 +82,22 @@ func TestDW005_AnyUnprovenFactOrDimension_AbstainsWholeRule(t *testing.T) {
 	}
 }
 
+// TestDW021_UnprovenFactTable_Abstains proves the S3 thesis end to end: a
+// per-table StructureProven() gate abstains automatically on an unproven fact
+// table, with no dialect branch anywhere in dw021.go. This unproven table has
+// NO indexes at all (which would otherwise fire deterministically per
+// TestDW021_FactWithNoIndexesAtAll_Fires) — the dropped statement could have
+// been the very CREATE INDEX declaring its columnar index.
+func TestDW021_UnprovenFactTable_Abstains(t *testing.T) {
+	tb := unprovenDWTable("fact_sales")
+	s := &db.Schema{Tables: []db.Table{tb}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact}}
+	_, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-021")})
+	if len(surf) != 0 {
+		t.Errorf("DW-021 must abstain on an unproven fact table, got: %+v", surf)
+	}
+}
+
 func TestDW010_UnprovenSCD2Dimension_Abstains(t *testing.T) {
 	tb := unprovenDWTable("dim_product")
 	tb.Columns = []db.Column{{Name: "valid_to", Type: db.TypeDateTime}}

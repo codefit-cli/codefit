@@ -522,9 +522,10 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   any detected role — the identical shape still fires exactly as before this
   slice. Suppression is never silent: when items are withheld, the note
   records how many and on how many tables, plus the `database.paradigm: oltp`
-  escape hatch to see them. The DW-0xx columnar-index and partitioning rules
-  are **not yet built** (see Not covered, below); the star-schema/SCD half
-  landed in S2 — next entry.
+  escape hatch to see them. The DW-0xx partitioning rule is **not yet built**
+  (see Not covered, below); the star-schema/SCD half landed in S2 — next
+  entry — and the columnar/analytic-index check landed in S3 — the entry
+  after that.
 - **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
   S2, RF-03 OLAP closure).** Five rules reading the schema **plus** the S1
   paradigm/role classification. They reach **only** fact- and dimension-role
@@ -608,6 +609,64 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
     warehouse concept, so these rules can only classify a Prisma project whose
     models happen to be named `fact_`/`dim_`.
+- **Fact table missing a columnar/analytic index (DW-021, S3, RF-03 OLAP
+  closure).** A fact-role table with no index using a **recognized**
+  columnar/analytic access method. Pure **surface, never an affirmation**
+  (ADR 0017): whether the absence matters depends on the table's real size and
+  query pattern, which codefit cannot see from static DDL.
+  - **Vocabulary**, defined in exactly **one** place
+    (`dwrules.columnarIndexMethods`) so extending it is a vocabulary change
+    that never touches control flow: PostgreSQL contributes `brin` and `gin`;
+    T-SQL contributes `columnstore`, captured verbatim by the parser as of
+    index-method-capture (PR #79, `db.Index.Method`). MySQL contributes
+    **nothing** — its only index methods, `btree`/`hash`, are ordinary
+    row-store methods, not columnar ones, so there is **no** MySQL-specific
+    branch anywhere in this rule.
+  - **Gating, per table**, on `db.Table.StructureProven()` (ADR 0034/
+    db-model-completeness-contract) — the **same** pattern DW-001 already
+    uses, not DW-005/DW-011's whole-rule abstain, because DW-021 is a
+    per-table question. A statement that could have declared the very
+    columnar index this rule asks about — PostgreSQL's `ON ONLY` clause on a
+    partitioned parent table's own index, the standalone `CREATE
+    FULLTEXT/SPATIAL/XML/PRIMARY XML INDEX` forms, T-SQL's `CREATE
+    NONCLUSTERED COLUMNSTORE INDEX`, and MySQL's fourth `USING` position
+    (between the index name and `ON`) — already marks its table
+    `Complete=false` via the completeness contract's existing machinery (see
+    the SQL-DDL known limits below, item 7), so this **single**
+    `StructureProven()` gate abstains automatically on every one of those
+    forms, with **no** per-dialect branch in `dw021.go` itself. This closes
+    the S3 attempt this project shipped and then **froze at review**: the
+    frozen version answered from blindness on every input path because the
+    parser could not read index access methods at all; index-method-capture
+    fixed the parser floor first, and this rule is deliberately nothing more
+    than reading what the parser now provides.
+  - **Prisma is NOT zero-value**, unlike the sibling DW-001/002/005/010/011
+    family (whose blanket Prisma-zero-value note concerns
+    partitioning/materialized-view/warehouse-modelling concepts
+    `schema.prisma` has no syntax for at all): Prisma's own
+    `@@index([...], type: X)` syntax (the `extendedIndexes` preview feature)
+    **does** let a schema declare a columnar/analytic method, and the Prisma
+    provider captures it verbatim (lowercased) exactly like every other
+    `db.Index.Method` call site — a fact-role Prisma model with
+    `@@index([col], type: Brin)` genuinely suppresses this rule, proven
+    end to end through the real Prisma provider. T-SQL's `columnstore`
+    vocabulary word has no Prisma equivalent, so a Prisma project can only
+    ever satisfy DW-021 via `brin`/`gin`.
+  - **Dogfood status — stated plainly.** The positive and negative/trap fire
+    paths are proven **through the real parser**, not a hand-built
+    `db.Index` literal — real PostgreSQL DDL parsed by `sqlddl.New()` for the
+    plain-index positive and the `USING brin` negative, real T-SQL DDL parsed
+    under the SQLServer dialect for the `CREATE CLUSTERED COLUMNSTORE INDEX`
+    negative, and the real Prisma provider for both the no-`type:` positive
+    and the `type: Brin` negative — plus an end-to-end abstention proof
+    against a **real** genuinely-unrecognized shape (PostgreSQL's `ON ONLY`,
+    the same shape `internal/providers/sqlddl/testdata/
+    pg_constructed_unrecognized_index_forms.sql` already vendors) confirming
+    the table lands `StructureProven()=false` and DW-021 emits nothing for
+    it. No real vendored warehouse corpus is used for DW-021 specifically —
+    the same AdventureWorksDW naming/`ALTER … ADD CONSTRAINT` limits that
+    keep the whole DW-0xx family blind to that corpus (see above) apply here
+    too.
 
 ### Not covered (declared, not silent)
 
@@ -649,12 +708,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S2.**
+- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S3.**
   Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
-  **and** the star-schema/SCD checks — DW-001, DW-002, DW-005, DW-010, DW-011 —
-  **are now covered** (see above). What **remains** not covered: a
-  columnar/analytic-index check (**DW-021**, planned for S3) and a partitioning
-  check (**DW-020**, planned for S4). Neither fires today, under any dialect.
+  the star-schema/SCD checks (DW-001, DW-002, DW-005, DW-010, DW-011),
+  **and** the columnar/analytic-index check (**DW-021**) **are now covered**
+  (see above). What **remains** not covered: a partitioning check
+  (**DW-020**, planned for S4). It does not fire today, under any dialect.
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
@@ -662,9 +721,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   snake_case prefixes `fact_`/`dim_`/`stg_`/`mart_`, so a warehouse using
   **PascalCase Kimball naming** (`FactInternetSales`, `DimCustomer` — as
   Microsoft's own AdventureWorksDW does) classifies entirely as `unclassified`
-  and gets **no value** from any DW rule. That is a naming-vocabulary limit,
-  not a rule gap, and it is locked as a test against the vendored
-  AdventureWorksDW DDL rather than left silent.
+  and gets **no value** from any DW rule, DW-021 included. That is a
+  naming-vocabulary limit, not a rule gap, and it is locked as a test against
+  the vendored AdventureWorksDW DDL rather than left silent.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
