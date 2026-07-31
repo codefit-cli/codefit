@@ -4,8 +4,8 @@
       "Name": "actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 40
       },
       "Columns": [
         {
@@ -68,8 +68,8 @@
       "Name": "customer",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 103
       },
       "Columns": [
         {
@@ -227,8 +227,8 @@
       "Name": "address",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 138
       },
       "Columns": [
         {
@@ -350,8 +350,8 @@
       "Name": "rental",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 149
       },
       "Columns": [
         {
@@ -463,8 +463,8 @@
       "Name": "payment_p2022_01",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 181
       },
       "Columns": [
         {

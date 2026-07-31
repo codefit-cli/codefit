@@ -208,7 +208,16 @@ func (b *builder) triggerBody(st stmt) db.Body {
 	return routineBody(st)
 }
 
-func (b *builder) getTable(name string) *db.Table {
+// getTable returns the named table, creating it if this is the first
+// statement to reference it. pos anchors a NEWLY created table only — an
+// already-registered table keeps whatever position its FIRST reference gave
+// it (F1, 4R risk/reliability/resilience lens, corroborated + verified: this
+// reducer used to never set Table.Pos at all, so every unproven table's
+// routed surface item anchored on file:line "":0 — identical for every
+// unproven table in a project, collapsing their baseline fingerprints into
+// one. Matches the Prisma provider's own construction site
+// (prismaschema.go:145), which has always set Pos).
+func (b *builder) getTable(name string, pos db.Pos) *db.Table {
 	t := b.tables[name]
 	if t == nil {
 		// Complete starts true (N1, design §1-D1b): db.Table.Complete's zero
@@ -216,7 +225,7 @@ func (b *builder) getTable(name string) *db.Table {
 		// it explicitly or the whole DB dimension mutes itself on this
 		// provider. A table is demoted to Complete=false only when a later
 		// statement affecting it cannot be reduced (MarkUnproven).
-		t = &db.Table{Name: name, Complete: true}
+		t = &db.Table{Name: name, Pos: pos, Complete: true}
 		b.tables[name] = t
 		b.order = append(b.order, name)
 	}
@@ -253,11 +262,11 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 		// malformed body: still register the table, no columns, and record
 		// the drop (D2 site 3, design §2) — the parser could not read this
 		// table's constraint set at all.
-		t := b.getTable(name)
+		t := b.getTable(name, db.Pos{File: file, Line: st.line})
 		t.MarkUnproven(db.ReasonMalformedTableBody, st.text, db.Pos{File: file, Line: st.line})
 		return
 	}
-	t := b.getTable(name)
+	t := b.getTable(name, db.Pos{File: file, Line: st.line})
 	for _, p := range splitTopLevelParts(inner) {
 		line := st.line + strings.Count(st.text[:innerStart+p.off], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
@@ -441,7 +450,7 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: db.Pos{File: file, Line: st.line}})
 		return
 	}
-	t := b.getTable(normalizeName(m[1]))
+	t := b.getTable(normalizeName(m[1]), db.Pos{File: file, Line: st.line})
 	// offset of the action group within the statement, for per-action line numbers
 	actOff := strings.Index(st.text, m[2])
 	for _, p := range splitTopLevelParts(m[2]) {
@@ -541,7 +550,7 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		return
 	}
 	b.seenIndex[name] = true
-	t := b.getTable(normalizeName(m[4]))
+	t := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
 	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
 }
 

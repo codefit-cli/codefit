@@ -4,8 +4,8 @@
       "Name": "actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 7
       },
       "Columns": [
         {
@@ -81,8 +81,8 @@
       "Name": "film",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 17
       },
       "Columns": [
         {
@@ -171,8 +171,8 @@
       "Name": "film_actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 27
       },
       "Columns": [
         {

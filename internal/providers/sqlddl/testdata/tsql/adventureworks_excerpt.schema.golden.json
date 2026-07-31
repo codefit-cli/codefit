@@ -4,8 +4,8 @@
       "Name": "Customer",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 1
       },
       "Columns": [
         {
@@ -93,8 +93,8 @@
       "Name": "SalesOrderHeader",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 9
       },
       "Columns": [
         {
@@ -173,8 +173,8 @@
       "Name": "SalesOrderDetail",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 17
       },
       "Columns": [
         {
