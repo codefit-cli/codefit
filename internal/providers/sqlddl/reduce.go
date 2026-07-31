@@ -250,10 +250,24 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 	loc := reCreateTable.FindStringSubmatchIndex(st.text)
 	name := normalizeName(st.text[loc[4]:loc[5]])
 	ifNotExists := loc[2] != -1
-	if _, exists := b.tables[name]; exists {
-		// AJUSTE 1: an existing table + (implicit) IF NOT EXISTS → skip the WHOLE
-		// statement. The first CREATE wins; no Frankenstein merge.
-		_ = ifNotExists
+	if existing, exists := b.tables[name]; exists {
+		// AJUSTE 1: an existing table + explicit IF NOT EXISTS → skip the
+		// WHOLE statement silently. The first CREATE wins; no Frankenstein
+		// merge. This IS a declared, recognized skip (ADR 0018): the SQL
+		// itself says "only create if absent", so discarding the second
+		// declaration is genuinely safe.
+		//
+		// F3 (4R ledger, obs #1282): WITHOUT "IF NOT EXISTS", a second
+		// CREATE TABLE for the same normalized name is NOT a declared skip —
+		// it is a genuine anomaly (most commonly normalizeName stripping a
+		// schema qualifier so two DIFFERENT tables, e.g. public.users and
+		// audit.users, collapse into one name) whose real columns/
+		// constraints are silently discarded. That is unproven structure,
+		// recorded on the SURVIVING table so an absence-based rule does not
+		// affirm over data it never actually saw completely.
+		if !ifNotExists {
+			existing.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, db.Pos{File: file, Line: st.line})
+		}
 		return
 	}
 	openIdx := loc[1] - 1 // the '(' the regex ended on
