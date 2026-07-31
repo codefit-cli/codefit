@@ -198,7 +198,8 @@ func TestSensorDB_OwnedCategories_IncludesPrefixRedundantIndex(t *testing.T) {
 
 // S1 asserted that the paradigm assembly left the sensor's output
 // byte-identical, because dwrules.All() was empty. S2 broke that premise on
-// purpose: there are five real DW rules now. What SURVIVES the premise change
+// purpose: there are six real DW rules now (S2's five plus S3's DW-021).
+// What SURVIVES the premise change
 // is the property that actually mattered — a schema with NO warehouse-role
 // table must be completely untouched by the DW family, under EVERY valid
 // paradigm config value. happySchema (User/Post/NoKey) is exactly such a

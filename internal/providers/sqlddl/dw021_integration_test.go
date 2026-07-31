@@ -102,14 +102,12 @@ func TestDW021_RealPostgreSQLParser_BRINIndex_DoesNotFire(t *testing.T) {
 	}
 }
 
-// TestDW021_RealSQLServerParser_ColumnstoreIndex_DoesNotFire proves the
-// SEPARATE T-SQL vocabulary word end to end: a REAL CREATE CLUSTERED
-// COLUMNSTORE INDEX statement, parsed by the T-SQL dialect, must populate
-// Method="columnstore" and suppress DW-021 — no dialect branch in dw021.go
-// makes this work, only the shared vocabulary map reading what the real
-// parser captured.
-func TestDW021_RealSQLServerParser_ColumnstoreIndex_DoesNotFire(t *testing.T) {
-	const src = `
+// tsqlStarSchemaDDL is the shared T-SQL DDL for the columnstore
+// positive/negative pair below: a two-dimension star with fact_sales
+// carrying ONE extra statement (the index under test), injected via
+// indexStmt — the T-SQL counterpart of starSchemaDDL above.
+func tsqlStarSchemaDDL(indexStmt string) string {
+	return `
 CREATE TABLE [dbo].[dim_customer]([customer_id] [int] NOT NULL);
 GO
 CREATE TABLE [dbo].[dim_product]([product_id] [int] NOT NULL);
@@ -120,9 +118,19 @@ ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_customer] FOREIGN KEY ([custom
 GO
 ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_product] FOREIGN KEY ([product_id]) REFERENCES [dbo].[dim_product] ([product_id]);
 GO
-CREATE CLUSTERED COLUMNSTORE INDEX [cci_fact_sales] ON [dbo].[fact_sales];
+` + indexStmt + `
 GO
 `
+}
+
+// TestDW021_RealSQLServerParser_ColumnstoreIndex_DoesNotFire proves the
+// SEPARATE T-SQL vocabulary word end to end: a REAL CREATE CLUSTERED
+// COLUMNSTORE INDEX statement, parsed by the T-SQL dialect, must populate
+// Method="columnstore" and suppress DW-021 — no dialect branch in dw021.go
+// makes this work, only the shared vocabulary map reading what the real
+// parser captured.
+func TestDW021_RealSQLServerParser_ColumnstoreIndex_DoesNotFire(t *testing.T) {
+	src := tsqlStarSchemaDDL("CREATE CLUSTERED COLUMNSTORE INDEX [cci_fact_sales] ON [dbo].[fact_sales];")
 	p := sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer()))
 	s, err := p.ParseSchema([]providers.SourceFile{{Path: "schema.sql", Content: []byte(src)}})
 	if err != nil {
@@ -140,6 +148,46 @@ GO
 	_, surf := dwrules.Run(s, &c)
 	if n := countDW021(surf); n != 0 {
 		t.Errorf("DW-021 items for fact_sales = %d, want 0 (real T-SQL CLUSTERED COLUMNSTORE INDEX)", n)
+	}
+}
+
+// TestDW021_RealBlindShape_NonclusteredColumnstore_Abstains is S2's
+// requested lock (4R review READ-006): dw021.go's doc comment names FOUR
+// forms that mark a table unproven — ON ONLY, standalone FULLTEXT/SPATIAL/
+// XML/PRIMARY XML, T-SQL's NONCLUSTERED COLUMNSTORE, and MySQL's pre-ON
+// USING position — but only the first had an executable lock before this
+// test. Unlike its CLUSTERED counterpart (recognized by
+// reCreateColumnstoreIndex, index-method-capture PR #79), a NONCLUSTERED
+// COLUMNSTORE index carries an EXPLICIT column list — a materially
+// different statement shape neither reCreateIndex (which requires the
+// keyword "index" immediately after an optional CLUSTERED/NONCLUSTERED
+// qualifier, not "columnstore") nor reCreateColumnstoreIndex (whose own
+// optional qualifier is CLUSTERED only, never NONCLUSTERED) recognizes — so
+// it is still genuinely unread, and this test proves the claim by
+// construction rather than leaving it as prose.
+func TestDW021_RealBlindShape_NonclusteredColumnstore_Abstains(t *testing.T) {
+	src := tsqlStarSchemaDDL("CREATE NONCLUSTERED COLUMNSTORE INDEX [ncci_fact_sales] ON [dbo].[fact_sales] ([amount]);")
+	p := sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer()))
+	s, err := p.ParseSchema([]providers.SourceFile{{Path: "schema.sql", Content: []byte(src)}})
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	fact := tableNamed(t, s, "fact_sales")
+	if fact.StructureProven() {
+		t.Fatalf("fact_sales.StructureProven() = true, want false — NONCLUSTERED COLUMNSTORE is a genuinely " +
+			"unrecognized CREATE INDEX shape (see the SQL-DDL known limits in dbcoverage.go) and must mark " +
+			"the table unproven")
+	}
+
+	c := paradigm.Detect(s)
+	if got := c.Roles["fact_sales"]; got != paradigm.RoleFact {
+		t.Fatalf("fact_sales role = %q, want %q", got, paradigm.RoleFact)
+	}
+
+	_, surf := dwrules.Run(s, &c)
+	if n := countDW021(surf); n != 0 {
+		t.Errorf("DW-021 items for fact_sales = %d, want 0 — must ABSTAIN on an unproven table, not fire on "+
+			"absence over a dropped statement", n)
 	}
 }
 

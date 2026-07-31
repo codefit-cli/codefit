@@ -9,10 +9,11 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
-// D4 (design SS4) — the five DW rules ABSTAIN, per table, on an unproven
-// table; DW-005 and DW-011 are SCHEMA-LEVEL census judgments and therefore
-// abstain the WHOLE rule when ANY relevant table is unproven — a per-table
-// continue would silently shrink the census and still emit, a worse lie.
+// D4 (design SS4) — all six DW rules (DW-001/002/005/010/011/021) ABSTAIN,
+// per table, on an unproven table; DW-005 and DW-011 are SCHEMA-LEVEL census
+// judgments and therefore abstain the WHOLE rule when ANY relevant table is
+// unproven — a per-table continue would silently shrink the census and
+// still emit, a worse lie.
 
 func unprovenDWTable(name string) db.Table {
 	tb := db.Table{Name: name, Pos: db.Pos{File: "x.sql", Line: 1}}

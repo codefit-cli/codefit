@@ -1,6 +1,7 @@
 package dwrules
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -15,10 +16,14 @@ import (
 // db.Index.Method, which is proven separately by REAL-parser tests in
 // internal/providers/sqlddl (dw021_integration_test.go) — the positive fire
 // path (no columnar index, real PostgreSQL DDL), the negative/trap path (a
-// real `USING brin`/`USING gin`/T-SQL `columnstore` index), and the
-// end-to-end abstention over a real genuinely-unrecognized index shape
-// (`ON ONLY`), per the task's "at minimum one real-parser test for each fire
-// path" requirement.
+// real `USING brin` index, and separately a real T-SQL `columnstore`
+// index), and the end-to-end abstention over a real genuinely-unrecognized
+// index shape (`ON ONLY`), per the task's "at minimum one real-parser test
+// for each fire path" requirement. `gin` is DELIBERATELY excluded from the
+// vocabulary (4R review, coordinator round, C1) — see dw021.go's doc
+// comment for why — so it has NO real-parser trap test; the hand-built
+// TestDW021_FactWithGINIndex_Fires below locks the opposite direction
+// instead.
 
 func run021(s *db.Schema, c *paradigm.Classification) []findings.SurfaceItem {
 	fs, surf := dw021{}.Check(s, c)
@@ -88,15 +93,21 @@ func TestDW021_FactWithBRINIndex_DoesNotFire(t *testing.T) {
 	}
 }
 
-// THE TRAP (PostgreSQL): GIN is the other recognized PostgreSQL method.
-func TestDW021_FactWithGINIndex_DoesNotFire(t *testing.T) {
+// BOUNDARY (C1, 4R review — architect decision): gin is DELIBERATELY
+// excluded from the vocabulary despite being a real PostgreSQL access
+// method, because no coherent "columnar/analytic" criterion admits gin
+// while rejecting its siblings gist/spgist (see dw021.go's doc comment). A
+// fact table whose only index is GIN must therefore FIRE, exactly like any
+// other non-columnar method — the inverse of what this test asserted before
+// C1. (Renamed from TestDW021_FactWithGINIndex_DoesNotFire.)
+func TestDW021_FactWithGINIndex_Fires(t *testing.T) {
 	tb := dwtbl("fact_sales", dwcol("amount", db.TypeFloat))
 	tb.Indexes = []db.Index{dwidx("gin", "amount")}
 	s := &db.Schema{Tables: []db.Table{tb}}
 	c := cls(paradigm.ParadigmOLAP, map[string]paradigm.Role{"fact_sales": paradigm.RoleFact})
 
-	if got := itemsOfCategory(run021(s, c), surface.CategoryDWNoColumnarIndex); len(got) != 0 {
-		t.Errorf("DW-021 items = %d, want 0 (a GIN index is columnar)", len(got))
+	if got := itemsOfCategory(run021(s, c), surface.CategoryDWNoColumnarIndex); len(got) != 1 {
+		t.Errorf("DW-021 items = %d, want 1 (gin is deliberately NOT a recognized columnar method)", len(got))
 	}
 }
 
@@ -141,6 +152,57 @@ func TestDW021_FactWithMixedIndexes_DoesNotFire(t *testing.T) {
 	}
 }
 
+// W1 (4R review, REL-002): a fact table keyed ONLY by a primary key, with no
+// secondary index at all, still has an index-like structure — db.IndexLike's
+// "the PK counts as an implicit index" convention, already shared by
+// DB-001/DB-010/DB-011b/DW-010 — so has_any_index must read true and the
+// signal must MENTION the PK, never claim "(none)". The fire decision itself
+// is unchanged: a PK carries no Method, so it can never satisfy the
+// columnar/analytic vocabulary.
+func TestDW021_FactWithOnlyPrimaryKey_FiresAndReportsThePK(t *testing.T) {
+	tb := dwtbl("fact_sales", dwcol("sale_id", db.TypeInt))
+	tb.PrimaryKey = []string{"sale_id"}
+	s := &db.Schema{Tables: []db.Table{tb}}
+	c := cls(paradigm.ParadigmOLAP, map[string]paradigm.Role{"fact_sales": paradigm.RoleFact})
+
+	got := itemsOfCategory(run021(s, c), surface.CategoryDWNoColumnarIndex)
+	if len(got) != 1 {
+		t.Fatalf("DW-021 items = %d, want 1 (a PK carries no columnar method, so it still fires)", len(got))
+	}
+	if !got[0].StructuralFacts["has_any_index"] {
+		t.Error("has_any_index must be true — the primary key IS an index-like structure (db.IndexLike's convention)")
+	}
+	if v := signalValue(got[0], "existing_index_methods"); v == "(none)" || v == "" {
+		t.Errorf("existing_index_methods signal = %q, must mention the primary key rather than claim there is none", v)
+	}
+}
+
+// S3 (4R review, RES-001): describeIndexMethods must cap its rendered list,
+// the same convention dbrules.routeUnprovenTable already uses for its own
+// unreduced-statement signal, so a pathological table cannot balloon a
+// single surface item unboundedly.
+func TestDW021_ManyIndexes_MethodsListIsCapped(t *testing.T) {
+	tb := dwtbl("fact_sales", dwcol("amount", db.TypeFloat))
+	for i := 0; i < columnarIndexSignalCap+2; i++ {
+		tb.Indexes = append(tb.Indexes, dwidx("btree", "amount"))
+	}
+	s := &db.Schema{Tables: []db.Table{tb}}
+	c := cls(paradigm.ParadigmOLAP, map[string]paradigm.Role{"fact_sales": paradigm.RoleFact})
+
+	got := itemsOfCategory(run021(s, c), surface.CategoryDWNoColumnarIndex)
+	if len(got) != 1 {
+		t.Fatalf("DW-021 items = %d, want 1", len(got))
+	}
+	v := signalValue(got[0], "existing_index_methods")
+	if !strings.Contains(v, "more") {
+		t.Errorf("existing_index_methods signal = %q, want it capped with an \"N more\" suffix "+
+			"(%d indexes present, cap is %d)", v, columnarIndexSignalCap+2, columnarIndexSignalCap)
+	}
+	if got := strings.Count(v, "btree"); got != columnarIndexSignalCap {
+		t.Errorf("rendered %d btree entries, want exactly the cap (%d)", got, columnarIndexSignalCap)
+	}
+}
+
 // Only FACT-role tables are evaluated — a dimension with no columnar index is
 // none of DW-021's business.
 func TestDW021_NonFactRole_EmitsNothing(t *testing.T) {
@@ -160,6 +222,34 @@ func TestDW021_NoFactRoleTables_EmitsNothing(t *testing.T) {
 
 	if got := run021(s, c); len(got) != 0 {
 		t.Errorf("DW-021 items = %d, want 0 (no fact-role table in the schema)", len(got))
+	}
+}
+
+// S1 (4R review READ-005): ReasonToReview's vocabulary mention must be
+// DERIVED from columnarIndexMethods, not restated by hand — otherwise the
+// doc comment's "defined ONCE" claim is false for the agent-facing text.
+// Locked structurally (every current vocabulary word present, the
+// deliberately-excluded gin absent) rather than as an exact-string match, so
+// a future vocabulary change updates this test's premise without editing its
+// assertions.
+func TestDW021_ReasonToReview_DerivesVocabularyFromTheMap(t *testing.T) {
+	tb := dwtbl("fact_sales", dwcol("amount", db.TypeFloat))
+	s := &db.Schema{Tables: []db.Table{tb}}
+	c := cls(paradigm.ParadigmOLAP, map[string]paradigm.Role{"fact_sales": paradigm.RoleFact})
+
+	got := itemsOfCategory(run021(s, c), surface.CategoryDWNoColumnarIndex)
+	if len(got) != 1 {
+		t.Fatalf("DW-021 items = %d, want 1", len(got))
+	}
+	reason := got[0].ReasonToReview
+	for method := range columnarIndexMethods {
+		if !strings.Contains(reason, method) {
+			t.Errorf("ReasonToReview = %q, missing vocabulary word %q — it must be derived from "+
+				"columnarIndexMethods, not restated by hand", reason, method)
+		}
+	}
+	if strings.Contains(reason, "gin") {
+		t.Errorf("ReasonToReview = %q, must NOT mention gin — it is deliberately excluded from the vocabulary", reason)
 	}
 }
 

@@ -422,7 +422,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   block) does not. **Two-way disposition, no rule signature change (ADR 0015):**
   DB-050 (the dimension's one affirmation) **routes** an unproven table to the
   `db-table-structure-unproven` surface category instead of affirming; DB-001,
-  DB-052, and the five DW-0xx rules **abstain silently** on an unproven table (a
+  DB-052, and all six DW-0xx rules (DW-001/002/005/010/011/021) **abstain
+  silently** on an unproven table (a
   dropped statement might have declared the very index/column/key each rule is
   asking about). DW-005 and DW-011 are schema-level census judgments and abstain
   the **whole rule** — never a per-table skip, which would silently shrink the
@@ -616,12 +617,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   query pattern, which codefit cannot see from static DDL.
   - **Vocabulary**, defined in exactly **one** place
     (`dwrules.columnarIndexMethods`) so extending it is a vocabulary change
-    that never touches control flow: PostgreSQL contributes `brin` and `gin`;
-    T-SQL contributes `columnstore`, captured verbatim by the parser as of
-    index-method-capture (PR #79, `db.Index.Method`). MySQL contributes
-    **nothing** — its only index methods, `btree`/`hash`, are ordinary
-    row-store methods, not columnar ones, so there is **no** MySQL-specific
-    branch anywhere in this rule.
+    that never touches control flow — including its own agent-facing prose,
+    which `ReasonToReview` derives from this same map rather than restating
+    by hand: PostgreSQL contributes `brin`; T-SQL contributes `columnstore`,
+    captured verbatim by the parser as of index-method-capture (PR #79,
+    `db.Index.Method`). MySQL contributes **nothing** — its only index
+    methods, `btree`/`hash`, are ordinary row-store methods, not columnar
+    ones, so there is **no** MySQL-specific branch anywhere in this rule.
+    PostgreSQL's `gin`/`gist`/`spgist` are **deliberately excluded** too (4R
+    review, coordinator round — an architect decision, not an oversight):
+    they are specialized lookup structures over particular data shapes
+    (`gin`: full-text/array/jsonb containment; `gist`/`spgist`:
+    geometric/range/nearest-neighbor search), not column-store or
+    analytic-scan structures, and are siblings over **overlapping**
+    workloads with no coherent "columnar/analytic" line separating one from
+    the other two — admitting `gin` while rejecting `gist`/`spgist` would
+    have been an arbitrary cut, so the rule admits **none** of the three.
   - **Gating, per table**, on `db.Table.StructureProven()` (ADR 0034/
     db-model-completeness-contract) — the **same** pattern DW-001 already
     uses, not DW-005/DW-011's whole-rule abstain, because DW-021 is a
@@ -629,17 +640,30 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     columnar index this rule asks about — PostgreSQL's `ON ONLY` clause on a
     partitioned parent table's own index, the standalone `CREATE
     FULLTEXT/SPATIAL/XML/PRIMARY XML INDEX` forms, T-SQL's `CREATE
-    NONCLUSTERED COLUMNSTORE INDEX`, and MySQL's fourth `USING` position
-    (between the index name and `ON`) — already marks its table
-    `Complete=false` via the completeness contract's existing machinery (see
-    the SQL-DDL known limits below, item 7), so this **single**
-    `StructureProven()` gate abstains automatically on every one of those
-    forms, with **no** per-dialect branch in `dw021.go` itself. This closes
-    the S3 attempt this project shipped and then **froze at review**: the
-    frozen version answered from blindness on every input path because the
-    parser could not read index access methods at all; index-method-capture
-    fixed the parser floor first, and this rule is deliberately nothing more
-    than reading what the parser now provides.
+    NONCLUSTERED COLUMNSTORE INDEX` (which, unlike its `CLUSTERED`
+    counterpart, carries an explicit column list — real-DDL-locked, not left
+    as prose), and MySQL's fourth `USING` position (between the index name
+    and `ON`) — already marks its table `Complete=false` via the
+    completeness contract's existing machinery (see the SQL-DDL known limits
+    below, item 7), so this **single** `StructureProven()` gate abstains
+    automatically on every one of those forms, with **no** per-dialect
+    branch in `dw021.go` itself. This closes the S3 attempt this project
+    shipped and then **froze at review**: the frozen version answered from
+    blindness on every input path because the parser could not read index
+    access methods at all; index-method-capture fixed the parser floor
+    first, and this rule is deliberately nothing more than reading what the
+    parser now provides.
+  - **Signals** (`existing_index_methods`, `has_any_index`) report **every**
+    index-like structure on the table, not just `db.Index` entries: a table
+    keyed only by a **primary key**, with no secondary index at all, still
+    reports `has_any_index=true` and names the PK in the signal (a PK
+    carries no `Method` of its own, so it never satisfies the vocabulary and
+    never changes the fire decision, but it **is** an index-like structure
+    everywhere else in this project — `db.IndexLike`'s shared convention —
+    and this rule's own signals must not silently disagree). The rendered
+    list is **capped**, the same convention `dbrules.routeUnprovenTable`
+    already uses for its own bounded signal, so a pathological table cannot
+    balloon a single item unboundedly.
   - **Prisma is NOT zero-value**, unlike the sibling DW-001/002/005/010/011
     family (whose blanket Prisma-zero-value note concerns
     partitioning/materialized-view/warehouse-modelling concepts
@@ -651,22 +675,34 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `@@index([col], type: Brin)` genuinely suppresses this rule, proven
     end to end through the real Prisma provider. T-SQL's `columnstore`
     vocabulary word has no Prisma equivalent, so a Prisma project can only
-    ever satisfy DW-021 via `brin`/`gin`.
+    ever satisfy DW-021 via `brin`.
   - **Dogfood status — stated plainly.** The positive and negative/trap fire
     paths are proven **through the real parser**, not a hand-built
     `db.Index` literal — real PostgreSQL DDL parsed by `sqlddl.New()` for the
     plain-index positive and the `USING brin` negative, real T-SQL DDL parsed
     under the SQLServer dialect for the `CREATE CLUSTERED COLUMNSTORE INDEX`
     negative, and the real Prisma provider for both the no-`type:` positive
-    and the `type: Brin` negative — plus an end-to-end abstention proof
-    against a **real** genuinely-unrecognized shape (PostgreSQL's `ON ONLY`,
-    the same shape `internal/providers/sqlddl/testdata/
-    pg_constructed_unrecognized_index_forms.sql` already vendors) confirming
-    the table lands `StructureProven()=false` and DW-021 emits nothing for
-    it. No real vendored warehouse corpus is used for DW-021 specifically —
-    the same AdventureWorksDW naming/`ALTER … ADD CONSTRAINT` limits that
-    keep the whole DW-0xx family blind to that corpus (see above) apply here
-    too.
+    and the `type: Brin` negative — plus **two** end-to-end abstention proofs
+    against **real** genuinely-unrecognized shapes (PostgreSQL's `ON ONLY`,
+    and T-SQL's `CREATE NONCLUSTERED COLUMNSTORE INDEX` — the same shapes
+    `internal/providers/sqlddl/testdata/
+    pg_constructed_unrecognized_index_forms.sql` and
+    `dw021_integration_test.go` exercise) confirming the table lands
+    `StructureProven()=false` and DW-021 emits nothing for it. No real
+    vendored warehouse corpus is used for DW-021's dogfood **in this
+    repository** — the same AdventureWorksDW naming/`ALTER … ADD CONSTRAINT`
+    limits that keep the whole DW-0xx family blind to that corpus (see
+    above) apply here too — but that is a statement about what this
+    repository vendors, **not** a claim that no such corpus exists: a
+    separate empirical yield measurement (4R review + yield measurement,
+    coordinator round) surveyed 19 real public warehouse schemas (353
+    tables, 273 FKs) and found DW-021 fires unmodified on 3 of them — the
+    **only** DW-0xx rule that fires on unmodified real DDL; none of the five
+    S2 rules do. That measurement's corpus is not vendored here (a future
+    slice's job, not this one's), so DW-021's own test suite still proves
+    its fire paths through constructed DDL, per the dogfood status above —
+    but the coverage gap is honestly scoped to "not vendored", never "does
+    not exist".
 
 ### Not covered (declared, not silent)
 
