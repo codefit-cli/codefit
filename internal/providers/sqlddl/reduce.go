@@ -32,7 +32,7 @@ func newBuilder(dialect *Dialect) *builder {
 }
 
 func (b *builder) schema() *db.Schema {
-	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs, Unreduced: b.unreduced}
+	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs, Unreduced: b.unreduced, Dialect: b.dialect.Name}
 	for _, name := range b.order {
 		if t := b.tables[name]; t != nil {
 			s.Tables = append(s.Tables, *t)
@@ -43,8 +43,23 @@ func (b *builder) schema() *db.Schema {
 
 var (
 	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
-	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
-	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+\w+\s*)?\(([^)]*)\)`)
+	reAlterTable = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
+
+	// reCreateIndex submatches: 1=UNIQUE, 2=IF NOT EXISTS, 3=index name,
+	// 4=table name, 5=method (S3, db-olap-rules — the "USING <method>" clause,
+	// now CAPTURING so it reaches db.Index.Method; was non-capturing and
+	// discarded before), 6=column list. This is NOT end-anchored, so it never
+	// FAILS to match on trailing syntax it does not model (a partial index's
+	// WHERE, an INCLUDE clause, a tablespace) — that trailing text is simply
+	// ignored, a declared skip (ADR 0034 §2.4), not incompleteness.
+	//
+	// DECLARED LIMIT: this only captures the PRE-column-list "USING <method>"
+	// position (PostgreSQL's grammar). MySQL's CREATE INDEX also allows
+	// "USING BTREE|HASH" in a SECOND position, an index_option AFTER the
+	// column list, which this regex does not reach at all — see
+	// db.Index.Method's doc comment and DW-021, which abstains on
+	// Schema.Dialect=="mysql" rather than answer from that blindness.
+	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+(\w+)\s*)?\(([^)]*)\)`)
 	reView        = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
 	reRoutine     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
 	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
@@ -590,7 +605,12 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		// applyAlterTable's phantom-creation case above.
 		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
 	}
-	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
+	t.Indexes = append(t.Indexes, db.Index{
+		Pos:     db.Pos{File: file, Line: st.line},
+		Columns: splitIdents(m[6]),
+		Unique:  unique,
+		Method:  strings.ToLower(m[5]),
+	})
 }
 
 // --- small parse helpers ---

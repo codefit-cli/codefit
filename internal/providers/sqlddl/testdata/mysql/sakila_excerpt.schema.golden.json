@@ -70,7 +70,8 @@
           "Columns": [
             "last_name"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": ""
         }
       ],
       "Complete": true,
@@ -253,7 +254,8 @@
           "Columns": [
             "film_id"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": ""
         }
       ],
       "Complete": true,
@@ -264,5 +266,6 @@
   "Views": null,
   "Procedures": null,
   "Triggers": null,
-  "Unreduced": null
+  "Unreduced": null,
+  "Dialect": "mysql"
 }
