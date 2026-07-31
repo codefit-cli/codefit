@@ -668,7 +668,32 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   cleanly — this fabrication path is now recognized at its source and converted
   into a recorded drop exactly like the three shapes above; it does not gain new
   parsing support, it stops inventing data. Locked in
-  `internal/providers/sqlddl/fabrication_test.go`.
+  `internal/providers/sqlddl/fabrication_test.go`. (7) **Several `CREATE
+  INDEX`-family statement shapes are not parsed** by `reCreateIndex` either, so
+  the indexes they declare never reach the model: an anonymous PostgreSQL index
+  (`CREATE INDEX ON t (...)`, no index name); PostgreSQL's `ON ONLY` clause on a
+  partitioned parent table's own index; and the standalone `CREATE [UNIQUE]
+  [CLUSTERED|NONCLUSTERED] [COLUMNSTORE|FULLTEXT|SPATIAL|[PRIMARY] XML] INDEX`
+  forms — T-SQL's **ordinary** `CLUSTERED`/`NONCLUSTERED` index statement chief
+  among them, which is **not** an exotic shape, it is T-SQL's everyday
+  standalone index syntax. These shapes are **still not parsed** (deliberately
+  deferred parser-shape debt, `parser-records-unrecognized-drops`; teaching
+  `reCreateIndex` to actually read them is a named follow-up, not implemented
+  here) — but, exactly like (6) above, the drop is **no longer silent**:
+  `apply()`'s `default:` branch recognizes the `CREATE INDEX`-shaped head and
+  marks the table's structural completeness (`db.Table.Complete=false`, ADR
+  0034), attributing the drop to its named table when the statement's `ON` (or
+  `ON ONLY`) clause resolves one, or to `Schema.Unreduced` when it does not (a
+  wrong attribution is worse than none). On an ordinary SQL Server schema this
+  means **every** table carrying a plain `CLUSTERED`/`NONCLUSTERED` index
+  becomes `Complete=false` and DB-050 **routes** it instead of affirming — the
+  honest cost of this fix, stated plainly rather than softened, and it
+  amplifies schema-wide through `paradigm.Classification.Unprovable` (one
+  incomplete table anywhere marks every **other** recognized-prefix
+  `fact_`/`dim_`/`stg_`/`mart_` demotion in the same schema unprovable too, not
+  just the demoted table itself). Locked in
+  `internal/providers/sqlddl/unrecognized_index_form_test.go` and
+  `internal/providers/sqlddl/tsql_ordinary_index_completeness_test.go`.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
