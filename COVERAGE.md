@@ -439,6 +439,40 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (Pagila's `film.fulltext` phantom index, and the closed "`ADD  CONSTRAINT`"
   double-space fabrication, both documented below) reports `Complete=true`
   regardless; that class needs its own, separate control.
+- **Index access method (`db.Index.Method`, `index-method-capture`).** Every
+  index the schema-parsing providers read now carries its **declared** access
+  method/kind when the source states one, lowercased at every capture site for
+  one convention across dialects: PostgreSQL's `USING <method>` (**both**
+  grammar positions the parser reads — before the column list, e.g.
+  `CREATE INDEX ix ON t USING gin (col)`, and MySQL's **different**
+  post-column-list position, `CREATE INDEX ix ON t (col) USING BTREE|HASH`);
+  T-SQL's `CLUSTERED`/`NONCLUSTERED` ordinary-index kind; and T-SQL's
+  `CREATE [CLUSTERED] COLUMNSTORE INDEX` kind, captured unconditionally as
+  `"columnstore"` (the `CLUSTERED` qualifier is that statement's own default
+  when omitted, so it carries no extra information beyond "this is a
+  columnstore index") — its `Columns` is left **empty**, never synthesized,
+  because a clustered columnstore index names no column in its own grammar
+  (it implicitly covers every column) and inventing one would misrepresent
+  what the source actually said. Prisma's `@@index(..., type: X)` argument is
+  captured the same way — **deliberately not validated** against any
+  codefit-maintained vocabulary, since Prisma's own accepted set of index
+  types has not been verified against every provider this project supports;
+  whatever the schema text declares is captured verbatim, only lowercased.
+  Empty means "no access method declared in source" — the same
+  empty-means-none convention as `Table.DBName` — and is **never** defaulted
+  to a guessed value like `"btree"`. This closes **two structurally different**
+  classes of parser blindness: PostgreSQL's anonymous index and T-SQL's
+  `CLUSTERED`/`NONCLUSTERED`/`COLUMNSTORE` forms were previously **dropped
+  entirely** — a "discard" class the completeness contract (ADR 0034) already
+  covered honestly by marking the table unproven; this slice teaches the
+  parser to actually **read** them, so the abstention disappears rather than
+  staying reported. MySQL's post-column-list `USING` and Prisma's `type:`
+  argument were the **opposite** class: the statement parsed successfully but
+  the value was silently discarded — an "omission" the completeness contract
+  structurally cannot catch at all, because nothing was ever dropped to
+  record; this slice closes that gap by actually extracting the value
+  instead. See the SQL-DDL known limits below (item 7) for the narrower set of
+  `CREATE INDEX`-family shapes still genuinely unread after this slice.
 - **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
   tables (S1, RF-03 OLAP closure).** codefit computes a schema's **paradigm**
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
@@ -668,32 +702,37 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   cleanly — this fabrication path is now recognized at its source and converted
   into a recorded drop exactly like the three shapes above; it does not gain new
   parsing support, it stops inventing data. Locked in
-  `internal/providers/sqlddl/fabrication_test.go`. (7) **Several `CREATE
-  INDEX`-family statement shapes are not parsed** by `reCreateIndex` either, so
-  the indexes they declare never reach the model: an anonymous PostgreSQL index
-  (`CREATE INDEX ON t (...)`, no index name); PostgreSQL's `ON ONLY` clause on a
-  partitioned parent table's own index; and the standalone `CREATE [UNIQUE]
-  [CLUSTERED|NONCLUSTERED] [COLUMNSTORE|FULLTEXT|SPATIAL|[PRIMARY] XML] INDEX`
-  forms — T-SQL's **ordinary** `CLUSTERED`/`NONCLUSTERED` index statement chief
-  among them, which is **not** an exotic shape, it is T-SQL's everyday
-  standalone index syntax. These shapes are **still not parsed** (deliberately
-  deferred parser-shape debt, `parser-records-unrecognized-drops`; teaching
-  `reCreateIndex` to actually read them is a named follow-up, not implemented
-  here) — but, exactly like (6) above, the drop is **no longer silent**:
-  `apply()`'s `default:` branch recognizes the `CREATE INDEX`-shaped head and
-  marks the table's structural completeness (`db.Table.Complete=false`, ADR
-  0034), attributing the drop to its named table when the statement's `ON` (or
-  `ON ONLY`) clause resolves one, or to `Schema.Unreduced` when it does not (a
-  wrong attribution is worse than none). On an ordinary SQL Server schema this
-  means **every** table carrying a plain `CLUSTERED`/`NONCLUSTERED` index
-  becomes `Complete=false` and DB-050 **routes** it instead of affirming — the
-  honest cost of this fix, stated plainly rather than softened, and it
-  amplifies schema-wide through `paradigm.Classification.Unprovable` (one
-  incomplete table anywhere marks every **other** recognized-prefix
-  `fact_`/`dim_`/`stg_`/`mart_` demotion in the same schema unprovable too, not
-  just the demoted table itself). Locked in
-  `internal/providers/sqlddl/unrecognized_index_form_test.go` and
-  `internal/providers/sqlddl/tsql_ordinary_index_completeness_test.go`.
+  `internal/providers/sqlddl/fabrication_test.go`. (7) **Narrowed** as of
+  `index-method-capture`, 2026-07-31: `reCreateIndex` now **does** parse an
+  anonymous PostgreSQL index (`CREATE INDEX ON t (...)`, no index name —
+  PostgreSQL generates the name), T-SQL's ordinary `CREATE [UNIQUE]
+  [CLUSTERED|NONCLUSTERED] INDEX` form (T-SQL's everyday standalone index
+  syntax, not an exotic shape), and T-SQL's `CREATE [CLUSTERED] COLUMNSTORE
+  INDEX` (as its own branch, since that specific shape carries no column list
+  at all) — all three now populate `db.Index.Method` (see the Reasoning entry
+  above) instead of dropping the statement. What **still** is not parsed, and
+  still marks its table unproven exactly as described below: PostgreSQL's
+  `ON ONLY` clause on a partitioned parent table's own index; the standalone
+  `CREATE FULLTEXT|SPATIAL|XML|PRIMARY XML INDEX` statement forms (distinct
+  from the inline/`ADD` shorthand this package already reads elsewhere); and
+  `CREATE NONCLUSTERED COLUMNSTORE INDEX` — unlike its `CLUSTERED`
+  counterpart, a nonclustered columnstore index **does** carry an explicit
+  column list, a materially different shape from the one this slice closed,
+  and is deliberately left for a future slice rather than folded in here.
+  These remaining shapes are still deferred parser-shape debt
+  (`parser-records-unrecognized-drops`, 2026-07-31) — but, exactly like (6)
+  above, the drop is **not silent**: `apply()`'s `default:` branch recognizes
+  the `CREATE INDEX`-shaped head and marks the table's structural completeness
+  (`db.Table.Complete=false`, ADR 0034), attributing the drop to its named
+  table when the statement's `ON` (or `ON ONLY`) clause resolves one, or to
+  `Schema.Unreduced` when it does not (a wrong attribution is worse than
+  none), and amplifies schema-wide through `paradigm.Classification.Unprovable`
+  exactly as before. Locked in
+  `internal/providers/sqlddl/unrecognized_index_form_test.go` (the still
+  unrecognized forms) and
+  `internal/providers/sqlddl/tsql_ordinary_index_completeness_test.go` (the
+  now-recognized T-SQL `CLUSTERED`/`NONCLUSTERED` form, deliberately flipped
+  to its opposite, now-correct outcome).
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
