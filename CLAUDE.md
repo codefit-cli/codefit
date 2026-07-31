@@ -77,6 +77,26 @@ Siempre se informan las consecuencias.** Es transversal a todo el diseño:
 - codefit **se audita a sí mismo** (ver más abajo): el código sin tests será
   detectado por su propio sensor de tests. Predicamos con el ejemplo.
 
+#### Un test verde no controla nada hasta que se lo hizo fallar a propósito
+
+Correr, pasar y asertar **todavía no es controlar**. Un fixture que cortocircuita
+antes de llegar a la rama que se está probando queda verde para siempre sin
+proteger nada.
+
+- **Probar cada test por MUTACIÓN**: romper el comportamiento exacto que el test
+  dice proteger → verlo **fallar** → restaurar → verlo pasar. Dejar las dos
+  corridas escritas donde las vea quien revise (mensaje del commit o del PR).
+- **La forma que más se repite: el fixture armado a mano sostiene valores que el
+  camino de producción NO puede producir.** Un `db.Table` al que el test le pone
+  una `Pos` que el reducer real nunca setea, por ejemplo. El test lockea una
+  realidad que no existe y el defecto queda invisible para la suite entera.
+  Preferir siempre tests que manejen el parser/sensor REAL sobre structs armados
+  a mano.
+- Pregunta de bolsillo para cualquier test: **"¿qué tendría que romperse para
+  que esto falle?"** Si la respuesta es "nada", es un adorno, no un candado.
+- Aplica también al trabajo delegado: **"los tests pasan" describe una suite, no
+  un control.** Exigir la mutación y su salida.
+
 ### SDD (Specification-Driven Development)
 
 - Cada componente nuevo arranca con una **mini-spec antes de codear**: qué hace,
@@ -95,6 +115,41 @@ plan y esperar confirmación.** No avanzar a implementación de un componente
 nuevo sin que el enfoque esté acordado.
 
 ---
+
+## Disciplina de verificación (OBLIGATORIA)
+
+La sección de documentación de más abajo cubre **no mentir en los docs**. Ésta
+cubre algo distinto y previo: **saber si algo realmente corrió**. Cada regla acá
+viene de un fallo real de este proyecto, no de un hipotético. **La confianza no
+es evidencia.**
+
+- **Una afirmación sobre ejecución exige ejecución.** Si una oración dice que
+  algo corrió, pasó, compiló o dio verde, hay que correr exactamente eso, en
+  exactamente ese estado, y leer la salida. Esto incluye los artefactos escritos:
+  mensajes de commit, cuerpos de PR, comentarios y docs son **afirmaciones**.
+  "Los tests pasan" es mentira si ese árbol exacto no se testeó. Para probar un
+  commit intermedio: `git worktree add --detach` y correr ahí.
+- **`-count=1` en el gate, siempre.** Un verde cacheado no es verde. Ya pasó:
+  `go test -race ./...` devolvió exit 0 con ~90% de los paquetes cacheados.
+- **Nunca mandar stderr a `/dev/null`** en un comando cuya salida sostiene una
+  afirmación, y chequear el exit code. Un comando que falla (127) y uno que no
+  encuentra nada son **indistinguibles** una vez descartado el error.
+- **La ausencia necesita sonda positiva.** Antes de concluir "no hay ninguno",
+  probar que la búsqueda funciona. Ya pasó dos veces, y una fue peor que un falso
+  negativo: un grep de confirmación devolvió 3 hits que eran todos falsos
+  positivos de un patrón demasiado ancho (`CLUSTER` matcheando `PRIMARY KEY
+  CLUSTERED`), y habría confirmado una conclusión equivocada.
+- **Un fixture se verifica por su CONTENIDO, no por su nombre ni por que exista.**
+  El excerpt vendorizado de Pagila no es Pagila completo. Un test escrito contra
+  un corpus que no tiene la forma que dice ejercitar **pasa por vacío**.
+- **Los informes de subagentes, las lentes de review y las skills son
+  afirmaciones, no evidencia.** Una lente puede decir CRITICAL y estar
+  equivocada; otra puede declarar "garantizado a nivel de tipos" algo que es un
+  `string` pelado. Se verifican, no se creen.
+- **El blast radius se lee, no se adivina.** Antes de llamar bajo-impacto a un
+  cambio, leer todos los llamadores y todos los caminos que llegan.
+- **Preferir la fuente de verdad a una reimplementación.** Correr la función real
+  sobre los datos reales, no una copia de la lógica en otro lado.
 
 ## Restricciones técnicas NO NEGOCIABLES
 
