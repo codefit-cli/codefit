@@ -840,9 +840,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   and gets no DW value; and a name with **neither** an underscore **nor** a
   PascalCase `Fact`/`Dim` boundary. Both are **false negatives accepted on
   purpose**, since a wrong promotion silences that table's 1NF findings. That
-  residual gap remains a
-  naming-vocabulary limit, not a rule gap, and it is locked as a test against
-  the vendored AdventureWorksDW DDL rather than left silent.
+  residual gap remains a naming-vocabulary limit, not a rule gap, and it is
+  locked as a test against the vendored AdventureWorksDW DDL rather than left
+  silent.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler

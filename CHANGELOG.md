@@ -157,9 +157,10 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
 
 ### Declared limits — stated, not hidden
 
-- **Role detection is snake_case only.** PascalCase Kimball naming (Microsoft's
-  `FactInternetSales`, `DimCustomer`) classifies as `unclassified`, so the DW family
-  yields **no value** on it. Test-locked, not silent.
+- **Role detection matched only a leading snake_case segment, at this release.** PascalCase
+  Kimball naming (Microsoft's `FactInternetSales`, `DimCustomer`) classified as
+  `unclassified`, so the DW family yielded **no value** on it. Test-locked, not silent.
+  (Superseded after this tag — see the role-vocabulary entry under *Unreleased*.)
 - **DW-002 fires on a UUID/GUID surrogate** — it types as a string in the neutral model.
   The emitted facts are what the agent needs to dismiss it in one step.
 - **DW-002 also fires when the parser did not reconstruct the primary key's column**
@@ -173,8 +174,9 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
 - **Zero value on Prisma.** A `schema.prisma` expresses no warehouse concept.
 - **Dogfood status.** All five rules' fire and trap paths are proven by constructed,
   declared-synthetic schemas (ADR 0028). Microsoft's AdventureWorksDW **is** vendored
-  (MIT) and yields no DW finding, for two independent test-locked reasons: its PascalCase
-  names, and a pre-existing T-SQL reducer gap.
+  (MIT) and yielded no DW finding, for two independent test-locked reasons at this
+  release: its PascalCase names, and a pre-existing T-SQL reducer gap. (The naming half
+  was closed after this tag — see *Unreleased*; the reducer gap remains.)
 
 ### Known issues
 
