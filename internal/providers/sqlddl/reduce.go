@@ -44,7 +44,55 @@ func (b *builder) schema() *db.Schema {
 var (
 	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
 	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
-	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+\w+\s*)?\(([^)]*)\)`)
+	// reCreateIndex recognizes the "ordinary" CREATE INDEX shape — one with an
+	// explicit column list — across all three dialects, and captures the
+	// index's declared access method wherever the dialect places it:
+	//
+	//   group 1: UNIQUE
+	//   group 2: T-SQL's CLUSTERED|NONCLUSTERED kind (no column-list impact —
+	//            same statement shape as an ordinary index, just an extra
+	//            keyword before INDEX; index-method-capture)
+	//   group 3: IF NOT EXISTS
+	//   group 4: the index NAME — now OPTIONAL, to admit PostgreSQL's
+	//            anonymous form ("CREATE INDEX ON t ..."), where PostgreSQL
+	//            itself generates the name (index-method-capture). Making
+	//            this optional does NOT introduce ambiguity with an ordinary
+	//            named index whose name happens to start with "on" (e.g.
+	//            "on_hand_idx") or a TABLE named "on": Go's regexp (RE2) finds
+	//            the correct overall match via Pike's algorithm, which
+	//            reproduces Perl-like leftmost-first submatch semantics
+	//            without true backtracking — both directions are locked by
+	//            TestSQLDDL_PG_AnonymousIndex_NamedIndexStartingWithOn_
+	//            StillAttributes and ..._OnTableNamedOn.
+	//   group 5: the table name
+	//   group 6: PostgreSQL's USING <method> position, BEFORE the column list
+	//   group 7: the column list
+	//   group 8: MySQL's USING BTREE|HASH position, AFTER the column list —
+	//            a DIFFERENT grammar position from PostgreSQL's (
+	//            index-method-capture)
+	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?(clustered\s+|nonclustered\s+)?index\s+` +
+		`(?:concurrently\s+)?(if\s+not\s+exists\s+)?(?:("?[\w"]+"?)\s+)?on\s+("?[\w".]+"?)\s*` +
+		`(?:using\s+(\w+)\s*)?\(([^)]*)\)(?:\s*using\s+(\w+))?`)
+
+	// reCreateColumnstoreIndex recognizes T-SQL's CREATE [CLUSTERED] COLUMNSTORE
+	// INDEX — a genuinely DIFFERENT statement shape from reCreateIndex, not a
+	// widened case of it: a clustered columnstore index (CLUSTERED is also
+	// this statement's own default when omitted) carries NO column list at
+	// all — it always covers every column of the table implicitly. This is
+	// deliberately its own branch (index-method-capture task instruction),
+	// not folded into reCreateIndex's `\(([^)]*)\)` grammar, which requires a
+	// column list to match at all. A NONCLUSTERED COLUMNSTORE INDEX, which
+	// DOES take an explicit column list, is a distinct shape this regex does
+	// NOT cover — it stays a genuinely unrecognized CREATE INDEX-shaped head
+	// (reIndexShapedHead), out of scope for this slice.
+	//
+	//   group 1: CLUSTERED (optional; also this statement's own default)
+	//   group 2: IF NOT EXISTS
+	//   group 3: the index name (T-SQL always requires one here, unlike PG's
+	//            anonymous form)
+	//   group 4: the table name
+	reCreateColumnstoreIndex = regexp.MustCompile(`(?is)^create\s+(clustered\s+)?columnstore\s+index\s+` +
+		`(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\b`)
 	reView        = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
 	reRoutine     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
 	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
@@ -130,6 +178,8 @@ func (b *builder) apply(file string, st stmt) {
 		b.applyAlterTable(file, st)
 	case reCreateIndex.MatchString(st.text):
 		b.applyCreateIndex(file, st)
+	case reCreateColumnstoreIndex.MatchString(st.text):
+		b.applyCreateColumnstoreIndex(file, st)
 	case reView.MatchString(st.text):
 		b.views = append(b.views, db.View{Name: normalizeName(reView.FindStringSubmatch(st.text)[1]), Pos: pos, Body: viewBody(st)})
 	case reRoutine.MatchString(st.text):
@@ -638,6 +688,58 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		return
 	}
 	unique := m[1] != ""
+	name := normalizeName(m[4])
+	if name != "" && m[3] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
+		return
+	}
+	if name != "" {
+		b.seenIndex[name] = true
+	}
+	t, created := b.getTable(normalizeName(m[5]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
+		// x was ever seen — no CREATE TABLE declared it. Same disposition as
+		// applyAlterTable's phantom-creation case above.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
+	// method precedence: at most ONE of these three is ever non-empty for a
+	// given statement — T-SQL's CLUSTERED/NONCLUSTERED (m[2]), PostgreSQL's
+	// USING before the column list (m[6]), MySQL's USING after the column
+	// list (m[8]) — since the grammars are mutually exclusive per dialect.
+	// Normalized to lowercase here (once), so every capture site in this
+	// package shares one convention (index-method-capture).
+	method := m[2]
+	if method == "" {
+		method = m[6]
+	}
+	if method == "" {
+		method = m[8]
+	}
+	t.Indexes = append(t.Indexes, db.Index{
+		Pos:     db.Pos{File: file, Line: st.line},
+		Columns: splitIdents(m[7]),
+		Unique:  unique,
+		Method:  strings.ToLower(strings.TrimSpace(method)),
+	})
+}
+
+// applyCreateColumnstoreIndex handles T-SQL's CREATE [CLUSTERED] COLUMNSTORE
+// INDEX — the one CREATE INDEX-family shape with NO column list at all (see
+// reCreateColumnstoreIndex's own doc comment). Columns is deliberately left
+// EMPTY rather than synthesized: this statement never names any column in its
+// own grammar (it implicitly covers every column of the table), and inventing
+// a column list here would misrepresent the statement as declaring something
+// it did not — the same "never fabricate what the source did not say"
+// discipline ADR 0034 §2.6 already draws for the reducer generally. Method is
+// unconditionally "columnstore" (never "clustered columnstore"): the
+// CLUSTERED qualifier is this statement's own default when omitted, so it
+// carries no distinguishing information a consumer (e.g. a future columnar-
+// index rule) would need beyond "this IS a columnstore index".
+func (b *builder) applyCreateColumnstoreIndex(file string, st stmt) {
+	m := reCreateColumnstoreIndex.FindStringSubmatch(st.text)
+	if m == nil {
+		return
+	}
 	name := normalizeName(m[3])
 	if m[2] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
 		return
@@ -645,12 +747,9 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 	b.seenIndex[name] = true
 	t, created := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
 	if created {
-		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
-		// x was ever seen — no CREATE TABLE declared it. Same disposition as
-		// applyAlterTable's phantom-creation case above.
 		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
 	}
-	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
+	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Method: "columnstore"})
 }
 
 // --- small parse helpers ---

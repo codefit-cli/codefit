@@ -20,12 +20,17 @@ import (
 // contract. These tests lock the fix: the dispatch has no branch for these
 // forms, so per ADR 0034 SS2.4 ("Only a GENUINELY unrecognized statement ...
 // marks a table unproven") they must mark their table unproven.
-
-// TestSQLDDL_UnrecognizedIndexForms_Fixture_MarkAllThreeTablesUnproven is the
-// AUTHORED fixture regression (mirrors n2_fixture_test.go's own discipline):
-// before this fixture existed, COLUMNSTORE / anonymous CREATE INDEX / ON
-// ONLY appeared ZERO times anywhere in this package's testdata/, so a test
-// written against the existing corpus would have passed VACUOUSLY.
+//
+// index-method-capture UPDATE: two of the seven forms this fixture exercises
+// — T-SQL's CLUSTERED COLUMNSTORE INDEX (fact_sales) and PostgreSQL's
+// anonymous CREATE INDEX (event_log) — are TAUGHT to the parser by this
+// slice and stop being genuinely unrecognized. This is the intended
+// direction (the point of this slice is to make blindness disappear, not
+// just report it honestly) — the two now assert the OPPOSITE outcome:
+// Complete=true, Method captured, nothing recorded to Unreduced. The other
+// five forms (ON ONLY, FULLTEXT/SPATIAL/XML/PRIMARY XML) are OUT OF SCOPE
+// for this slice and remain genuinely unrecognized — this is the
+// still-unknown floor the completeness contract must keep protecting.
 func TestSQLDDL_UnrecognizedIndexForms_Fixture_MarkAllThreeTablesUnproven(t *testing.T) {
 	path := filepath.Join("testdata", "pg_constructed_unrecognized_index_forms.sql")
 	content, err := os.ReadFile(path)
@@ -61,7 +66,11 @@ func TestSQLDDL_UnrecognizedIndexForms_Fixture_MarkAllThreeTablesUnproven(t *tes
 		byName[tb.Name] = tb
 	}
 
-	for _, name := range wantTables {
+	// Still GENUINELY unrecognized (out of this slice's scope) — the
+	// protected floor: an unrecognized index-shaped statement STILL marks
+	// its table unproven, exactly as before.
+	stillUnrecognized := []string{"metrics_partitioned", "articles", "venues", "documents", "catalog_items"}
+	for _, name := range stillUnrecognized {
 		tb, ok := byName[name]
 		if !ok {
 			t.Fatalf("table %s not found (tables: %v)", name, s.Tables)
@@ -76,9 +85,6 @@ func TestSQLDDL_UnrecognizedIndexForms_Fixture_MarkAllThreeTablesUnproven(t *tes
 			t.Errorf("table %s: Unreduced = %v, want exactly one entry", name, tb.Unreduced)
 		}
 	}
-
-	assertUnreducedTextContains(t, byName["fact_sales"], "COLUMNSTORE")
-	assertUnreducedTextContains(t, byName["event_log"], "CREATE INDEX ON event_log")
 	assertUnreducedTextContains(t, byName["metrics_partitioned"], "ON ONLY metrics_partitioned")
 	// REL-001 (4R reliability lens): FULLTEXT/SPATIAL/XML/PRIMARY XML are a
 	// standalone-statement gap of the SAME shape COLUMNSTORE closed above —
@@ -89,6 +95,44 @@ func TestSQLDDL_UnrecognizedIndexForms_Fixture_MarkAllThreeTablesUnproven(t *tes
 	assertUnreducedTextContains(t, byName["venues"], "CREATE SPATIAL INDEX")
 	assertUnreducedTextContains(t, byName["documents"], "CREATE XML INDEX")
 	assertUnreducedTextContains(t, byName["catalog_items"], "CREATE PRIMARY XML INDEX")
+
+	// NOW RECOGNIZED (index-method-capture): fact_sales' CLUSTERED COLUMNSTORE
+	// INDEX and event_log's anonymous CREATE INDEX both parse cleanly, with
+	// Method carrying the declared kind — the exact opposite of the drop
+	// disposition above, on the SAME fixture.
+	factSales, ok := byName["fact_sales"]
+	if !ok {
+		t.Fatalf("table fact_sales not found (tables: %v)", s.Tables)
+	}
+	if !factSales.Complete {
+		t.Errorf("fact_sales.Complete = false, want true — CREATE CLUSTERED COLUMNSTORE INDEX is now recognized. Note=%q Unreduced=%v", factSales.Note, factSales.Unreduced)
+	}
+	if len(factSales.Indexes) != 1 {
+		t.Fatalf("fact_sales.Indexes = %v, want exactly 1", factSales.Indexes)
+	}
+	if got := factSales.Indexes[0].Method; got != "columnstore" {
+		t.Errorf("fact_sales.Indexes[0].Method = %q, want %q", got, "columnstore")
+	}
+	if got := factSales.Indexes[0].Columns; len(got) != 0 {
+		t.Errorf("fact_sales.Indexes[0].Columns = %v, want empty — a clustered columnstore index names no column in its own grammar", got)
+	}
+
+	eventLog, ok := byName["event_log"]
+	if !ok {
+		t.Fatalf("table event_log not found (tables: %v)", s.Tables)
+	}
+	if !eventLog.Complete {
+		t.Errorf("event_log.Complete = false, want true — an anonymous CREATE INDEX is now recognized. Note=%q Unreduced=%v", eventLog.Note, eventLog.Unreduced)
+	}
+	if len(eventLog.Indexes) != 1 {
+		t.Fatalf("event_log.Indexes = %v, want exactly 1", eventLog.Indexes)
+	}
+	if got := eventLog.Indexes[0].Method; got != "brin" {
+		t.Errorf("event_log.Indexes[0].Method = %q, want %q", got, "brin")
+	}
+	if got := eventLog.Indexes[0].Columns; len(got) != 1 || got[0] != "event_id" {
+		t.Errorf("event_log.Indexes[0].Columns = %v, want [event_id]", got)
+	}
 }
 
 // assertUnreducedTextContains guards the Unreduced[0] access so a table that
