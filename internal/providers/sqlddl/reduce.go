@@ -209,7 +209,12 @@ func (b *builder) triggerBody(st stmt) db.Body {
 }
 
 // getTable returns the named table, creating it if this is the first
-// statement to reference it. pos anchors a NEWLY created table only — an
+// statement to reference it, and reports whether it was JUST created (true)
+// or already existed (false) — callers that can reference a table BEFORE any
+// CREATE TABLE for it (applyAlterTable, applyCreateIndex) use this to detect
+// a PHANTOM creation (F4, 4R ledger obs #1282) and record it; applyCreateTable
+// itself ignores the bool, since a table it creates is by definition
+// genuinely declared. pos anchors a NEWLY created table only — an
 // already-registered table keeps whatever position its FIRST reference gave
 // it (F1, 4R risk/reliability/resilience lens, corroborated + verified: this
 // reducer used to never set Table.Pos at all, so every unproven table's
@@ -217,19 +222,24 @@ func (b *builder) triggerBody(st stmt) db.Body {
 // unproven table in a project, collapsing their baseline fingerprints into
 // one. Matches the Prisma provider's own construction site
 // (prismaschema.go:145), which has always set Pos).
-func (b *builder) getTable(name string, pos db.Pos) *db.Table {
+func (b *builder) getTable(name string, pos db.Pos) (*db.Table, bool) {
 	t := b.tables[name]
-	if t == nil {
+	created := t == nil
+	if created {
 		// Complete starts true (N1, design §1-D1b): db.Table.Complete's zero
 		// value is false (fail-closed), so every construction site must set
 		// it explicitly or the whole DB dimension mutes itself on this
 		// provider. A table is demoted to Complete=false only when a later
-		// statement affecting it cannot be reduced (MarkUnproven).
+		// statement affecting it cannot be reduced (MarkUnproven). This
+		// default is UNCHANGED by F4 — F4's fix is applied selectively, at
+		// the two call sites that can create a table this way, never by
+		// flipping this default (that IS the N1 trap and would mute the
+		// whole dimension).
 		t = &db.Table{Name: name, Pos: pos, Complete: true}
 		b.tables[name] = t
 		b.order = append(b.order, name)
 	}
-	return t
+	return t, created
 }
 
 func (b *builder) dropTable(name string) {
@@ -276,11 +286,11 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 		// malformed body: still register the table, no columns, and record
 		// the drop (D2 site 3, design §2) — the parser could not read this
 		// table's constraint set at all.
-		t := b.getTable(name, db.Pos{File: file, Line: st.line})
+		t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
 		t.MarkUnproven(db.ReasonMalformedTableBody, st.text, db.Pos{File: file, Line: st.line})
 		return
 	}
-	t := b.getTable(name, db.Pos{File: file, Line: st.line})
+	t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
 	for _, p := range splitTopLevelParts(inner) {
 		line := st.line + strings.Count(st.text[:innerStart+p.off], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
@@ -464,7 +474,16 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: db.Pos{File: file, Line: st.line}})
 		return
 	}
-	t := b.getTable(normalizeName(m[1]), db.Pos{File: file, Line: st.line})
+	t, created := b.getTable(normalizeName(m[1]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282, "the false affirmation survives, path
+		// 2"): this ALTER TABLE is the FIRST time this name was ever seen —
+		// no CREATE TABLE declared it. Recording it here, not by defaulting
+		// Complete to false (the N1 trap), keeps every genuinely-declared
+		// table unaffected while stopping DB-050 from affirming over a
+		// table it never actually read.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
 	// offset of the action group within the statement, for per-action line numbers
 	actOff := strings.Index(st.text, m[2])
 	for _, p := range splitTopLevelParts(m[2]) {
@@ -564,7 +583,13 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		return
 	}
 	b.seenIndex[name] = true
-	t := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
+	t, created := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
+		// x was ever seen — no CREATE TABLE declared it. Same disposition as
+		// applyAlterTable's phantom-creation case above.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
 	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
 }
 

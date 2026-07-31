@@ -103,6 +103,14 @@ const (
 	// ReasonMalformedTableBody: the table's declaration body could not be
 	// parsed at all (e.g. an unbalanced CREATE TABLE(...) body).
 	ReasonMalformedTableBody = "the table's declaration body could not be parsed"
+	// ReasonTableNeverDeclared: this table entry was materialized by a
+	// statement that REFERENCES a table (e.g. ALTER TABLE, CREATE INDEX ...
+	// ON) before any CREATE TABLE for that name was ever seen. It has zero
+	// genuine structure — no columns were ever read — and an absence-based
+	// rule that affirms over it (F4, 4R ledger obs #1282) would be affirming
+	// over a table the parser never actually read at all, not merely one it
+	// read incompletely.
+	ReasonTableNeverDeclared = "no CREATE TABLE statement was ever seen for this table"
 )
 
 // MarkUnproven records that a statement affecting t could not be reduced. It
