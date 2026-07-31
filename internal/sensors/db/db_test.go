@@ -337,6 +337,7 @@ func TestSensorDB_OwnedCategories_IncludesEveryDWCategory(t *testing.T) {
 		surface.CategoryDWNoTimeDimension,
 		surface.CategoryDWSCD2NoCurrencyIndex,
 		surface.CategoryDWMixedSCDStrategies,
+		surface.CategoryDWNoColumnarIndex,
 	} {
 		if !owned[string(want)] {
 			t.Errorf("OwnedCategories() missing %q", want)

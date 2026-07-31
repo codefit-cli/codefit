@@ -160,6 +160,44 @@ func TestDW001_ProvenFactTable_StillFires(t *testing.T) {
 	}
 }
 
+// TestDW021_UnprovenFactTable_Abstains mirrors TestDW001_UnprovenFactTable_
+// Abstains: DW-021 asks a PER-TABLE question ("does THIS fact table have a
+// columnar index"), exactly like DW-001/002/010, not a schema-wide census —
+// so it gates with a per-table `continue`, not a whole-rule abstain (that
+// shape is reserved for the SEPARATE Schema.Dialect=="mysql" gate in
+// dw021_test.go, which is unrelated to per-table completeness).
+func TestDW021_UnprovenFactTable_Abstains(t *testing.T) {
+	tb := unprovenDWTable("fact_sales")
+	// Even with zero indexes (which WOULD fire if evaluated), the guard must
+	// short-circuit before that check is ever reached.
+	s := &db.Schema{Tables: []db.Table{tb}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact}}
+	_, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-021")})
+	if len(surf) != 0 {
+		t.Errorf("DW-021 must abstain on an unproven fact table, got: %+v", surf)
+	}
+}
+
+// TestDW021_ProvenFactTable_StillFires is DW-021's positive control (equal
+// priority to the abstain test, ADR 0034 §2.5): a genuinely columnar-index-
+// less fact table whose structure IS proven complete must still fire — the
+// contract narrows false positives without trading away a true one.
+func TestDW021_ProvenFactTable_StillFires(t *testing.T) {
+	tb := db.Table{Name: "fact_sales", Complete: true, Pos: db.Pos{File: "x.sql", Line: 1}}
+	s := &db.Schema{Tables: []db.Table{tb}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact}}
+	_, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-021")})
+	var found bool
+	for _, it := range surf {
+		if it.Category == string(surface.CategoryDWNoColumnarIndex) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("DW-021 must still fire on a PROVEN fact table with no columnar index")
+	}
+}
+
 func dwRuleByID(t *testing.T, id string) dwrules.Rule {
 	t.Helper()
 	for _, r := range dwrules.All() {

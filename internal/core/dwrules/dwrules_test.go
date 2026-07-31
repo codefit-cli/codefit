@@ -127,14 +127,14 @@ func TestAll_RuleIDsAreUniqueAndNonEmpty(t *testing.T) {
 	}
 }
 
-// TestAll_RegistersTheS2Family locks the EXACT S2 rule set. DW-020
-// (partitioning, S4) and DW-021 (columnar index, S3) are deliberately ABSENT
-// and must stay declared-not-covered in dbcoverage.go/COVERAGE.md until they
-// are actually built — a rule appearing here before its coverage prose, or
-// coverage prose before the rule, is the exact drift this project's honesty
-// doctrine exists to prevent.
-func TestAll_RegistersTheS2Family(t *testing.T) {
-	want := []string{"DW-001", "DW-002", "DW-005", "DW-010", "DW-011"}
+// TestAll_RegistersTheS2AndS3Family locks the EXACT S2+S3 rule set (renamed
+// from TestAll_RegistersTheS2Family when DW-021 landed). DW-020
+// (partitioning, S4) is deliberately ABSENT and must stay declared-not-covered
+// in dbcoverage.go/COVERAGE.md until it is actually built — a rule appearing
+// here before its coverage prose, or coverage prose before the rule, is the
+// exact drift this project's honesty doctrine exists to prevent.
+func TestAll_RegistersTheS2AndS3Family(t *testing.T) {
+	want := []string{"DW-001", "DW-002", "DW-005", "DW-010", "DW-011", "DW-021"}
 	got := make([]string, 0, len(dwrules.All()))
 	for _, r := range dwrules.All() {
 		got = append(got, r.ID())
@@ -145,18 +145,20 @@ func TestAll_RegistersTheS2Family(t *testing.T) {
 	}
 }
 
-// TestOwnedCategories_CoversEveryS2Rule replaces S1's
-// TestOwnedCategories_EmptyInS1. Every DW rule emits exactly one surface
-// category, and every one of those categories MUST be declared owned — an
-// undeclared category can never be baselined or pruned (ADR 0019), which is
-// the single way to corrupt an existing baseline.
-func TestOwnedCategories_CoversEveryS2Rule(t *testing.T) {
+// TestOwnedCategories_CoversEveryS2AndS3Rule replaces S1's
+// TestOwnedCategories_EmptyInS1 (renamed from TestOwnedCategories_
+// CoversEveryS2Rule when DW-021 landed). Every DW rule emits exactly one
+// surface category, and every one of those categories MUST be declared
+// owned — an undeclared category can never be baselined or pruned (ADR
+// 0019), which is the single way to corrupt an existing baseline.
+func TestOwnedCategories_CoversEveryS2AndS3Rule(t *testing.T) {
 	want := []string{
 		string(surface.CategoryDWNoFactDimensionFK),
 		string(surface.CategoryDWDimensionNoSurrogateKey),
 		string(surface.CategoryDWNoTimeDimension),
 		string(surface.CategoryDWSCD2NoCurrencyIndex),
 		string(surface.CategoryDWMixedSCDStrategies),
+		string(surface.CategoryDWNoColumnarIndex),
 	}
 	got := dwrules.OwnedCategories()
 	if len(got) != len(dwrules.All()) {

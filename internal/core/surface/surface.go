@@ -138,6 +138,7 @@ const (
 	CategoryDWNoTimeDimension         Category = "dw-no-time-dimension"          // DW-005: facts present, no time dimension
 	CategoryDWSCD2NoCurrencyIndex     Category = "dw-scd2-no-currency-index"     // DW-010: SCD-2 dimension with no index serving its currency lookup
 	CategoryDWMixedSCDStrategies      Category = "dw-mixed-scd-strategies"       // DW-011: SCD-1 and SCD-2 dimensions mixed in one schema
+	CategoryDWNoColumnarIndex         Category = "dw-fact-no-columnar-index"     // DW-021: fact table with no dialect-recognized columnar/analytic index
 
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
