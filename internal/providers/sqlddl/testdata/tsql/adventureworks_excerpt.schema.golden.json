@@ -4,8 +4,8 @@
       "Name": "Customer",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 1
       },
       "Columns": [
         {
@@ -84,14 +84,17 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "SalesOrderHeader",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 9
       },
       "Columns": [
         {
@@ -161,14 +164,17 @@
           ]
         }
       ],
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "SalesOrderDetail",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "tsql/adventureworks_excerpt.sql",
+        "Line": 17
       },
       "Columns": [
         {
@@ -227,10 +233,14 @@
           ]
         }
       ],
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     }
   ],
   "Views": null,
   "Procedures": null,
-  "Triggers": null
+  "Triggers": null,
+  "Unreduced": null
 }

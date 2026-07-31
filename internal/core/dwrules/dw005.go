@@ -54,6 +54,19 @@ func (dw005) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 	var anchor db.Pos
 	timeDim := ""
 
+	// D4 (design SS4): SCHEMA-LEVEL ABSTAIN. This rule is a census judgment
+	// ("does this schema have a time dimension at all"), so a per-table
+	// continue would silently SHRINK the census and still emit — a WORSE lie
+	// than abstaining, because the item would look authoritative over an
+	// incomplete count. ANY unproven fact- or dimension-role table aborts the
+	// whole rule.
+	for _, t := range s.Tables {
+		role := cls.Roles[t.Name]
+		if (role == paradigm.RoleFact || role == paradigm.RoleDimension) && !t.StructureProven() {
+			return nil, nil
+		}
+	}
+
 	for _, t := range s.Tables {
 		switch cls.Roles[t.Name] {
 		case paradigm.RoleFact:

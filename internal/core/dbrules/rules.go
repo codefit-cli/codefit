@@ -2,6 +2,7 @@ package dbrules
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -15,12 +16,24 @@ type db050 struct{}
 func (db050) ID() string { return "DB-050" }
 
 func (db050) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
-	var out []findings.Finding
+	var findingsOut []findings.Finding
+	var surfaceOut []findings.SurfaceItem
 	for _, t := range s.Tables {
 		if len(t.PrimaryKey) > 0 {
 			continue
 		}
-		out = append(out, findings.Finding{
+		// D4/D5 (design SS4/SS5): DB-050 is the ONE absence-based rule that
+		// AFFIRMS, so on an unproven table it cannot simply abstain — that
+		// would trade a false positive for total loss of the dimension's
+		// single deterministic signal. It ROUTES to a dedicated surface item
+		// instead, carrying the raw unreduced statement(s) so the agent can
+		// read the DDL itself. Every other absence-based rule abstains
+		// silently (see the ABSTAIN rules below and in dwrules).
+		if !t.StructureProven() {
+			surfaceOut = append(surfaceOut, routeUnprovenTable(t))
+			continue
+		}
+		findingsOut = append(findingsOut, findings.Finding{
 			ID:            "DB-050",
 			Dimension:     findings.DimensionDB,
 			Severity:      findings.SeverityMedium,
@@ -33,7 +46,63 @@ func (db050) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 			Probabilistic: false,
 		})
 	}
-	return out, nil
+	return findingsOut, surfaceOut
+}
+
+// routeUnprovenTableStatementCap and routeUnprovenTableStatementMaxLen bound
+// routeUnprovenTable's payload (F6, 4R ledger obs #1282): every sibling
+// carrier in this change caps its output (sensors/db's inventory: 5 tables /
+// 3 reasons per note) — this one did not, so a pathological migration
+// (hundreds of dropped ALTERs on one table, or one absurdly long statement)
+// could balloon a single surface item unboundedly.
+const (
+	routeUnprovenTableStatementCap    = 5
+	routeUnprovenTableStatementMaxLen = 500
+)
+
+// routeUnprovenTable builds DB-050's routed surface item for a table whose
+// structure could not be proven complete (design SS5): "this table has no
+// primary key" and "codefit cannot tell whether this table has a primary
+// key" are different claims, so this is its OWN category, never a reuse.
+func routeUnprovenTable(t db.Table) findings.SurfaceItem {
+	signals := []string{"table: " + t.Name}
+	shown := t.Unreduced
+	if len(shown) > routeUnprovenTableStatementCap {
+		shown = shown[:routeUnprovenTableStatementCap]
+	}
+	for _, u := range shown {
+		signals = append(signals,
+			"unreduced_statement: "+truncateStatement(u.Text, routeUnprovenTableStatementMaxLen),
+			"unreduced_at: "+u.Pos.File+":"+strconv.Itoa(u.Pos.Line),
+		)
+	}
+	if omitted := len(t.Unreduced) - len(shown); omitted > 0 {
+		signals = append(signals, strconv.Itoa(omitted)+" more unreduced statement(s) omitted for brevity")
+	}
+	signals = append(signals, "reason: "+t.Note)
+	return findings.SurfaceItem{
+		Category:          string(surface.CategoryDBTableStructureUnproven),
+		File:              t.Pos.File,
+		Line:              t.Pos.Line,
+		StructuralSignals: signals,
+		StructuralFacts: map[string]bool{
+			"table_structure_proven_complete": false,
+			"primary_key_present_in_model":    len(t.PrimaryKey) > 0,
+		},
+		ReasonToReview: "codefit could not reduce " + strconv.Itoa(len(t.Unreduced)) + " statement(s) affecting table " +
+			t.Name + ", so it cannot tell whether " + t.Name + " declares a primary key. The statement(s) are " +
+			"quoted above with their file:line — read the DDL: does " + t.Name + " declare one?",
+	}
+}
+
+// truncateStatement bounds a single unreduced statement's length (F6),
+// appending a marker so the agent knows the quoted text is a prefix, not the
+// whole statement — never silently cutting it without saying so.
+func truncateStatement(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+	return text[:maxLen] + "... (truncated)"
 }
 
 // db001 — a foreign key with no covering index. Whether it matters depends on the
@@ -47,6 +116,11 @@ func (db001) ID() string { return "DB-001" }
 func (db001) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	var out []findings.SurfaceItem
 	for _, t := range s.Tables {
+		if !t.StructureProven() {
+			// ABSTAIN (D4, design SS4): a dropped statement might have
+			// declared the very index that would cover this FK.
+			continue
+		}
 		coverers := db.IndexLike(t)
 		for _, fk := range t.ForeignKeys {
 			if db.CoveredByOrderedPrefix(coverers, fk.Columns) {

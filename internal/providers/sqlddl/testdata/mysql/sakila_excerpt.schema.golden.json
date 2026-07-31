@@ -4,8 +4,8 @@
       "Name": "actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 7
       },
       "Columns": [
         {
@@ -72,14 +72,17 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "film",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 17
       },
       "Columns": [
         {
@@ -159,14 +162,17 @@
         "film_id"
       ],
       "ForeignKeys": null,
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "film_actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "mysql/sakila_excerpt.sql",
+        "Line": 27
       },
       "Columns": [
         {
@@ -249,10 +255,14 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     }
   ],
   "Views": null,
   "Procedures": null,
-  "Triggers": null
+  "Triggers": null,
+  "Unreduced": null
 }

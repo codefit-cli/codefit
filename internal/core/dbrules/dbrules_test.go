@@ -37,7 +37,7 @@ func surfaceWithCategory(items []findings.SurfaceItem, cat surface.Category) []f
 
 func TestDB050_FiresOnNoPK(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{
-		{Name: "NoPK", Pos: db.Pos{File: "s.prisma", Line: 7}, Columns: []db.Column{{Name: "x", Type: db.TypeString}}},
+		{Name: "NoPK", Pos: db.Pos{File: "s.prisma", Line: 7}, Complete: true, Columns: []db.Column{{Name: "x", Type: db.TypeString}}},
 	}}
 	fs, _ := run(s)
 	got := findingsWithID(fs, "DB-050")
@@ -68,7 +68,7 @@ func TestDB050_NegativeWithPK(t *testing.T) {
 
 func db001Table(fks []db.ForeignKey, idx []db.Index, pk []string) *db.Schema {
 	return &db.Schema{Tables: []db.Table{{
-		Name: "T", Pos: db.Pos{File: "s.prisma", Line: 1}, PrimaryKey: pk, ForeignKeys: fks, Indexes: idx,
+		Name: "T", Pos: db.Pos{File: "s.prisma", Line: 1}, Complete: true, PrimaryKey: pk, ForeignKeys: fks, Indexes: idx,
 	}}}
 }
 

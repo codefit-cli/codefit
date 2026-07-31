@@ -19,6 +19,12 @@ type builder struct {
 	trigs     []db.Trigger
 	seenIndex map[string]bool
 	dialect   *Dialect
+
+	// unreduced accumulates statements recognized as table-affecting (an
+	// "alter table" head) whose table name could not be resolved — design §2,
+	// drop site 2. It gates nothing per-table; it surfaces only in the
+	// per-scan completeness inventory (sensors/db.Result.Note).
+	unreduced []db.Unreduced
 }
 
 func newBuilder(dialect *Dialect) *builder {
@@ -26,7 +32,7 @@ func newBuilder(dialect *Dialect) *builder {
 }
 
 func (b *builder) schema() *db.Schema {
-	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs}
+	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs, Unreduced: b.unreduced}
 	for _, name := range b.order {
 		if t := b.tables[name]; t != nil {
 			s.Tables = append(s.Tables, *t)
@@ -202,14 +208,38 @@ func (b *builder) triggerBody(st stmt) db.Body {
 	return routineBody(st)
 }
 
-func (b *builder) getTable(name string) *db.Table {
+// getTable returns the named table, creating it if this is the first
+// statement to reference it, and reports whether it was JUST created (true)
+// or already existed (false) — callers that can reference a table BEFORE any
+// CREATE TABLE for it (applyAlterTable, applyCreateIndex) use this to detect
+// a PHANTOM creation (F4, 4R ledger obs #1282) and record it; applyCreateTable
+// itself ignores the bool, since a table it creates is by definition
+// genuinely declared. pos anchors a NEWLY created table only — an
+// already-registered table keeps whatever position its FIRST reference gave
+// it (F1, 4R risk/reliability/resilience lens, corroborated + verified: this
+// reducer used to never set Table.Pos at all, so every unproven table's
+// routed surface item anchored on file:line "":0 — identical for every
+// unproven table in a project, collapsing their baseline fingerprints into
+// one. Matches the Prisma provider's own construction site
+// (prismaschema.go:145), which has always set Pos).
+func (b *builder) getTable(name string, pos db.Pos) (*db.Table, bool) {
 	t := b.tables[name]
-	if t == nil {
-		t = &db.Table{Name: name}
+	created := t == nil
+	if created {
+		// Complete starts true (N1, design §1-D1b): db.Table.Complete's zero
+		// value is false (fail-closed), so every construction site must set
+		// it explicitly or the whole DB dimension mutes itself on this
+		// provider. A table is demoted to Complete=false only when a later
+		// statement affecting it cannot be reduced (MarkUnproven). This
+		// default is UNCHANGED by F4 — F4's fix is applied selectively, at
+		// the two call sites that can create a table this way, never by
+		// flipping this default (that IS the N1 trap and would mute the
+		// whole dimension).
+		t = &db.Table{Name: name, Pos: pos, Complete: true}
 		b.tables[name] = t
 		b.order = append(b.order, name)
 	}
-	return t
+	return t, created
 }
 
 func (b *builder) dropTable(name string) {
@@ -230,19 +260,37 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 	loc := reCreateTable.FindStringSubmatchIndex(st.text)
 	name := normalizeName(st.text[loc[4]:loc[5]])
 	ifNotExists := loc[2] != -1
-	if _, exists := b.tables[name]; exists {
-		// AJUSTE 1: an existing table + (implicit) IF NOT EXISTS → skip the WHOLE
-		// statement. The first CREATE wins; no Frankenstein merge.
-		_ = ifNotExists
+	if existing, exists := b.tables[name]; exists {
+		// AJUSTE 1: an existing table + explicit IF NOT EXISTS → skip the
+		// WHOLE statement silently. The first CREATE wins; no Frankenstein
+		// merge. This IS a declared, recognized skip (ADR 0018): the SQL
+		// itself says "only create if absent", so discarding the second
+		// declaration is genuinely safe.
+		//
+		// F3 (4R ledger, obs #1282): WITHOUT "IF NOT EXISTS", a second
+		// CREATE TABLE for the same normalized name is NOT a declared skip —
+		// it is a genuine anomaly (most commonly normalizeName stripping a
+		// schema qualifier so two DIFFERENT tables, e.g. public.users and
+		// audit.users, collapse into one name) whose real columns/
+		// constraints are silently discarded. That is unproven structure,
+		// recorded on the SURVIVING table so an absence-based rule does not
+		// affirm over data it never actually saw completely.
+		if !ifNotExists {
+			existing.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, db.Pos{File: file, Line: st.line})
+		}
 		return
 	}
 	openIdx := loc[1] - 1 // the '(' the regex ended on
 	inner, innerStart, ok := balancedParen(st.text, openIdx)
 	if !ok {
-		b.getTable(name) // malformed body: still register the table, no columns
+		// malformed body: still register the table, no columns, and record
+		// the drop (D2 site 3, design §2) — the parser could not read this
+		// table's constraint set at all.
+		t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
+		t.MarkUnproven(db.ReasonMalformedTableBody, st.text, db.Pos{File: file, Line: st.line})
 		return
 	}
-	t := b.getTable(name)
+	t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
 	for _, p := range splitTopLevelParts(inner) {
 		line := st.line + strings.Count(st.text[:innerStart+p.off], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
@@ -369,8 +417,16 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 		// MySQL inline KEY/INDEX/FULLTEXT KEY/SPATIAL KEY shorthand (task
 		// I4b) — recorded as a plain (non-unique) index by its base columns.
 		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: false})
+	case kw == "CHECK" || kw == "EXCLUDE" || kw == "PARTITION":
+		// Declared, RECOGNIZED skips (ADR 0018) — known not to be a
+		// key/index/column, so this is NOT incompleteness. Recording these
+		// would mute DB-050 across virtually every real PostgreSQL schema
+		// (N2, design §2/§3c) — CHECK constraints are commonplace.
 	default:
-		// CHECK / EXCLUDE / PARTITION — declared limits, skipped.
+		// A genuinely UNRECOGNIZED table constraint form — the dispatch does
+		// not know what this declares, so it cannot rule out a key/index (D2
+		// site 4, design §2).
+		t.MarkUnproven(db.ReasonUnreducedTableStatement, c, pos)
 	}
 }
 
@@ -409,15 +465,51 @@ func (b *builder) applyColumn(t *db.Table, def string, pos db.Pos) {
 func (b *builder) applyAlterTable(file string, st stmt) {
 	m := reAlterTable.FindStringSubmatch(st.text)
 	if m == nil {
+		// The statement announced itself as "alter table" (apply's own
+		// dispatch matched it) but reAlterTable itself failed to parse the
+		// table name — a genuine unknown, unlike a declared out-of-subset
+		// statement. It cannot be attributed to any table, so it is recorded
+		// on the SCHEMA (D2 site 2, design §2): it gates nothing per-table,
+		// it only feeds the scan-level completeness inventory.
+		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: db.Pos{File: file, Line: st.line}})
 		return
 	}
-	t := b.getTable(normalizeName(m[1]))
+	t, created := b.getTable(normalizeName(m[1]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282, "the false affirmation survives, path
+		// 2"): this ALTER TABLE is the FIRST time this name was ever seen —
+		// no CREATE TABLE declared it. Recording it here, not by defaulting
+		// Complete to false (the N1 trap), keeps every genuinely-declared
+		// table unaffected while stopping DB-050 from affirming over a
+		// table it never actually read.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
 	// offset of the action group within the statement, for per-action line numbers
 	actOff := strings.Index(st.text, m[2])
 	for _, p := range splitTopLevelParts(m[2]) {
 		line := st.line + strings.Count(st.text[:actOff+p.off], "\n")
 		b.applyAlterAction(t, strings.TrimSpace(p.text), db.Pos{File: file, Line: line})
 	}
+}
+
+// alterActionRecognizedSkips are the ALTER TABLE action heads this reducer
+// RECOGNIZES and deliberately does not model (ADR 0018's declared subset,
+// made machine-visible, design §2). Recording these as unproven would mute
+// DB-050 across virtually every real PostgreSQL dump (N2) — none of them can
+// declare a key, index or column. Values are the leading token(s), matched
+// case-insensitively against act's own prefix.
+var alterActionRecognizedSkips = []string{
+	"ALTER COLUMN", "ALTER ", "RENAME", "OWNER", "ENABLE", "DISABLE",
+	"CLUSTER", "SET ", "RESET ", "VALIDATE", "NO ",
+}
+
+func isAlterActionRecognizedSkip(up string) bool {
+	for _, prefix := range alterActionRecognizedSkips {
+		if strings.HasPrefix(up, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
@@ -441,6 +533,18 @@ func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 		b.applyTableConstraint(t, strings.TrimSpace(act[len("ADD"):]), pos)
 	case strings.HasPrefix(up, "ADD COLUMN"), strings.HasPrefix(up, "ADD "):
 		rest := strings.TrimSpace(act[len("ADD"):])
+		// R1 disposition (design §8c, spec "R1 — Fabrication Hypothesis",
+		// CONFIRMED): a non-single-space ADD/CONSTRAINT (e.g. "ADD  CONSTRAINT")
+		// still lands here because "ADD " only needs ONE space to match. Before
+		// treating the remainder as a column, check whether it is actually a
+		// constraint form the dispatch above MISSED (its own leading keyword
+		// says so) — narrowing the fabrication at its source converts it into a
+		// recorded drop, which the completeness contract then covers, instead
+		// of inventing a phantom column/key literally named "CONSTRAINT".
+		if kw := leadingKeyword(rest); kw == "CONSTRAINT" || kw == "PRIMARY" || kw == "UNIQUE" || kw == "FOREIGN" || kw == "CHECK" {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, act, pos)
+			return
+		}
 		rest = trimPrefixFold(rest, "COLUMN")
 		rest = trimPrefixFold(rest, "IF NOT EXISTS")
 		name, _ := firstToken(rest)
@@ -454,8 +558,17 @@ func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 		rest = trimPrefixFold(rest, "IF EXISTS")
 		name, _ := firstToken(rest)
 		dropColumn(t, normalizeName(name))
+	case isAlterActionRecognizedSkip(up):
+		// ALTER COLUMN / RENAME / OWNER / ENABLE / DISABLE / CLUSTER / SET /
+		// RESET / VALIDATE / NO … — declared, RECOGNIZED skips (N2): known
+		// not to declare a key/index/column, so this is NOT incompleteness.
 	default:
-		// ALTER COLUMN / RENAME / OWNER / ENABLE … — declared limits, skipped.
+		// A genuinely UNRECOGNIZED alter action — the dispatch does not know
+		// what this declares, so it cannot rule out a key/index (D2 site 5,
+		// design §2). This is the dominant chokepoint: AdventureWorksDW's
+		// WITH CHECK ADD / newline-ADD / comma-chained CONSTRAINT shapes all
+		// land here.
+		t.MarkUnproven(db.ReasonUnreducedTableStatement, act, pos)
 	}
 }
 
@@ -470,7 +583,13 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		return
 	}
 	b.seenIndex[name] = true
-	t := b.getTable(normalizeName(m[4]))
+	t, created := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
+		// x was ever seen — no CREATE TABLE declared it. Same disposition as
+		// applyAlterTable's phantom-creation case above.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
 	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
 }
 

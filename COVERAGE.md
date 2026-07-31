@@ -44,15 +44,24 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - **Table without a primary key (DB-050).** A model with no `@id`/`@@id`, read from
   the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
   (Flyway) migrations reconstructed to their final state (`database.schema_paths`).
-  SQL-DDL parsing supports **three dialects — PostgreSQL, MySQL, and SQL Server
-  (T-SQL)** — selected by `database.type` in `.codefit.yaml`
-  (`postgresql` | `mysql` | `sqlserver`); `sqlite` is recognized but returns an
-  explicit "not supported yet" note rather than silently parsing as Postgres. All
-  DB rules (DB-050 and below) are **dialect-agnostic**: they reason over the
-  neutral `db.Schema` model regardless of which dialect parsed the DDL. An
-  unmapped type keyword falls back to `db.TypeUnknown` — an honest fallback, never
-  a silent guess. A table with no primary key is structurally undeniable, so it is
-  **affirmed**. The DB dimension covers only what the schema states — no query
+  A table with no primary key is structurally undeniable, so it is **affirmed** —
+  but **only over a table whose structure the parser could PROVE complete**
+  (`db.Table.Complete`, ADR 0034, `db-model-completeness-contract`). When one or
+  more statements affecting a table could not be reduced (a dropped `ALTER TABLE`
+  shape, a malformed `CREATE TABLE` body, an unrecognized Prisma model-body line),
+  DB-050 does **not** affirm — it **routes** that table to a dedicated
+  `db-table-structure-unproven` surface item instead (see "Table structural
+  completeness" below), carrying the raw unreduced statement and `file:line` so the
+  agent can read the source DDL itself. "Absence of DATA" (a genuinely missing key)
+  and "absence of FEATURE" (a key the parser could not read) are **different
+  claims**, and DB-050 never blurs them. SQL-DDL parsing supports **three dialects —
+  PostgreSQL, MySQL, and SQL Server (T-SQL)** — selected by `database.type` in
+  `.codefit.yaml` (`postgresql` | `mysql` | `sqlserver`); `sqlite` is recognized but
+  returns an explicit "not supported yet" note rather than silently parsing as
+  Postgres. All DB rules (DB-050 and below) are **dialect-agnostic**: they reason
+  over the neutral `db.Schema` model regardless of which dialect parsed the DDL. An
+  unmapped type keyword falls back to `db.TypeUnknown` — an honest fallback, never a
+  silent guess. The DB dimension covers only what the schema states — no query
   analysis.
 
 ### Reasoning — codefit maps surface, the agent judges
@@ -398,6 +407,38 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   in `testdata/tsql/constructed_dynamic_sql_proc.sql` (`sp_executesql` over a
   built string), and a real NEGATIVE (`uspGetBillOfMaterials`). **Zero value on
   Prisma-only projects.**
+- **Table structural completeness (`db-model-completeness-contract`, ADR 0034).**
+  Every table carries a completeness signal (`db.Table.Complete`/`Note`/
+  `Unreduced`) mirroring the pre-existing `Body.Complete` idiom (ADR 0004/0025) at
+  TABLE granularity: `false` means the parser met at least one statement affecting
+  the table it could NOT reduce and could not rule out as declaring a
+  key/index/column. A **declared, recognized** skip (`CHECK`/`EXCLUDE`/`PARTITION`
+  constraints; `ALTER COLUMN`/`RENAME`/`OWNER`/`ENABLE`/`DISABLE`/`CLUSTER`/`SET`/
+  `RESET`/`VALIDATE`/`NO` alter actions) is **not** incompleteness — recording
+  those would mute the whole DB dimension on ordinary PostgreSQL DDL, so only a
+  genuinely unrecognized statement demotes a table. On the Prisma path, a
+  model-body line that is neither a recognized field nor a `@@`-attribute demotes
+  the table the same way; the deferred, unrelated top-level-line skip (a `view`
+  block) does not. **Two-way disposition, no rule signature change (ADR 0015):**
+  DB-050 (the dimension's one affirmation) **routes** an unproven table to the
+  `db-table-structure-unproven` surface category instead of affirming; DB-001,
+  DB-052, and the five DW-0xx rules **abstain silently** on an unproven table (a
+  dropped statement might have declared the very index/column/key each rule is
+  asking about). DW-005 and DW-011 are schema-level census judgments and abstain
+  the **whole rule** — never a per-table skip, which would silently shrink the
+  census and still emit. A genuinely PK-less table with a proven-complete
+  structure still affirms DB-050 at confidence 1.0 — honesty costs nothing here.
+  Per-scan, `sensors/db.Result.Note` (reaching the agent through scan-all's
+  `DBSection.Note`) carries a bounded **inventory** of what could not be measured,
+  aggregated by REASON never by table (a 200-table systematic gap is one line, not
+  200) — this is an inventory of WHAT was measured, never a DIAGNOSIS of WHY the
+  parser failed (no parser-internal identifiers reach scan output; the closed
+  `Reason*` vocabulary in `core/db` is the type-level control). **Boundary,**
+  stated so this contract does not over-promise: `Complete` covers DROPS, not
+  FABRICATIONS — a reducer that believes it succeeded while inventing data
+  (Pagila's `film.fulltext` phantom index, and the closed "`ADD  CONSTRAINT`"
+  double-space fabrication, both documented below) reports `Complete=true`
+  regardless; that class needs its own, separate control.
 - **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
   tables (S1, RF-03 OLAP closure).** codefit computes a schema's **paradigm**
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
@@ -596,8 +637,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **same** inline-index-shorthand heuristic from a different direction: the
   column is silently dropped and a phantom zero-column index is fabricated in
   its place instead. Confirmed against real vendored Pagila DDL; **not yet
-  fixed**. (6) **Three shapes of `ALTER TABLE ... ADD CONSTRAINT` are dropped**
-  by the reducer, so the keys they declare never reach the model: T-SQL's
+  fixed**. This is a **fabrication, not a silent drop**, so `db.Table.Complete`
+  (ADR 0034) cannot catch it — the reducer believes it succeeded; the
+  completeness contract's own doc comment states this boundary explicitly
+  ("`Complete` covers DROPS, not FABRICATIONS") rather than over-promising a
+  guarantee this mechanism does not provide. (6) **Three shapes of
+  `ALTER TABLE ... ADD CONSTRAINT` are dropped** by the reducer, so the keys
+  they declare never reach the model: T-SQL's
   `WITH CHECK` / `WITH NOCHECK` prefix (`ALTER TABLE x WITH CHECK ADD
   CONSTRAINT ...`); any whitespace other than a single space between `ADD` and
   `CONSTRAINT` (a newline, as formatted DDL commonly writes it); and
@@ -605,12 +651,24 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   where every constraint after the first is lost because it does not repeat
   `ADD`. Confirmed against real vendored AdventureWorksDW DDL, which uses **all
   three** — its three real primary keys and all eight real foreign keys are
-  invisible. The most serious consequence: **DB-050 ("table without a primary
-  key"), a deterministic affirmation at confidence 1.0, is WRONG on that DDL** —
-  it reports three tables as having no primary key over a script that plainly
-  declares one for each. A genuine false affirmation, not a surface question;
-  stated here rather than left silent, locked as a test in
-  `internal/providers/sqlddl/dw_integration_test.go`, and **not yet fixed**.
+  invisible. These three **shapes are still not parsed** (deliberately deferred
+  parser-shape debt, unchanged by `db-model-completeness-contract`) — but the
+  drop is **no longer silent**: each now marks the table's structural
+  completeness (`db.Table.Complete=false`, ADR 0034) and DB-050 **routes** the
+  table to a `db-table-structure-unproven` surface item (the raw unreduced
+  statement plus `file:line`) instead of affirming. Real vendored
+  AdventureWorksDW now yields **zero** DB-050 false affirmations and exactly 3
+  routed surface items, locked in
+  `internal/providers/sqlddl/dw_integration_test.go`
+  (`TestDB050_AdventureWorksDW_NoFalseAffirmation_RoutesToSurfaceInstead`).
+  Separately, the same investigation found and **closed** a related but
+  distinct defect: a non-single-space `ADD`/`CONSTRAINT` (e.g. "`ADD  CONSTRAINT`",
+  two spaces) used to hit the generic "`ADD `" column branch and **fabricate** a
+  phantom column/key literally named "`CONSTRAINT`" rather than dropping
+  cleanly — this fabrication path is now recognized at its source and converted
+  into a recorded drop exactly like the three shapes above; it does not gain new
+  parsing support, it stops inventing data. Locked in
+  `internal/providers/sqlddl/fabrication_test.go`.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

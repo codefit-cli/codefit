@@ -60,6 +60,16 @@ func (*Sensor) OwnedCategories() []string {
 		string(surface.CategoryDBRepeatingGroups),
 		string(surface.CategoryDBViewSensitiveColumn),
 		string(surface.CategoryDBPrefixRedundantIndex),
+		string(surface.CategoryDBTableStructureUnproven),
+		// Routine-body rule family (DB-030/031/040/041, 0.2.3) — pre-existing
+		// gap found by the dbcoverage enforcement work
+		// (db-model-completeness-contract, Control D): these four categories
+		// were emitted by dbrules but never declared here, the one way to
+		// corrupt an existing baseline (ADR 0019).
+		string(surface.CategoryDBRoutineNoExceptionHandling),
+		string(surface.CategoryDBTriggerCrossTableCascade),
+		string(surface.CategoryDBTriggerExternalCall),
+		string(surface.CategoryDBDynamicSQLInRoutine),
 	}
 	return append(own, dwrules.OwnedCategories()...)
 }
@@ -131,7 +141,8 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	fs = append(fs, dwF...)
 	surf = append(surf, dwS...)
 
-	surf, note := suppress3NF(surf, cls, override)
+	surf, suppressed := suppress3NF(surf, cls, override)
+	note := joinTraces(completenessNote(schema), suppressed)
 
 	stampFingerprints(fs, surf, content)
 
@@ -145,6 +156,154 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 }
 
 func notMeasured(note string) Result { return Result{Measured: false, Note: note} }
+
+// joinTraces composes the sensor's audit traces into Result.Note (design
+// SS7a). Each trace is INDEPENDENT and self-contained; a trace with nothing
+// to say contributes nothing. Order is FIXED (measurement inventory first,
+// then suppression) so the note is deterministic and diffable — the
+// measurement inventory qualifies everything after it: "I could not read 3
+// tables" changes how "I withheld 12 items on OLAP tables" should be read.
+// Two producers share this one channel by construction, never by one
+// overwriting the other.
+func joinTraces(traces ...string) string {
+	var nonEmpty []string
+	for _, t := range traces {
+		if t != "" {
+			nonEmpty = append(nonEmpty, t)
+		}
+	}
+	return strings.Join(nonEmpty, " ")
+}
+
+// completenessInventoryTableCap and completenessInventoryReasonCap bound the
+// per-scan measurement inventory to O(1) in schema size (design SS7a): a
+// systematic parser gap across 200 tables is ONE line naming the reason and
+// the count, not 200 lines.
+const (
+	completenessInventoryTableCap  = 5
+	completenessInventoryReasonCap = 3
+)
+
+// routingClause renders the note's claim about DB-050 routing, ACCURATELY
+// scoped to what actually happened (F2, 4R ledger obs #1282, CRITICAL): the
+// note must never promise a surface item that does not exist. routed is how
+// many of a reason group's unproven tables DB-050 actually routed (those
+// with no primary key currently in the model); total is the group's size.
+func routingClause(routed, total int) string {
+	switch routed {
+	case 0:
+		return "None of them currently show a missing primary key in the model, so DB-050 did not route any " +
+			"of them to a surface item — this note is their only trace in scan output."
+	case total:
+		return "DB-050 routed them to the db-table-structure-unproven surface items rather than affirming. " +
+			"Read those items for the raw statements and their file:line."
+	default:
+		return fmt.Sprintf(
+			"DB-050 routed %d of them (those with no primary key currently in the model) to the "+
+				"db-table-structure-unproven surface items rather than affirming — read those items for the raw "+
+				"statements and their file:line. The rest already show a primary key and have no further trace "+
+				"beyond this note.",
+			routed,
+		)
+	}
+}
+
+// completenessNote is the per-scan INVENTORY of what codefit could not
+// measure (design SS7a, ADR 0034's measurement/diagnostics boundary). It
+// aggregates by REASON, never by table, and states the fact — "codefit could
+// not prove N tables complete" — never a parser diagnosis (which regex
+// branch, which dialect quirk): the only inputs are t.Note (drawn from this
+// package's closed Reason* vocabulary) and table names, both of which the
+// core, not the provider, controls. Empty when everything was proven (never
+// spammed).
+func completenessNote(s *coredb.Schema) string {
+	if s == nil {
+		return ""
+	}
+	byReason := map[string][]string{}
+	var reasonOrder []string
+	// routedCount tracks, per reason, how many of that reason's unproven
+	// tables were ACTUALLY routed by DB-050 (F2, 4R ledger obs #1282,
+	// CRITICAL, verified: DB-050's own guard clause — dbrules/rules.go,
+	// `if len(t.PrimaryKey) > 0 { continue }` — runs BEFORE the routing
+	// check, so an unproven table that already shows a primary key in the
+	// model is never routed. The note must not claim otherwise for those
+	// tables; a rule about the ABSENCE of a primary key has nothing to
+	// route when a key is already visible, proven or not).
+	routedCount := map[string]int{}
+	for _, t := range s.Tables {
+		if t.StructureProven() || t.Note == "" {
+			continue
+		}
+		if _, seen := byReason[t.Note]; !seen {
+			reasonOrder = append(reasonOrder, t.Note)
+		}
+		byReason[t.Note] = append(byReason[t.Note], t.Name)
+		if len(t.PrimaryKey) == 0 {
+			routedCount[t.Note]++
+		}
+	}
+
+	var parts []string
+	reasonsShown := 0
+	for _, reason := range reasonOrder {
+		if reasonsShown >= completenessInventoryReasonCap {
+			parts = append(parts, fmt.Sprintf("(+%d more reasons)", len(reasonOrder)-reasonsShown))
+			break
+		}
+		names := byReason[reason]
+		shown := names
+		suffix := ""
+		if len(names) > completenessInventoryTableCap {
+			shown = names[:completenessInventoryTableCap]
+			suffix = fmt.Sprintf(" (+%d more)", len(names)-completenessInventoryTableCap)
+		}
+		parts = append(parts, fmt.Sprintf(
+			"codefit could not prove the structure of %d table(s) complete — %s: %s%s. "+
+				"Absence-based DB/DW rules abstained on them. %s",
+			len(names), reason, strings.Join(shown, ", "), suffix,
+			routingClause(routedCount[reason], len(names)),
+		))
+		reasonsShown++
+	}
+
+	if len(s.Unreduced) > 0 {
+		shown := s.Unreduced
+		suffix := ""
+		if len(shown) > completenessInventoryTableCap {
+			suffix = fmt.Sprintf(" (+%d more)", len(shown)-completenessInventoryTableCap)
+			shown = shown[:completenessInventoryTableCap]
+		}
+		locs := make([]string, 0, len(shown))
+		for _, u := range shown {
+			locs = append(locs, fmt.Sprintf("%s:%d", u.Pos.File, u.Pos.Line))
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%d statement(s) affecting an unidentified table could not be reduced (%s%s). "+
+				"No table could be attributed, so no rule was gated on them.",
+			len(s.Unreduced), strings.Join(locs, ", "), suffix,
+		))
+	}
+
+	if len(parts) > 0 {
+		// F5 (4R ledger obs #1282): "Absence-based DB/DW rules abstained on
+		// them" is true for dbrules/dwrules, but a reader could reasonably
+		// take it as comprehensive. It is not: internal/core/crossrules
+		// (DB-010/DB-013) is a SEPARATE, absence-based rule family that runs
+		// in scan-all and does NOT consult StructureProven() today — a real,
+		// if bounded, limit (crossrules only emits surface, never an
+		// affirmation, so the blast radius is a possible surface item over
+		// unproven structure, not a false deterministic finding). Stated
+		// once, not per reason group, so it never spams a clean scan and
+		// never repeats per reason (ADR 0018's corollary: a declared limit
+		// must be machine-visible, not left to prose alone — locked by
+		// TestSensorDB_CompletenessNote_DeclaresCrossrulesExceptionWhenNonEmpty).
+		parts = append(parts, "Declared exception: the code×schema cross (DB-010/DB-013) does not consult "+
+			"this completeness signal and may still emit surface items over these tables.")
+	}
+
+	return strings.Join(parts, " ")
+}
 
 // suppress3NF drops DB-002 (CategoryDBMultivalued) / DB-003
 // (CategoryDBRepeatingGroups) surface items on OLAP-classified tables (design

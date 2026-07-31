@@ -346,7 +346,11 @@ func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrul
 	res.Findings = append(res.Findings, crossF...)
 	res.Surface = append(res.Surface, crossS...)
 
-	return &DBSection{Measured: true, Score: res.Score}, res, true
+	// r.Note carries the sensor's composed audit trace (design SS4 "scanall.go
+	// Note Leak" / SS7a) — the completeness inventory plus any 3NF-suppression
+	// trace. The unmeasured paths above already carry Note; this was the one
+	// path that dropped it.
+	return &DBSection{Measured: true, Note: r.Note, Score: res.Score}, res, true
 }
 
 // runCross extracts the code's query filters (when the language provider implements

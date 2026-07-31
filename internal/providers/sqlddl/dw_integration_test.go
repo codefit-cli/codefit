@@ -9,7 +9,9 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/dbrules"
 	"github.com/codefit-cli/codefit/internal/core/dwrules"
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/paradigm"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
@@ -135,26 +137,51 @@ func TestDW_AdventureWorksDW_SnakeCaseRenamed_StarStillInvisible_DeclaredLimit(t
 	}
 }
 
-// The most serious consequence of LIMIT 2, locked so it cannot rot silently: a
-// DETERMINISTIC AFFIRMATION (confidence 1.0) is wrong on real vendored DDL.
-// DB-050 says these three tables have no primary key; Microsoft's script
-// declares one for each. This is a KNOWN BUG, recorded here and in
-// dbcoverage.go's SQL-DDL known-limits entry — the test asserts today's
-// behavior precisely so that fixing the parser turns it red and forces the
-// declared limit to be retired at the same time.
-func TestDB050_AdventureWorksDW_FalseAffirmation_KnownBug(t *testing.T) {
+// db-model-completeness-contract (2026-07-30): this test used to lock a KNOWN
+// BUG — DB-050 deterministically AFFIRMED (confidence 1.0) that these three
+// tables have no primary key, over real Microsoft-authored DDL that plainly
+// declares one for each. That was the motivating false affirmation for the
+// whole change (proposal SS1). It is REWRITTEN, not deleted: the three ALTER
+// TABLE ... ADD CONSTRAINT shapes are STILL dropped (LIMIT 2 above is
+// unchanged, deliberately deferred parser-shape debt) — what changed is that
+// the drop is now RECORDED (D2), so DB-050 ROUTES to a dedicated surface item
+// instead of affirming (D4/D5, design SS4/SS5). This is the "AdventureWorksDW
+// yields zero false affirmations" success criterion from the proposal, made
+// executable.
+func TestDB050_AdventureWorksDW_NoFalseAffirmation_RoutesToSurfaceInstead(t *testing.T) {
 	s := awdwSchema(t)
-	fs, _ := dbrules.Run(s)
-	var affirmed []string
+	fs, surf := dbrules.Run(s)
+
 	for _, f := range fs {
 		if f.ID == "DB-050" {
-			affirmed = append(affirmed, f.Description)
+			t.Errorf("DB-050 affirmed %q — must route to surface instead of affirming over unproven structure", f.Description)
 		}
 	}
-	if len(affirmed) != 3 {
-		t.Fatalf("DB-050 affirmations = %d, want 3 (the known false-positive count). If this dropped to 0, "+
-			"the T-SQL ALTER ... ADD CONSTRAINT gap is fixed — retire this test and the matching NotCovered "+
-			"entry. Got: %v", len(affirmed), affirmed)
+
+	var routed []findings.SurfaceItem
+	for _, it := range surf {
+		if it.Category == string(surface.CategoryDBTableStructureUnproven) {
+			routed = append(routed, it)
+		}
+	}
+	if len(routed) != 3 {
+		t.Fatalf("db-table-structure-unproven surface items = %d, want 3 (DimCustomer, DimDate, FactInternetSales). "+
+			"If this changed, LIMIT 2's ALTER TABLE ADD CONSTRAINT shapes may have been fixed or regressed — "+
+			"re-derive this count from the fixture rather than adjusting it blindly. Got: %+v", len(routed), routed)
+	}
+	for _, it := range routed {
+		if it.StructuralFacts["table_structure_proven_complete"] {
+			t.Errorf("item for line %d: table_structure_proven_complete = true, want false", it.Line)
+		}
+		hasUnreducedStatement := false
+		for _, sig := range it.StructuralSignals {
+			if strings.HasPrefix(sig, "unreduced_statement: ") {
+				hasUnreducedStatement = true
+			}
+		}
+		if !hasUnreducedStatement {
+			t.Errorf("item for line %d carries no unreduced_statement signal — the agent needs the raw DDL to judge for itself", it.Line)
+		}
 	}
 }
 

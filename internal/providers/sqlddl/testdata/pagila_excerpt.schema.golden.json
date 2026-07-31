@@ -4,8 +4,8 @@
       "Name": "actor",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 40
       },
       "Columns": [
         {
@@ -59,14 +59,17 @@
       ],
       "PrimaryKey": null,
       "ForeignKeys": null,
-      "Indexes": null
+      "Indexes": null,
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "customer",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 103
       },
       "Columns": [
         {
@@ -215,14 +218,17 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "address",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 138
       },
       "Columns": [
         {
@@ -335,14 +341,17 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "rental",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 149
       },
       "Columns": [
         {
@@ -445,14 +454,17 @@
           ],
           "Unique": true
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     },
     {
       "Name": "payment_p2022_01",
       "DBName": "",
       "Pos": {
-        "File": "",
-        "Line": 0
+        "File": "pagila_excerpt.sql",
+        "Line": 181
       },
       "Columns": [
         {
@@ -565,7 +577,10 @@
           ],
           "Unique": false
         }
-      ]
+      ],
+      "Complete": true,
+      "Note": "",
+      "Unreduced": null
     }
   ],
   "Views": [
@@ -637,5 +652,6 @@
       },
       "ExecutesFunction": "tsvector_update_trigger"
     }
-  ]
+  ],
+  "Unreduced": null
 }

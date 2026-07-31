@@ -142,7 +142,12 @@ var fieldLine = regexp.MustCompile(`^([A-Za-z_]\w*)\s+([A-Za-z_]\w*(?:\[\])?\??)
 // parseModel turns a model block into a db.Table, resolving each field against the
 // model/enum name sets (the two-pass mechanism).
 func parseModel(b prismaBlock, models, enums map[string]bool) db.Table {
-	t := db.Table{Name: b.name, Pos: db.Pos{File: b.file, Line: b.line}}
+	// Complete starts true (N1, design §1-D1b): db.Table.Complete's zero
+	// value is false (fail-closed), so this construction site must set it
+	// explicitly or every Prisma project mutes the whole DB dimension. A
+	// table is demoted to Complete=false only when a body line is neither a
+	// recognized field nor a @@-attribute (see MarkUnproven below).
+	t := db.Table{Name: b.name, Pos: db.Pos{File: b.file, Line: b.line}, Complete: true}
 	for _, ln := range b.body {
 		pos := db.Pos{File: b.file, Line: ln.num}
 		if strings.HasPrefix(ln.text, "@@") {
@@ -151,7 +156,16 @@ func parseModel(b prismaBlock, models, enums map[string]bool) db.Table {
 		}
 		m := fieldLine.FindStringSubmatch(ln.text)
 		if m == nil {
-			continue // not a field line — skip leniently
+			// A body line that is neither a @@-attribute nor a field line:
+			// the parser does not know what it declared, so it cannot rule
+			// out that it declared a key, an index or a column. Recording it
+			// honours the same contract the SQL-DDL reducer does (ADR 0034,
+			// design SS7b) — the neutral model, not the provider, defines
+			// what "unproven" means. Distinct from the deferred, test-locked
+			// debt at splitBlocks' stray TOP-LEVEL line skip (:92 — no
+			// *db.Table in scope there, a different granularity).
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, ln.text, pos)
+			continue
 		}
 		name, typeTok, rest := m[1], m[2], m[3]
 		base, nullable, list := parseTypeToken(typeTok)
