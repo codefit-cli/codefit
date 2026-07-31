@@ -695,8 +695,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     above) apply here too — but that is a statement about what this
     repository vendors, **not** a claim that no such corpus exists: a
     separate empirical yield measurement (4R review + yield measurement,
-    coordinator round) surveyed 19 real public warehouse schemas (353
-    tables, 273 FKs) and found DW-021 fires unmodified on 3 of them — the
+    coordinator round) surveyed 22 real public corpora (463 tables, 427
+    FKs, 771 indexes) and found DW-021 fires unmodified on 3 of them — the
     **only** DW-0xx rule that fires on unmodified real DDL; none of the five
     S2 rules do. That measurement's corpus is not vendored here (a future
     slice's job, not this one's), so DW-021's own test suite still proves
