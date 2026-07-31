@@ -72,10 +72,14 @@ stage" — it does **not** claim `0.1.0` is done.
   `file:line` rather than losing the signal. Also fixed: four surface categories emitted
   since `v0.2.3` without being declared in `OwnedCategories()` (ADR 0019 — the one way to
   corrupt a committed baseline), caught by the new `dbcoverage` enforcement test on its first
-  run. **Alpha, not `0.2.5`:** DW-021 and DW-020 are still open — see the `alpha.1` entry
-  below for what each needs. DW-021 has an implementation on the `feat/olap-columnar-index`
-  branch that a full 4R found unsound on every input path; it is deliberately unmerged
-  pending an architect decision (draft PR #75).
+  run. **Alpha, not `0.2.5`:** DW-021 and DW-020 were still open as of this tag — see the
+  `alpha.1` entry below for what each needed. The `feat/olap-columnar-index` draft (PR
+  #75) that a full 4R found unsound on every input path was abandoned, not merged: the
+  4R traced the unsoundness to the PARSER (it could not read index access methods at
+  all), not the rule, so the fix landed at that layer first, on `main`, past this tag
+  and still untagged as of this writing; a rule-only DW-021 was then rebuilt from
+  scratch on a new branch. Neither DW-021 nor DW-020 has shipped in a tagged release
+  yet — this bullet is history, not current status.
 - **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
   warehouse from a transactional database and audits its modelling: paradigm/table-role
   detection as a pure core leaf (prefixes corroborated by real FK fan-out/fan-in, never by a
@@ -83,12 +87,14 @@ stage" — it does **not** claim `0.1.0` is done.
   overrides, 3NF-suppression on fact/dimension/mart tables with an audit trace in the sensor's
   `Note`, and the star-schema/SCD family DW-001/002/005/010/011 — all **surface**, never
   affirmations (ADR 0017), wired into `scan-db` and the DB bucket of `scan-all`, and
-  baselineable (ADR 0019). **Alpha, not `0.2.5`:** two of the eight items in the PRD's OLAP
-  scope remain — DW-021 (columnar index) and DW-020 (partitioning) — and neither is a
-  rule-only slice: DW-021 needs a `Method` field the neutral `db.Index` does not have yet, and
+  baselineable (ADR 0019). **Alpha, not `0.2.5`:** as of this tag, two of the eight items in the PRD's OLAP
+  scope remained — DW-021 (columnar index) and DW-020 (partitioning) — and neither was a
+  rule-only slice: DW-021 needed a `Method` field the neutral `db.Index` did not yet have, and
   DW-020 needs the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it currently
   declares as a limit and skips, per dialect. Role detection is snake_case only, so PascalCase
-  Kimball naming yields no DW value; declared, test-locked, not silent.
+  Kimball naming yields no DW value; declared, test-locked, not silent. (`db.Index.Method` has
+  since landed on `main`, past this tag and still untagged as of this writing — see the
+  `alpha.2` entry above.)
 - **`v0.2.4` — Phase 2.4 complete (index-vs-query).** The index-vs-query DB debt deferred in
   `0.2.0` is paid (OLAP remains the open Phase-2 debt): the first rules that cross the code's
   queries against the schema. A filtered

@@ -9,10 +9,11 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
-// D4 (design SS4) — the five DW rules ABSTAIN, per table, on an unproven
-// table; DW-005 and DW-011 are SCHEMA-LEVEL census judgments and therefore
-// abstain the WHOLE rule when ANY relevant table is unproven — a per-table
-// continue would silently shrink the census and still emit, a worse lie.
+// D4 (design SS4) — all six DW rules (DW-001/002/005/010/011/021) ABSTAIN,
+// per table, on an unproven table; DW-005 and DW-011 are SCHEMA-LEVEL census
+// judgments and therefore abstain the WHOLE rule when ANY relevant table is
+// unproven — a per-table continue would silently shrink the census and
+// still emit, a worse lie.
 
 func unprovenDWTable(name string) db.Table {
 	tb := db.Table{Name: name, Pos: db.Pos{File: "x.sql", Line: 1}}
@@ -79,6 +80,22 @@ func TestDW005_AnyUnprovenFactOrDimension_AbstainsWholeRule(t *testing.T) {
 	fs, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-005")})
 	if len(fs) != 0 || len(surf) != 0 {
 		t.Errorf("DW-005 must abstain the WHOLE rule when any fact/dimension table is unproven, got findings=%v surface=%v", fs, surf)
+	}
+}
+
+// TestDW021_UnprovenFactTable_Abstains proves the S3 thesis end to end: a
+// per-table StructureProven() gate abstains automatically on an unproven fact
+// table, with no dialect branch anywhere in dw021.go. This unproven table has
+// NO indexes at all (which would otherwise fire deterministically per
+// TestDW021_FactWithNoIndexesAtAll_Fires) — the dropped statement could have
+// been the very CREATE INDEX declaring its columnar index.
+func TestDW021_UnprovenFactTable_Abstains(t *testing.T) {
+	tb := unprovenDWTable("fact_sales")
+	s := &db.Schema{Tables: []db.Table{tb}}
+	cls := &paradigm.Classification{Roles: map[string]paradigm.Role{"fact_sales": paradigm.RoleFact}}
+	_, surf := dwrules.RunWith(s, cls, []dwrules.Rule{dwRuleByID(t, "DW-021")})
+	if len(surf) != 0 {
+		t.Errorf("DW-021 must abstain on an unproven fact table, got: %+v", surf)
 	}
 }
 

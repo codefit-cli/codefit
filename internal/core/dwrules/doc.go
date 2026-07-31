@@ -12,8 +12,10 @@
 // star-schema + SCD family — DW-001 (fact without a dimension FK), DW-002
 // (dimension without a surrogate key), DW-005 (facts present, no time
 // dimension), DW-010 (SCD-2 without a currency index) and DW-011 (mixed SCD
-// strategies) — without touching that seam. DW-021 (columnar index, S3) and
-// DW-020 (partitioning, S4) are NOT here yet and remain declared-not-covered.
+// strategies) — without touching that seam. S3 adds DW-021 (fact table with no
+// columnar/analytic index), reasoning over db.Index.Method the parser now
+// populates (index-method-capture, PR #79). DW-020 (partitioning, S4) is NOT
+// here yet and remains declared-not-covered.
 //
 // Every rule in this package is SURFACE-only (ADR 0017). A warehouse-modelling
 // choice is a design judgment, not a structurally undeniable defect: an
