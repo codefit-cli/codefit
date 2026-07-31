@@ -161,7 +161,7 @@ diagnosis. A process rule without a test enforcing it is an intention, not a
 control. Every declared limit this change touches gets an executable lock:
 the fabrication characterization test, the recognized-skip regression tests,
 the N2 authored fixture, the AdventureWorksDW zero-false-affirmation lock,
-and the Prisma `:153`/`:92` completeness/deferred-debt locks.
+and the Prisma `:167`/`:92` completeness/deferred-debt locks.
 
 ### 2.8 The measurement/diagnostics boundary
 
@@ -230,7 +230,7 @@ inventory) and no new channel is invented.
 - Any future provider that fills `db.Schema` inherits the obligation to set
   `Complete` explicitly at its construction site(s) — the Prisma provider is
   a first-class implementer of this contract, not a follow-up: without its
-  own `:153` fix, the contract would affirm unproven completeness on the
+  own `:167` fix, the contract would affirm unproven completeness on the
   project's own most-used route (Next.js/Prisma).
 - `dbcoverage.go`'s `NotCovered()` items (5) and (6) are corrected in the
   same change that introduces this ADR — source before mirror, then synced to

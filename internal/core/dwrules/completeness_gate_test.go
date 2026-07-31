@@ -135,9 +135,15 @@ func TestDW011_AnyUnprovenDimension_AbstainsWholeRule(t *testing.T) {
 	}
 }
 
-// Proven-model regression locks: a fully proven schema must behave EXACTLY
-// as before this change (byte-identical output), for one representative rule
-// (DW-001) since the others already have their own per-rule unit tests.
+// Proven-model regression lock (4R repair, obs #1282 — the doc comment
+// previously overclaimed "byte-identical output"; corrected to match what
+// this test actually asserts): a fully proven schema must still fire DW-001
+// on a fact table with no dimension FK — a PRESENCE check only (category
+// membership), for one representative rule since the others already have
+// their own per-rule unit tests. Full signal-content correctness for DW-001
+// (table name, foreign_keys text, StructuralFacts) is separately covered by
+// dw001_test.go's TestDW001_FactWithoutDimensionFK_Fires and siblings, which
+// this test does not duplicate.
 func TestDW001_ProvenFactTable_StillFires(t *testing.T) {
 	tb := db.Table{Name: "fact_sales", Complete: true, Pos: db.Pos{File: "x.sql", Line: 1}}
 	s := &db.Schema{Tables: []db.Table{tb}}

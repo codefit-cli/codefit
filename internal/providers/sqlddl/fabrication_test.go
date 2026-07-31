@@ -28,11 +28,12 @@ import (
 // completeness contract alone does not cover a reducer that believes it
 // succeeded. Design §8c's disposition (narrow the fabrication at its source
 // in applyAlterAction, converting a CONSTRAINT-prefixed remainder to
-// MarkUnproven instead of applyColumn) is implemented once db.Table.
-// MarkUnproven exists — see reduce.go's applyAlterAction. Once that fix
-// lands, this test's R1-a/R1-b assertions are UPDATED (not loosened) to lock
-// the corrected behavior: Complete=false + an Unreduced entry, no phantom
-// column/key.
+// MarkUnproven instead of applyColumn) IS IMPLEMENTED — see reduce.go's
+// applyAlterAction (the leadingKeyword check just before the "ADD "/"ADD
+// COLUMN" branch's default column handling). R1-a/R1-b below assert the
+// CORRECTED, current behavior: Complete=false + an Unreduced entry, no
+// phantom column/key — NOT the CONFIRMED output quoted above, which is
+// preserved here only as the historical record of the branch decision.
 func TestSQLDDL_R1_FabricationHypothesis(t *testing.T) {
 	const tableDecl = "CREATE TABLE [dbo].[f]([a] [int] NOT NULL,[b] [int] NOT NULL);\nGO\n"
 	parse := func(t *testing.T, src string) db.Table {
@@ -99,7 +100,8 @@ func TestSQLDDL_R1_FabricationHypothesis(t *testing.T) {
 		}
 	})
 
-	// R1-c predicts a clean drop: "ADD " (reduce.go:442) requires a literal
+	// R1-c predicts a clean drop: "ADD " (reduce.go:534, re-verified at 4R
+	// repair time — line numbers drift as the file grows) requires a literal
 	// single space, so a tab falls straight to the applyAlterAction default —
 	// no phantom column, no phantom key.
 	t.Run("R1-c: ADD + tab + CONSTRAINT — predicts a clean drop, no fabrication", func(t *testing.T) {

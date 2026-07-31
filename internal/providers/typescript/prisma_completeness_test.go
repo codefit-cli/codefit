@@ -10,11 +10,14 @@ import (
 )
 
 // Spec "Domain: Prisma Schema Completeness" (DELTA 2), design SS7b —
-// prismaschema.go:153 (`if m == nil { continue }`, inside parseModel with
+// prismaschema.go:158 (`if m == nil { continue }`, inside parseModel with
 // &t in scope) must mark the table unproven instead of silently continuing.
-// This is separate from N1's default (prismaschema.go:145, tested in
+// This is separate from N1's default (prismaschema.go:150, tested in
 // completeness_construction_test.go), which this narrows for lines the
-// parser actually drops.
+// parser actually drops. (Line numbers re-verified against the working tree
+// at 4R-repair time, 4R ledger obs #1282's "cheap, and this repo's doctrine"
+// item — they drifted from the design's original :153/:145 as this file
+// grew.)
 func TestPrisma_UnrecognizedModelBodyLine_MarksUnproven(t *testing.T) {
 	p := &typescript.Provider{}
 	// A multi-line block-attribute continuation: line 2 of the @@index

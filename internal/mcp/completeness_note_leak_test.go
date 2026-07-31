@@ -76,7 +76,7 @@ database:
 		t.Fatal("test fixture setup produced no sensor Note — fixture must be adjusted, the leak cannot be observed against an empty Note")
 	}
 	if section.Note == "" {
-		t.Error("DBSection.Note is empty on a MEASURED result whose sensor Result.Note is non-empty — the scanall.go:349 leak")
+		t.Error("DBSection.Note is empty on a MEASURED result whose sensor Result.Note is non-empty — the scanall.go:353 leak (re-verified at 4R repair time; the fix now lives there, not :349)")
 	}
 	if section.Note != want.Note {
 		t.Errorf("DBSection.Note = %q, want it to equal the sensor's Result.Note %q", section.Note, want.Note)
