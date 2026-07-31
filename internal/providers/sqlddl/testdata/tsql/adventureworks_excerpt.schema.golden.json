@@ -82,7 +82,8 @@
           "Columns": [
             "AccountNumber"
           ],
-          "Unique": false
+          "Unique": false,
+          "Method": ""
         }
       ],
       "Complete": true,

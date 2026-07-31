@@ -1,9 +1,21 @@
 -- CONSTRUCTED / SYNTHETIC fixture — NOT vendored, NOT copied from any
--- upstream corpus. Authored for codefit's own test suite
+-- upstream corpus. Originally authored for codefit's own test suite
 -- (parser-records-unrecognized-drops, ADR 0034 SS2.4) to prove that a CREATE
 -- INDEX-shaped statement reCreateIndex's own grammar does not cover is
 -- GENUINELY UNRECOGNIZED — not a declared skip — and must mark its table
 -- unproven rather than vanish silently.
+--
+-- UPDATED by index-method-capture: TWO of the seven statements below (the
+-- CLUSTERED COLUMNSTORE INDEX and the anonymous CREATE INDEX) are NO LONGER
+-- unrecognized — reCreateIndex/reCreateColumnstoreIndex now read them, and
+-- capture their access method into db.Index.Method. This is the intended
+-- direction (the point of that slice is to make blindness disappear, not
+-- just report it honestly). They stay in this fixture because
+-- TestSQLDDL_UnrecognizedIndexForms_Fixture_MixedRecognizedAndUnrecognized
+-- still exercises them, now asserting the OPPOSITE (recognized) outcome —
+-- see that test's own doc comment. The other five statements remain
+-- genuinely unrecognized and are the still-unknown floor this fixture's
+-- original purpose protects.
 --
 -- Why constructed: a case-insensitive grep across
 -- internal/providers/sqlddl/testdata/ for COLUMNSTORE, "ON ONLY", and an
@@ -20,9 +32,11 @@ CREATE TABLE fact_sales (
     amount numeric(12,2)
 );
 
--- T-SQL: CREATE [CLUSTERED] COLUMNSTORE INDEX — reCreateIndex requires a
--- mandatory index name captured right before "on", and does not know the
--- CLUSTERED/COLUMNSTORE vocabulary at all.
+-- T-SQL: CREATE [CLUSTERED] COLUMNSTORE INDEX — NOW RECOGNIZED as of
+-- index-method-capture, by its own dedicated regex (reCreateColumnstoreIndex,
+-- a genuinely different statement shape from reCreateIndex: no column list
+-- at all). Method captures "columnstore"; Columns stays empty (never
+-- synthesized) since the statement's own grammar names none.
 CREATE CLUSTERED COLUMNSTORE INDEX cci_fact_sales ON fact_sales;
 
 CREATE TABLE event_log (
@@ -30,8 +44,10 @@ CREATE TABLE event_log (
     payload text
 );
 
--- PostgreSQL: an anonymous index (no index name) — legal PostgreSQL syntax,
--- but reCreateIndex's index-name capture group is mandatory.
+-- PostgreSQL: an anonymous index (no index name) — legal PostgreSQL syntax.
+-- NOW RECOGNIZED as of index-method-capture: reCreateIndex's index-name
+-- capture group is optional, so this parses with Method="brin" and
+-- Columns=[event_id].
 CREATE INDEX ON event_log USING brin (event_id);
 
 CREATE TABLE metrics_partitioned (

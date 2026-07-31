@@ -44,39 +44,102 @@ func (b *builder) schema() *db.Schema {
 var (
 	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
 	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
-	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+(?:concurrently\s+)?(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\s*(?:using\s+\w+\s*)?\(([^)]*)\)`)
-	reView        = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
-	reRoutine     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
-	reTrigger     = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
-	reDropTable   = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
-	reReferences  = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
+	// reCreateIndex recognizes the "ordinary" CREATE INDEX shape — one with an
+	// explicit column list — across all three dialects, and captures the
+	// index's declared access method wherever the dialect places it:
+	//
+	//   group 1: UNIQUE
+	//   group 2: T-SQL's CLUSTERED|NONCLUSTERED kind (no column-list impact —
+	//            same statement shape as an ordinary index, just an extra
+	//            keyword before INDEX; index-method-capture)
+	//   group 3: IF NOT EXISTS
+	//   group 4: the index NAME — now OPTIONAL, to admit PostgreSQL's
+	//            anonymous form ("CREATE INDEX ON t ..."), where PostgreSQL
+	//            itself generates the name (index-method-capture). Making
+	//            this optional does NOT introduce ambiguity with an ordinary
+	//            named index whose name happens to start with "on" (e.g.
+	//            "on_hand_idx") or a TABLE named "on": Go's regexp (RE2) finds
+	//            the correct overall match via Pike's algorithm, which
+	//            reproduces Perl-like leftmost-first submatch semantics
+	//            without true backtracking — both directions are locked by
+	//            TestSQLDDL_PG_AnonymousIndex_NamedIndexStartingWithOn_
+	//            StillAttributes and ..._OnTableNamedOn.
+	//   group 5: the table name
+	//   group 6: PostgreSQL's USING <method> position, BEFORE the column list
+	//   group 7: the column list
+	//   group 8: MySQL's USING BTREE|HASH position, AFTER the column list —
+	//            a DIFFERENT grammar position from PostgreSQL's (
+	//            index-method-capture)
+	reCreateIndex = regexp.MustCompile(`(?is)^create\s+(unique\s+)?(clustered\s+|nonclustered\s+)?index\s+` +
+		`(?:concurrently\s+)?(if\s+not\s+exists\s+)?(?:("?[\w"]+"?)\s+)?on\s+("?[\w".]+"?)\s*` +
+		`(?:using\s+(\w+)\s*)?\(([^)]*)\)(?:\s*using\s+(\w+))?`)
+
+	// reCreateColumnstoreIndex recognizes T-SQL's CREATE [CLUSTERED] COLUMNSTORE
+	// INDEX — a genuinely DIFFERENT statement shape from reCreateIndex, not a
+	// widened case of it: a clustered columnstore index (CLUSTERED is also
+	// this statement's own default when omitted) carries NO column list at
+	// all — it always covers every column of the table implicitly. This is
+	// deliberately its own branch (index-method-capture task instruction),
+	// not folded into reCreateIndex's `\(([^)]*)\)` grammar, which requires a
+	// column list to match at all. A NONCLUSTERED COLUMNSTORE INDEX, which
+	// DOES take an explicit column list, is a distinct shape this regex does
+	// NOT cover — it stays a genuinely unrecognized CREATE INDEX-shaped head
+	// (reIndexShapedHead), out of scope for this slice.
+	//
+	//   group 1: CLUSTERED (optional; also this statement's own default)
+	//   group 2: IF NOT EXISTS
+	//   group 3: the index name (T-SQL always requires one here, unlike PG's
+	//            anonymous form)
+	//   group 4: the table name
+	reCreateColumnstoreIndex = regexp.MustCompile(`(?is)^create\s+(clustered\s+)?columnstore\s+index\s+` +
+		`(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\b`)
+	reView       = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
+	reRoutine    = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
+	reTrigger    = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
+	reDropTable  = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
+	reReferences = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
 
 	// reIndexShapedHead recognizes a CREATE INDEX-family statement head
-	// BROADER than reCreateIndex — including forms reCreateIndex's own
-	// grammar does not cover (an anonymous PostgreSQL index with no index
-	// name, an "ON ONLY" partitioned-table index, T-SQL's
-	// CLUSTERED/NONCLUSTERED/COLUMNSTORE index kinds, and the standalone
-	// FULLTEXT/SPATIAL/XML/PRIMARY XML CREATE INDEX statement forms — this
-	// package already treats FULLTEXT/SPATIAL as recognized index vocabulary
-	// for the INLINE and ALTER...ADD shorthand forms
+	// BROADER than reCreateIndex/reCreateColumnstoreIndex COMBINED — the
+	// LAST-RESORT net in apply()'s switch, checked AFTER both of those (so it
+	// only ever sees a statement neither of them could dispatch). Its own
+	// regex text is UNCHANGED and still broadly matches CLUSTERED/
+	// NONCLUSTERED/COLUMNSTORE/anonymous-shaped heads too — the dispatch
+	// ORDER, not this regex, is what determines which forms actually reach
+	// this case. As of index-method-capture, what STILL lands here (an
+	// anonymous PostgreSQL index and T-SQL's ordinary CLUSTERED/NONCLUSTERED
+	// index no longer do — reCreateIndex now reads both; T-SQL's CLUSTERED
+	// COLUMNSTORE INDEX no longer does either — reCreateColumnstoreIndex now
+	// reads it): PostgreSQL's "ON ONLY" partitioned-table index; the
+	// standalone FULLTEXT/SPATIAL/XML/PRIMARY XML CREATE INDEX statement
+	// forms — this package already treats FULLTEXT/SPATIAL as recognized
+	// index vocabulary for the INLINE and ALTER...ADD shorthand forms
 	// (isInlineKeyIndexForm/isAddKeyIndexForm), so leaving the standalone
 	// CREATE form out here would be an internal inconsistency, not a new
-	// dialect gap, REL-001) — so apply()'s default: branch can tell "this
-	// dispatch genuinely has no branch for this INDEX form" apart from a
-	// statement that is out of the declared subset entirely (INSERT, GRANT,
-	// COMMENT, CREATE TYPE, ...), which must stay silent (ADR 0034 SS2.4;
+	// dialect gap, REL-001); and T-SQL's CREATE NONCLUSTERED COLUMNSTORE
+	// INDEX, which — unlike its CLUSTERED counterpart — carries an explicit
+	// column list, a materially different shape reCreateColumnstoreIndex
+	// deliberately does not cover (out of scope this slice). apply()'s
+	// default: branch can then tell "this dispatch genuinely has no branch
+	// for this INDEX form" apart from a statement that is out of the
+	// declared subset entirely (INSERT, GRANT, COMMENT, CREATE TYPE, ...),
+	// which must stay silent (ADR 0034 SS2.4;
 	// TestSQLDDL_OutOfSubsetStatement_RecordsNothing locks that boundary).
 	reIndexShapedHead = regexp.MustCompile(`(?is)^create\s+(?:unique\s+)?(?:clustered\s+|nonclustered\s+)?` +
 		`(?:columnstore\s+|fulltext\s+|spatial\s+|primary\s+xml\s+|xml\s+)?index\b`)
 
 	// reIndexShapedTarget extracts the target table from a CREATE
-	// INDEX-shaped statement default() could not fully parse — the
-	// identifier following its ON (or ON ONLY, PostgreSQL's
-	// partitioned-table syntax) clause. Same table-identifier character
-	// class as reCreateIndex's own capture group 4, for consistency. Narrow
-	// on purpose: used ONLY to ATTRIBUTE an already-confirmed unrecognized
-	// index drop to a table (design: "a wrong attribution is worse than
-	// none"), never to reduce the statement itself.
+	// INDEX-shaped statement the dispatch could not fully reduce (via
+	// markUnrecognizedIndexShape) — the identifier following its ON (or ON
+	// ONLY, PostgreSQL's partitioned-table syntax) clause. Same
+	// table-identifier character class as reCreateIndex's own capture group
+	// 5 (the TABLE name, `[\w".]` — schema-qualifier-tolerant), NOT group 4
+	// (the INDEX name, `[\w"]`, no dot) — a "restore consistency" edit that
+	// picked group 4 instead would silently drop schema qualifiers from the
+	// attribution target and misattribute drops. Narrow on purpose: used
+	// ONLY to ATTRIBUTE an already-confirmed unrecognized index drop to a
+	// table (design: "a wrong attribution is worse than none"), never to
+	// reduce the statement itself.
 	reIndexShapedTarget = regexp.MustCompile(`(?is)\bon\s+(?:only\s+)?("?[\w".]+"?)`)
 
 	// reTriggerExecutes matches the PostgreSQL "EXECUTE FUNCTION|PROCEDURE
@@ -130,6 +193,8 @@ func (b *builder) apply(file string, st stmt) {
 		b.applyAlterTable(file, st)
 	case reCreateIndex.MatchString(st.text):
 		b.applyCreateIndex(file, st)
+	case reCreateColumnstoreIndex.MatchString(st.text):
+		b.applyCreateColumnstoreIndex(file, st)
 	case reView.MatchString(st.text):
 		b.views = append(b.views, db.View{Name: normalizeName(reView.FindStringSubmatch(st.text)[1]), Pos: pos, Body: viewBody(st)})
 	case reRoutine.MatchString(st.text):
@@ -145,32 +210,15 @@ func (b *builder) apply(file string, st stmt) {
 		b.dropTable(normalizeName(reDropTable.FindStringSubmatch(st.text)[1]))
 	case reIndexShapedHead.MatchString(st.text):
 		// A genuinely UNRECOGNIZED CREATE INDEX form: it announces itself as
-		// a CREATE INDEX statement but reCreateIndex's own grammar has no
-		// branch for it (an anonymous index, ON ONLY, or a
-		// CLUSTERED/NONCLUSTERED/COLUMNSTORE kind). Per ADR 0034 SS2.4, this
-		// is NOT a declared skip: the dispatch genuinely does not know
-		// whether it declares an index, so it must mark the table unproven
-		// instead of vanishing silently.
-		if tm := reIndexShapedTarget.FindStringSubmatch(st.text); tm != nil {
-			t, created := b.getTable(normalizeName(tm[1]), pos)
-			if created {
-				// F4 pattern (4R ledger obs #1282), same disposition as
-				// applyAlterTable/applyCreateIndex above (REL-002, 4R
-				// reliability lens): this is the FIRST time this table name
-				// was ever seen — no CREATE TABLE declared it. The accurate
-				// claim reaching the agent through routeUnprovenTable is "no
-				// CREATE TABLE was ever seen for this table", not "a
-				// statement affecting this table could not be reduced".
-				t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, pos)
-			} else {
-				t.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, pos)
-			}
-		} else {
-			// No attributable table (a wrong attribution is worse than
-			// none, design §2) — recorded at schema level; gates nothing
-			// per-table.
-			b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: pos})
-		}
+		// a CREATE INDEX statement but neither reCreateIndex nor
+		// reCreateColumnstoreIndex's grammar has a branch for it (PostgreSQL's
+		// ON ONLY, a standalone FULLTEXT/SPATIAL/XML/PRIMARY XML form, or
+		// T-SQL's CREATE NONCLUSTERED COLUMNSTORE INDEX, which carries an
+		// explicit column list unlike its CLUSTERED counterpart). Per ADR
+		// 0034 SS2.4, this is NOT a declared skip: the dispatch genuinely
+		// does not know whether it declares an index, so it must mark the
+		// table unproven instead of vanishing silently.
+		b.markUnrecognizedIndexShape(file, st)
 	default:
 		// out of the declared subset (INSERT/UPDATE/DO/GRANT/COMMENT/CREATE
 		// TYPE/…) — skipped on purpose. These statement KINDS are never
@@ -468,7 +516,7 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 	case strings.HasPrefix(up, "PRIMARY KEY"):
 		t.PrimaryKey = parenCols(c)
 	case strings.HasPrefix(up, "UNIQUE"):
-		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: true})
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: true, Method: indexMethodOutsideParens(c)})
 	case strings.HasPrefix(up, "FOREIGN KEY"):
 		if fk, ok := parseForeignKey(c, pos); ok {
 			t.ForeignKeys = append(t.ForeignKeys, fk)
@@ -476,7 +524,12 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 	case kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL":
 		// MySQL inline KEY/INDEX/FULLTEXT KEY/SPATIAL KEY shorthand (task
 		// I4b) — recorded as a plain (non-unique) index by its base columns.
-		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: false})
+		// Method (F1, coordinator review of index-method-capture): MySQL's
+		// index_type/index_option grammar lets USING BTREE|HASH appear
+		// either before the column list (index_type) or after it
+		// (index_option) — indexMethodOutsideParens reads either position,
+		// same convention as the standalone CREATE INDEX capture site.
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: false, Method: indexMethodOutsideParens(c)})
 	case kw == "CHECK" || kw == "EXCLUDE" || kw == "PARTITION":
 		// Declared, RECOGNIZED skips (ADR 0018) — known not to be a
 		// key/index/column, so this is NOT incompleteness. Recording these
@@ -632,12 +685,120 @@ func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 	}
 }
 
+// markUnrecognizedIndexShape attributes a genuinely unrecognized CREATE
+// INDEX-shaped statement to its target table (or Schema.Unreduced when no
+// table resolves), marking the table's structure unproven. Shared by TWO call
+// sites (index-method-capture, F2/F3 coordinator review): apply()'s
+// reIndexShapedHead fallback (a shape reCreateIndex's grammar never matches
+// at all) AND applyCreateIndex's own paren-balance guard (a shape
+// reCreateIndex's grammar MATCHES syntactically but cannot safely reduce — an
+// expression index). Both must fall to the exact SAME floor; sharing this
+// helper is what keeps that guaranteed rather than merely convenient.
+func (b *builder) markUnrecognizedIndexShape(file string, st stmt) {
+	pos := db.Pos{File: file, Line: st.line}
+	if tm := reIndexShapedTarget.FindStringSubmatch(st.text); tm != nil {
+		t, created := b.getTable(normalizeName(tm[1]), pos)
+		if created {
+			// F4 pattern (4R ledger obs #1282), same disposition as
+			// applyAlterTable/applyCreateIndex above (REL-002, 4R
+			// reliability lens): this is the FIRST time this table name
+			// was ever seen — no CREATE TABLE declared it. The accurate
+			// claim reaching the agent through routeUnprovenTable is "no
+			// CREATE TABLE was ever seen for this table", not "a
+			// statement affecting this table could not be reduced".
+			t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, pos)
+		} else {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, pos)
+		}
+	} else {
+		// No attributable table (a wrong attribution is worse than
+		// none, design §2) — recorded at schema level; gates nothing
+		// per-table.
+		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: pos})
+	}
+}
+
 func (b *builder) applyCreateIndex(file string, st stmt) {
+	loc := reCreateIndex.FindStringSubmatchIndex(st.text)
+	if loc == nil {
+		return
+	}
 	m := reCreateIndex.FindStringSubmatch(st.text)
-	if m == nil {
+	// F2 (coordinator review, index-method-capture — regression, confirmed
+	// by execution): reCreateIndex's own column-list grammar, \(([^)]*)\),
+	// stops at the FIRST ')'. Making the index name optional (to admit
+	// PostgreSQL's anonymous form) also brought PostgreSQL's anonymous
+	// EXPRESSION index into reach — CREATE INDEX ON t (lower(email)) — whose
+	// nested '(' means the naive capture truncates to "lower(email" instead
+	// of the true "lower(email)". Left unchecked, that FABRICATES a column
+	// the source never declared and leaves the table wrongly proven complete
+	// — a regression from honest abstention (before this slice, this
+	// statement fell to the floor) to silent fabrication. Parsing SQL
+	// EXPRESSIONS is out of scope; balancedParen (already used by
+	// applyCreateTable) proves the TRUE column-list span — when it disagrees
+	// with the naive regex capture, the statement is not safely reducible,
+	// so it falls to the SAME floor a genuinely unrecognized CREATE
+	// INDEX-shaped statement uses, via markUnrecognizedIndexShape, instead
+	// of inventing a name.
+	openIdx := loc[14] - 1 // the '(' reCreateIndex's own grammar requires just before group 7 (the column list)
+	trueInner, _, ok := balancedParen(st.text, openIdx)
+	if !ok || trueInner != m[7] {
+		b.markUnrecognizedIndexShape(file, st)
 		return
 	}
 	unique := m[1] != ""
+	name := normalizeName(m[4])
+	if name != "" && m[3] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
+		return
+	}
+	if name != "" {
+		b.seenIndex[name] = true
+	}
+	t, created := b.getTable(normalizeName(m[5]), db.Pos{File: file, Line: st.line})
+	if created {
+		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
+		// x was ever seen — no CREATE TABLE declared it. Same disposition as
+		// applyAlterTable's phantom-creation case above.
+		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
+	}
+	// method precedence: at most ONE of these three is ever non-empty for a
+	// given statement — T-SQL's CLUSTERED/NONCLUSTERED (m[2]), PostgreSQL's
+	// USING before the column list (m[6]), MySQL's USING after the column
+	// list (m[8]) — since the grammars are mutually exclusive per dialect.
+	// Normalized to lowercase here (once), so every capture site in this
+	// package shares one convention (index-method-capture).
+	method := m[2]
+	if method == "" {
+		method = m[6]
+	}
+	if method == "" {
+		method = m[8]
+	}
+	t.Indexes = append(t.Indexes, db.Index{
+		Pos:     db.Pos{File: file, Line: st.line},
+		Columns: splitIdents(m[7]),
+		Unique:  unique,
+		Method:  strings.ToLower(strings.TrimSpace(method)),
+	})
+}
+
+// applyCreateColumnstoreIndex handles T-SQL's CREATE [CLUSTERED] COLUMNSTORE
+// INDEX — the one CREATE INDEX-family shape with NO column list at all (see
+// reCreateColumnstoreIndex's own doc comment). Columns is deliberately left
+// EMPTY rather than synthesized: this statement never names any column in its
+// own grammar (it implicitly covers every column of the table), and inventing
+// a column list here would misrepresent the statement as declaring something
+// it did not — the same "never fabricate what the source did not say"
+// discipline ADR 0034 §2.6 already draws for the reducer generally. Method is
+// unconditionally "columnstore" (never "clustered columnstore"): the
+// CLUSTERED qualifier is this statement's own default when omitted, so it
+// carries no distinguishing information a consumer (e.g. a future columnar-
+// index rule) would need beyond "this IS a columnstore index".
+func (b *builder) applyCreateColumnstoreIndex(file string, st stmt) {
+	m := reCreateColumnstoreIndex.FindStringSubmatch(st.text)
+	if m == nil {
+		return
+	}
 	name := normalizeName(m[3])
 	if m[2] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
 		return
@@ -645,12 +806,9 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 	b.seenIndex[name] = true
 	t, created := b.getTable(normalizeName(m[4]), db.Pos{File: file, Line: st.line})
 	if created {
-		// F4 (4R ledger obs #1282): CREATE INDEX ... ON x is the FIRST time
-		// x was ever seen — no CREATE TABLE declared it. Same disposition as
-		// applyAlterTable's phantom-creation case above.
 		t.MarkUnproven(db.ReasonTableNeverDeclared, st.text, db.Pos{File: file, Line: st.line})
 	}
-	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Columns: splitIdents(m[5]), Unique: unique})
+	t.Indexes = append(t.Indexes, db.Index{Pos: db.Pos{File: file, Line: st.line}, Method: "columnstore"})
 }
 
 // --- small parse helpers ---
@@ -662,6 +820,45 @@ func parseForeignKey(c string, pos db.Pos) (db.ForeignKey, bool) {
 		return db.ForeignKey{}, false
 	}
 	return db.ForeignKey{Pos: pos, Columns: cols, RefTable: normalizeName(m[1]), RefColumns: splitIdents(m[2])}, true
+}
+
+// reUsingMethod matches a "USING <method>" clause — used ONLY outside a
+// balanced column-list paren span (see indexMethodOutsideParens), so it can
+// never mistake a column literally named "using" for this clause.
+var reUsingMethod = regexp.MustCompile(`(?i)\busing\s+(\w+)`)
+
+// indexMethodOutsideParens extracts a "USING <method>" clause from a
+// table/inline index constraint's text OUTSIDE its balanced column-list
+// parentheses (F1, coordinator review of index-method-capture) — MySQL's
+// grammar allows it either BEFORE the column list (index_type: "KEY idx
+// USING BTREE (col)") or AFTER it (index_option: "KEY idx (col) USING
+// BTREE"), the same two-position ambiguity CREATE INDEX's own leading/
+// trailing USING already has, at a different call site (applyCreateIndex).
+// Searching only OUTSIDE the parens is deliberate: it is what stops a column
+// literally named "using" inside the list from ever being mistaken for this
+// clause. Empty when s has no column-list parens at all (PRIMARY KEY/FOREIGN
+// KEY constraints never carry a method) or no USING clause is present.
+func indexMethodOutsideParens(s string) string {
+	i := strings.IndexByte(s, '(')
+	if i < 0 {
+		return ""
+	}
+	inner, innerStart, ok := balancedParen(s, i)
+	if !ok {
+		return ""
+	}
+	closeIdx := innerStart + len(inner) // index of the matching ')'
+	before, after := s[:i], ""
+	if closeIdx+1 <= len(s) {
+		after = s[closeIdx+1:]
+	}
+	if m := reUsingMethod.FindStringSubmatch(after); m != nil {
+		return strings.ToLower(m[1])
+	}
+	if m := reUsingMethod.FindStringSubmatch(before); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
 }
 
 // parenCols returns the identifiers inside the first (...) of s.
