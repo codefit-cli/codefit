@@ -17,7 +17,7 @@ import (
 
 // STAGE 1 IS INERT, and this file is the lock that says so.
 //
-// The schema gate computes five schema-wide warehouse signals and is wired to
+// The schema gate computes six schema-wide warehouse signals and is wired to
 // NOTHING: Detect, roleFor, fold, Resolve and the sensor's suppress3NF must all
 // behave exactly as they did before it existed. The signals are here to be
 // MEASURED over real corpora; stage 2 decides what to do with them, from the
@@ -42,19 +42,86 @@ var gateSymbols = struct {
 	unexported []string
 }{
 	exported: []string{
-		"WarehouseSignals", "WarehouseEvidence", "Signal",
+		// Has and Count are METHODS on WarehouseEvidence, so the qualified
+		// paradigm.Has form never appears outside this package — they are
+		// listed because the in-package half of the scan matches bare
+		// identifiers, and because TestSchemaGate_EveryGateSymbolIsEnumerated
+		// found them missing: the lock had never named either.
+		"WarehouseSignals", "WarehouseEvidence", "Signal", "Has", "Count",
 		"SignalCalendarTable", "SignalSurrogateKeyNames", "SignalBulkLoadShape",
-		"SignalNoAuditTimestamps", "SignalStarTopology",
+		"SignalNoAuditTimestamps", "SignalStarTopology", "SignalTypeProfileSplit",
 	},
 	unexported: []string{
 		"allSignals", "judgeable", "minJudgeableTables",
 		"hasCalendarTable", "hasSurrogateKeyVocabulary", "hasBulkLoadShape",
-		"hasNoAuditTimestamps", "hasStarTopology",
+		"hasNoAuditTimestamps", "hasStarTopology", "hasTypeProfileSplit",
+		"allSpokesAreLeaves",
 		"calendarNames", "keyLikeSegments", "starFanOutMin",
 		"surrogateKeyColumnsMin", "surrogateKeyTablesMin",
 		"bulkKeyColumnsInOneTableMin", "bulkKeyColumnsSchemaMin",
+		"typeProfile", "profileOf", "numericDominated", "textDominated",
+		"numericPolePct", "numericPoleTextMaxPct", "numericPoleMinColumns",
+		"textPolePct", "textPoleMinColumns",
+		"numericPoleMinTables", "textPoleMinTables", "numericPoleMinSharePct",
+		"maxUnclassifiedPct", "minProfiledCoveragePct",
 		"normalizeGateIdent", "trailingSegment",
 	},
+}
+
+// TestSchemaGate_EveryGateSymbolIsEnumerated proves the list above is COMPLETE
+// against schemagate.go, so a seventh signal cannot be added and left outside
+// the inertness lock — an enumerated lock that silently stops covering new
+// symbols is the exact ornament CLAUDE.md's mutation rule exists to catch.
+// Written for the sixth signal, it immediately found three symbols the list had
+// never named (Has, Count, allSpokesAreLeaves).
+//
+// It reads the gate file's own top-level declarations (and the methods declared
+// on its types) and requires every one of them to be named in gateSymbols.
+func TestSchemaGate_EveryGateSymbolIsEnumerated(t *testing.T) {
+	listed := map[string]bool{}
+	for _, s := range append(append([]string{}, gateSymbols.exported...), gateSymbols.unexported...) {
+		listed[s] = true
+	}
+
+	f, err := parser.ParseFile(token.NewFileSet(), gateFile, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", gateFile, err)
+	}
+
+	var declared []string
+	for _, d := range f.Decls {
+		switch decl := d.(type) {
+		case *ast.FuncDecl:
+			declared = append(declared, decl.Name.Name)
+		case *ast.GenDecl:
+			for _, spec := range decl.Specs {
+				switch sp := spec.(type) {
+				case *ast.TypeSpec:
+					declared = append(declared, sp.Name.Name)
+				case *ast.ValueSpec:
+					for _, n := range sp.Names {
+						declared = append(declared, n.Name)
+					}
+				}
+			}
+		}
+	}
+	if len(declared) < len(listed) {
+		t.Fatalf("read only %d declarations from %s — the parse is not seeing the file", len(declared), gateFile)
+	}
+
+	var missing []string
+	for _, name := range declared {
+		if name != "_" && !listed[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("%s declares %d symbol(s) the inertness lock does not enumerate:\n  %s\n"+
+			"Add them to gateSymbols — a lock that does not name a symbol cannot prove that symbol is unwired.",
+			gateFile, len(missing), strings.Join(missing, "\n  "))
+	}
 }
 
 const gateFile = "schemagate.go"

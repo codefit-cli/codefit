@@ -17,7 +17,7 @@ import (
 // corpus vendored in this repository, through the REAL parser — not over
 // hand-built db.Schema values, which can hold shapes the parser never produces.
 //
-// Stage 1 computes five schema-wide warehouse signals and is wired to nothing.
+// Stage 1 computes six schema-wide warehouse signals and is wired to nothing.
 // The point of building it inert is to get THIS table before deciding anything,
 // and the table is uncomfortable in a way a hunch would never have been:
 //
@@ -55,6 +55,20 @@ import (
 //     is in fact a join table. This is the architectural premise restated: no
 //     single table, and no single signal, tells a warehouse from a transactional
 //     schema.
+//
+// THE SIXTH SIGNAL, type_profile_split, fires on NOTHING here, and the two
+// reasons are worth separating because only one of them is a threshold:
+//
+//   - every vendored OLTP corpus is a 3-to-5-table excerpt whose tables are
+//     uniformly mixed — there is no split to see, which is the correct answer
+//     and the acceptance bar this signal was required to clear;
+//   - the reference warehouse abstains for a reason that has nothing to do with
+//     the ALTER TABLE gap the rest of this file blames: AdventureWorksDW
+//     brackets its type names ([int], [nvarchar](50)), the T-SQL type map never
+//     matches them, and all 74 of its parsed columns land on db.TypeUnknown. A
+//     SECOND, independent parser gap — fixing the ALTER one alone will not move
+//     this row. Locked with real DDL in
+//     TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes.
 //
 // This file is ALSO the behavioral half of the inertness lock: every row
 // asserts what paradigm.Detect returns over the same real parse. The signals

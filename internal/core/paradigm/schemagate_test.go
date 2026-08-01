@@ -456,6 +456,7 @@ func TestWarehouseSignals_HasIsFalseForUnfired(t *testing.T) {
 		paradigm.SignalBulkLoadShape,
 		paradigm.SignalNoAuditTimestamps,
 		paradigm.SignalStarTopology,
+		paradigm.SignalTypeProfileSplit,
 	} {
 		if e.Has(s) {
 			t.Errorf("Has(%q) = true on an empty schema, want false", s)
