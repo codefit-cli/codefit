@@ -97,6 +97,25 @@ All notable changes to codefit are documented here. The format is based on
   integer surrogate keys; and **two `CREATE TABLE` statements with no `;`/`GO` between them**
   lose the second one entirely, with nothing recorded. Neither is fixed here.
 
+### Internal — no behavior change
+
+- **Schema gate, stage 1: five schema-wide warehouse signals, wired to nothing.** Paradigm
+  detection works bottom-up today, so one table named `dim_status` with fan-in ≥ 1 inside an
+  otherwise transactional schema decides its own silencing of the DB-002/DB-003 1NF surface —
+  the schema gets no vote. `internal/core/paradigm` now computes five independently-named
+  signals over the whole schema (`calendar_table`, `surrogate_key_names`, `bulk_load_shape`,
+  `no_audit_timestamps`, `star_topology`) as a first step toward inverting that. **Nothing calls
+  them.** `Detect`, `Resolve` and the sensor's 3NF suppression behave exactly as before, and two
+  tests lock that inertness — an AST scan proving no production file references the gate, and a
+  behavioral test proving `Detect` does not move on a schema where the gate fires. No new
+  capability, nothing to use from `main`, and `COVERAGE.md` is deliberately untouched.
+  **What the measurement says** (locked over every vendored corpus through the real parser, see
+  [ADR 0035](docs/decisions/0035-schema-gate-stage-1-inert-signals.md)): the one genuine
+  warehouse in the repository, AdventureWorksDW, fires **one** signal, while a three-table
+  excerpt of Sakila — a rental shop — fires **two**. A naive "≥ 2 means warehouse" threshold
+  would today get both backwards. Publishing that number before wiring anything is the entire
+  point of building this stage inert.
+
 ## [0.2.5-alpha.2] — 2026-07-31
 
 **Still on the way to Phase 2.5 — this release is a correctness fix, not new coverage.**
