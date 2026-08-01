@@ -37,6 +37,13 @@ import (
 // is_current / effective_date, separator-insensitive), so the two rules cannot
 // disagree about what "keeps history" means, and it inherits the same declared
 // limit: a dimension using a different history vocabulary reads as SCD-1.
+//
+// PARTITION CHILDREN ARE NOT CENSUS MEMBERS either (ADR 0039), through the one
+// predicate the gate and the census loop share (inSCDCensus). Both directions
+// were measured through the real parser: a dimension-role child's
+// by-construction unprovenness abstained this whole rule, and counting one
+// would fabricate an SCD-1 dimension out of a partition that declares no
+// columns of its own.
 type dw011 struct{}
 
 func (dw011) ID() string { return "DW-011" }
@@ -49,18 +56,16 @@ func (dw011) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 	// D4 (design SS4): SCHEMA-LEVEL ABSTAIN, same rationale as DW-005 — this
 	// is a census judgment over every COMPARED dimension (time dimensions
 	// excluded), so a per-table continue would silently shrink the census
-	// and still emit. ANY unproven, non-time dimension aborts the whole rule.
-	for _, t := range s.Tables {
-		if cls.Roles[t.Name] != paradigm.RoleDimension || isTimeDimension(t) {
-			continue
-		}
-		if !t.StructureProven() {
-			return nil, nil
-		}
+	// and still emit. ANY unproven census member aborts the whole rule.
+	//
+	// The gate reads the SAME predicate as the census loop below (census.go,
+	// ADR 0038 §2 generalized by ADR 0039).
+	if censusAbstains(s, func(t db.Table) bool { return inSCDCensus(t, cls) }) {
+		return nil, nil
 	}
 
 	for _, t := range s.Tables {
-		if cls.Roles[t.Name] != paradigm.RoleDimension || isTimeDimension(t) {
+		if !inSCDCensus(t, cls) {
 			continue
 		}
 		if !anchored {
@@ -91,4 +96,27 @@ func (dw011) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 			"deliberate? A report joining both mixes point-in-time attributes with as-of-today attributes, " +
 			"so the same query re-run later can return different history.",
 	}}
+}
+
+// inSCDCensus reports whether t is a member of DW-011's census: a
+// DIMENSION-role table (role read from cls, never re-derived) that is neither a
+// time dimension nor a declared partition child. BOTH the completeness gate and
+// the census loop consult this ONE predicate (census.go).
+//
+// Excluding a partition child is the half of ADR 0039 that prevents a NEW
+// false affirmation rather than closing an old false negative. A child carries
+// no columns of its own — they are declared on the parent — so as parsed it
+// shows no SCD marker at all and would join the SCD-1 group. On a warehouse
+// whose dimensions are uniformly SCD-2, one partition child would then be
+// enough to make DW-011 report a mixed strategy that does not exist:
+// an SCD-1 dimension fabricated out of a partition.
+//
+// The gate exemption alone would be the reverse error, and it was measured
+// through the real parser rather than reasoned: a DIMENSION can be partitioned
+// too, and when the fact references a specific partition (which PostgreSQL
+// before 12 required) the child earns a dimension role and its
+// by-construction unprovenness abstains this whole rule. ADR 0038 §4 believed
+// DW-011 safe from that.
+func inSCDCensus(t db.Table, cls *paradigm.Classification) bool {
+	return cls.Roles[t.Name] == paradigm.RoleDimension && !isTimeDimension(t) && !isPartitionChild(t)
 }

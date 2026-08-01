@@ -146,10 +146,8 @@ type dw020 struct{}
 func (dw020) ID() string { return "DW-020" }
 
 func (dw020) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Finding, []findings.SurfaceItem) {
-	for _, t := range s.Tables {
-		if inPartitioningCensus(t, cls) && !t.StructureProven() {
-			return nil, nil
-		}
+	if censusAbstains(s, func(t db.Table) bool { return inPartitioningCensus(t, cls) }) {
+		return nil, nil
 	}
 
 	var partitioned, unpartitioned []string
@@ -193,12 +191,6 @@ func (dw020) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 	}}
 }
 
-// isPartitionChild reports whether the SOURCE declares t as a partition of
-// another table. db.Partitioning.Of is the model's own back-reference; an
-// empty Of is NOT proof that a table is not a partition (see dw020's doc
-// comment and db.Partitioning's).
-func isPartitionChild(t db.Table) bool { return t.Partitioning.Of != "" }
-
 // inPartitioningCensus reports whether t is a member of DW-020's census: a
 // FACT-role table (role read from cls, never re-derived) that the source does
 // not declare as a partition child. Both the completeness gate and the census
@@ -206,6 +198,11 @@ func isPartitionChild(t db.Table) bool { return t.Partitioning.Of != "" }
 // being gated, nor gated without being censused — the divergence that would
 // let a child's by-construction unprovenness abstain a rule the child is not
 // even part of.
+//
+// isPartitionChild and the gate itself (censusAbstains) now live in census.go
+// and are shared with DW-005 and DW-011, which ADR 0039 brought under the same
+// idiom after ADR 0038's measured DW-005 false negative was confirmed to have a
+// DW-011 twin.
 func inPartitioningCensus(t db.Table, cls *paradigm.Classification) bool {
 	return cls.Roles[t.Name] == paradigm.RoleFact && !isPartitionChild(t)
 }

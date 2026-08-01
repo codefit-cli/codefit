@@ -48,6 +48,21 @@ import (
 // recognized only by its NAME — the integer key is structurally
 // indistinguishable from any other surrogate. A warehouse that both uses an
 // integer date key AND names its calendar unconventionally will fire here.
+//
+// # PARTITION CHILDREN ARE NOT CENSUS MEMBERS (ADR 0039)
+//
+// A declared PostgreSQL partition child is excluded from the census and from
+// the completeness gate alike, through the ONE predicate both loops consult
+// (inTimeDimensionCensus). A child is a restatement of its parent, not an
+// independent fact or dimension to count, and it is unproven BY CONSTRUCTION
+// (db.ReasonPartitionChildInheritsStructure) on a schema codefit read
+// perfectly — so gating on it made this rule vanish on every declaratively
+// partitioned warehouse. That was measured, not suspected: ADR 0038 §4
+// recorded it as an open false negative and ADR 0039 closes it.
+//
+// The exclusion is paid for where it costs something: a warehouse that
+// partitions its CALENDAR is still recognized, by the parent's name, through
+// partitionedCalendarName.
 type dw005 struct{}
 
 func (dw005) ID() string { return "DW-005" }
@@ -61,16 +76,25 @@ func (dw005) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 	// ("does this schema have a time dimension at all"), so a per-table
 	// continue would silently SHRINK the census and still emit — a WORSE lie
 	// than abstaining, because the item would look authoritative over an
-	// incomplete count. ANY unproven fact- or dimension-role table aborts the
-	// whole rule.
-	for _, t := range s.Tables {
-		role := cls.Roles[t.Name]
-		if (role == paradigm.RoleFact || role == paradigm.RoleDimension) && !t.StructureProven() {
-			return nil, nil
-		}
+	// incomplete count. ANY unproven census member aborts the whole rule.
+	//
+	// The gate reads the SAME predicate as the census loop below (census.go,
+	// ADR 0038 §2 generalized by ADR 0039), so a table can never be gated
+	// without being censused.
+	if censusAbstains(s, func(t db.Table) bool { return inTimeDimensionCensus(t, cls) }) {
+		return nil, nil
 	}
 
 	for _, t := range s.Tables {
+		if !inTimeDimensionCensus(t, cls) {
+			// A partition child is not a census member — but its PARENT's
+			// name still answers this rule's question. See
+			// partitionedCalendarName.
+			if timeDim == "" && partitionedCalendarName(t) {
+				timeDim = t.Partitioning.Of
+			}
+			continue
+		}
 		switch cls.Roles[t.Name] {
 		case paradigm.RoleFact:
 			if len(facts) == 0 {
@@ -107,6 +131,58 @@ func (dw005) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 			"calendar defined elsewhere, or will every time-sliced query have to do its own date arithmetic " +
 			"on the facts?",
 	}}
+}
+
+// inTimeDimensionCensus reports whether t is a member of DW-005's census: a
+// FACT- or DIMENSION-role table (role read from cls, never re-derived) that
+// the source does not declare as a partition child. BOTH the completeness gate
+// and the census loop consult this ONE predicate (census.go).
+//
+// A partition child is excluded for two independent reasons, either of which
+// alone would be sufficient:
+//
+//   - It is not an independent table to count. A fact partitioned into 60
+//     monthly children would put 61 names in fact_tables for one fact table,
+//     and a dimension's children would do the same to dimensions.
+//   - Its unprovenness is BY CONSTRUCTION, not a parser failure, so gating on
+//     it would abstain DW-005 on every declaratively partitioned PostgreSQL
+//     warehouse. That is the false negative ADR 0038 §4 measured and left
+//     open, and ADR 0039 closes.
+func inTimeDimensionCensus(t db.Table, cls *paradigm.Classification) bool {
+	return hasWarehouseRole(t, cls) && !isPartitionChild(t)
+}
+
+// partitionedCalendarName reports whether t is declared as a partition of a
+// table whose NAME is a calendar — the one place this rule reads a table it
+// deliberately excluded from its census, and it is a correction, not an
+// exception.
+//
+// The census exclusion, on its own, would trade one false negative for a false
+// AFFIRMATION on exactly one shape, measured through the real parser: a
+// warehouse that partitions its CALENDAR and whose fact references a specific
+// partition (which every PostgreSQL before 12 REQUIRED — a foreign key could
+// not target a partitioned parent). The fan-in then lands on the child, so ADR
+// 0033's corroboration gate demotes the parent dim_date to unclassified, the
+// child is excluded as a partition, and DW-005 would report "this schema
+// declares no time dimension" over DDL that declares dim_date on its face.
+// Before the exemption that outcome was masked by accident, because the
+// child's by-construction unprovenness abstained the whole rule.
+//
+// Reading Partitioning.Of costs nothing and invents nothing: a child RESTATES
+// its parent, the parent's name is already in the model, and it is checked
+// with timeDimensionName — the SAME name signal this rule applies to every
+// dimension, not a second vocabulary that could drift from it (the drift that
+// once made DW-005 blind to D_DATE). The child's own name is deliberately NOT
+// consulted: dim_date_2024 strips to "date2024", which is not a calendar, and
+// accepting it would mean matching by containment — the exact widening
+// timeDimensionName rejects because it would swallow dim_update and
+// dim_candidate.
+//
+// It is checked for ANY partition child, regardless of role, because the shape
+// that needs it is precisely the one where role classification lost the
+// parent.
+func partitionedCalendarName(t db.Table) bool {
+	return isPartitionChild(t) && timeDimensionName(t.Partitioning.Of)
 }
 
 // isTimeDimension reports whether a dimension table is a time dimension, by

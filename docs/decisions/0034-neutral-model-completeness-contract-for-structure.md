@@ -12,6 +12,14 @@ one shared predicate. Everything below still holds as written; 0038 adds the cas
 this ADR's four reasons did not anticipate — unprovenness that is not a measurement
 failure.
 
+**Extended (2026-08-01) by
+[ADR 0039](0039-census-membership-scopes-the-completeness-gate-for-every-census-rule.md):**
+member-scoping is the idiom for EVERY census rule, not a DW-020 special case — DW-005
+and DW-011 adopt it through one shared helper, after both were measured going silent
+on declaratively partitioned warehouses. §2.5's dispositions are otherwise unchanged,
+and §2.7 (a declared limit must be machine-visible) is what put ADR 0038's last
+untested limit under a real-parser test.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares
