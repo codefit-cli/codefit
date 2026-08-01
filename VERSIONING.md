@@ -92,11 +92,13 @@ stage" — it does **not** claim `0.1.0` is done.
   baselineable (ADR 0019). **Alpha, not `0.2.5`:** as of this tag, two of the eight items in the PRD's OLAP
   scope remained — DW-021 (columnar index) and DW-020 (partitioning) — and neither was a
   rule-only slice: DW-021 needed a `Method` field the neutral `db.Index` did not yet have, and
-  DW-020 needs the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it currently
-  declares as a limit and skips, per dialect. Role detection reached only a leading snake_case
+  DW-020 needed the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it
+  declared as a limit and skipped, per dialect. Role detection reached only a leading snake_case
   segment at this tag; declared, test-locked, not silent. (Both of that bullet's limits have
   since moved on `main`, past this tag and still untagged as of this writing: `db.Index.Method`
-  landed — see the `alpha.2` entry above — and the role vocabulary now recognizes
+  landed — see the `alpha.2` entry above — the `PARTITION BY`/`PARTITION OF`/T-SQL
+  partition-scheme capture DW-020 was waiting on landed too (`db.Table.Partitioning`; the
+  DW-020 RULE is still not built), and the role vocabulary now recognizes
   underscore-delimited leading **and** trailing tokens plus separator-free PascalCase, all
   case-insensitively, so Kimball's `FactInternetSales`/`DimCustomer` spelling is recognized;
   all-caps names remain unclassified by design.)

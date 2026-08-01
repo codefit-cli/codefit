@@ -156,7 +156,10 @@ func TestInlineIndexShorthand_NotAPhantomColumn(t *testing.T) {
 }
 
 // --- I5: a trailing PARTITION BY clause must not prevent the table + its
-// real columns from being captured, and must not crash ---
+// real columns from being captured, and must not crash. (The clause itself
+// is no longer ignored — partition-capture reads it into
+// db.Table.Partitioning; what this test locks is that reading it leaves the
+// BODY untouched. See partition_capture_test.go for the clause itself.) ---
 
 func TestPartitionClause_TableAndColumnsCaptured(t *testing.T) {
 	src := `CREATE TABLE sales (
@@ -170,7 +173,7 @@ func TestPartitionClause_TableAndColumnsCaptured(t *testing.T) {
 	s := parse(t, src)
 	tb := table(t, s, "sales")
 	if !eqStr(colNames(tb), []string{"id", "sold_at", "region"}) {
-		t.Errorf("columns = %v, want [id sold_at region] (partition clause skipped, not crashed)", colNames(tb))
+		t.Errorf("columns = %v, want [id sold_at region] (the trailing partition clause is read into Partitioning, and must not disturb the body)", colNames(tb))
 	}
 }
 

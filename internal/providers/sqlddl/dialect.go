@@ -89,6 +89,26 @@ type Dialect struct {
 	// existing dollar-quoting/DELIMITER mechanisms already capture the whole
 	// body, and GO is not a batch separator in either dialect.
 	RoutineBodyEndsAtBatchSeparator bool
+
+	// PartitionSchemeOnClause is a per-dialect DATUM (partition-capture):
+	// does this dialect declare TABLE PARTITIONING by naming a partition
+	// SCHEME in a trailing "ON <scheme> (<column>)" clause, with the
+	// strategy living in a separately declared CREATE PARTITION FUNCTION?
+	//
+	// true ONLY for SQLServer. PostgreSQL and MySQL both spell partitioning
+	// inline as "PARTITION BY <strategy> (<key>)", which reduce.go reads on
+	// every dialect without consulting this datum (the grammar is the same
+	// word in both, and a dialect that does not have it simply never emits
+	// it). T-SQL's form needs the datum because "ON <name>" is ALSO how
+	// T-SQL names a FILEGROUP — the vendored AdventureWorksDW corpus ends
+	// every CREATE TABLE with ") ON [PRIMARY];" — and only the parenthesized
+	// column distinguishes the two. Gating on this datum keeps that read
+	// from ever being attempted against a PostgreSQL/MySQL tail, where "ON"
+	// belongs to a different grammar entirely (e.g. "ON COMMIT DROP").
+	//
+	// It also gates whether CREATE PARTITION FUNCTION / CREATE PARTITION
+	// SCHEME statements are read at all: they exist only in this dialect.
+	PartitionSchemeOnClause bool
 }
 
 // LineComment is one line-comment prefix a dialect recognizes.
@@ -139,6 +159,7 @@ func Postgres() Dialect {
 		TriggerHasInlineBody: false,
 
 		RoutineBodyEndsAtBatchSeparator: false,
+		PartitionSchemeOnClause:         false,
 	}
 }
 
@@ -167,6 +188,7 @@ func MySQL() Dialect {
 		TriggerHasInlineBody: true,
 
 		RoutineBodyEndsAtBatchSeparator: false,
+		PartitionSchemeOnClause:         false,
 	}
 }
 
@@ -195,5 +217,6 @@ func SQLServer() Dialect {
 		TriggerHasInlineBody: true,
 
 		RoutineBodyEndsAtBatchSeparator: true,
+		PartitionSchemeOnClause:         true,
 	}
 }

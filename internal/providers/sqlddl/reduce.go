@@ -25,10 +25,30 @@ type builder struct {
 	// drop site 2. It gates nothing per-table; it surfaces only in the
 	// per-scan completeness inventory (sensors/db.Result.Note).
 	unreduced []db.Unreduced
+
+	// partSchemeFunc and partFuncStrategy hold T-SQL's two-hop partitioning
+	// vocabulary (partition-capture), keyed by LOWERCASED identifier because
+	// T-SQL identifiers are case-insensitive: scheme -> partition function,
+	// and partition function -> the strategy word its own statement spells
+	// ("AS RANGE RIGHT" -> "range"). They are reducer-internal ONLY — no
+	// model surface is added for them, because a CREATE PARTITION
+	// FUNCTION/SCHEME statement affects no table's columns, keys or indexes.
+	// Their sole purpose is to let a table's "ON <scheme>(<col>)" clause
+	// report a strategy that is genuinely IN THE SOURCE instead of leaving
+	// T-SQL's Strategy permanently empty. A scheme this map cannot resolve
+	// leaves Strategy empty — never a default.
+	partSchemeFunc   map[string]string
+	partFuncStrategy map[string]string
 }
 
 func newBuilder(dialect *Dialect) *builder {
-	return &builder{tables: map[string]*db.Table{}, seenIndex: map[string]bool{}, dialect: dialect}
+	return &builder{
+		tables:           map[string]*db.Table{},
+		seenIndex:        map[string]bool{},
+		dialect:          dialect,
+		partSchemeFunc:   map[string]string{},
+		partFuncStrategy: map[string]string{},
+	}
 }
 
 func (b *builder) schema() *db.Schema {
@@ -152,6 +172,54 @@ var (
 	// clause in their grammar, so this never matches there —
 	// Trigger.ExecutesFunction correctly stays empty on those dialects.
 	reTriggerExecutes = regexp.MustCompile(`(?is)\bexecute\s+(?:function|procedure)\s+("?[\w".]+"?)\s*\(`)
+
+	// --- table partitioning (partition-capture) -------------------------
+	//
+	// reCreateTablePartitionOf recognizes PostgreSQL's partition CHILD form,
+	// "CREATE TABLE <child> PARTITION OF <parent> FOR VALUES ... | DEFAULT".
+	// It is a genuinely DIFFERENT statement shape from reCreateTable, not a
+	// widened case of it: reCreateTable requires a '(' immediately after the
+	// table name, which this form does not have, so the two can never
+	// compete for the same statement (verified against the real parser
+	// before this slice: this form matched NOTHING and the whole child table
+	// vanished). "PARTITION OF" is matched as a two-word unit so it can
+	// never be confused with the parent's "PARTITION BY".
+	reCreateTablePartitionOf = regexp.MustCompile(`(?is)^create\s+table\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)\s+partition\s+of\s+("?[\w".]+"?)`)
+
+	// rePartitionBy matches the parent's "PARTITION BY" keyword pair
+	// (PostgreSQL and MySQL spell it identically). It is deliberately only
+	// the KEYWORD: the strategy word and the key list are read by walking
+	// forward from the match, because MySQL's strategies are multi-word
+	// ("LINEAR HASH", "RANGE COLUMNS") and its keys can be arbitrary
+	// EXPRESSIONS whose parentheses a regex character class cannot balance.
+	// Callers must locate it with firstTopLevelMatch, never with a bare
+	// FindStringIndex: "PARTITION BY" is ALSO window-function syntax (OVER
+	// (PARTITION BY ...)) and can appear inside a quoted table COMMENT.
+	rePartitionBy = regexp.MustCompile(`(?is)\bpartition\s+by\b`)
+
+	// rePartitionOf locates the "PARTITION OF" keyword pair inside an
+	// already-dispatched partition-child statement, so the Declaration can
+	// start at the clause rather than at "CREATE TABLE".
+	rePartitionOf = regexp.MustCompile(`(?is)\bpartition\s+of\b`)
+
+	// rePartitionSchemeOn matches T-SQL's "ON <partition scheme> (<column>)"
+	// table-tail clause. The PARENTHESIZED COLUMN is the whole
+	// discriminator: T-SQL's grammar admits "ON <filegroup>" (the vendored
+	// AdventureWorksDW corpus ends every CREATE TABLE with ") ON
+	// [PRIMARY];") and "ON <scheme>(<column>)", and only the latter is
+	// partitioning. Requiring the '(' is what keeps a filegroup from being
+	// reported as a partition scheme. \b before "on" stops the match from
+	// starting inside TEXTIMAGE_ON / FILESTREAM_ON, whose '_' is a word
+	// character.
+	rePartitionSchemeOn = regexp.MustCompile(`(?is)\bon\s+("?[\w]+"?)\s*\(`)
+
+	// rePartitionFunction / rePartitionScheme read T-SQL's two standalone
+	// partitioning statements. Neither affects any table's columns, keys or
+	// indexes, so neither reaches the neutral model directly (they populate
+	// builder-internal maps): they exist only so a table's ON-clause can
+	// report the strategy word its partition function actually spells.
+	rePartitionFunction = regexp.MustCompile(`(?is)^create\s+partition\s+function\s+("?[\w".]+"?)\s*\([^)]*\)\s*as\s+(\w+)\b`)
+	rePartitionScheme   = regexp.MustCompile(`(?is)^create\s+partition\s+scheme\s+("?[\w".]+"?)\s+as\s+partition\s+("?[\w".]+"?)`)
 )
 
 // isRoutineHead reports whether accumulated statement text is a CREATE
@@ -189,6 +257,18 @@ func (b *builder) apply(file string, st stmt) {
 	switch {
 	case reCreateTable.MatchString(st.text):
 		b.applyCreateTable(file, st)
+	case reCreateTablePartitionOf.MatchString(st.text):
+		// PostgreSQL's partition CHILD. Before partition-capture this
+		// statement matched NO branch at all and fell through to default:,
+		// so the entire table disappeared from the model without a trace —
+		// the one failure mode ADR 0034 exists to prevent.
+		b.applyCreateTablePartitionOf(file, st)
+	case b.dialect.PartitionSchemeOnClause && rePartitionScheme.MatchString(st.text):
+		m := rePartitionScheme.FindStringSubmatch(st.text)
+		b.partSchemeFunc[strings.ToLower(normalizeName(m[1]))] = strings.ToLower(normalizeName(m[2]))
+	case b.dialect.PartitionSchemeOnClause && rePartitionFunction.MatchString(st.text):
+		m := rePartitionFunction.FindStringSubmatch(st.text)
+		b.partFuncStrategy[strings.ToLower(normalizeName(m[1]))] = strings.ToLower(m[2])
 	case strings.HasPrefix(head, "alter table"):
 		b.applyAlterTable(file, st)
 	case reCreateIndex.MatchString(st.text):
@@ -403,6 +483,249 @@ func (b *builder) applyCreateTable(file string, st stmt) {
 		line := st.line + strings.Count(st.text[:innerStart+p.off], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
 	}
+	// Partitioning is declared in the TAIL — the text after the body's
+	// matching ')' — in all three dialects, never inside the body. Reading
+	// it can only ADD to the model: it never calls MarkUnproven, so a table
+	// that is proven complete today stays proven after this slice (locked by
+	// TestSQLDDL_PG_PartitionedParent_StaysComplete and, over every vendored
+	// corpus, by TestSQLDDL_NoVendoredCorpusDeclaresPartitioning).
+	closeIdx := innerStart + len(inner) // index of the body's matching ')'
+	if closeIdx+1 <= len(st.text) {
+		t.Partitioning = b.readPartitioning(st.text[closeIdx+1:])
+	}
+}
+
+// readPartitioning reduces a CREATE TABLE's TAIL into db.Partitioning. tail is
+// everything after the column-list body's matching ')'.
+//
+// It reads two grammars:
+//
+//	PARTITION BY <strategy> (<key>) [ (<partition definitions>) ]   PG + MySQL
+//	ON <partition scheme> (<column>)                                T-SQL only
+//
+// Both are located with firstTopLevelMatch, NOT a bare regex search. That is
+// load-bearing twice over: "PARTITION BY" is also WINDOW-FUNCTION syntax
+// (OVER (PARTITION BY ...)), and either keyword can appear as ordinary text
+// inside a quoted MySQL table COMMENT — firstTopLevelMatch ignores anything
+// at paren depth > 0 or inside a single-quoted string, so neither can reach
+// this reduction.
+//
+// It NEVER calls MarkUnproven. A partitioning clause declares no column, no
+// primary key and no index, so failing to decompose one is not the kind of
+// blindness db.Table.Complete measures; treating it as such would demote
+// tables that are fully readable today and mute every absence-based DB rule
+// across ordinary partitioned DDL. Partial reads are reported INSIDE
+// db.Partitioning instead: Declaration always carries the source clause, and
+// Strategy/Key stay empty rather than guessing.
+func (b *builder) readPartitioning(tail string) db.Partitioning {
+	if m := firstTopLevelMatch(tail, rePartitionBy); m != nil {
+		return partitionByClause(tail, m[0], m[1])
+	}
+	if b.dialect.PartitionSchemeOnClause {
+		if m := firstTopLevelMatch(tail, rePartitionSchemeOn); m != nil {
+			return b.partitionSchemeClause(tail, m)
+		}
+	}
+	return db.Partitioning{}
+}
+
+// partitionByClause reduces "PARTITION BY <strategy> (<key>) ..." starting at
+// tail[start:], with kwEnd the offset just past the "BY".
+//
+// The Declaration runs from the PARTITION keyword to the END of the
+// statement, deliberately: MySQL's partition-definition list and MySQL's
+// SUBPARTITION BY clause both belong to the partitioning declaration and
+// neither can be delimited by the key's closing paren. The cost is that a
+// clause a dialect allows AFTER partitioning (PostgreSQL's TABLESPACE) is
+// included too. That is the right trade for a field whose purpose is to let
+// an agent READ THE SOURCE when the structured fields abstain: a Declaration
+// with one extra clause is still the truth, while one cut short would hide
+// the subpartitioning that explains the table.
+func partitionByClause(tail string, start, kwEnd int) db.Partitioning {
+	p := db.Partitioning{Declaration: strings.TrimSpace(tail[start:])}
+	open := strings.IndexByte(tail[kwEnd:], '(')
+	if open < 0 {
+		// No key list at all (malformed, or a form this reducer does not
+		// know). The declaration stands; nothing is invented from it.
+		return p
+	}
+	p.Strategy = partitionStrategyWord(tail[kwEnd : kwEnd+open])
+	if inner, _, ok := balancedParen(tail, kwEnd+open); ok {
+		p.Key = partitionKeyColumns(inner)
+	}
+	return p
+}
+
+// partitionSchemeClause reduces T-SQL's "ON <scheme> (<column>)" table-tail
+// clause. m is rePartitionSchemeOn's submatch index slice: m[2:4] is the
+// scheme name and m[1] is just past the '(' that opened the column list.
+//
+// The strategy is resolved through the scheme's own CREATE PARTITION
+// FUNCTION when the parsed DDL contained one, and left EMPTY otherwise — it
+// is never defaulted to "range" merely because that is T-SQL's only
+// partition-function strategy word. An unresolvable scheme is a scheme
+// declared in a file this scan did not read, and codefit reports what it
+// read.
+func (b *builder) partitionSchemeClause(tail string, m []int) db.Partitioning {
+	scheme := normalizeName(tail[m[2]:m[3]])
+	p := db.Partitioning{Scheme: scheme}
+	inner, _, ok := balancedParen(tail, m[1]-1)
+	if !ok {
+		return db.Partitioning{}
+	}
+	p.Declaration = strings.TrimSpace(tail[m[0] : m[1]+len(inner)])
+	p.Key = partitionKeyColumns(inner)
+	if fn, found := b.partSchemeFunc[strings.ToLower(scheme)]; found {
+		p.Strategy = b.partFuncStrategy[fn]
+	}
+	return p
+}
+
+// applyCreateTablePartitionOf reduces PostgreSQL's partition CHILD statement,
+// "CREATE TABLE <child> PARTITION OF <parent> FOR VALUES ... | DEFAULT".
+//
+// The child is registered as ITS OWN TABLE — it is one, with its own storage
+// and its own indexes — carrying a back-reference to its parent, and is then
+// marked UNPROVEN. That statement declares the child's partition bounds and
+// nothing else: its columns, primary key and constraints are all inherited
+// from the parent and appear nowhere in it. Registering it as a complete
+// table with zero columns would hand DB-050 a table that "declares no primary
+// key" — a false affirmation over a key the parent declares. Leaving it out
+// of the model, which is what happened before this slice, silently deleted a
+// real table instead.
+func (b *builder) applyCreateTablePartitionOf(file string, st stmt) {
+	m := reCreateTablePartitionOf.FindStringSubmatch(st.text)
+	pos := db.Pos{File: file, Line: st.line}
+	t, _ := b.getTable(normalizeName(m[1]), pos)
+	t.Partitioning = db.Partitioning{
+		Declaration: partitionOfDeclaration(st.text),
+		Of:          normalizeName(m[2]),
+	}
+	t.MarkUnproven(db.ReasonPartitionChildInheritsStructure, st.text, pos)
+}
+
+// partitionOfDeclaration returns the "PARTITION OF ..." clause of a partition
+// child statement, verbatim from the source, or the whole statement if the
+// keyword cannot be located (never an empty declaration).
+func partitionOfDeclaration(text string) string {
+	if m := firstTopLevelMatch(text, rePartitionOf); m != nil {
+		return strings.TrimSpace(text[m[0]:])
+	}
+	return strings.TrimSpace(text)
+}
+
+// partitionStrategyWord normalizes the text between "PARTITION BY" and the
+// key's '(' into the strategy word the SOURCE spells, lowercased and
+// whitespace-collapsed: "RANGE" -> "range", "LINEAR HASH" -> "linear hash",
+// "RANGE  COLUMNS" -> "range columns". codefit maintains no closed strategy
+// vocabulary — whatever word the source used is what is reported.
+//
+// It returns EMPTY for anything that is not a run of plain words, e.g.
+// MySQL's "KEY ALGORITHM=2": that is a form this reducer does not decompose,
+// and reporting "key algorithm=2" as a strategy would be inventing a
+// vocabulary word no dialect has. The Declaration still carries the clause,
+// so the abstention is visible rather than silent.
+func partitionStrategyWord(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isWord := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		isSpace := c == ' ' || c == '\t' || c == '\n' || c == '\r'
+		if !isWord && !isSpace {
+			return ""
+		}
+	}
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+// partitionKeyColumns returns the partition key's plain COLUMN identifiers,
+// or nil when the key is not a plain column list.
+//
+// FABRICATION GUARD. It deliberately does NOT reuse splitIdents, the
+// reducer's ordinary column-list splitter: splitIdents cuts each part at its
+// first space and strips a schema qualifier, so "YEAR(`sold_on`)" — a
+// perfectly ordinary MySQL partition key — comes back as the single "column"
+// `YEAR("sold_on")`, a name that exists in no table in the schema. A rule
+// reading it would compare a partition key against column names and match
+// nothing, or worse, report it to an agent as a real column. Table.Complete
+// cannot catch that class at all: it measures DROPS, not FABRICATIONS (see
+// its own doc, "BOUNDARY"). So an expression key yields nil here, and the
+// caller reports the clause through Declaration instead.
+func partitionKeyColumns(inner string) []string {
+	parts := splitTopLevelParts(inner)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		tok := strings.TrimSpace(p.text)
+		if !isPlainIdentifier(tok) {
+			return nil
+		}
+		out = append(out, normalizeName(tok))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// isPlainIdentifier reports whether s is a single bare or double-quoted SQL
+// identifier — no function call, no operator, no qualifier, no whitespace.
+// Quoting was already canonicalized to ANSI double quotes by split() before
+// the reducer ever sees a statement, so one quote style is enough here.
+func isPlainIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		inner := s[1 : len(s)-1]
+		return inner != "" && !strings.ContainsAny(inner, `"`)
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+// firstTopLevelMatch returns re's first submatch-index slice whose match
+// BEGINS at paren depth 0 and outside a single-quoted string, or nil.
+//
+// This is the guard that keeps query syntax out of the schema model. "OVER
+// (PARTITION BY customer_id)" puts its PARTITION BY at paren depth 1, and a
+// MySQL table COMMENT='partition by range' puts it inside a string literal;
+// a bare regex search would reduce either one into a table's declared
+// partitioning. Depth and string tracking follow the same convention as
+// balancedParen and splitTopLevelParts elsewhere in this file.
+func firstTopLevelMatch(s string, re *regexp.Regexp) []int {
+	depth, inStr := 0, false
+	topLevel := make([]bool, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			if c == '\'' {
+				inStr = false
+			}
+		case c == '\'':
+			inStr = true
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		default:
+			topLevel[i] = depth == 0
+		}
+	}
+	for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
+		if m[0] < len(topLevel) && topLevel[m[0]] {
+			return m
+		}
+	}
+	return nil
 }
 
 // applyTableItem parses one comma-separated item of a CREATE TABLE body: a table

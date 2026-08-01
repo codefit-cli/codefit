@@ -86,6 +86,13 @@
           "Method": ""
         }
       ],
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -166,6 +173,13 @@
         }
       ],
       "Indexes": null,
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -235,6 +249,13 @@
         }
       ],
       "Indexes": null,
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null

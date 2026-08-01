@@ -60,6 +60,13 @@
       "PrimaryKey": null,
       "ForeignKeys": null,
       "Indexes": null,
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -221,6 +228,13 @@
           "Method": "btree"
         }
       ],
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -345,6 +359,13 @@
           "Method": "btree"
         }
       ],
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -459,6 +480,13 @@
           "Method": "btree"
         }
       ],
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null
@@ -468,7 +496,7 @@
       "DBName": "",
       "Pos": {
         "File": "pagila_excerpt.sql",
-        "Line": 181
+        "Line": 189
       },
       "Columns": [
         {
@@ -476,7 +504,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 181
+            "Line": 189
           },
           "Type": "int",
           "RawType": "integer",
@@ -488,7 +516,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 182
+            "Line": 190
           },
           "Type": "int",
           "RawType": "integer",
@@ -500,7 +528,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 183
+            "Line": 191
           },
           "Type": "int",
           "RawType": "integer",
@@ -512,7 +540,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 184
+            "Line": 192
           },
           "Type": "int",
           "RawType": "integer",
@@ -524,7 +552,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 185
+            "Line": 193
           },
           "Type": "float",
           "RawType": "numeric(5,2)",
@@ -536,7 +564,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 186
+            "Line": 194
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -549,7 +577,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 207
+            "Line": 215
           },
           "Columns": [
             "customer_id"
@@ -564,7 +592,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 190
+            "Line": 198
           },
           "Columns": [
             "customer_id"
@@ -575,7 +603,7 @@
         {
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 192
+            "Line": 200
           },
           "Columns": [
             "customer_id"
@@ -584,6 +612,13 @@
           "Method": "btree"
         }
       ],
+      "Partitioning": {
+        "Declaration": "",
+        "Strategy": "",
+        "Scheme": "",
+        "Key": null,
+        "Of": ""
+      },
       "Complete": true,
       "Note": "",
       "Unreduced": null

@@ -417,11 +417,18 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `Unreduced`) mirroring the pre-existing `Body.Complete` idiom (ADR 0004/0025) at
   TABLE granularity: `false` means the parser met at least one statement affecting
   the table it could NOT reduce and could not rule out as declaring a
-  key/index/column. A **declared, recognized** skip (`CHECK`/`EXCLUDE`/`PARTITION`
-  constraints; `ALTER COLUMN`/`RENAME`/`OWNER`/`ENABLE`/`DISABLE`/`CLUSTER`/`SET`/
+  key/index/column. A **declared, recognized** skip (`CHECK`/`EXCLUDE`
+  constraints and MySQL's inline `PARTITION`-definition body items;
+  `ALTER COLUMN`/`RENAME`/`OWNER`/`ENABLE`/`DISABLE`/`CLUSTER`/`SET`/
   `RESET`/`VALIDATE`/`NO` alter actions) is **not** incompleteness — recording
   those would mute the whole DB dimension on ordinary PostgreSQL DDL, so only a
-  genuinely unrecognized statement demotes a table. On the Prisma path, a
+  genuinely unrecognized statement demotes a table. A table's **partitioning
+  clause is no longer among those skips at all**: as of `partition-capture` the
+  reducer **reads** it into `db.Table.Partitioning` (see the SQL-DDL known
+  limits below), and reading it **never demotes a table** — measured through the
+  real parser across all 17 vendored corpora, whose table counts and
+  structure-proven counts are identical before and after that slice. On the
+  Prisma path, a
   model-body line that is neither a recognized field nor a `@@`-attribute demotes
   the table the same way; the deferred, unrelated top-level-line skip (a `view`
   block) does not. **Two-way disposition, no rule signature change (ADR 0015):**
@@ -430,7 +437,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   DB-052, and all six DW-0xx rules (DW-001/002/005/010/011/021) **abstain
   silently** on an unproven table (a
   dropped statement might have declared the very index/column/key each rule is
-  asking about). DW-005 and DW-011 are schema-level census judgments and abstain
+  asking about). One reason reaches that same disposition **without any parser
+  failure**: a PostgreSQL **partition child** (`CREATE TABLE c PARTITION OF p
+  FOR VALUES ...`) is registered as its own table and marked unproven under
+  `ReasonPartitionChildInheritsStructure`, because that statement declares the
+  child's partition bounds and **nothing else** — its columns, primary key and
+  constraints all live on the parent. Before `partition-capture` the child table
+  did not enter the model at all: the statement matched no dispatch branch and
+  the whole table vanished silently, which is strictly worse than an unproven
+  one. DW-005 and DW-011 are schema-level census judgments and abstain
   the **whole rule** — never a per-table skip, which would silently shrink the
   census and still emit. A genuinely PK-less table with a proven-complete
   structure still affirms DB-050 at confidence 1.0 — honesty costs nothing here.
@@ -912,7 +927,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **and** the columnar/analytic-index check (**DW-021**) **are now covered**
   (see above) — `dwrules.All()` is **six** rules as of S3. What **remains**
   not covered: a partitioning check
-  (**DW-020**, planned for S4). It does not fire today, under any dialect.
+  (**DW-020**, planned for S4). It does not fire today, under any dialect. Its
+  **parser floor now exists** — as of `partition-capture` the reducer reads
+  table partitioning into `db.Table.Partitioning` (PostgreSQL/MySQL
+  `PARTITION BY`, PostgreSQL `PARTITION OF`, T-SQL's `ON <scheme>(<column>)`;
+  see the SQL-DDL known limits below) — but **no rule reads that field yet**.
+  The floor is not the check: `dwrules.All()` is still **six** rules, and
+  nothing in codefit today tells an agent that a fact table is unpartitioned.
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
@@ -1104,6 +1125,43 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   surviving `orders` carrying only the **first** statement's columns. **Not
   fixed:** keying the model by schema-qualified name is a neutral-model change
   (`db.Table` would have to carry its schema), deliberately outside this slice.
+  (11) **Narrowed as of `partition-capture`, 2026-08-01.** Table partitioning
+  was previously ignored outright — a PostgreSQL/MySQL `PARTITION BY` tail and
+  a T-SQL `ON <scheme>(<column>)` clause were dropped without a trace while the
+  table stayed **proven**, and a PostgreSQL `PARTITION OF` child statement
+  matched **no dispatch branch at all**, so the entire child table vanished from
+  the model. The reducer now **reads** all three into `db.Table.Partitioning`:
+  the strategy word the source spells (`PARTITION BY RANGE|LIST|HASH|KEY|LINEAR
+  HASH|RANGE COLUMNS|…`, lowercased, no closed vocabulary), the partition key
+  when it is a plain column list, the T-SQL partition scheme name plus the
+  strategy resolved through its own `CREATE PARTITION FUNCTION` when that
+  statement is in the DDL read, and a partition child's parent table. A child is
+  modelled as **its own table** plus a back-reference (`Partitioning.Of`), never
+  folded into the parent, and is marked unproven (see the completeness entry
+  above). **Read but not decomposed**, reported through
+  `Partitioning.Declaration` — the clause verbatim — with the structured fields
+  left **empty rather than guessed**: an **expression** partition key
+  (`PARTITION BY RANGE (YEAR(sold_on))`, `extract(...)`), because splitting one
+  with the ordinary column-list splitter fabricates a column name that exists in
+  no table and `db.Table.Complete` cannot catch a fabrication; MySQL's
+  `KEY ALGORITHM=2` strategy form; MySQL `SUBPARTITION BY`; and the individual
+  partition names and bounds. **Not read at all**, routing to the pre-existing
+  honest-abstention floor exactly as before: PostgreSQL
+  `ALTER TABLE ... ATTACH`/`DETACH PARTITION` and MySQL
+  `ALTER TABLE ... PARTITION BY`, which mark their table `Complete=false` — so an
+  attached child is never **linked** to its parent, and an empty
+  `Partitioning.Of` is **not** proof a table is not a partition. Neither is an
+  empty `Declaration` proof a table is unpartitioned: `pg_dump` emits most
+  partition children as ordinary standalone `CREATE TABLE`s with no partition
+  grammar of their own (the vendored `payment_p2022_01` is exactly that), and
+  codefit reports the **source**, not the database. **No vendored corpus
+  declares table partitioning at all** — every `PARTITION` occurrence under
+  `testdata/` is inside a comment — so this read is proven by constructed DDL
+  plus two real-corpus **negative** controls: AdventureWorksDW's
+  `) ON [PRIMARY];` filegroup clause on all three tables, which must not read as
+  a partition scheme, and a corpus-wide sweep asserting no table in any of the 17
+  corpora reports partitioning. Locked in
+  `internal/providers/sqlddl/partition_capture_test.go`.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
