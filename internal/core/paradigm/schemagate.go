@@ -7,35 +7,32 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// THE SCHEMA GATE — stage 1: computed, named, and wired to NOTHING.
+// THE SCHEMA GATE — stage 2: the schema is judged FIRST, and its verdict
+// decides whether any table inside it may hold a warehouse role.
 //
-// WHY IT EXISTS. Detect works BOTTOM-UP: it assigns a role to each table from
-// its name plus local structural corroboration, then folds the schema-level
-// Paradigm out of those roles. The sensor's 3NF suppression
-// (internal/sensors/db) then consults the PER-TABLE role and never the folded
-// Paradigm. The consequence is a real hole: one table named dim_status with
-// fan-in >= 1, sitting in an otherwise purely transactional schema, decides its
-// own silencing of the DB-002/DB-003 1NF surface. The schema gets no vote.
+// WHY IT EXISTS. Detect used to work BOTTOM-UP: it assigned a role to each
+// table from its name plus local structural corroboration, then folded the
+// schema-level Paradigm out of those roles. The sensor's 3NF suppression
+// (internal/sensors/db) consults the PER-TABLE role and never the folded
+// Paradigm. The consequence was a real hole: one table named dim_status with
+// fan-in >= 1, sitting in an otherwise purely transactional schema, decided its
+// own silencing of the DB-002/DB-003 1NF surface. The schema got no vote.
 //
-// The inversion this file prepares: decide from SCHEMA-WIDE evidence whether
-// this is a warehouse AT ALL, and only then assign roles inside it. The reason
-// the question has to be asked at the schema level is that it cannot be
+// The inversion (ADR 0037, revising ADR 0033): decide from SCHEMA-WIDE evidence
+// whether this is a warehouse AT ALL, and only then assign roles inside it. The
+// reason the question has to be asked at the schema level is that it cannot be
 // answered at the table level — order_items(order_id, product_id, quantity,
 // price) is structurally INDISTINGUISHABLE from TPC-DS's
 // store_sales(ss_item_sk, ss_customer_sk, ss_quantity). The table cannot be
 // told apart; the schema can.
 //
-// STAGE 1 IS DELIBERATELY INERT. Nothing in this file is called by Detect,
-// roleFor, fold, Resolve or any sensor — codefit's observable behavior with
-// this file present is identical to its behavior without it. The signals exist
-// to be MEASURED over real corpora first; the decision of how many, and which,
-// constitute a warehouse is stage 2's, made from that measurement rather than
-// from a hunch. The inertness is itself test-locked, in
-// schemagate_inertness_test.go.
+// STAGE 1 BUILT THESE SIGNALS INERT ON PURPOSE, so the verdict could be decided
+// from a measurement instead of a hunch. It was: 26 public corpora, 13 analytic
+// and 13 transactional (ADR 0036 §"The measurement", ADR 0037 §Decision).
 //
 // NO SCORE, NO FUZZ. Each signal is an independently computable predicate over
 // *db.Schema and is NAMED in the result, so a consumer can always be told WHY —
-// never "warehouse-ness 0.7".
+// never "warehouse-ness 0.7". The sensor's note renders exactly those names.
 // ---------------------------------------------------------------------------
 
 // Signal names one piece of schema-wide warehouse evidence. The six values
@@ -81,15 +78,69 @@ var allSignals = []struct {
 	{SignalTypeProfileSplit, hasTypeProfileSplit},
 }
 
-// WarehouseEvidence is the gate's result: exactly which signals a schema
-// exhibits, in the fixed order of allSignals.
+// decidingSignals are the ONLY signals that can open the gate, and the split is
+// measured, not reasoned. Over 26 public corpora (13 analytic / 13
+// transactional, pinned in ADR 0036) each of these three fired on warehouses
+// and on NO transactional schema at all — 8/0, 3/0 and 3/0 — while the three
+// excluded signals measured:
 //
-// It deliberately carries NO verdict and NO threshold. "How many signals make a
-// warehouse" is a decision the measurement is supposed to make, and stage 1
-// exists to produce that measurement — publishing a threshold now would be
-// answering the question the data has not been asked yet.
+//	bulk_load_shape       0 W / 0 O — fired on NOTHING; empirically inert
+//	no_audit_timestamps   6 W / 5 O — a coin flip; carries almost no information
+//	star_topology         6 W / 5 O — same, and it fires on any OLTP join table
+//
+// Requiring ANY ONE of the three below identifies 9 of 13 warehouses with zero
+// false positives. The obvious alternative, "any 3 of the 6", identifies 5 of 13
+// at the SAME zero false positives — strictly worse recall for the same
+// precision, because the two coin-flip signals are exactly what forces a
+// counting threshold that high.
+//
+// THE OTHER THREE ARE STILL COMPUTED AND STILL REPORTED (see
+// WarehouseEvidence.Fired). They remain evidence a consuming agent may want to
+// reason over; they simply do not get a vote. Deciding() is what a caller uses
+// when it must state WHY the gate opened.
+//
+// A slice, not a map: the reported order must be deterministic, and it must be
+// allSignals' order.
+var decidingSignals = []Signal{
+	SignalCalendarTable,
+	SignalSurrogateKeyNames,
+	SignalTypeProfileSplit,
+}
+
+// WarehouseEvidence is the gate's result: exactly which signals a schema
+// exhibits, in the fixed order of allSignals, plus the verdict those signals
+// imply (Qualifies) and the named subset that produced it (Deciding).
 type WarehouseEvidence struct {
 	Fired []Signal
+}
+
+// Qualifies is THE VERDICT: this schema is a warehouse iff at least one
+// DECIDING signal fired. See decidingSignals for the measurement behind the
+// selection, and for why counting all six is the wrong shape.
+//
+// A consequence worth stating rather than leaving implicit: WarehouseSignals
+// refuses to evaluate a schema below minJudgeableTables, so a schema of fewer
+// than 3 tables can never qualify. That is the no-vacuous-truths guard reaching
+// its natural conclusion — a two-table model is not enough schema to be evidence
+// of anything — and the developer's explicit database.paradigm override is the
+// escape hatch for the rare case where it is wrong.
+func (e WarehouseEvidence) Qualifies() bool { return len(e.Deciding()) > 0 }
+
+// Deciding returns the fired signals that actually decide the verdict, in
+// allSignals' order. Empty means the gate is closed; a non-empty result is
+// exactly what a caller renders when it has to answer "why did you call this a
+// warehouse".
+func (e WarehouseEvidence) Deciding() []Signal {
+	var out []Signal
+	for _, f := range e.Fired {
+		for _, d := range decidingSignals {
+			if f == d {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // Has reports whether sig is among the fired signals.
@@ -108,8 +159,9 @@ func (e WarehouseEvidence) Count() int { return len(e.Fired) }
 // WarehouseSignals evaluates all six schema-wide warehouse signals over s as a
 // pure function, and returns the ones that fired.
 //
-// It is not called by anything in codefit's production paths (stage 1 is
-// inert — see this file's header and schemagate_inertness_test.go).
+// Detect calls it before it assigns a single role (see paradigm.go). The
+// wiring is test-locked in schemagate_verdict_test.go, structurally and
+// behaviorally.
 func WarehouseSignals(s *db.Schema) WarehouseEvidence {
 	e := WarehouseEvidence{}
 	if !judgeable(s) {

@@ -13,12 +13,12 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
 
-// The schema gate (internal/core/paradigm, stage 1) MEASURED over every SQL
-// corpus vendored in this repository, through the REAL parser — not over
-// hand-built db.Schema values, which can hold shapes the parser never produces.
+// The schema gate (internal/core/paradigm) MEASURED over every SQL corpus
+// vendored in this repository, through the REAL parser — not over hand-built
+// db.Schema values, which can hold shapes the parser never produces.
 //
-// Stage 1 computes six schema-wide warehouse signals and is wired to nothing.
-// The point of building it inert is to get THIS table before deciding anything,
+// Stage 1 computed six schema-wide warehouse signals and wired them to nothing.
+// The point of building it inert was to get THIS table before deciding anything,
 // and the table is uncomfortable in a way a hunch would never have been:
 //
 //	CORPUS                              PARADIGM  SIGNALS THAT FIRED
@@ -32,8 +32,15 @@ import (
 // the repository fires ONE signal; a three-table excerpt of Sakila — a rental
 // shop's transactional schema — fires TWO. A naive ">= 2 signals means
 // warehouse" threshold, applied today, would classify Sakila as a warehouse and
-// AdventureWorksDW as not one. That is the single most useful thing stage 1
-// produced, and it is exactly the decision stage 2 must NOT make from intuition.
+// AdventureWorksDW as not one.
+//
+// STAGE 2 (ADR 0037) decided from that shape, plus the 26-corpus measurement in
+// ADR 0036: the verdict SELECTS the three zero-false-positive signals and
+// requires ANY ONE of them, rather than counting all six. This table is what
+// that decision looks like on real vendored DDL — Sakila's two signals are
+// exactly the two that do NOT vote, so it stays transactional, while
+// AdventureWorksDW's single calendar_table opens the gate. The gateOpen column
+// below records it, corpus by corpus.
 //
 // The three causes behind those numbers, each independently verifiable above:
 //
@@ -70,9 +77,9 @@ import (
 //     this row. Locked with real DDL in
 //     TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes.
 //
-// This file is ALSO the behavioral half of the inertness lock: every row
-// asserts what paradigm.Detect returns over the same real parse. The signals
-// fire; the classification does not move.
+// This file is ALSO the end-to-end half of the wiring lock: every row asserts
+// what paradigm.Detect returns over the same real parse, so the verdict and its
+// consequence are measured together on real DDL.
 
 // gateCorpusCase is one measured corpus.
 type gateCorpusCase struct {
@@ -85,8 +92,12 @@ type gateCorpusCase struct {
 	tables, proven int
 	// fired is the EXACT set of signals, in paradigm's fixed order.
 	fired []paradigm.Signal
-	// paradigmWas is what Detect returns — unchanged by the gate's existence.
-	paradigmWas paradigm.Paradigm
+	// gateOpen is the VERDICT those signals produce (ADR 0037). It is asserted
+	// separately from fired because the two are not the same question: a corpus
+	// can fire two signals and still be refused.
+	gateOpen bool
+	// paradigmIs what Detect returns.
+	paradigmIs paradigm.Paradigm
 }
 
 // gateCorpusExpectations covers EVERY .sql file under testdata/. The test fails
@@ -97,52 +108,60 @@ type gateCorpusCase struct {
 // vendor views, procedures and triggers BY DESIGN, and the constructed routine
 // fixtures declare no tables at all.
 var gateCorpusExpectations = []gateCorpusCase{
-	{path: "mysql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "mysql/constructed_inline_index_using.sql", tables: 2, proven: 2, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "mysql/constructed_non_cascading_trigger.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
+	{path: "mysql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "mysql/constructed_inline_index_using.sql", tables: 2, proven: 2, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "mysql/constructed_non_cascading_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		path: "mysql/sakila_excerpt.sql", tables: 3, proven: 3,
 		// A rental shop's OLTP schema firing TWO warehouse signals. film_actor
 		// is a depth-1 star, and last_update is not created_at.
-		fired:       []paradigm.Signal{paradigm.SignalNoAuditTimestamps, paradigm.SignalStarTopology},
-		paradigmWas: paradigm.ParadigmOLTP,
+		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps, paradigm.SignalStarTopology},
+		paradigmIs: paradigm.ParadigmOLTP,
 	},
-	{path: "mysql/sakila_real_objects.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
+	{path: "mysql/sakila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		path: "pagila_excerpt.sql", tables: 5, proven: 5,
-		fired:       []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
-		paradigmWas: paradigm.ParadigmOLTP,
+		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
+		paradigmIs: paradigm.ParadigmOLTP,
 	},
-	{path: "pagila_real_objects.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "pg_constructed_cascade_trigger.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "pg_constructed_exception_handler.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "pg_constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "pg_constructed_n2_recognized_skips.sql", tables: 2, proven: 2, paradigmWas: paradigm.ParadigmOLTP},
+	{path: "pagila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "pg_constructed_cascade_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "pg_constructed_exception_handler.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "pg_constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "pg_constructed_n2_recognized_skips.sql", tables: 2, proven: 2, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		// 7 tables, only 2 proven: five were materialized by CREATE INDEX
 		// statements the reducer could not attribute. Both absence-based
 		// signals abstain, which is the whole point of the proven-structure
 		// guard.
 		path: "pg_constructed_unrecognized_index_forms.sql", tables: 7, proven: 2,
-		paradigmWas: paradigm.ParadigmOLTP,
+		paradigmIs: paradigm.ParadigmOLTP,
 	},
 	{
 		path: "tsql/adventureworks_excerpt.sql", tables: 3, proven: 3,
 		// ModifiedDate is not created_at/updated_at.
-		fired:       []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
-		paradigmWas: paradigm.ParadigmOLTP,
+		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
+		paradigmIs: paradigm.ParadigmOLTP,
 	},
-	{path: "tsql/adventureworks_real_objects.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
+	{path: "tsql/adventureworks_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		// THE reference warehouse, and it fires ONE signal — fewer than Sakila.
 		// DimDate is recognized by name; everything else abstains because the
 		// T-SQL ALTER gap leaves all three tables unproven and key-less.
+		//
+		// It is also the ONLY vendored corpus the gate OPENS, and the pair of
+		// facts on this row is the stage-2 decision in miniature: one DECIDING
+		// signal beats Sakila's two EXCLUDED ones. The paradigm still reads oltp
+		// because with no parsed keys the A5 corroboration gate demotes all
+		// three recognized names anyway — an open gate grants permission to
+		// classify, it never classifies on its own.
 		path: "tsql/adventureworksdw_real_objects.sql", tables: 3, proven: 0,
-		fired:       []paradigm.Signal{paradigm.SignalCalendarTable},
-		paradigmWas: paradigm.ParadigmOLTP,
+		fired:      []paradigm.Signal{paradigm.SignalCalendarTable},
+		gateOpen:   true,
+		paradigmIs: paradigm.ParadigmOLTP,
 	},
-	{path: "tsql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
-	{path: "tsql/constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmWas: paradigm.ParadigmOLTP},
+	{path: "tsql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{path: "tsql/constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 }
 
 // dialectFor picks the dialect a corpus is written in, from the directory
@@ -239,11 +258,21 @@ func TestSchemaGate_SignalsOverVendoredCorpora(t *testing.T) {
 			if !sameSignals(e.Fired, c.fired) {
 				t.Errorf("Fired = %v, want %v", e.Fired, c.fired)
 			}
+			// The VERDICT, asserted separately from the evidence: Sakila fires
+			// two signals and is still refused, which is the row that would
+			// break first if anyone reverted to counting.
+			if got := e.Qualifies(); got != c.gateOpen {
+				t.Errorf("Qualifies() = %v, want %v (Fired = %v)", got, c.gateOpen, e.Fired)
+			}
 
-			// INERTNESS, behavioral half: whatever the gate saw above, Detect
-			// returns exactly what it returned before the gate existed.
-			if got := paradigm.Detect(s).Paradigm; got != c.paradigmWas {
-				t.Errorf("Detect().Paradigm = %q, want %q — stage 1 must not move detection", got, c.paradigmWas)
+			// And the consequence, end to end on real DDL.
+			cls := paradigm.Detect(s)
+			if cls.Paradigm != c.paradigmIs {
+				t.Errorf("Detect().Paradigm = %q, want %q", cls.Paradigm, c.paradigmIs)
+			}
+			if cls.Gate.Open != c.gateOpen {
+				t.Errorf("Detect().Gate.Open = %v, want %v — the verdict must reach the Classification",
+					cls.Gate.Open, c.gateOpen)
 			}
 		})
 	}

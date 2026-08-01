@@ -61,7 +61,49 @@ type Classification struct {
 	// can also ask StripRoleToken whether a name carries a recognized token at
 	// all — but that answers a question about the NAME alone, and says nothing
 	// about which of the two causes demoted a given table.)
+	//
+	// A THIRD demotion cause exists as of ADR 0037 and is deliberately NOT
+	// recorded here: a closed schema gate. Gate.Withheld carries those, because
+	// their cause is the schema-level verdict rather than anything about the
+	// table's own structure, and conflating the two would make Unprovable lie
+	// about why.
 	Unprovable map[string]bool
+
+	// Gate is the schema-level warehouse verdict that decided whether any role
+	// in Roles could be a warehouse role at all (ADR 0037).
+	Gate GateVerdict
+}
+
+// GateVerdict is the schema gate's decision plus the evidence behind it. It is
+// carried on every Classification so a consumer can always be told WHY —
+// codefit never reports a classification it cannot justify.
+type GateVerdict struct {
+	// Open is the verdict: this schema may hold warehouse roles.
+	Open bool
+
+	// ByOverride distinguishes the two ways Open becomes true. False means the
+	// EVIDENCE opened it (Deciding names which signals). True means the
+	// DEVELOPER opened it with an explicit database.paradigm: olap/mixed, over
+	// a schema whose evidence said otherwise — a distinction the sensor's note
+	// must keep, because "codefit judged this a warehouse" and "you told codefit
+	// this is a warehouse" are different claims.
+	ByOverride bool
+
+	// Fired is every signal that fired, all six evaluated, in the gate's fixed
+	// order. Reported whether or not the gate opened: the three excluded signals
+	// are still evidence an agent may want, they just do not vote.
+	Fired []Signal
+
+	// Deciding is the subset of Fired that opened the gate — empty when the gate
+	// is closed, and empty when ByOverride is true (config opened it, no signal
+	// did).
+	Deciding []Signal
+
+	// Withheld names every table whose bottom-up role the CLOSED gate took away,
+	// mapped to the role it would have received. Empty whenever Open is true.
+	// This is the raw material for the sensor's audit trace: withholding a role
+	// changes what codefit reports, so it is never silent.
+	Withheld map[string]Role
 }
 
 // factFanOutMin is the minimum distinct-table FK fan-out that corroborates a
@@ -70,7 +112,25 @@ type Classification struct {
 // only.
 const factFanOutMin = 2
 
-// Detect computes a Classification as a pure function of s. Table role is
+// Detect computes a Classification as a pure function of s.
+//
+// TOP-DOWN, as of ADR 0037: the SCHEMA is judged first. WarehouseSignals asks
+// whether schema-wide evidence makes this a warehouse at all, and only inside a
+// schema that qualifies is any warehouse role assigned. When the gate is CLOSED,
+// every table is RoleUnclassified — the roles that would have been assigned are
+// preserved in Gate.Withheld so the decision is reportable, never silent — and
+// the schema folds to oltp.
+//
+// This is the fix for the hole ADR 0035 documented: the sensor's 3NF
+// suppression reads the PER-TABLE role, so before the gate a single table named
+// dim_status could silence its own DB-002/DB-003 1NF surface inside an
+// otherwise purely transactional schema. It no longer can, because the schema
+// now votes first.
+//
+// INSIDE a qualifying schema nothing about role assignment changed. Everything
+// the rest of this comment describes is exactly as it was.
+//
+// Table role is
 // determined by the NAME as the primary signal (locked decision A5) — see
 // candidateRole for the recognized spellings, which cover underscore-
 // delimited leading and trailing tokens and separator-free PascalCase, all
@@ -105,9 +165,40 @@ func Detect(s *db.Schema) Classification {
 		cls.Roles[t.Name] = roleFor(s, t, fanIn)
 	}
 
-	cls.Unprovable = unprovableDemotions(s, cls.Roles)
+	evidence := WarehouseSignals(s)
+	cls.Gate = GateVerdict{Open: evidence.Qualifies(), Fired: evidence.Fired, Deciding: evidence.Deciding()}
+	if !cls.Gate.Open {
+		cls.Gate.Withheld = withholdRoles(cls.Roles)
+	}
+
+	// Unprovable answers "which demotions might be a dropped statement rather
+	// than a genuine structural absence" — a question about STRUCTURE. With the
+	// gate closed there is no structural demotion to explain: every table is
+	// unclassified for one schema-level reason, recorded in Gate.Withheld.
+	// Computing it here anyway would attribute the withholding to the parser.
+	if cls.Gate.Open {
+		cls.Unprovable = unprovableDemotions(s, cls.Roles)
+	} else {
+		cls.Unprovable = map[string]bool{}
+	}
 	cls.Paradigm = fold(cls.Roles)
 	return cls
+}
+
+// withholdRoles strips every warehouse role out of roles IN PLACE and returns
+// what it took, keyed by table name. A table the vocabulary never nominated is
+// already RoleUnclassified and contributes nothing — the map names exactly the
+// tables whose reported behavior the closed gate changed.
+func withholdRoles(roles map[string]Role) map[string]Role {
+	withheld := map[string]Role{}
+	for name, r := range roles {
+		if r == RoleUnclassified {
+			continue
+		}
+		withheld[name] = r
+		roles[name] = RoleUnclassified
+	}
+	return withheld
 }
 
 // unprovableDemotions computes Classification.Unprovable (design SS6):
@@ -384,16 +475,55 @@ func fold(roles map[string]Role) Paradigm {
 	}
 }
 
-// Resolve applies an explicit developer override on top of detected. An
-// empty or "auto" override returns detected unchanged (detection decides).
-// An explicit oltp/olap/mixed override REPLACES the schema-level Paradigm
-// only — Roles stay detection-derived, so per-table suppression still works
-// under an override that keeps a mixed reality (developer autonomy:
-// explicit config always wins, but it does not erase the structural facts
-// Roles carries).
+// Resolve applies an explicit developer override on top of detected. An empty
+// or "auto" override returns detected unchanged (detection decides). An
+// explicit oltp/olap/mixed override REPLACES the schema-level Paradigm — Roles
+// stay detection-derived, so per-table suppression still works under an
+// override that keeps a mixed reality.
+//
+// AND IT OUTRANKS THE SCHEMA GATE, in one direction only. This is the project's
+// innegotiable rule (CLAUDE.md, "el developer decide") applied to ADR 0037:
+//
+//   - explicit olap or mixed is the developer ASSERTING that this is a
+//     warehouse. If the gate closed, its withheld roles are RESTORED and the
+//     verdict is reopened with ByOverride set. Leaving them withheld would not
+//     merely keep 1NF findings — it would hand the whole DW-0xx family an
+//     all-unclassified role map and silently run ZERO warehouse rules over a
+//     schema the developer just declared to be a warehouse.
+//   - explicit oltp is the developer asserting the opposite, and it restores
+//     NOTHING. Manufacturing a warehouse role there would overrule the developer
+//     in the one direction that SILENCES findings — the exact failure the gate
+//     exists to close. (The sensor also short-circuits 3NF suppression on
+//     explicit oltp; this is the second, independent lock on the same promise.)
+//
+// The EVIDENCE (Gate.Fired, Gate.Deciding) always survives an override
+// unchanged: it is a measured fact about the schema, and the override changes
+// only what is done with it.
 func Resolve(detected Classification, override Paradigm) Classification {
 	if override == "" || override == ParadigmAuto {
 		return detected
 	}
-	return Classification{Paradigm: override, Roles: detected.Roles, Unprovable: detected.Unprovable}
+
+	out := Classification{
+		Paradigm:   override,
+		Roles:      detected.Roles,
+		Unprovable: detected.Unprovable,
+		Gate:       detected.Gate,
+	}
+	if (override != ParadigmOLAP && override != ParadigmMixed) || detected.Gate.Open {
+		return out
+	}
+
+	restored := make(map[string]Role, len(detected.Roles))
+	for name, r := range detected.Roles {
+		restored[name] = r
+	}
+	for name, r := range detected.Gate.Withheld {
+		restored[name] = r
+	}
+	out.Roles = restored
+	out.Gate.Open = true
+	out.Gate.ByOverride = true
+	out.Gate.Withheld = nil
+	return out
 }

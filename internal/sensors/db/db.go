@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -142,7 +143,7 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	surf = append(surf, dwS...)
 
 	surf, suppressed := suppress3NF(surf, cls, override)
-	note := joinTraces(completenessNote(schema), suppressed)
+	note := joinTraces(completenessNote(schema), schemaGateNote(cls, override), suppressed)
 
 	stampFingerprints(fs, surf, content)
 
@@ -159,12 +160,13 @@ func notMeasured(note string) Result { return Result{Measured: false, Note: note
 
 // joinTraces composes the sensor's audit traces into Result.Note (design
 // SS7a). Each trace is INDEPENDENT and self-contained; a trace with nothing
-// to say contributes nothing. Order is FIXED (measurement inventory first,
-// then suppression) so the note is deterministic and diffable — the
-// measurement inventory qualifies everything after it: "I could not read 3
-// tables" changes how "I withheld 12 items on OLAP tables" should be read.
-// Two producers share this one channel by construction, never by one
-// overwriting the other.
+// to say contributes nothing. Order is FIXED — measurement inventory, then the
+// schema-gate verdict, then suppression — so the note is deterministic and
+// diffable, and so each trace qualifies the ones after it: "I could not read 3
+// tables" changes how "this schema is not a warehouse" should be read, and that
+// verdict in turn is WHY the suppression line says what it says. Three
+// producers share this one channel by construction, never by one overwriting
+// another.
 func joinTraces(traces ...string) string {
 	var nonEmpty []string
 	for _, t := range traces {
@@ -303,6 +305,117 @@ func completenessNote(s *coredb.Schema) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// gateNoteTableCap bounds the table list in the schema-gate trace, the same way
+// completenessInventoryTableCap bounds the measurement inventory: a warehouse
+// vocabulary applied across 200 tables is ONE line naming a count and a sample,
+// never 200 names.
+const gateNoteTableCap = 5
+
+// schemaGateNote is the audit trace for the schema-level warehouse verdict
+// (ADR 0037). The gate changes what codefit reports, so it never decides
+// silently — "siempre se informan las consecuencias" (CLAUDE.md).
+//
+// Three states, and each is a different claim:
+//
+//   - CLOSED with roles withheld. This is the one a developer cannot otherwise
+//     discover: the consequence is items that WOULD have been suppressed simply
+//     appearing, which looks like nothing happened. The trace states the count,
+//     names the tables, names the three deciding signals it looked for, and
+//     names the escape hatch — database.paradigm: olap or mixed, the setting
+//     that reopens the gate (paradigm.Resolve).
+//   - OPEN on evidence. codefit concluded "warehouse"; it must be able to say
+//     WHICH signals concluded it. This sentence is the reason the verdict names
+//     signals rather than counting them — a score could not be rendered into
+//     anything an agent can check.
+//   - OPEN by explicit config. The developer asserted it and won. That is a
+//     different claim from codefit having judged it, and the two must not read
+//     alike.
+//
+// Empty when the gate changed nothing: no role withheld and none granted. Every
+// ordinary transactional scan lands there, and a line on each of those would be
+// pure noise.
+func schemaGateNote(cls paradigm.Classification, override paradigm.Paradigm) string {
+	if !cls.Gate.Open {
+		if len(cls.Gate.Withheld) == 0 {
+			return ""
+		}
+		return fmt.Sprintf(
+			"Schema gate: this schema shows none of the three deciding warehouse signals "+
+				"(calendar_table, surrogate_key_names, type_profile_split), so it is not classified as a "+
+				"warehouse and the warehouse role of %d %s was withheld (%s). Their DB-002/DB-003 1NF "+
+				"surface was NOT suppressed; set database.paradigm: olap (or mixed) if this really is a "+
+				"warehouse.",
+			len(cls.Gate.Withheld), tableWord(len(cls.Gate.Withheld)), sampleTables(namesOf(cls.Gate.Withheld)),
+		)
+	}
+
+	holders := warehouseRoleTables(cls)
+	if len(holders) == 0 {
+		return ""
+	}
+	if cls.Gate.ByOverride {
+		return fmt.Sprintf(
+			"Schema gate: no deciding warehouse signal fired on this schema, but the explicit "+
+				"database.paradigm: %s setting wins over detection, so %d %s kept a warehouse role (%s).",
+			override, len(holders), tableWord(len(holders)), sampleTables(holders),
+		)
+	}
+	return fmt.Sprintf(
+		"Schema gate: this schema is classified as a warehouse on the deciding signal(s) %s, so %d %s "+
+			"hold a warehouse role (%s).",
+		joinSignals(cls.Gate.Deciding), len(holders), tableWord(len(holders)), sampleTables(holders),
+	)
+}
+
+// warehouseRoleTables lists, sorted, every table that ended up holding a
+// warehouse role — the tables whose reporting the OPEN gate changed.
+func warehouseRoleTables(cls paradigm.Classification) []string {
+	var out []string
+	for name, role := range cls.Roles {
+		if role != paradigm.RoleUnclassified {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// namesOf returns the sorted keys of a role map. Sorted because a note built
+// from map iteration order is not diffable.
+func namesOf(roles map[string]paradigm.Role) []string {
+	out := make([]string, 0, len(roles))
+	for name := range roles {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sampleTables renders at most gateNoteTableCap names and says how many were
+// elided, so the line stays O(1) in schema size without ever pretending the list
+// was complete.
+func sampleTables(names []string) string {
+	if len(names) <= gateNoteTableCap {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(names[:gateNoteTableCap], ", "), len(names)-gateNoteTableCap)
+}
+
+func joinSignals(sigs []paradigm.Signal) string {
+	out := make([]string, 0, len(sigs))
+	for _, s := range sigs {
+		out = append(out, string(s))
+	}
+	return strings.Join(out, ", ")
+}
+
+func tableWord(n int) string {
+	if n == 1 {
+		return "table"
+	}
+	return "tables"
 }
 
 // suppress3NF drops DB-002 (CategoryDBMultivalued) / DB-003
