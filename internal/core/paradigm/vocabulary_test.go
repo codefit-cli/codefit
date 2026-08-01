@@ -21,6 +21,19 @@ import (
 // starWith builds a minimal star: one fact-candidate table with FK fan-out to
 // every dimension candidate (satisfying factFanOutMin), and each dimension
 // therefore carrying fan-in >= 1. Corroboration is real, never assumed.
+//
+// It also opens the SCHEMA GATE (ADR 0037), and that is load-bearing in BOTH
+// directions for this file. The vocabulary tests come in two kinds — "this
+// spelling IS a warehouse token" and "this spelling is NOT one" — and a closed
+// gate would break the first kind loudly and the second kind SILENTLY, since
+// every table in a non-qualifying schema is unclassified regardless of how it
+// is spelled. TestVocabulary_BareWordPrefixIsNotAToken, the guard against
+// wrongly promoting factory_settings, would have gone on passing while checking
+// nothing at all.
+//
+// gateOpeningTables (schemagate_verdict_test.go) contributes a declared
+// calendar and one plain table, neither of which holds a role, so the star's own
+// role map is exactly what these tests assert about.
 func starWith(fact string, dims ...string) *db.Schema {
 	f := db.Table{Name: fact, PrimaryKey: []string{"id"}}
 	tables := []db.Table{}
@@ -30,7 +43,7 @@ func starWith(fact string, dims ...string) *db.Schema {
 		})
 		tables = append(tables, db.Table{Name: d, PrimaryKey: []string{"id"}})
 	}
-	return &db.Schema{Tables: append([]db.Table{f}, tables...)}
+	return withGateOpen(&db.Schema{Tables: append([]db.Table{f}, tables...)})
 }
 
 // TestVocabulary_CaseInsensitive locks the single highest-leverage finding of
@@ -192,6 +205,9 @@ func TestVocabulary_AllCapsIsNotPascalCase(t *testing.T) {
 // carries a newly-recognized spelling and NO corroboration, and must still be
 // demoted.
 func TestVocabulary_CorroborationStillRequired(t *testing.T) {
+	// date_dim opens the gate on its own (a declared calendar), so this fixture
+	// needs no extra evidence — and the assertion below stays a statement about
+	// CORROBORATION rather than about the gate.
 	s := &db.Schema{Tables: []db.Table{
 		{Name: "Fact_Sales", PrimaryKey: []string{"id"}}, // no FK fan-out
 		{Name: "date_dim", PrimaryKey: []string{"id"}},   // no fan-in

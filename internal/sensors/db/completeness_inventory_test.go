@@ -76,6 +76,12 @@ func TestSensorDB_CompletenessInventory_EmptyWhenEverythingProven(t *testing.T) 
 
 // The inventory and the 3NF-suppression trace COMPOSE — neither clobbers the
 // other — and the measurement inventory is FIRST when both are present.
+//
+// The _sk columns are the schema gate's price of admission (ADR 0037): without
+// schema-wide warehouse evidence no table holds a warehouse role, nothing is
+// suppressed, and there is no second trace to compose with. That the SUPPRESSION
+// trace is what this test looks for — not merely "a non-empty note" — is what
+// keeps it honest now that a third producer shares the same channel.
 func TestSensorDB_CompletenessInventory_ComposesWithSuppressionNote(t *testing.T) {
 	schema := `datasource db {
   provider = "postgresql"
@@ -84,6 +90,8 @@ func TestSensorDB_CompletenessInventory_ComposesWithSuppressionNote(t *testing.T
 
 model fact_sales {
   id          Int          @id
+  customer_sk Int
+  product_sk  Int
   customer_id Int
   product_id  Int
   customer    dim_customer @relation(fields: [customer_id], references: [id])
@@ -93,7 +101,8 @@ model fact_sales {
 }
 
 model dim_customer {
-  id Int @id
+  id          Int @id
+  customer_sk Int
 }
 
 model dim_product {

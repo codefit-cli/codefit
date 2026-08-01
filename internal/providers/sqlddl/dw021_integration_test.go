@@ -24,25 +24,35 @@ import (
 // starSchemaDDL is the shared PostgreSQL DDL for the positive/negative pair
 // below: a two-dimension star with fact_sales carrying ONE extra statement
 // (the index under test), injected via indexStmt.
+//
+// The keys are spelled _sk, and that is now load-bearing rather than
+// stylistic. The schema gate (ADR 0037) withholds every warehouse role from a
+// schema showing no schema-wide warehouse evidence, so a star named fact_/dim_
+// but keyed customer_id/product_id is no longer classified as one — and without
+// a fact role, DW-021 never evaluates anything and every test below would fail
+// for a reason that has nothing to do with index methods. `_sk` is the
+// surrogate-key convention the gate measures (3 warehouse fires, 0
+// transactional, over 26 corpora) and the one a real Kimball star uses; it is
+// the minimal honest way to say "this is a warehouse" in DDL.
 func starSchemaDDL(indexStmt string) string {
 	return `
 CREATE TABLE dim_customer (
-    customer_id integer PRIMARY KEY
+    customer_sk integer PRIMARY KEY
 );
 
 CREATE TABLE dim_product (
-    product_id integer PRIMARY KEY
+    product_sk integer PRIMARY KEY
 );
 
 CREATE TABLE fact_sales (
-    sale_id integer PRIMARY KEY,
-    customer_id integer NOT NULL,
-    product_id integer NOT NULL,
+    sale_sk integer PRIMARY KEY,
+    customer_sk integer NOT NULL,
+    product_sk integer NOT NULL,
     amount numeric(12,2)
 );
 
-ALTER TABLE fact_sales ADD CONSTRAINT fact_sales_customer_fk FOREIGN KEY (customer_id) REFERENCES dim_customer(customer_id);
-ALTER TABLE fact_sales ADD CONSTRAINT fact_sales_product_fk FOREIGN KEY (product_id) REFERENCES dim_product(product_id);
+ALTER TABLE fact_sales ADD CONSTRAINT fact_sales_customer_fk FOREIGN KEY (customer_sk) REFERENCES dim_customer(customer_sk);
+ALTER TABLE fact_sales ADD CONSTRAINT fact_sales_product_fk FOREIGN KEY (product_sk) REFERENCES dim_product(product_sk);
 
 ` + indexStmt + `
 `
@@ -105,18 +115,19 @@ func TestDW021_RealPostgreSQLParser_BRINIndex_DoesNotFire(t *testing.T) {
 // tsqlStarSchemaDDL is the shared T-SQL DDL for the columnstore
 // positive/negative pair below: a two-dimension star with fact_sales
 // carrying ONE extra statement (the index under test), injected via
-// indexStmt — the T-SQL counterpart of starSchemaDDL above.
+// indexStmt — the T-SQL counterpart of starSchemaDDL above, and carrying the
+// same _sk surrogate keys for the same schema-gate reason.
 func tsqlStarSchemaDDL(indexStmt string) string {
 	return `
-CREATE TABLE [dbo].[dim_customer]([customer_id] [int] NOT NULL);
+CREATE TABLE [dbo].[dim_customer]([customer_sk] [int] NOT NULL);
 GO
-CREATE TABLE [dbo].[dim_product]([product_id] [int] NOT NULL);
+CREATE TABLE [dbo].[dim_product]([product_sk] [int] NOT NULL);
 GO
-CREATE TABLE [dbo].[fact_sales]([sale_id] [int] NOT NULL, [customer_id] [int] NOT NULL, [product_id] [int] NOT NULL, [amount] [numeric](12,2) NULL);
+CREATE TABLE [dbo].[fact_sales]([sale_sk] [int] NOT NULL, [customer_sk] [int] NOT NULL, [product_sk] [int] NOT NULL, [amount] [numeric](12,2) NULL);
 GO
-ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_customer] FOREIGN KEY ([customer_id]) REFERENCES [dbo].[dim_customer] ([customer_id]);
+ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_customer] FOREIGN KEY ([customer_sk]) REFERENCES [dbo].[dim_customer] ([customer_sk]);
 GO
-ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_product] FOREIGN KEY ([product_id]) REFERENCES [dbo].[dim_product] ([product_id]);
+ALTER TABLE [dbo].[fact_sales] ADD CONSTRAINT [fk_product] FOREIGN KEY ([product_sk]) REFERENCES [dbo].[dim_product] ([product_sk]);
 GO
 ` + indexStmt + `
 GO

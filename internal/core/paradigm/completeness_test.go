@@ -13,6 +13,15 @@ import (
 // (any spelling the vocabulary recognizes — here the fact_ prefix) but which
 // was demoted for lack of structural corroboration, where that lack MIGHT be
 // a dropped statement rather than a genuine absence.
+//
+// EVERY fixture in this file now opens the schema gate deliberately (ADR 0037),
+// and that is a statement about what Unprovable MEANS rather than a repair:
+// Unprovable answers "was this demotion STRUCTURAL, and might the structure be
+// a dropped statement". A schema demoted by a CLOSED gate has a different cause
+// entirely — the schema-level verdict — and Detect deliberately records no
+// Unprovable entry for it (locked by
+// TestDetect_ClosedGate_ReportsNoUnprovableDemotion). So the question these
+// tests ask only exists inside a qualifying schema.
 
 // unprovenFactPrefixed returns a fact_-prefixed table with NO foreign keys
 // (below factFanOutMin) whose structure is unproven — the demotion below the
@@ -24,7 +33,7 @@ func unprovenFactPrefixed(name string) db.Table {
 }
 
 func TestParadigm_Unprovable_DemotedFactPrefixed_UnprovenTable_IsMarked(t *testing.T) {
-	s := &db.Schema{Tables: []db.Table{unprovenFactPrefixed("fact_sales")}}
+	s := withGateOpen(&db.Schema{Tables: []db.Table{unprovenFactPrefixed("fact_sales")}})
 	cls := paradigm.Detect(s)
 	if cls.Roles["fact_sales"] != paradigm.RoleUnclassified {
 		t.Fatalf("role = %q, want unclassified (fan-out below threshold)", cls.Roles["fact_sales"])
@@ -36,7 +45,7 @@ func TestParadigm_Unprovable_DemotedFactPrefixed_UnprovenTable_IsMarked(t *testi
 
 func TestParadigm_Unprovable_DemotedFactPrefixed_ProvenTable_IsNotMarked(t *testing.T) {
 	tb := db.Table{Name: "fact_sales", Complete: true}
-	s := &db.Schema{Tables: []db.Table{tb}}
+	s := withGateOpen(&db.Schema{Tables: []db.Table{tb}})
 	cls := paradigm.Detect(s)
 	if cls.Roles["fact_sales"] != paradigm.RoleUnclassified {
 		t.Fatalf("role = %q, want unclassified (fan-out below threshold)", cls.Roles["fact_sales"])
@@ -54,7 +63,7 @@ func TestParadigm_Unprovable_DemotedFactPrefixed_ProvenTable_IsNotMarked(t *test
 func TestParadigm_Unprovable_NoPrefixTable_NeverMarked(t *testing.T) {
 	tb := db.Table{Name: "orders"}
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "...", db.Pos{File: "x.sql", Line: 1})
-	s := &db.Schema{Tables: []db.Table{tb}}
+	s := withGateOpen(&db.Schema{Tables: []db.Table{tb}})
 	cls := paradigm.Detect(s)
 	if cls.Unprovable["orders"] {
 		t.Error("Unprovable[orders] = true, want false — an unrecognized name means the demotion cause is vocabulary, not structure")
@@ -68,7 +77,7 @@ func TestParadigm_Unprovable_PromotedTable_NeverMarked_EvenIfUnproven(t *testing
 	tb := db.Table{Name: "fact_sales"}
 	tb.ForeignKeys = []db.ForeignKey{{RefTable: "dim_a"}, {RefTable: "dim_b"}}
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "...", db.Pos{File: "x.sql", Line: 1})
-	s := &db.Schema{Tables: []db.Table{tb, {Name: "dim_a"}, {Name: "dim_b"}}}
+	s := withGateOpen(&db.Schema{Tables: []db.Table{tb, {Name: "dim_a"}, {Name: "dim_b"}}})
 	cls := paradigm.Detect(s)
 	if cls.Roles["fact_sales"] != paradigm.RoleFact {
 		t.Fatalf("role = %q, want fact (fan-out clears the threshold)", cls.Roles["fact_sales"])
@@ -85,7 +94,7 @@ func TestParadigm_Unprovable_PromotedTable_NeverMarked_EvenIfUnproven(t *testing
 func TestParadigm_Unprovable_DimPrefixed_UnprovenElsewhereInSchema_IsMarked(t *testing.T) {
 	dim := db.Table{Name: "dim_customer", Complete: true}
 	other := unprovenFactPrefixed("fact_sales") // unproven, but irrelevant to dim_customer's own FKs
-	s := &db.Schema{Tables: []db.Table{dim, other}}
+	s := withGateOpen(&db.Schema{Tables: []db.Table{dim, other}})
 	cls := paradigm.Detect(s)
 	if cls.Roles["dim_customer"] != paradigm.RoleUnclassified {
 		t.Fatalf("role = %q, want unclassified (fan-in is zero)", cls.Roles["dim_customer"])

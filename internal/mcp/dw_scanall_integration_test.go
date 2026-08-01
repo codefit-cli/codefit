@@ -41,6 +41,8 @@ func TestDW_SurfacesEndToEnd(t *testing.T) {
 
 model fact_sales {
   id           Int          @id
+  customer_sk  Int
+  product_sk   Int
   customerKey  Int
   productCode  String
   amount       Float
@@ -50,6 +52,7 @@ model fact_sales {
 
 model dim_customer {
   customer_key Int          @id
+  customer_sk  Int
   name         String
   fact_sales   fact_sales[]
 }

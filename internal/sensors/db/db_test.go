@@ -260,6 +260,14 @@ func TestSensorDB_ParadigmAssembly_DWRulesRunOnAStarSchema(t *testing.T) {
 	// fact_sales fans out to two dimensions (real corroboration); dim_product
 	// is keyed by a natural string code (DW-002) and there is no time
 	// dimension anywhere (DW-005).
+	//
+	// The _sk columns are the schema gate's price of admission (ADR 0037), and
+	// they were chosen over adding a dim_date precisely BECAUSE DW-005 must
+	// still fire here: a calendar would open the gate and silence the rule this
+	// test asserts. 3 _sk columns across 2 tables is the measured
+	// surrogate_key_names convention, and it is the only warehouse evidence in
+	// this schema — remove it and every DW assertion below fails, which is the
+	// behavior change stage 2 makes.
 	schema := `datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -267,6 +275,8 @@ func TestSensorDB_ParadigmAssembly_DWRulesRunOnAStarSchema(t *testing.T) {
 
 model fact_sales {
   id           Int          @id
+  customer_sk  Int
+  product_sk   Int
   customerKey  Int
   productCode  String
   amount       Float
@@ -276,6 +286,7 @@ model fact_sales {
 
 model dim_customer {
   customer_key Int          @id
+  customer_sk  Int
   name         String
   fact_sales   fact_sales[]
 }
@@ -342,6 +353,8 @@ func TestSensorDB_DW021_RealPrismaProvider(t *testing.T) {
 
 model fact_sales {
   id           Int          @id
+  customer_sk  Int
+  product_sk   Int
   customerKey  Int
   productCode  String
   amount       Float
@@ -352,6 +365,7 @@ model fact_sales {
 
 model dim_customer {
   customer_key Int          @id
+  customer_sk  Int
   name         String
   fact_sales   fact_sales[]
 }
@@ -476,6 +490,8 @@ func TestSensorDB_3NFSuppression_AutoOLAP_DimensionTableNotFlagged(t *testing.T)
 
 model fact_sales {
   id          Int          @id
+  customer_sk Int
+  product_sk  Int
   customer_id Int
   product_id  Int
   customer    dim_customer @relation(fields: [customer_id], references: [id])
@@ -483,7 +499,8 @@ model fact_sales {
 }
 
 model dim_customer {
-  id Int @id
+  id          Int @id
+  customer_sk Int
 }
 
 model dim_product {
@@ -540,6 +557,8 @@ func TestSensorDB_3NFSuppression_AuditTraceNote(t *testing.T) {
 
 model fact_sales {
   id          Int          @id
+  customer_sk Int
+  product_sk  Int
   customer_id Int
   product_id  Int
   customer    dim_customer @relation(fields: [customer_id], references: [id])
@@ -547,7 +566,8 @@ model fact_sales {
 }
 
 model dim_customer {
-  id Int @id
+  id          Int @id
+  customer_sk Int
 }
 
 model dim_product {
@@ -572,14 +592,17 @@ database:
 		if err != nil {
 			t.Fatalf("Audit: %v", err)
 		}
-		if r.Note == "" {
-			t.Fatal("Note is empty, want a factual trace of what 3NF-suppression withheld")
+		// TIGHTENED for the schema gate (ADR 0037). These assertions used to
+		// read Contains(Note, "1") and Contains(Note, "database.paradigm") —
+		// both of which the gate's OWN trace now satisfies, in a note where
+		// nothing had been suppressed at all. Two loose substrings over a
+		// shared channel stopped being a lock the moment a third producer
+		// joined it, so the whole suppression sentence is matched instead.
+		if !strings.Contains(r.Note, "3NF-suppression withheld 1 1NF surface item") {
+			t.Errorf("Note = %q, want the suppression trace naming the withheld count", r.Note)
 		}
-		if !strings.Contains(r.Note, "1") {
-			t.Errorf("Note = %q, want it to mention the suppressed count (1)", r.Note)
-		}
-		if !strings.Contains(r.Note, "database.paradigm") {
-			t.Errorf("Note = %q, want it to point at database.paradigm: oltp as the escape hatch", r.Note)
+		if !strings.Contains(r.Note, "set database.paradigm: oltp to see them") {
+			t.Errorf("Note = %q, want the suppression trace naming its escape hatch", r.Note)
 		}
 	})
 
@@ -604,6 +627,8 @@ database:
 
 model fact_sales {
   id          Int          @id
+  customer_sk Int
+  product_sk  Int
   customer_id Int
   product_id  Int
   customer    dim_customer @relation(fields: [customer_id], references: [id])
@@ -611,9 +636,10 @@ model fact_sales {
 }
 
 model dim_customer {
-  id     Int    @id
-  phone1 String
-  phone2 String
+  id          Int    @id
+  customer_sk Int
+  phone1      String
+  phone2      String
 }
 
 model dim_product {
@@ -692,6 +718,15 @@ database:
 // table's DB-003 item is dropped WHILE an unrelated unclassified-role
 // table's DB-003 item in the SAME schema still fires — proves NO
 // over-suppression on mixed.
+//
+// UNCHANGED by the schema gate (ADR 0037), and deliberately so: this fixture
+// carries no warehouse evidence, so detection CLOSES the gate over it, and the
+// explicit "mixed" is what reopens it and restores dim_customer's role
+// (paradigm.Resolve). That is the developer-autonomy rule doing its job — an
+// explicit olap/mixed is the developer asserting this IS a warehouse, and the
+// gate does not overrule them. This test passing unchanged is the evidence that
+// the restore path works end to end through the sensor; the unit lock is
+// TestResolve_ExplicitWarehouseOverride_ReopensAClosedGate.
 func TestSensorDB_3NFSuppression_Mixed_OnlyOLAPRoleSuppressed(t *testing.T) {
 	schema := `datasource db {
   provider = "postgresql"
@@ -756,6 +791,8 @@ func TestSensorDB_3NFSuppression_DB002_MultivaluedColumn(t *testing.T) {
 
 model fact_sales {
   id          Int          @id
+  customer_sk Int
+  product_sk  Int
   customer_id Int
   product_id  Int
   customer    dim_customer @relation(fields: [customer_id], references: [id])
@@ -763,7 +800,8 @@ model fact_sales {
 }
 
 model dim_customer {
-  id Int @id
+  id          Int @id
+  customer_sk Int
 }
 
 model dim_product {
@@ -792,6 +830,8 @@ database:
 		}
 	})
 
+	// Same as the DB-003 mixed case above: the explicit "mixed" reopens a gate
+	// that detection closed, so this exercises the override restore path too.
 	t.Run("mixed: dimension suppressed, unclassified table NOT over-suppressed", func(t *testing.T) {
 		schema := `datasource db {
   provider = "postgresql"
@@ -845,20 +885,16 @@ database:
 // always wins, detection MUST NOT suppress. A detected-oltp schema (no
 // override, no recognized warehouse name) with the identical repeating-group
 // shape also fires unchanged.
+//
+// TIGHTENED for the schema gate (ADR 0037). The first two fixtures were single
+// tables with no warehouse evidence, so under the gate they would have had TWO
+// independent reasons not to be suppressed — and the one this test is named for
+// (the explicit override) would have stopped being tested at all. Both now carry
+// the _sk surrogate-key convention and a real star, and each asserts the gate is
+// OPEN before asserting the finding fired: the explicit oltp is then the only
+// thing standing between these tables and suppression, which is the guarantee.
 func TestSensorDB_3NFSuppression_OLTPNegative_StillFlagged(t *testing.T) {
-	t.Run("explicit oltp override on a dim_-prefixed table", func(t *testing.T) {
-		schema := `datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-model dim_product {
-  id        Int    @id
-  category1 String
-  category2 String
-}
-`
-		yaml := `version: "1"
+	yamlOLTP := `version: "1"
 project:
   name: t
   language: typescript
@@ -870,11 +906,47 @@ database:
   schema_paths:
     - prisma/schema.prisma
 `
-		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+	// requireGateOpen fails loudly when the fixture stopped qualifying, so
+	// neither subtest below can pass because detection lost interest.
+	requireGateOpen := func(t *testing.T, r sdb.Result) {
+		t.Helper()
+		if cls := paradigm.Detect(r.Schema); !cls.Gate.Open {
+			t.Fatalf("the schema gate is CLOSED on this fixture (Fired = %v) — the explicit oltp override "+
+				"is no longer the thing preventing suppression, so this test proves nothing", cls.Gate.Fired)
+		}
+	}
+
+	t.Run("explicit oltp override on a dim_-prefixed table", func(t *testing.T) {
+		schema := `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model fact_sales {
+  id          Int          @id
+  customer_sk Int
+  product_sk  Int
+  product_id  Int
+  product     dim_product  @relation(fields: [product_id], references: [id])
+}
+
+model dim_product {
+  id          Int    @id
+  product_sk  Int
+  category1   String
+  category2   String
+}
+
+model orders {
+  id Int @id
+}
+`
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yamlOLTP)
 		r, err := sdb.New(typescript.New()).Audit(ctx)
 		if err != nil {
 			t.Fatalf("Audit: %v", err)
 		}
+		requireGateOpen(t, r)
 		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "dim_product") {
 			t.Error("DB-003 did not fire for dim_product under explicit oltp override, want NOT suppressed (explicit config always wins)")
 		}
@@ -892,29 +964,31 @@ database:
 }
 
 model fact_sales {
-  id      Int      @id
-  amount1 Int
-  amount2 Int
-  tags    String[]
+  id          Int      @id
+  customer_sk Int
+  product_sk  Int
+  amount1     Int
+  amount2     Int
+  tags        String[]
+  customer_id Int
+  customer    dim_customer @relation(fields: [customer_id], references: [id])
+}
+
+model dim_customer {
+  id          Int @id
+  customer_sk Int
+}
+
+model orders {
+  id Int @id
 }
 `
-		yaml := `version: "1"
-project:
-  name: t
-  language: typescript
-  framework: next
-database:
-  orm: prisma
-  type: postgresql
-  paradigm: oltp
-  schema_paths:
-    - prisma/schema.prisma
-`
-		ctx := writeProject(t, "prisma/schema.prisma", schema, yaml)
+		ctx := writeProject(t, "prisma/schema.prisma", schema, yamlOLTP)
 		r, err := sdb.New(typescript.New()).Audit(ctx)
 		if err != nil {
 			t.Fatalf("Audit: %v", err)
 		}
+		requireGateOpen(t, r)
 		if !hasSurfaceForTable(r.Res.Surface, string(surface.CategoryDBRepeatingGroups), "fact_sales") {
 			t.Error("DB-003 did not fire for fact_sales under explicit oltp override, want NOT suppressed (explicit config always wins)")
 		}

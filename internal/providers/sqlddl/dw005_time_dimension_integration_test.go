@@ -35,22 +35,30 @@ import (
 
 // starDDL renders the dw-gamerec/dw-kantor shape with the calendar dimension
 // spelled as the corpus spells it.
+//
+// The keys are spelled _sk so this star carries schema-wide warehouse evidence
+// that is INDEPENDENT of its calendar (ADR 0037). That independence is the whole
+// reason for the choice: the control below renames the calendar away to prove
+// DW-005 still fires on a genuine absence, and if the only evidence in the
+// schema WERE the calendar, renaming it would close the schema gate, withhold
+// every role, and make the control pass by abstention instead of by firing —
+// a green test protecting nothing.
 func starDDL(calendar string) string {
 	return `CREATE TABLE ` + calendar + ` (
-    date_key integer NOT NULL PRIMARY KEY,
+    date_sk integer NOT NULL PRIMARY KEY,
     full_date date NOT NULL,
     fiscal_year integer NOT NULL
 );
 
 CREATE TABLE D_GAME (
-    game_key integer NOT NULL PRIMARY KEY,
+    game_sk integer NOT NULL PRIMARY KEY,
     title varchar(200) NOT NULL
 );
 
 CREATE TABLE F_GAME_SALES (
-    sale_id integer NOT NULL PRIMARY KEY,
-    date_key integer NOT NULL REFERENCES ` + calendar + ` (date_key),
-    game_key integer NOT NULL REFERENCES D_GAME (game_key),
+    sale_sk integer NOT NULL PRIMARY KEY,
+    date_sk integer NOT NULL REFERENCES ` + calendar + ` (date_sk),
+    game_sk integer NOT NULL REFERENCES D_GAME (game_sk),
     units integer NOT NULL
 );
 `

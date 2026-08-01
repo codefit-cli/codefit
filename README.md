@@ -119,7 +119,10 @@ independent audit layer that validates AI-generated code is secure and correct
   **code×schema crosses** that check whether the columns the code actually filters on
   are backed by an index. It also **detects the schema's paradigm** (OLTP vs OLAP,
   overridable by `database.paradigm`) so an OLAP schema's intentional denormalization
-  is not flagged as a normalization violation, and on a schema it classifies as a
+  is not flagged as a normalization violation — the whole **schema** is judged before
+  any table is called a fact or a dimension, so one `dim_`-named table cannot silence
+  its own normalization findings inside an otherwise transactional schema — and on a
+  schema it classifies as a
   warehouse it audits the **star-schema and slowly-changing-dimension shape** (a fact
   joining no dimension, a business key where a surrogate belongs, facts with no time
   dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) — the
@@ -184,8 +187,14 @@ Concretely, on `main` — so you know exactly what to expect without reading
   on are backed by an index. One structural fact is affirmed (a table with no primary
   key); everything else is surface the agent judges, all dialect-agnostic over the
   reconstructed neutral schema. codefit also **detects the schema's paradigm** (OLTP vs
-  OLAP, by table naming and structure — `database.paradigm` overrides it) and does **not**
-  flag an OLAP schema's intentional denormalization as a normalization violation. On a
+  OLAP — `database.paradigm` overrides it) and does **not**
+  flag an OLAP schema's intentional denormalization as a normalization violation. The
+  question is asked of the **schema** before it is asked of any table: a schema counts as
+  a warehouse only on schema-wide evidence (a declared calendar table, the `_sk`
+  surrogate-key convention, or a numeric/text split across its column types), and inside
+  a schema that shows none of those, no table gets a warehouse role at all — so one
+  `dim_`-named table cannot decide its own silencing. When roles are withheld, the scan's
+  note says so and names `database.paradigm: olap` as the escape hatch. On a
   schema it classifies as a warehouse it additionally audits the **star-schema and
   slowly-changing-dimension shape**: a fact table joining no dimension, a dimension keyed
   by a business key instead of a surrogate, facts with no time dimension, an SCD-2
