@@ -131,8 +131,10 @@ const (
 	//
 	// Every one of these yields ZERO value on a Prisma-only project: a
 	// schema.prisma expresses no warehouse concept, so a Prisma schema whose
-	// models happen to be named fact_/dim_ is the only way any of them can
-	// even classify — see COVERAGE.md's Prisma-zero-value note.
+	// models happen to carry a recognized warehouse name (fact/dim/stg/mart as
+	// a delimited segment, or a PascalCase Fact.../Dim... token — see
+	// internal/core/paradigm) is the only way any of them can even classify —
+	// see COVERAGE.md's Prisma-zero-value note.
 	CategoryDWNoFactDimensionFK       Category = "dw-fact-no-dimension-fk"       // DW-001: fact table with no FK to any dimension
 	CategoryDWDimensionNoSurrogateKey Category = "dw-dimension-no-surrogate-key" // DW-002: dimension keyed by a natural/composite business key
 	CategoryDWNoTimeDimension         Category = "dw-no-time-dimension"          // DW-005: facts present, no time dimension

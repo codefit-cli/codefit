@@ -651,8 +651,9 @@ database:
 }
 
 // explicit-olap-override: database.paradigm: olap set explicitly, ANY table
-// (even one with no fact_/dim_/stg_/mart_ prefix) has its DB-003 item
-// dropped SCHEMA-WIDE — the dev asserts the whole schema is a warehouse.
+// (even one whose name nominates no warehouse role at all, like "widgets")
+// has its DB-003 item dropped SCHEMA-WIDE — the dev asserts the whole schema
+// is a warehouse.
 func TestSensorDB_3NFSuppression_ExplicitOLAPOverride_DropsSchemaWide(t *testing.T) {
 	schema := `datasource db {
   provider = "postgresql"
@@ -842,8 +843,8 @@ database:
 // oltp-negative: an explicit oltp override on a dim_-prefixed schema with the
 // identical shape as the auto-olap case MUST still fire — explicit config
 // always wins, detection MUST NOT suppress. A detected-oltp schema (no
-// override, no recognized prefix) with the identical repeating-group shape
-// also fires unchanged.
+// override, no recognized warehouse name) with the identical repeating-group
+// shape also fires unchanged.
 func TestSensorDB_3NFSuppression_OLTPNegative_StillFlagged(t *testing.T) {
 	t.Run("explicit oltp override on a dim_-prefixed table", func(t *testing.T) {
 		schema := `datasource db {

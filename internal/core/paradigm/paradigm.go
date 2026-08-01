@@ -1,6 +1,10 @@
 package paradigm
 
-import "github.com/codefit-cli/codefit/internal/core/db"
+import (
+	"strings"
+
+	"github.com/codefit-cli/codefit/internal/core/db"
+)
 
 // Paradigm classifies a schema (or an explicit override) as analytic,
 // transactional, or a mix of both. ParadigmAuto is a valid CONFIG value
@@ -18,11 +22,11 @@ const (
 )
 
 // Role classifies a single table's warehouse role: an ordinary OLTP table,
-// or a table with no fact_/dim_/stg_/mart_ prefix or insufficient structural
-// corroboration, gets the explicit RoleUnclassified value ("unclassified") —
-// NOT the bare Go zero value (""), which Detect never returns. Every entry
-// in a Classification's Roles map is always one of the five named constants
-// below.
+// or a table whose name carries no recognized warehouse token (see
+// candidateRole) or that lacks structural corroboration, gets the explicit
+// RoleUnclassified value ("unclassified") — NOT the bare Go zero value (""),
+// which Detect never returns. Every entry in a Classification's Roles map is
+// always one of the five named constants below.
 type Role string
 
 const (
@@ -42,37 +46,46 @@ type Classification struct {
 
 	// Unprovable names tables whose role could not be DECIDED because the
 	// model does not prove their structure complete (db-model-completeness-
-	// contract, design SS6). Distinct from an ordinary RoleUnclassified ("no
-	// recognized prefix"): a table demoted to RoleUnclassified is ALSO in
+	// contract, design SS6). Distinct from an ordinary RoleUnclassified ("the
+	// name nominates nothing"): a table demoted to RoleUnclassified is ALSO in
 	// Unprovable only when its demotion cause might be a dropped statement
-	// rather than a genuine structural absence. Never set for a table with no
-	// recognized prefix (that demotion's cause is vocabulary, not
-	// structure), and never set for a PROMOTED table (promotion is
-	// unconditionally safe — a dropped FK can only undercount fan-out/fan-in,
-	// never fabricate it).
+	// rather than a genuine structural absence. Never set for a table whose
+	// name carries no recognized warehouse token (that demotion's cause is
+	// vocabulary, not structure), and never set for a PROMOTED table
+	// (promotion is unconditionally safe — a dropped FK can only undercount
+	// fan-out/fan-in, never fabricate it).
+	//
+	// Membership is therefore the one PUBLIC signal that separates the two
+	// demotion causes: candidateRole is unexported, and a name-demoted and a
+	// structure-demoted table carry the identical RoleUnclassified. (A caller
+	// can also ask StripRoleToken whether a name carries a recognized token at
+	// all — but that answers a question about the NAME alone, and says nothing
+	// about which of the two causes demoted a given table.)
 	Unprovable map[string]bool
 }
 
 // factFanOutMin is the minimum distinct-table FK fan-out that corroborates a
-// fact_-prefixed table's candidate role (design §2a: "a fact table
-// references many dim tables"). Exact thresholds are TDD-refined downstream;
-// this fixes the shape only.
+// fact-candidate table's role (design §2a: "a fact table references many dim
+// tables"). Exact thresholds are TDD-refined downstream; this fixes the shape
+// only.
 const factFanOutMin = 2
 
 // Detect computes a Classification as a pure function of s. Table role is
-// determined by NAME PREFIX as the primary signal (fact_/dim_/stg_/mart_,
-// locked decision A5); a prefixed fact_/dim_ table is further corroborated
-// by REAL relational structure — fact_ needs FK fan-out to factFanOutMin+
-// distinct tables; dim_ needs to be referenced (fan-in) by at least one
-// other table — and demoted to unclassified when that structural evidence
-// is absent. A lone single-column (surrogate) primary key is deliberately
-// NOT, by itself, corroboration: almost every ordinary OLTP table has one,
-// so accepting it alone made the corroboration vacuous (CRITICAL C1, fixed
-// post-review — see ADR 0033 decision 2 and the S1 review ledger). stg_/
-// mart_ need no structural signal in S1 (design §2a). A table with no
-// recognized prefix is always unclassified, regardless of structure
-// (name-only demotion never promotes: structure corroborates, it never
-// substitutes for the name).
+// determined by the NAME as the primary signal (locked decision A5) — see
+// candidateRole for the recognized spellings, which cover underscore-
+// delimited leading and trailing tokens and separator-free PascalCase, all
+// case-insensitively. A fact- or dimension-CANDIDATE table is further
+// corroborated by REAL relational structure — a fact candidate needs FK
+// fan-out to factFanOutMin+ distinct tables; a dimension candidate needs to
+// be referenced (fan-in) by at least one other table — and is demoted to
+// unclassified when that structural evidence is absent. A lone single-column
+// (surrogate) primary key is deliberately NOT, by itself, corroboration:
+// almost every ordinary OLTP table has one, so accepting it alone made the
+// corroboration vacuous (CRITICAL C1, fixed post-review — see ADR 0033
+// decision 2 and the S1 review ledger). Staging/mart candidates need no
+// structural signal in S1 (design §2a). A table whose name nominates nothing
+// is always unclassified, regardless of structure (structure corroborates a
+// name, it never substitutes for one).
 //
 // The schema-level Paradigm folds from the resulting role mix: any
 // olap-role table (fact/dimension/staging/mart) coexisting with at least one
@@ -100,11 +113,11 @@ func Detect(s *db.Schema) Classification {
 // unprovableDemotions computes Classification.Unprovable (design SS6):
 // promotion is unconditionally safe (a dropped FK can only UNDERcount
 // fan-out/fan-in, never fabricate it), so only a DEMOTION is ever suspect —
-// and only when the table carried a recognized prefix in the first place (a
-// table with no recognized prefix is unclassified for a vocabulary reason,
-// never a structural one). A recognized-prefix demotion is marked unprovable
-// when EITHER the table's own structure is unproven OR any OTHER table in
-// the schema is (a lost FK anywhere could be the one that would have
+// and only when the table's name nominated a role in the first place (a table
+// whose name nominates nothing is unclassified for a vocabulary reason, never
+// a structural one). A name-recognized demotion is marked unprovable when
+// EITHER the table's own structure is unproven OR any OTHER table in the
+// schema is (a lost FK anywhere could be the one that would have
 // referenced/been-referenced-by this table — the schema-wide half of the
 // corroboration is fan-in, computed over every table's foreign keys).
 func unprovableDemotions(s *db.Schema, roles map[string]Role) map[string]bool {
@@ -121,8 +134,8 @@ func unprovableDemotions(s *db.Schema, roles map[string]Role) map[string]bool {
 		if roles[t.Name] != RoleUnclassified {
 			continue // promoted — unconditionally safe, never unprovable
 		}
-		if _, ok := prefixRole(t.Name); !ok {
-			continue // no recognized prefix — vocabulary, not structure
+		if _, ok := candidateRole(t.Name); !ok {
+			continue // the name nominates nothing — vocabulary, not structure
 		}
 		if !t.StructureProven() || anyIncomplete {
 			out[t.Name] = true
@@ -131,11 +144,14 @@ func unprovableDemotions(s *db.Schema, roles map[string]Role) map[string]bool {
 	return out
 }
 
-// roleFor determines one table's role: name prefix as the primary signal,
-// corroborated by REAL relational structure — FK fan-out for fact_, fan-in
-// for dim_ — never by a lone surrogate primary key alone (CRITICAL C1 fix).
+// roleFor determines one table's role: the name nominates a CANDIDATE
+// (candidateRole), which REAL relational structure must then corroborate —
+// FK fan-out for a fact candidate, fan-in for a dimension candidate — never a
+// lone surrogate primary key (CRITICAL C1 fix). Widening the name vocabulary
+// never touches this gate: locked decision A5 holds regardless of how the
+// candidate was spelled.
 func roleFor(s *db.Schema, t db.Table, fanIn map[string]int) Role {
-	candidate, ok := prefixRole(t.Name)
+	candidate, ok := candidateRole(t.Name)
 	if !ok {
 		return RoleUnclassified
 	}
@@ -152,32 +168,168 @@ func roleFor(s *db.Schema, t db.Table, fanIn map[string]int) Role {
 		}
 		return RoleUnclassified
 	default:
-		// stg_/mart_: name alone is sufficient in S1 — no structural signal
-		// is specified for staging/mart tables (design §2a).
+		// staging/mart (nominated by a leading stg_/mart_ segment only): the
+		// name alone is sufficient in S1 — no structural signal is specified
+		// for staging/mart tables (design §2a).
 		return candidate
 	}
 }
 
-// prefixRole maps a table name's prefix to its candidate role. ok is false
-// when no recognized prefix matches.
-func prefixRole(name string) (Role, bool) {
-	switch {
-	case hasPrefix(name, "fact_"):
-		return RoleFact, true
-	case hasPrefix(name, "dim_"):
-		return RoleDimension, true
-	case hasPrefix(name, "stg_"):
-		return RoleStaging, true
-	case hasPrefix(name, "mart_"):
-		return RoleMart, true
-	default:
-		return RoleUnclassified, false
-	}
+// nameToken pairs a recognized warehouse naming token with the role it
+// nominates. A slice, not a map, so matching order is deterministic.
+type nameToken struct {
+	token string
+	role  Role
 }
 
-func hasPrefix(name, prefix string) bool {
-	return len(name) >= len(prefix) && name[:len(prefix)] == prefix
+// The role-name vocabulary. Every entry is evidence-backed by the yield
+// measurement over 22 real public corpora, never speculative: widening a
+// vocabulary on a hunch buys coverage with false positives, and a false
+// promotion here does not merely add noise — it SILENCES the table's
+// DB-002/DB-003 1NF findings through the sensor's 3NF-suppression pass.
+var (
+	// prefixTokens match the FIRST underscore-delimited segment.
+	// fct_ is dbt's own convention; f_/d_ are dw-jobtech's (d_date,
+	// d_country) — recorded by the measurement both as misses AND as the
+	// cause of DW-001/DW-005 false positives, since codefit reported "the
+	// fact reaches no dimension" while the dimensions sat there unrecognized.
+	prefixTokens = []nameToken{
+		{"fact", RoleFact}, {"fct", RoleFact}, {"f", RoleFact},
+		{"dim", RoleDimension}, {"d", RoleDimension},
+		{"stg", RoleStaging},
+		{"mart", RoleMart},
+	}
+
+	// suffixTokens match the LAST underscore-delimited segment — TPC-DS's
+	// date_dim, dw-supermarket's *_fact. Deliberately narrower than
+	// prefixTokens: no single-letter or staging/mart suffix was observed, and
+	// an unobserved suffix is a guess, not a convention.
+	suffixTokens = []nameToken{
+		{"fact", RoleFact}, {"facts", RoleFact},
+		{"dim", RoleDimension}, {"dims", RoleDimension},
+	}
+
+	// pascalTokens match a leading token in separator-free PascalCase —
+	// Microsoft's own AdventureWorksDW spelling (FactInternetSales,
+	// DimCustomer), which lowercasing alone cannot reach because
+	// "factinternetsales" carries no delimited token at all.
+	pascalTokens = []nameToken{
+		{"fact", RoleFact},
+		{"dim", RoleDimension},
+	}
+)
+
+// candidateRole maps a table name to the warehouse role its NAME nominates.
+// ok is false when no recognized token matches; a nominated role is only ever
+// a CANDIDATE — roleFor still requires real structural corroboration before
+// promoting it (locked decision A5, ADR 0033 decision 2: structure
+// corroborates a name, it never substitutes for one).
+//
+// Three spellings are recognized, in order: an underscore-delimited leading
+// token, an underscore-delimited trailing token, and separator-free
+// PascalCase. Matching is case-insensitive throughout — the single
+// highest-leverage gap the yield measurement found, since 4 of 9 real
+// warehouse corpora used the exact Kimball convention this package already
+// knew, only capitalized.
+func candidateRole(name string) (Role, bool) {
+	r, _, ok := roleToken(name)
+	return r, ok
 }
+
+// StripRoleToken removes the recognized warehouse role token from name and
+// returns the REMAINDER, preserving that remainder's original spelling
+// ("D_DATE" → "DATE", "date_dim" → "date", "DimDate" → "Date"). ok is false
+// when the name carries no recognized token, in exactly the cases candidateRole
+// refuses — the two share one implementation, which is the entire point.
+//
+// WHY THIS IS EXPORTED. A second, parallel name vocabulary lived in
+// internal/core/dwrules (DW-005's time-dimension list: dim_date / dim_time /
+// dim_calendar) and did NOT move when this package's vocabulary widened. The
+// result was measured over 22 real corpora: two warehouses spelling their
+// calendar D_DATE / D_Date went from "no fact table, rule abstains" to a
+// confident "this fact table reaches no time dimension" — over schemas that
+// plainly declare one. Composing on this seam means the next widening here
+// cannot silently re-open that hole; a copied token list would.
+//
+// It deliberately does NOT return the nominated Role. A caller that wanted the
+// role would be doing name-only classification, and the A5 corroboration gate
+// (structure corroborates a name, it never substitutes for one) is not
+// something this package hands out a bypass for. Callers get the remainder, so
+// they can ask their own question about the rest of the name, and nothing else.
+func StripRoleToken(name string) (string, bool) {
+	_, rest, ok := roleToken(name)
+	return rest, ok
+}
+
+// roleToken is the single matcher behind candidateRole and StripRoleToken. It
+// returns the nominated role, the name with the matched token removed, and
+// whether anything matched. Three spellings, in order: underscore-delimited
+// leading token, underscore-delimited trailing token, separator-free
+// PascalCase.
+func roleToken(name string) (Role, string, bool) {
+	if r, rest, ok := segmentRole(name); ok {
+		return r, rest, true
+	}
+	if r, rest, ok := pascalRole(name); ok {
+		return r, rest, true
+	}
+	return RoleUnclassified, "", false
+}
+
+// segmentRole matches an underscore-delimited leading or trailing token, and
+// returns the remaining segments rejoined. A name with no underscore has no
+// delimited token and never matches here: the delimiter IS the word boundary
+// that keeps "factory_settings" (first segment "factory") and
+// "dimension_config" (first segment "dimension") out of the vocabulary.
+// Without it, a bare "fact"/"dim" prefix would swallow ordinary English words
+// and silence their 1NF findings.
+func segmentRole(name string) (Role, string, bool) {
+	segs := strings.Split(name, "_")
+	if len(segs) < 2 {
+		return RoleUnclassified, "", false
+	}
+	for _, nt := range prefixTokens {
+		if strings.EqualFold(segs[0], nt.token) {
+			return nt.role, strings.Join(segs[1:], "_"), true
+		}
+	}
+	for _, nt := range suffixTokens {
+		if strings.EqualFold(segs[len(segs)-1], nt.token) {
+			return nt.role, strings.Join(segs[:len(segs)-1], "_"), true
+		}
+	}
+	return RoleUnclassified, "", false
+}
+
+// pascalRole matches a leading token in separator-free PascalCase, and returns
+// the rest of the name. The word boundary is PascalCase's OWN signal: the token
+// is followed by an uppercase character AND THEN a lowercase one — "Fact" +
+// "In" of FactInternetSales.
+//
+// Requiring BOTH is what makes this discriminating rather than greedy.
+// "Uppercase follows the token" alone also accepts FACTORY_SETTINGS ('O' is
+// uppercase), promoting an ordinary all-caps OLTP table — the spelling Oracle
+// and DB2 DDL routinely use. "FACT" + "OR" fails the lowercase half, so an
+// all-caps name stays unclassified: genuinely ambiguous, and this package
+// declares ambiguity rather than guessing at it.
+func pascalRole(name string) (Role, string, bool) {
+	for _, nt := range pascalTokens {
+		n := len(nt.token)
+		if len(name) <= n+1 {
+			continue
+		}
+		if !strings.EqualFold(name[:n], nt.token) {
+			continue
+		}
+		if isUpperASCII(name[n]) && isLowerASCII(name[n+1]) {
+			return nt.role, name[n:], true
+		}
+	}
+	return RoleUnclassified, "", false
+}
+
+func isUpperASCII(c byte) bool { return c >= 'A' && c <= 'Z' }
+func isLowerASCII(c byte) bool { return c >= 'a' && c <= 'z' }
 
 // fkFanOut counts the distinct tables t references via foreign key.
 func fkFanOut(t db.Table) int {

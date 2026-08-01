@@ -503,15 +503,49 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   tables (S1, RF-03 OLAP closure).** codefit computes a schema's **paradigm**
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
   `dimension` | `staging` | `mart` | `unclassified`) as a pure function of the
-  schema: table-name prefixes (`fact_`/`dim_`/`stg_`/`mart_`) are the
-  **primary** signal, corroborated by **real relational structure** — `fact_`
-  tables need foreign-key fan-out to 2+ distinct tables, `dim_` tables need to
-  be **referenced** (fan-in) by at least one other table. A lone single-column
-  surrogate primary key is deliberately **not**, by itself, sufficient
-  corroboration (nearly every ordinary OLTP table has one, so it would
-  classify almost anything prefixed `fact_`/`dim_` as warehouse-role — fixed
-  post-review, see ADR 0033). `stg_`/`mart_` still need no structural signal
-  in S1. `database.paradigm` defaults to `"auto"` (detection decides); an
+  schema: the table **name** is the **primary** signal, corroborated by **real
+  relational structure** — a fact candidate needs foreign-key fan-out to 2+
+  distinct tables, a dimension candidate needs to be **referenced** (fan-in) by
+  at least one other table. A lone single-column surrogate primary key is
+  deliberately **not**, by itself, sufficient corroboration (nearly every
+  ordinary OLTP table has one, so it would classify almost any `fact`/`dim`-named
+  table as warehouse-role — fixed post-review, see ADR 0033). Staging/mart
+  candidates still need no structural signal in S1.
+  - **The name vocabulary**, stated exactly because it decides what the whole
+    DW family can even see. It was **widened** from the original four
+    snake_case prefixes after an empirical yield measurement over 22 real
+    public corpora found the family measuring near-zero on **vocabulary**, not
+    on rule logic. Three spellings are recognized, all **case-insensitively**:
+    (a) the **first** underscore-delimited segment — `fact`/`fct`/`f` → fact,
+    `dim`/`d` → dimension, `stg` → staging, `mart` → mart (`fct_` is dbt's
+    convention, `f_`/`d_` is dw-jobtech's); (b) the **last** underscore-delimited
+    segment — `fact`/`facts` → fact, `dim`/`dims` → dimension (TPC-DS's
+    `date_dim`, dw-supermarket's `*_fact`), deliberately narrower than (a)
+    since no single-letter or staging/mart **suffix** was observed in any
+    corpus and an unobserved suffix is a guess, not a convention; (c) a
+    separator-free **PascalCase** leading token, `Fact…` or `Dim…` (Microsoft's
+    AdventureWorksDW spelling).
+  - **Declared limits that remain, deliberately.** The PascalCase form (c)
+    requires the token to be followed by an uppercase character **and then a
+    lowercase one** — `Fact`+`In` of `FactInternetSales` — so `FactoryOrder`
+    does **not** match, and an **all-caps** name such as `FACTORY_SETTINGS` or
+    `DIMENSION_CONFIG` stays `unclassified` **by design**, because `FACT`+`OR`
+    is genuinely ambiguous and codefit declares ambiguity rather than guessing.
+    Forms (a) and (b) require a real underscore, so a name with **no**
+    delimiter and no PascalCase boundary is never recognized. Every one of
+    these is a deliberate **false-negative** choice, because a false promotion
+    here does not merely add noise — it **silences** that table's DB-002/DB-003
+    1NF findings through the 3NF-suppression pass below. The widening changed
+    **names only**: the ADR 0033 structural corroboration gate is untouched,
+    and a wider name never substitutes for structure. This vocabulary is the
+    **single source** for every name-shaped warehouse question codefit asks:
+    DW-005's time-dimension name test consumes it through an exported
+    strip-the-role-token seam rather than keeping a copy, because a copy
+    already drifted once and turned DW-005 into a confident false claim on two
+    real corpora (see DW-005 below). Widening it here therefore widens what
+    DW-005 can see, in the same change.
+
+  `database.paradigm` defaults to `"auto"` (detection decides); an
   **explicit** `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins**
   over detection — developer autonomy is innegotiable. This slice's first
   consumer: DB-002 (multivalued column) and DB-003 (repeating groups) — still
@@ -564,16 +598,36 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     is noise.
   - **DW-005, facts present but no time dimension.** Schema-level, at most
     **one** item, anchored on the first fact table. A time dimension is
-    recognized by **either** the conventional name (`dim_date`/`dim_time`/
-    `dim_calendar`, separator-insensitive) **or** the structural grain — a
-    dimension whose primary key is a single date/datetime column. The
-    structural signal keys on the **primary key**, not on "contains a date
-    column": an `updated_at` stamp is not a calendar, and accepting any date
-    column would suppress the rule on almost every schema (a silent false
-    negative). **Declared limit:** a calendar keyed by an integer `yyyymmdd`
-    smart key — AdventureWorksDW's own `DimDate` — is recognized only by
-    **name**, since that key is structurally indistinguishable from any other
-    surrogate.
+    recognized by **either** the **name** or the structural grain. The name
+    test **composes on the same role-name vocabulary** documented above: it
+    strips the recognized warehouse role token off either end of the table name
+    and checks that what **remains** is exactly `date`, `time` or `calendar`
+    (separator-insensitive) — so `dim_date`, `D_DATE`, `d_date`, `date_dim`,
+    `DATE_DIM`, `DimDate` and `DimCalendar` all match. Composing rather than
+    keeping a second spelling list is a **fix**, not a flourish: this rule used
+    to carry its own hardcoded `dim_date`/`dim_time`/`dim_calendar`, and when
+    the role vocabulary widened the two drifted — two real corpora spelling
+    their calendar `D_DATE`/`D_Date` began classifying as dimensions while
+    staying invisible here, so DW-005 reported "this fact table reaches no time
+    dimension" over schemas that plainly declare one. A silent miss became a
+    confident false claim. The remainder is matched by **equality, never
+    containment**: separators are stripped before comparison, so a substring
+    test for "date" would swallow `dim_update`, `dim_candidate` and
+    `dim_validate` and **silence** the rule on a warehouse that genuinely has
+    no calendar. The structural signal keys on the **primary key**, not on
+    "contains a date column": an `updated_at` stamp is not a calendar, and
+    accepting any date column would suppress the rule on almost every schema (a
+    silent false negative). **Declared limits,** both in the *miss* direction by
+    design — the rule asks a question the agent can answer from the schema
+    rather than making a claim codefit cannot back: **(a)** a calendar keyed by
+    an integer `yyyymmdd` smart key — AdventureWorksDW's own `DimDate` — is
+    recognized only by **name**, since that key is structurally
+    indistinguishable from any other surrogate; **(b)** by name, only a role
+    token plus *exactly* `date`/`time`/`calendar` matches — a spelled-out or
+    qualified calendar name (`date_dimension`, `dim_date_full`,
+    `dim_fiscal_date`, `dim_datetime`) does **not**, and neither does a bare
+    `calendar` carrying no role token (which the role vocabulary would never
+    classify as a dimension in the first place).
   - **DW-010, SCD-2 dimension without a currency index.** A dimension carrying
     slowly-changing columns (`valid_from`/`valid_to`/`is_current`/
     `effective_date`, separator-insensitive so `validTo`/`isCurrent` match too)
@@ -592,8 +646,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     both mixes point-in-time with as-of-today attributes. **Time dimensions are
     excluded** from the comparison (a calendar is not slowly-changing by
     definition); counting one as SCD-1 would fire this rule on essentially
-    every correctly built warehouse. A genuine split between two other
-    dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
+    every correctly built warehouse. The exclusion uses the **same**
+    time-dimension test as DW-005 above, so widening one never leaves the other
+    behind. A genuine split between two other dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
     its **declared limit**: a dimension using a different vocabulary
     (AdventureWorksDW's `DimProduct` uses `StartDate`/`EndDate`/`Status`) reads
     as SCD-1.
@@ -601,15 +656,24 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     fire paths of all five rules are proven by **constructed** (declared
     synthetic, ADR 0028) schemas, **not** by real vendored DDL. Microsoft's
     AdventureWorksDW **is** vendored
-    (`testdata/tsql/adventureworksdw_real_objects.sql`, MIT) and yields **no**
-    DW finding, for two independent, test-locked reasons: its PascalCase
-    Kimball names (`FactInternetSales`, `DimCustomer`) fall outside the
-    recognized snake_case prefix vocabulary, and the T-SQL reducer drops the
-    `ALTER TABLE ... ADD CONSTRAINT` shapes it uses, so its real primary and
-    foreign keys never reach the model at all (see SQL-DDL known limits (6)).
+    (`testdata/tsql/adventureworksdw_real_objects.sql`, MIT) and still yields
+    **no** DW finding — but for **one** test-locked reason now, not two.
+    The **naming half is closed**: the role-name vocabulary recognizes its
+    PascalCase Kimball spelling (`FactInternetSales`, `DimCustomer`), locked
+    against the **real parsed corpus** by
+    `TestDW_AdventureWorksDW_PascalCaseNaming_IsNowRecognized`, which asserts
+    all three tables reach `Classification.Unprovable` — the public signal
+    that a name **was** recognized and the demotion was structural.
+    What still blocks it: the T-SQL reducer drops the
+    `ALTER TABLE ... ADD CONSTRAINT` shapes this DDL uses, so its three real
+    primary keys and all eight real foreign keys never reach the model at all
+    (see SQL-DDL known limits (6)). With no keys, the corroboration gate has
+    nothing to corroborate with and demotes every recognized name back to
+    `unclassified`. Closing that parser gap is what would let the real corpus
+    carry the fire paths.
   - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
     warehouse concept, so these rules can only classify a Prisma project whose
-    models happen to be named `fact_`/`dim_`.
+    models happen to carry a recognized warehouse name.
 - **Fact table missing a columnar/analytic index (DW-021, S3, RF-03 OLAP
   closure).** A fact-role table with no index using a **recognized**
   columnar/analytic access method. Pure **surface, never an affirmation**
@@ -690,9 +754,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `dw021_integration_test.go` exercise) confirming the table lands
     `StructureProven()=false` and DW-021 emits nothing for it. No real
     vendored warehouse corpus is used for DW-021's dogfood **in this
-    repository** — the same AdventureWorksDW naming/`ALTER … ADD CONSTRAINT`
-    limits that keep the whole DW-0xx family blind to that corpus (see
-    above) apply here too — but that is a statement about what this
+    repository** — the same AdventureWorksDW `ALTER … ADD CONSTRAINT` parser
+    limit that keeps the whole DW-0xx family blind to that corpus (see
+    above) applies here too: its PascalCase names **are** now recognized by
+    the role vocabulary, but with no parsed keys the corroboration gate
+    demotes them to `unclassified`, so no fact role ever reaches this rule —
+    but that is a statement about what this
     repository vendors, **not** a claim that no such corpus exists: a
     separate empirical yield measurement (4R review + yield measurement,
     coordinator round) surveyed 22 real public corpora (463 tables, 427
@@ -748,18 +815,34 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
   the star-schema/SCD checks (DW-001, DW-002, DW-005, DW-010, DW-011),
   **and** the columnar/analytic-index check (**DW-021**) **are now covered**
-  (see above). What **remains** not covered: a partitioning check
+  (see above) — `dwrules.All()` is **six** rules as of S3. What **remains**
+  not covered: a partitioning check
   (**DW-020**, planned for S4). It does not fire today, under any dialect.
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
-  Separately from the rules: table-role detection recognizes only the
-  snake_case prefixes `fact_`/`dim_`/`stg_`/`mart_`, so a warehouse using
-  **PascalCase Kimball naming** (`FactInternetSales`, `DimCustomer` — as
-  Microsoft's own AdventureWorksDW does) classifies entirely as `unclassified`
-  and gets **no value** from any DW rule, DW-021 included. That is a
-  naming-vocabulary limit, not a rule gap, and it is locked as a test against
-  the vendored AdventureWorksDW DDL rather than left silent.
+  Separately from the rules, the **name-vocabulary limit recorded here has
+  narrowed**: table-role detection now recognizes **PascalCase Kimball naming**
+  (`FactInternetSales`, `DimCustomer` — as Microsoft's own AdventureWorksDW
+  does), underscore-delimited **leading and trailing** tokens, and all of them
+  **case-insensitively** (the exact vocabulary is in the paradigm entry above).
+  Recognizing a **name** is not promoting a **table**, and AdventureWorksDW is
+  exactly where the two part ways: its names **are** now recognized, but the
+  T-SQL reducer still drops the `ALTER TABLE ... ADD CONSTRAINT` shapes that
+  DDL uses, so with no parsed keys the corroboration gate has nothing to
+  corroborate with and demotes every recognized name back to `unclassified` —
+  those tables surface in `Classification.Unprovable` instead, and no DW rule,
+  DW-021 included, ever evaluates them. What blocks that corpus is a **parser**
+  limit now, not a vocabulary one.
+  What the vocabulary still does **not** recognize, by deliberate design rather
+  than oversight: an **all-caps** name (`FACTORY_SETTINGS`, `DIMENSION_CONFIG`)
+  — `FACT`+`OR` is genuinely ambiguous, so such a table stays `unclassified`
+  and gets no DW value; and a name with **neither** an underscore **nor** a
+  PascalCase `Fact`/`Dim` boundary. Both are **false negatives accepted on
+  purpose**, since a wrong promotion silences that table's 1NF findings. That
+  residual gap remains a naming-vocabulary limit, not a rule gap, and it is
+  locked as a test against the vendored AdventureWorksDW DDL rather than left
+  silent.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler

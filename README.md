@@ -192,10 +192,16 @@ Concretely, on `main` — so you know exactly what to expect without reading
   dimension whose "current version" lookup no index serves, and SCD-1 and SCD-2
   dimensions mixed in one schema. All five are surface, never affirmations. Two OLAP
   rules are **not** built yet — a columnar/analytic-index check and a partitioning check
-  — declared, not silent. Table roles are recognized from `fact_`/`dim_`/`stg_`/`mart_`
-  **snake_case** prefixes only, so a warehouse using PascalCase Kimball naming
-  (`FactInternetSales`) gets no value from them today. See [COVERAGE.md](COVERAGE.md)
-  for the full rule inventory and the declared SQL-DDL dialect limits.
+  — declared, not silent. Table roles are recognized from the table **name**,
+  **case-insensitively**, in three spellings: an underscore-delimited leading segment
+  (`fact_`/`fct_`/`f_`, `dim_`/`d_`, `stg_`, `mart_`), an underscore-delimited trailing
+  segment (`_fact`/`_facts`, `_dim`/`_dims`), or separator-free **PascalCase**
+  (`FactInternetSales`, `DimCustomer`). A recognized name is only ever a *candidate* —
+  real relational structure must corroborate it before a table is promoted. Declared
+  limit: an **all-caps** name (`FACTORY_SETTINGS`) stays unclassified by design, as does
+  a name with neither a delimiter nor a PascalCase boundary. See
+  [COVERAGE.md](COVERAGE.md) for the full rule inventory and the declared SQL-DDL
+  dialect limits.
 - **Not covered (declared, not silent).** JS server frameworks beyond
   Next.js/Express/Fastify/NestJS; deep taint analysis; business-logic correctness;
   architectural and race-condition classes. An Express/Fastify handler passed by

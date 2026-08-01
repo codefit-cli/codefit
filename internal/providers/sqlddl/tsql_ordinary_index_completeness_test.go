@@ -78,6 +78,6 @@ CREATE TABLE dim_customer (
 		t.Error("Unprovable[dim_customer] = true, want false — orders' NONCLUSTERED INDEX statement is now RECOGNIZED, so nothing sets anyIncomplete and nothing amplifies schema-wide")
 	}
 	if cls.Unprovable["orders"] {
-		t.Error("Unprovable[orders] = true, want false — orders itself has no recognized fact_/dim_ prefix, so it was never a candidate for Unprovable regardless of completeness")
+		t.Error("Unprovable[orders] = true, want false — \"orders\" carries no recognized warehouse name token (no delimited fact/dim segment, no PascalCase Fact/Dim boundary), so it was never a candidate for Unprovable regardless of completeness")
 	}
 }

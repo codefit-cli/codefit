@@ -26,8 +26,11 @@ import (
 //
 // A time dimension is recognized by EITHER signal, deliberately:
 //
-//	NAME — the conventional Kimball spellings dim_date / dim_time /
-//	dim_calendar. Cheap and matches the overwhelming majority of warehouses.
+//	NAME — a recognized warehouse role token (dim_/d_/*_dim/Dim…, the same
+//	vocabulary paradigm classifies roles with) plus date, time or calendar:
+//	dim_date, D_DATE, date_dim, DimCalendar. Cheap, and it matches the
+//	overwhelming majority of warehouses. See timeDimensionName for why this
+//	composes on paradigm's vocabulary instead of listing spellings.
 //
 //	STRUCTURE — a dimension whose PRIMARY KEY is a single date/datetime
 //	column. Such a table is date-grained by construction: one row per point in
@@ -99,9 +102,10 @@ func (dw005) Check(s *db.Schema, cls *paradigm.Classification) ([]findings.Findi
 			"has_any_dimension":       len(dims) > 0,
 		},
 		ReasonToReview: "This schema declares fact table(s) (" + strings.Join(facts, ", ") + ") but no dimension " +
-			"that is recognizably a time dimension — neither by name (dim_date/dim_time/dim_calendar) nor by " +
-			"grain (a dimension keyed by a single date column). Is the calendar defined elsewhere, or will " +
-			"every time-sliced query have to do its own date arithmetic on the facts?",
+			"that is recognizably a time dimension — neither by name (a role token plus date/time/calendar, " +
+			"e.g. dim_date, D_DATE, date_dim) nor by grain (a dimension keyed by a single date column). Is the " +
+			"calendar defined elsewhere, or will every time-sliced query have to do its own date arithmetic " +
+			"on the facts?",
 	}}
 }
 
@@ -118,12 +122,44 @@ func isTimeDimension(t db.Table) bool {
 	return ok && col.Type == db.TypeDateTime
 }
 
-// timeDimensionName matches the conventional Kimball spellings, compared on
-// the name with separators removed so dim_date, dimDate and dim-date all
-// match — the same normalizeIdent discipline the DB-052 name checks use.
+// timeDimensionName reports whether a table's NAME states that it is a
+// calendar. It COMPOSES on paradigm.StripRoleToken rather than carrying its own
+// spelling list: strip the recognized warehouse role token off either end of
+// the name, then check what is left against the small time vocabulary
+// date / time / calendar.
+//
+// WHY COMPOSED, not listed. This function used to hold a hardcoded
+// {dim_date, dim_time, dim_calendar}. When paradigm's ROLE vocabulary widened
+// (case-insensitive, leading and trailing tokens, PascalCase) this second,
+// parallel vocabulary stayed put, and the two drifted: dw-gamerec's D_DATE and
+// dw-kantor's D_Date began classifying as dimensions while remaining invisible
+// HERE, so DW-005 stopped abstaining and started reporting "this fact table
+// reaches no time dimension" over schemas that plainly declare a calendar — a
+// silent miss turned into a confident false claim. Composing means the next
+// role-vocabulary widening cannot silently re-open that hole.
+//
+// The remainder is matched by EQUALITY on the separator-stripped form, never by
+// containment. normalizeDWIdent removes separators, so a substring test for
+// "date" would accept dim_update, dim_candidate and dim_validate — treating an
+// ordinary dimension as the schema's calendar and SILENCING DW-005 on a
+// warehouse that genuinely has none. A rule that hides real absences to catch
+// more spellings is not worth having.
+//
+// DECLARED LIMIT: only a name that is a recognized role token PLUS exactly
+// date/time/calendar is matched. A spelled-out or qualified calendar name —
+// date_dimension, dim_date_full, dim_fiscal_date, dim_datetime — is NOT
+// recognized by name, and neither is a bare "calendar" carrying no role token
+// (which paradigm would never classify as a dimension in the first place).
+// Such a warehouse still gets the STRUCTURAL signal in isTimeDimension, and
+// failing that, a DW-005 surface item to judge: a question the agent can answer
+// from the schema, never a claim codefit cannot back.
 func timeDimensionName(name string) bool {
-	switch normalizeDWIdent(name) {
-	case "dimdate", "dimtime", "dimcalendar":
+	rest, ok := paradigm.StripRoleToken(name)
+	if !ok {
+		return false
+	}
+	switch normalizeDWIdent(rest) {
+	case "date", "time", "calendar":
 		return true
 	default:
 		return false

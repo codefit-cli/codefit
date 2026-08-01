@@ -23,84 +23,111 @@ import (
 // excerpt).
 //
 // WHAT THIS FILE ACTUALLY PROVES, stated plainly rather than implied: the
-// canonical reference warehouse currently yields NO DW finding, for TWO
-// independent reasons, and both are locked here so neither can regress into
-// silence. The rules' positive fire paths are therefore proven by
-// declared-synthetic constructed fixtures in the per-rule unit tests
-// (internal/core/dwrules), per the ADR 0028 fixture-gap policy — this file is
-// the honest record of why the real corpus cannot carry them yet.
+// canonical reference warehouse still yields NO DW finding — but for ONE
+// remaining reason, not the two it used to have.
 //
-//	LIMIT 1 (role detection). AdventureWorksDW uses PascalCase Kimball naming
-//	(FactInternetSales, DimCustomer), while codefit's S1 table-role detection
-//	recognizes only the snake_case prefixes fact_/dim_/stg_/mart_ (locked
-//	decision A5, ADR 0033). Every table classifies "unclassified", so no DW
-//	rule reaches any of them.
+//	LIMIT 1 (role NAME vocabulary) is GONE. It used to read: "AdventureWorksDW
+//	uses PascalCase Kimball naming (FactInternetSales, DimCustomer), while
+//	codefit's table-role detection recognizes only the snake_case prefixes
+//	fact_/dim_/stg_/mart_." The paradigm role-name vocabulary now recognizes
+//	PascalCase (and suffix, and case-insensitive) spellings, so all three of
+//	this corpus's table names DO nominate a role. That advance is locked
+//	positively by TestDW_AdventureWorksDW_PascalCaseNaming_IsNowRecognized
+//	below, against the REAL parsed corpus — not asserted from a fixture.
 //
 //	LIMIT 2 (T-SQL ALTER reduction, a PRE-EXISTING parser gap discovered while
-//	vendoring this fixture — NOT introduced by the DW rules). Three shapes of
+//	vendoring this fixture — NOT introduced by the DW rules) is UNCHANGED and
+//	is now the SOLE reason the corpus yields nothing. Three shapes of
 //	ALTER TABLE ... ADD CONSTRAINT are dropped by the reducer, and
 //	AdventureWorksDW's real DDL uses all three, so the warehouse's three real
 //	primary keys and all eight of its real foreign keys are invisible to every
-//	DB and DW rule.
+//	DB and DW rule. With no keys in the model the fact candidate shows a
+//	fan-out of 0 and the dimension candidates a fan-in of 0, so the A5
+//	corroboration gate demotes all three back to "unclassified".
 //	Consequence beyond the DW family: DB-050 ("table without a primary key")
 //	AFFIRMS, at confidence 1.0, that all three tables lack a primary key — a
 //	false affirmation over DDL that plainly declares them. See
 //	TestSQLDDL_TSQLAlterAddConstraint_DeclaredLimits below for the isolated,
 //	minimal reproduction of each shape.
+//
+// The rules' positive fire paths are therefore STILL proven by
+// declared-synthetic constructed fixtures in the per-rule unit tests
+// (internal/core/dwrules), per the ADR 0028 fixture-gap policy — this file is
+// the honest record of how far the real corpus now reaches, and of the one
+// gap that still stops it short.
 
 // awdwSchema parses the vendored AdventureWorksDW excerpt under the SQLServer
-// dialect, optionally applying declared textual mutations first.
-func awdwSchema(t *testing.T, replacements ...string) *db.Schema {
+// dialect, verbatim. It used to accept declared textual mutations so a caller
+// could rename the tables into snake_case; nothing needs that any more (see
+// TestDW_AdventureWorksDW_StarStillInvisible_DeclaredLimit), so every test in
+// this file now reads Microsoft's DDL exactly as vendored.
+func awdwSchema(t *testing.T) *db.Schema {
 	t.Helper()
 	path := filepath.Join("testdata", "tsql", "adventureworksdw_real_objects.sql")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	text := string(content)
-	if len(replacements) > 0 {
-		text = strings.NewReplacer(replacements...).Replace(text)
-	}
 	p := sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer()))
-	s, err := p.ParseSchema([]providers.SourceFile{{Path: path, Content: []byte(text)}})
+	s, err := p.ParseSchema([]providers.SourceFile{{Path: path, Content: content}})
 	if err != nil {
 		t.Fatalf("ParseSchema: %v", err)
 	}
 	return s
 }
 
-// kimballToSnakeCase is a DECLARED MUTATION of the vendored file:
-// AdventureWorksDW's PascalCase Kimball names rewritten to the snake_case
-// prefixes codefit's S1 role detection recognizes. Nothing else changes — the
-// columns and the DDL stay Microsoft's real ones. This is the same "mutate a
-// copy of real DDL rather than invent a fixture" discipline the DB-011b
-// coverage prose already documents.
-var kimballToSnakeCase = []string{
-	"[FactInternetSales]", "[fact_internet_sales]",
-	"[DimCustomer]", "[dim_customer]",
-	"[DimDate]", "[dim_date]",
-	"[DimCurrency]", "[dim_currency]",
-	"[DimProduct]", "[dim_product]",
-	"[DimPromotion]", "[dim_promotion]",
-	"[DimSalesTerritory]", "[dim_sales_territory]",
-}
-
-// LIMIT 1, locked: PascalCase Kimball naming carries no recognized prefix, so
-// the canonical reference warehouse classifies as pure OLTP and no DW rule
-// reaches it. Whoever broadens the prefix vocabulary will see this go red —
-// which is exactly the point of locking it.
-func TestDW_AdventureWorksDW_PascalCaseNaming_ClassifiesUnclassified(t *testing.T) {
+// LIMIT 1 RETIRED, locked positively. This test replaces the LIMIT 1 lock
+// (formerly ...PascalCaseNaming_ClassifiesUnclassified), which asserted that
+// AdventureWorksDW's names carried no recognized prefix. That is no longer
+// true, and — this is the part worth reading — the OLD ASSERTION KEPT PASSING
+// ANYWAY once the vocabulary widened, because LIMIT 2 independently produces
+// the same "everything unclassified" outcome. Its stated reason had gone
+// false while its assertion stayed green: a lock that could no longer tell
+// the difference between the thing it guarded and the thing next to it.
+//
+// So the assertion here is pinned to the one signal that DOES separate them.
+// Classification.Unprovable is populated ONLY for a table whose name
+// nominated a role and whose structural corroboration could not be proven; a
+// table whose name nominates nothing is skipped outright. Membership is
+// therefore the public, real-parser proof that the vocabulary now reaches
+// Microsoft's own Kimball spelling — and it is exactly what regresses to an
+// empty map if the vocabulary is narrowed back.
+//
+// Verified against main before this slice: the same corpus yielded
+// Unprovable = map[] (names unrecognized) and now yields all three tables.
+//
+// It deliberately does NOT claim the DW family works end-to-end on real DDL.
+// It does not: LIMIT 2 still starves corroboration, the roles below are still
+// unclassified, and the DW surface below is still empty.
+func TestDW_AdventureWorksDW_PascalCaseNaming_IsNowRecognized(t *testing.T) {
 	s := awdwSchema(t)
 	if len(s.Tables) != 3 {
 		t.Fatalf("parsed %d tables, want 3 (DimCustomer, DimDate, FactInternetSales)", len(s.Tables))
 	}
 	c := paradigm.Detect(s)
+
+	// THE ADVANCE: every real PascalCase name now nominates a role.
+	for _, name := range []string{"FactInternetSales", "DimCustomer", "DimDate"} {
+		if !c.Unprovable[name] {
+			t.Errorf("Unprovable[%s] = false, want true — %s must be recognized by the role-name "+
+				"vocabulary and demoted for UNPROVEN STRUCTURE (LIMIT 2), not skipped as an "+
+				"unrecognized name. A false here means the PascalCase spelling regressed out of "+
+				"the vocabulary", name, name)
+		}
+	}
+	if len(c.Unprovable) != 3 {
+		t.Errorf("Unprovable = %v (%d entries), want exactly the 3 warehouse tables", c.Unprovable, len(c.Unprovable))
+	}
+
+	// LIMIT 2, unchanged: recognized names still do not promote, because the
+	// dropped keys leave the A5 corroboration gate nothing to corroborate with.
 	if c.Paradigm != paradigm.ParadigmOLTP {
-		t.Errorf("Paradigm = %q, want %q (no table name carries a recognized prefix)", c.Paradigm, paradigm.ParadigmOLTP)
+		t.Errorf("Paradigm = %q, want %q — LIMIT 2 still leaves the star invisible", c.Paradigm, paradigm.ParadigmOLTP)
 	}
 	for name, role := range c.Roles {
 		if role != paradigm.RoleUnclassified {
-			t.Errorf("role[%s] = %q, want %q", name, role, paradigm.RoleUnclassified)
+			t.Errorf("role[%s] = %q, want %q — if this promoted, LIMIT 2 is FIXED: re-point this "+
+				"file at real DW-001/002/005 assertions over a correctly modelled star", name, role, paradigm.RoleUnclassified)
 		}
 	}
 	if _, surf := dwrules.Run(s, &c); len(surf) != 0 {
@@ -108,21 +135,29 @@ func TestDW_AdventureWorksDW_PascalCaseNaming_ClassifiesUnclassified(t *testing.
 	}
 }
 
-// LIMIT 2 on the real corpus: even after renaming the tables so role detection
-// CAN see them, AdventureWorksDW still classifies OLTP — because the parser
-// dropped every primary key and all eight foreign keys, so fact_internet_sales
-// shows a fan-out of 0 (below the corroboration threshold) and the dimensions
-// show a fan-in of 0. The star is real in the DDL and invisible in the model.
-func TestDW_AdventureWorksDW_SnakeCaseRenamed_StarStillInvisible_DeclaredLimit(t *testing.T) {
-	s := awdwSchema(t, kimballToSnakeCase...)
+// LIMIT 2 in isolation, on the REAL corpus under its REAL names. This test
+// used to run against a declared textual mutation (kimballToSnakeCase) that
+// rewrote Microsoft's PascalCase names into snake_case, purely so role
+// detection could see them at all. That workaround existed only to route
+// around LIMIT 1; with LIMIT 1 retired the rename proves nothing the real
+// names do not, so it is gone and the assertions moved onto the vendored DDL
+// verbatim — strictly closer to the real parser, per the project's
+// prefer-the-real-corpus rule. No assertion was weakened or dropped.
+//
+// What remains is the isolated structural cause: the parser drops every
+// primary key and all eight foreign keys, so FactInternetSales shows a
+// fan-out of 0 (below factFanOutMin) and the dimensions a fan-in of 0. The
+// star is real in the DDL and invisible in the model.
+func TestDW_AdventureWorksDW_StarStillInvisible_DeclaredLimit(t *testing.T) {
+	s := awdwSchema(t)
 
-	fact := tableNamed(t, s, "fact_internet_sales")
+	fact := tableNamed(t, s, "FactInternetSales")
 	if len(fact.ForeignKeys) != 0 {
-		t.Errorf("fact_internet_sales foreign keys = %d, want 0 — the DDL declares 8, and ALL of them are "+
+		t.Errorf("FactInternetSales foreign keys = %d, want 0 — the DDL declares 8, and ALL of them are "+
 			"lost: the block puts a newline between ADD and CONSTRAINT (which drops the first) and chains "+
 			"the rest by comma (which drops those too). LIMIT 2", len(fact.ForeignKeys))
 	}
-	for _, name := range []string{"fact_internet_sales", "dim_customer", "dim_date"} {
+	for _, name := range []string{"FactInternetSales", "DimCustomer", "DimDate"} {
 		if pk := tableNamed(t, s, name).PrimaryKey; len(pk) != 0 {
 			t.Errorf("%s primary key = %v, want empty — WITH CHECK ADD CONSTRAINT is dropped (LIMIT 2)", name, pk)
 		}

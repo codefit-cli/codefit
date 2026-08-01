@@ -9,9 +9,10 @@ import (
 
 // D6 (design SS6) — paradigm.roleFor demotes to RoleUnclassified exactly as
 // before (byte-identical on a proven schema), but Classification now also
-// records WHICH demotions are suspect: a table carrying a recognized prefix
-// (fact_/dim_) but demoted for lack of structural corroboration, where that
-// lack MIGHT be a dropped statement rather than a genuine absence.
+// records WHICH demotions are suspect: a table whose NAME nominated a role
+// (any spelling the vocabulary recognizes — here the fact_ prefix) but which
+// was demoted for lack of structural corroboration, where that lack MIGHT be
+// a dropped statement rather than a genuine absence.
 
 // unprovenFactPrefixed returns a fact_-prefixed table with NO foreign keys
 // (below factFanOutMin) whose structure is unproven — the demotion below the
@@ -45,16 +46,18 @@ func TestParadigm_Unprovable_DemotedFactPrefixed_ProvenTable_IsNotMarked(t *test
 	}
 }
 
-// A NO-PREFIX table demoted (never promoted in the first place) is an
-// ordinary "no recognized prefix" unclassified — never Unprovable, even when
-// unproven, because the demotion cause is the missing prefix, not structure.
+// A table whose name nominates NOTHING, demoted (never promoted in the first
+// place), is an ordinary "unrecognized name" unclassified — never Unprovable,
+// even when unproven, because the demotion cause is vocabulary, not structure.
+// "orders" carries no delimited fact/dim segment and no PascalCase Fact/Dim
+// boundary, so it stays unrecognized under the widened vocabulary too.
 func TestParadigm_Unprovable_NoPrefixTable_NeverMarked(t *testing.T) {
 	tb := db.Table{Name: "orders"}
 	tb.MarkUnproven(db.ReasonUnreducedTableStatement, "...", db.Pos{File: "x.sql", Line: 1})
 	s := &db.Schema{Tables: []db.Table{tb}}
 	cls := paradigm.Detect(s)
 	if cls.Unprovable["orders"] {
-		t.Error("Unprovable[orders] = true, want false — no recognized prefix means the demotion cause is vocabulary, not structure")
+		t.Error("Unprovable[orders] = true, want false — an unrecognized name means the demotion cause is vocabulary, not structure")
 	}
 }
 
