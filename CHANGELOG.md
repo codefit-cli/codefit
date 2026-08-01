@@ -14,6 +14,29 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **The SQL-DDL reducer now reads T-SQL's `ALTER TABLE … ADD CONSTRAINT` family**, the
+  shapes Microsoft's own generated scripts use to declare keys: the
+  `WITH CHECK` / `WITH NOCHECK` prefix, **any** whitespace run between `ADD` and
+  `CONSTRAINT` (a newline, two spaces, a tab — the ADD item is dispatched on its leading
+  keyword, so the separator no longer decides anything), and comma-chained constraint
+  lists whose later items repeat no verb. The SSMS tails come with it: a
+  `WITH (PAD_INDEX = OFF, …)` option list and an `ON [PRIMARY]` filegroup clause after
+  the column list, plus the standalone `CHECK CONSTRAINT` / `NOCHECK CONSTRAINT`
+  statement, now a declared recognized skip rather than a reason to demote the table.
+  Measured on the vendored AdventureWorksDW excerpt: **3 tables, 3/3 structure-proven,
+  3 primary keys and 8 foreign keys in the model**, zero routed
+  `db-table-structure-unproven` items, and an empty completeness note — where before it
+  was 3 tables, **0** structure-proven, every key invisible and every absence-based rule
+  abstaining. This is what turns codefit's only genuine Kimball warehouse corpus into
+  real end-to-end evidence for the DW family.
+- **A constraint whose column list cannot be read no longer becomes a silently empty
+  key.** A `PRIMARY KEY` / `UNIQUE` / `FOREIGN KEY` / `KEY` / `INDEX` whose parenthesized
+  list is absent, unbalanced or empty now marks the table unproven (ADR 0034) instead of
+  reducing to `PrimaryKey: []` — the exact input `DB-050` reads as "declares no primary
+  key", which would have affirmed an absence the reducer merely failed to read.
+
 ### Changed
 
 - **Table-role detection recognizes the naming real warehouses actually use.** An empirical
@@ -46,12 +69,33 @@ All notable changes to codefit are documented here. The format is based on
   **Declared limit kept:** a spelled-out or qualified calendar name (`date_dimension`,
   `dim_date_full`, `dim_fiscal_date`) is still not recognized by name — a miss, never a false
   claim. DW-011's time-dimension exclusion uses the same test, so the two cannot drift.
-- **The vendored AdventureWorksDW corpus is now recognized by name.** Microsoft's real DDL
-  previously matched nothing; its three tables are now recognized candidates, locked against
-  the **real parsed corpus**. It still yields no DW finding, but for **one** remaining reason
-  instead of two: the T-SQL reducer still drops the `ALTER TABLE ... ADD CONSTRAINT` shapes it
-  uses, so its real keys never reach the model and the corroboration gate has nothing to work
-  with. That limit is unchanged and still declared.
+- **The vendored AdventureWorksDW corpus is reached end to end, as vendored.** Both of the
+  limits that used to keep Microsoft's real DDL silent are now closed **in this same
+  unreleased cycle**: the name vocabulary above recognizes its PascalCase Kimball spelling,
+  and the reducer fix above puts its three primary keys and eight foreign keys in the model,
+  so the corroboration gate finally has structure to corroborate. Measured on the vendored
+  excerpt: paradigm `olap`, `FactInternetSales` → fact, `DimCustomer`/`DimDate` → dimension,
+  and the DW family emits **3 items** (two `dw-dimension-no-surrogate-key`, one
+  `dw-fact-no-columnar-index`) where it previously emitted none. The two limit-locks that
+  guarded each half are replaced by one positive lock over the real corpus
+  (`TestDW_AdventureWorksDW_StarIsVisible_AsVendored`); the declared snake_case rename those
+  locks needed is gone, because the star is visible under Microsoft's own names.
+- **What the two closures make visible is reported, not smoothed over.** On the same corpus
+  the three `db-table-structure-unproven` items disappear (their cause is gone) and the
+  previously-abstaining rules now speak: 8 `db-fk-no-index` and 3 `db-no-timestamps` surface
+  items. In the other direction, its one real `db-repeating-groups` (1NF) item on
+  `DimCustomer` (`AddressLine1`/`AddressLine2`) is now **withheld**: the table holds a
+  dimension role, so 3NF suppression engages — an intentionally denormalized warehouse
+  dimension is not a 1NF defect. That withholding is never silent; the sensor note states it
+  and names the escape hatch: *"3NF-suppression withheld 1 1NF surface item (DB-002/DB-003)
+  on 1 OLAP-classified table (fact/dimension/mart); set `database.paradigm: oltp` to see
+  them."*
+- **Two SQL-DDL parser limits, measured while doing the above, are now declared** in the
+  coverage manifest instead of being left silent: a **bracketed T-SQL type name**
+  (`[int]`) does not match the type vocabulary and falls back to `TypeUnknown` — which is
+  why DW-002 fires on AdventureWorksDW's `DimCustomer` and `DimDate` despite their genuine
+  integer surrogate keys; and **two `CREATE TABLE` statements with no `;`/`GO` between them**
+  lose the second one entirely, with nothing recorded. Neither is fixed here.
 
 ## [0.2.5-alpha.2] — 2026-07-31
 

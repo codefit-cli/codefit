@@ -23,16 +23,17 @@ import (
 // DECLARED SYNTHETIC (ADR 0028 fixture-gap policy), stated once for the whole
 // DW rule-test family rather than implied: EVERY schema in these unit tests is
 // constructed, not taken from a real corpus. The vendored real warehouse
-// (AdventureWorksDW) cannot carry the positive fire paths today for ONE
-// remaining test-locked reason documented in
-// internal/providers/sqlddl/dw_integration_test.go: the T-SQL reducer drops
-// the ALTER TABLE ... ADD CONSTRAINT shapes it uses, so its real primary and
-// foreign keys never reach the model, leaving the A5 corroboration gate
-// nothing to corroborate with. The NAMING half of that gap is CLOSED — the
-// role-name vocabulary now recognizes its PascalCase Kimball spelling, locked
-// against the real parsed corpus by
-// TestDW_AdventureWorksDW_PascalCaseNaming_IsNowRecognized. Both a POSITIVE
-// and a TRAP (negative) case are constructed for each rule.
+// (AdventureWorksDW) IS now reached end to end — both of the limits that used
+// to keep it silent are closed (the role-name vocabulary recognizes its
+// PascalCase Kimball spelling, and the T-SQL reducer reads the
+// ALTER TABLE ... ADD CONSTRAINT shapes it uses), so it classifies olap with
+// real fact/dimension roles, locked by
+// TestDW_AdventureWorksDW_StarIsVisible_AsVendored in
+// internal/providers/sqlddl/dw_integration_test.go. What that corpus still
+// does NOT carry is the per-rule fire paths: of these five rules only DW-002
+// fires on it, and it fires for a parser reason (the bracketed [int] type
+// reads as unknown), so the positive and TRAP (negative) cases below stay
+// constructed for each rule.
 
 // dwtbl builds a positioned table.
 func dwtbl(name string, cols ...db.Column) db.Table {
