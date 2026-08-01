@@ -125,17 +125,18 @@ independent audit layer that validates AI-generated code is secure and correct
   schema it classifies as a
   warehouse it audits the **star-schema and slowly-changing-dimension shape** (a fact
   joining no dimension, a business key where a surrogate belongs, facts with no time
-  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) — the
-  columnar-index and partitioning checks are **not** built yet. One structural fact is
+  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) plus a
+  **fact table with no columnar/analytic index** — the partitioning check is **not**
+  built yet. One structural fact is
   affirmed (a table with no primary key); everything else is surface the agent reasons.
   Run it standalone with `codefit-scan-db`; it also runs inside `scan-all` as its own
   section with a per-dimension score (the code×schema cross runs in `scan-all` only).
   The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
-**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the two remaining
-OLAP / data-warehouse rules — a columnar/analytic-index check and a partitioning
-check (the star-schema and slowly-changing-dimension rules already landed);
+**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the one remaining
+OLAP / data-warehouse rule — a partitioning check (the star-schema,
+slowly-changing-dimension and columnar/analytic-index rules already landed);
 **literal values in the query model** — carrying the WHERE's literals so the
 cross can infer cardinality from usage (a `String` used as an enum, a `DateTime` used
 as a flag) and tell an equality filter from a range, the two field-observed limits of
@@ -155,12 +156,16 @@ Concretely, on `main` — so you know exactly what to expect without reading
   `dangerouslySetInnerHTML` (React-specific by its pattern). These run on **any**
   `.ts`/`.tsx` file — no framework gate; which ones fire depends on the code, not the
   framework.
-- **Surface mapping — the agent reasons.** IDOR, broken authorization, and
-  over-fetching, for **Next.js** (App Router route handlers + Server Actions),
-  **Express**, **Fastify**, and **NestJS**. Handlers are found by structural shape,
+- **Surface mapping — the agent reasons.** IDOR, broken authorization,
+  over-fetching, and the **N+1 query-in-loop** pattern (DB-201), for **Next.js** (App
+  Router route handlers + Server Actions), **Express**, **Fastify**, and **NestJS**.
+  Handlers are found by structural shape,
   never by path or name. When a handler reaches a resource through a service in
   another file, codefit flags it (`indirect_access`) and names the call — it does not
-  follow it across files; the agent does.
+  follow it across files; the agent does. N+1 items are **ordered, never filtered**: a
+  loop over a literal 3-element array is enumerated exactly like one over an unbounded
+  query result, with the iterated source named as a fact so the agent dismisses it at a
+  glance.
 - **Dependency CVEs.** `codefit-check-cves` checks dependencies against
   [OSV.dev](https://osv.dev) (free, no API key) using the **exact** versions from
   `package-lock.json` / `go.mod` — never guessed from `package.json` ranges (no
@@ -199,9 +204,11 @@ Concretely, on `main` — so you know exactly what to expect without reading
   slowly-changing-dimension shape**: a fact table joining no dimension, a dimension keyed
   by a business key instead of a surrogate, facts with no time dimension, an SCD-2
   dimension whose "current version" lookup no index serves, and SCD-1 and SCD-2
-  dimensions mixed in one schema. All five are surface, never affirmations. Two OLAP
-  rules are **not** built yet — a columnar/analytic-index check and a partitioning check
-  — declared, not silent. Table roles are recognized from the table **name**,
+  dimensions mixed in one schema — plus a **fact table with no columnar/analytic index**
+  (a `brin` or `columnstore` method the parser read from the DDL; a fact table with only
+  ordinary row-store indexes fires). All six are surface, never affirmations. One OLAP
+  rule is **not** built yet — a partitioning check — declared, not silent.
+  Table roles are recognized from the table **name**,
   **case-insensitively**, in three spellings: an underscore-delimited leading segment
   (`fact_`/`fct_`/`f_`, `dim_`/`d_`, `stg_`, `mart_`), an underscore-delimited trailing
   segment (`_fact`/`_facts`, `_dim`/`_dims`), or separator-free **PascalCase**
@@ -404,6 +411,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). |
 | `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
+| `codefit-surface-nplus1` | Enumerate the N+1 surface: query call sites sitting inside a loop, ordered by structural certainty (the cross-function frontier last, never dropped). |
 | `codefit-check-cves` | Check the project's dependencies against OSV.dev (free, no API key). Reads exact versions from lockfiles / `go.mod`; reports the vulnerable deps with id, severity and fixed version. |
 
 **Baseline** — the project's audit memory (see below).
@@ -413,6 +421,8 @@ codefit exposes its capabilities as MCP tools in three roles:
 | `codefit-baseline-list` | List tracked items (fingerprint, file, category, state) — `filter: known` for what's still pending. |
 | `codefit-baseline-accept` | Record a human's decision to accept an item (false positive / accepted debt) with a reason. |
 | `codefit-baseline-prune` | Drop items a refactor resolved (re-scans to confirm they're gone first). |
+| `codefit-baseline-register-authz-helper` | Register a project-specific authorization helper so later scans recognize it (`known_authz_detected` becomes true where it is called). Clears the **authz** gap only — an IDOR/ownership item stays actionable. Requires a human decision and a reason. |
+| `codefit-baseline-unregister-authz-helper` | Reverse the above: the next scan stops recognizing that helper. |
 
 **Auxiliary** — feed results back and introspect.
 
