@@ -1,8 +1,11 @@
 package sqlddl_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/db"
@@ -90,25 +93,59 @@ func awdwSchema(t *testing.T) *db.Schema {
 //     paradigm, and told its successor in writing to "re-point this fixture at
 //     the real assertions over a real, correctly modelled star". This is it.
 //
-// Every number below is derived from Microsoft's DDL, not adjusted to fit:
+// Every value below is derived from Microsoft's DDL, not adjusted to fit:
 // three tables, a two-column fact key, one surrogate key per dimension, eight
-// foreign keys out of the fact.
+// foreign keys out of the fact — each named, not merely counted.
 func TestDW_AdventureWorksDW_StarIsVisible_AsVendored(t *testing.T) {
 	s := awdwSchema(t)
 	if len(s.Tables) != 3 {
 		t.Fatalf("parsed %d tables, want 3 (DimCustomer, DimDate, FactInternetSales)", len(s.Tables))
 	}
 
-	// LIMIT 2's structural proof: the keys are in the model.
+	// LIMIT 2's structural proof: the keys are in the model — asserted by
+	// IDENTITY, never by count or arity. Mutation testing (see this commit's
+	// message for both runs) proved the count/arity form these two assertions
+	// used to have was blind in the FABRICATION direction, which is the one
+	// that matters here:
+	//
+	//   - Removing applyAlterAdd's CONSTRAINT case makes the reducer fall
+	//     through to its column path and invent a primary key literally named
+	//     "CONSTRAINT" on all three tables. An ARITY check ACCEPTED that
+	//     fabrication for both single-column dimensions — len([CONSTRAINT])
+	//     is 1, which is exactly what it wanted — and only the fact table's
+	//     2-vs-1 mismatch reported anything at all.
+	//   - Reading the REFERENCES column list as the foreign key's own LOCAL
+	//     column list (so OrderDateKey/DueDateKey/ShipDateKey all collapse to
+	//     DateKey) left the COUNT at eight, and passed silently.
+	//
+	// Every value below is transcribed from Microsoft's DDL — the ALTER TABLE
+	// block at the end of the fixture — in the reducer's own normalized
+	// spelling: schema qualifiers stripped ([dbo].[DimCurrency] -> DimCurrency,
+	// normalizeName) and the foreign keys in the order the DDL declares them.
 	fact := tableNamed(t, s, "FactInternetSales")
-	if len(fact.ForeignKeys) != 8 {
-		t.Errorf("FactInternetSales foreign keys = %d, want 8 (the DDL declares eight, across a "+
-			"newline-broken ADD and a comma-chained list)", len(fact.ForeignKeys))
+	wantFK := []string{
+		"CurrencyKey -> DimCurrency(CurrencyKey)",
+		"CustomerKey -> DimCustomer(CustomerKey)",
+		"OrderDateKey -> DimDate(DateKey)",
+		"DueDateKey -> DimDate(DateKey)",
+		"ShipDateKey -> DimDate(DateKey)",
+		"ProductKey -> DimProduct(ProductKey)",
+		"PromotionKey -> DimPromotion(PromotionKey)",
+		"SalesTerritoryKey -> DimSalesTerritory(SalesTerritoryKey)",
 	}
-	wantPK := map[string]int{"FactInternetSales": 2, "DimCustomer": 1, "DimDate": 1}
+	if got := renderForeignKeys(fact); !slices.Equal(got, wantFK) {
+		t.Errorf("FactInternetSales foreign keys =\n\t%s\nwant the eight the DDL declares, across a "+
+			"newline-broken ADD and a comma-chained list =\n\t%s",
+			strings.Join(got, "\n\t"), strings.Join(wantFK, "\n\t"))
+	}
+	wantPK := map[string][]string{
+		"FactInternetSales": {"SalesOrderNumber", "SalesOrderLineNumber"},
+		"DimCustomer":       {"CustomerKey"},
+		"DimDate":           {"DateKey"},
+	}
 	for name, want := range wantPK {
-		if pk := tableNamed(t, s, name).PrimaryKey; len(pk) != want {
-			t.Errorf("%s primary key = %v, want %d column(s) — declared by WITH CHECK ADD CONSTRAINT", name, pk, want)
+		if pk := tableNamed(t, s, name).PrimaryKey; !slices.Equal(pk, want) {
+			t.Errorf("%s primary key = %v, want %v — declared by WITH CHECK ADD CONSTRAINT", name, pk, want)
 		}
 	}
 	for _, tb := range s.Tables {
@@ -177,6 +214,20 @@ func TestDB050_AdventureWorksDW_KeysAreRead_NothingAffirmedOrRouted(t *testing.T
 			t.Errorf("%s primary key = empty, want the one its ALTER TABLE declares", tb.Name)
 		}
 	}
+}
+
+// renderForeignKeys renders a table's foreign keys as "cols -> RefTable(refCols)"
+// strings, in model order, so a comparison reads every field the reducer
+// populates — local columns, referenced table, referenced columns — instead of
+// just how many rows it produced. Any of the three going wrong is a
+// fabrication the count alone cannot see.
+func renderForeignKeys(t db.Table) []string {
+	out := make([]string, 0, len(t.ForeignKeys))
+	for _, fk := range t.ForeignKeys {
+		out = append(out, fmt.Sprintf("%s -> %s(%s)",
+			strings.Join(fk.Columns, ","), fk.RefTable, strings.Join(fk.RefColumns, ",")))
+	}
+	return out
 }
 
 // tableNamed returns the table with the given name, failing the test when absent.
