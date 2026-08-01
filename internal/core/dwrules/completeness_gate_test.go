@@ -9,11 +9,22 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
-// D4 (design SS4) — all six DW rules (DW-001/002/005/010/011/021) ABSTAIN,
-// per table, on an unproven table; DW-005 and DW-011 are SCHEMA-LEVEL census
-// judgments and therefore abstain the WHOLE rule when ANY relevant table is
-// unproven — a per-table continue would silently shrink the census and
-// still emit, a worse lie.
+// D4 (design SS4) — all seven DW rules (DW-001/002/005/010/011/020/021)
+// ABSTAIN, per table, on an unproven table; DW-005, DW-011 and DW-020 are
+// SCHEMA-LEVEL census judgments and therefore abstain the WHOLE rule when ANY
+// relevant table is unproven — a per-table continue would silently shrink the
+// census and still emit, a worse lie.
+//
+// DW-020's gate is NOT locked here, and that is deliberate rather than an
+// omission. Its census excludes declared PARTITION CHILDREN, and a child is
+// unproven BY CONSTRUCTION (db.ReasonPartitionChildInheritsStructure) — a
+// state only the real parser produces, from real DDL. A hand-built db.Table
+// carrying that reason would be the exact "fixture holding values the
+// production path never sets" this project names as its most recurring test
+// defect. Both halves of DW-020's gate (whole-rule abstention, and the child
+// exemption that keeps it from abstaining on every partitioned warehouse) are
+// locked through the real parser in
+// internal/providers/sqlddl/dw020_partitioning_integration_test.go.
 
 func unprovenDWTable(name string) db.Table {
 	tb := db.Table{Name: name, Pos: db.Pos{File: "x.sql", Line: 1}}

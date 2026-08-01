@@ -206,8 +206,12 @@ Concretely, on `main` — so you know exactly what to expect without reading
   dimension whose "current version" lookup no index serves, and SCD-1 and SCD-2
   dimensions mixed in one schema — plus a **fact table with no columnar/analytic index**
   (a `brin` or `columnstore` method the parser read from the DDL; a fact table with only
-  ordinary row-store indexes fires). All six are surface, never affirmations. One OLAP
-  rule is **not** built yet — a partitioning check — declared, not silent.
+  ordinary row-store indexes fires) and a **census of its fact tables for declared table
+  partitioning** (one item for the whole schema, never one per table, naming which fact
+  tables declare partitioning and which do not; declared partition children are excluded,
+  since a partition is not a fact table). All seven are surface, never affirmations —
+  whether a fact table is large enough to need partitioning or a columnar index is a
+  runtime fact codefit cannot see, so it hands the agent the shape and the question.
   Table roles are recognized from the table **name**,
   **case-insensitively**, in three spellings: an underscore-delimited leading segment
   (`fact_`/`fct_`/`f_`, `dim_`/`d_`, `stg_`, `mart_`), an underscore-delimited trailing

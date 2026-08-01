@@ -20,10 +20,8 @@ type Rule interface {
 
 // All is the enumerated DW rule set, instantiated by hand exactly like
 // dbrules.All()/crossrules.All() — no registry (YAGNI). S2 (the star-schema +
-// SCD family) and S3 (the columnar-index rule) fill it; DW-020
-// (partitioning) remains declared-not-covered until S4 — its parser floor
-// (db.Table.Partitioning) landed with partition-capture, but no rule reads
-// that field yet, and a floor is not a check.
+// SCD family), S3 (the columnar-index rule) and S4 (the partitioning census)
+// fill it.
 func All() []Rule {
 	return []Rule{
 		dw001{}, // S2 — fact table with no FK to any dimension (surface)
@@ -31,6 +29,7 @@ func All() []Rule {
 		dw005{}, // S2 — facts present, no time dimension (surface)
 		dw010{}, // S2 — SCD-2 dimension without a currency index (surface)
 		dw011{}, // S2 — mixed SCD strategies in one schema (surface)
+		dw020{}, // S4 — fact tables censused for declared partitioning (surface)
 		dw021{}, // S3 — fact table with no columnar/analytic index (surface)
 	}
 }
@@ -51,6 +50,7 @@ func OwnedCategories() []string {
 		string(surface.CategoryDWNoTimeDimension),         // DW-005
 		string(surface.CategoryDWSCD2NoCurrencyIndex),     // DW-010
 		string(surface.CategoryDWMixedSCDStrategies),      // DW-011
+		string(surface.CategoryDWFactsNotPartitioned),     // DW-020
 		string(surface.CategoryDWNoColumnarIndex),         // DW-021
 	}
 }

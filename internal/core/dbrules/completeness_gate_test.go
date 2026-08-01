@@ -10,8 +10,8 @@ import (
 
 // D4 (design SS4) — the two-way rule gate. DB-050 (an AFFIRMATION) ROUTES to a
 // dedicated surface category on an unproven table instead of affirming; every
-// other absence-based rule (DB-001, DB-052, and all six DW rules in the
-// sibling package — DW-001/002/005/010/011/021) ABSTAINS silently.
+// other absence-based rule (DB-001, DB-052, and all seven DW rules in the
+// sibling package — DW-001/002/005/010/011/020/021) ABSTAINS silently.
 
 func unprovenTable(name string) db.Table {
 	tb := db.Table{Name: name, Pos: db.Pos{File: "x.sql", Line: 1}}

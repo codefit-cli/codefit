@@ -339,10 +339,12 @@ model dim_product {
 // db.Index literal: Prisma's own `@@index([...], type: X)` syntax (the
 // `extendedIndexes` preview feature) DOES let a Prisma schema declare a
 // columnar/analytic method — a real capability, distinct from the sibling
-// DW-001/002/005/010/011 family's blanket "zero value on Prisma" (those ask
-// about partitioning/materialized-view/warehouse-modelling concepts Prisma's
-// schema.prisma has no syntax for at all; DW-021 only needs an index's
-// method, which Prisma DOES express). Both fire paths run the full pipeline:
+// DW-001/002/005/010/011/020 family's blanket "zero value on Prisma" (those
+// ask about partitioning/materialized-view/warehouse-modelling concepts
+// Prisma's schema.prisma has no syntax for at all — DW-020 most literally of
+// all, since schema.prisma expresses no table partitioning whatsoever, so
+// db.Table.Partitioning is always empty on that path; DW-021 only needs an
+// index's method, which Prisma DOES express). Both fire paths run the full pipeline:
 // ParseSchema -> paradigm.Detect -> dwrules, through Sensor.Audit, exactly
 // like TestSensorDB_ParadigmAssembly_DWRulesRunOnAStarSchema above.
 func TestSensorDB_DW021_RealPrismaProvider(t *testing.T) {

@@ -434,7 +434,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   block) does not. **Two-way disposition, no rule signature change (ADR 0015):**
   DB-050 (the dimension's one affirmation) **routes** an unproven table to the
   `db-table-structure-unproven` surface category instead of affirming; DB-001,
-  DB-052, and all six DW-0xx rules (DW-001/002/005/010/011/021) **abstain
+  DB-052, and all seven DW-0xx rules (DW-001/002/005/010/011/020/021) **abstain
   silently** on an unproven table (a
   dropped statement might have declared the very index/column/key each rule is
   asking about). One reason reaches that same disposition **without any parser
@@ -445,9 +445,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   constraints all live on the parent. Before `partition-capture` the child table
   did not enter the model at all: the statement matched no dispatch branch and
   the whole table vanished silently, which is strictly worse than an unproven
-  one. DW-005 and DW-011 are schema-level census judgments and abstain
+  one. DW-005, DW-011 and DW-020 are schema-level census judgments and abstain
   the **whole rule** — never a per-table skip, which would silently shrink the
-  census and still emit. A genuinely PK-less table with a proven-complete
+  census and still emit. DW-020 adds one deliberate refinement the other two do
+  not need: a **partition child is exempt from its gate**, because a child is
+  not in its census in the first place and its unprovenness here is *by
+  construction* rather than a parser failure — gating on it would abstain the
+  rule on precisely the warehouses that **do** partition.
+  A genuinely PK-less table with a proven-complete
   structure still affirms DB-050 at confidence 1.0 — honesty costs nothing here.
   Per-scan, `sensors/db.Result.Note` (reaching the agent through scan-all's
   `DBSection.Note`) carries a bounded **inventory** of what could not be measured,
@@ -880,6 +885,100 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     its fire paths through constructed DDL, per the dogfood status above —
     but the coverage gap is honestly scoped to "not vendored", never "does
     not exist".
+- **Fact tables censused for declared table partitioning (DW-020, S4, RF-03
+  OLAP closure)** — the schema's fact-role tables, counted against
+  `db.Table.Partitioning`.
+  - **Pure surface, never an affirmation** (ADR 0017): whether partitioning is
+    worth anything depends on each table's real row count, growth rate and
+    retention policy — **runtime** facts, absent from static DDL. codefit
+    cannot see them and does not guess; it hands the agent the census and the
+    question.
+  - **Schema-level: at most ONE item for the whole schema**, never one per
+    table. That is the rule's defining decision and it was **measured**, not
+    reasoned: across the 26-corpus survey pinned in ADR 0036, **no analytic
+    corpus declares table partitioning at all**, so a per-table rule would fire
+    on essentially 100% of fact tables in 100% of warehouses — zero
+    discrimination, the same defect that makes DB-052 the worst-measured rule
+    in this project. DW-005 and DW-011 are the precedent idiom. The item
+    anchors on the **first unpartitioned census member** in schema order and
+    names **both** groups in its signals, the way DW-011 names both SCD groups.
+  - **Fires when at least one census member declares no partitioning** — which
+    **includes the mixed case** (some fact tables partitioned, others not),
+    deliberately. An inconsistency carries **more** information than a uniform
+    absence: the team demonstrably knows how to partition here, so an
+    unpartitioned sibling is a decision or an oversight the agent can now
+    judge. And suppressing on a partitioned sibling would be a counter-signal
+    that **silences** — the exact shape ADR 0017 forbids — letting one
+    partitioned fact table mute the question for every other fact table in the
+    schema. The counter-signal is **exposed** instead:
+    `partitioned_fact_tables` lists them and `some_fact_tables_partitioned` is
+    true, so a deliberate split is dismissible in one read.
+  - **Partition children are excluded** from the census, via
+    `db.Table.Partitioning.Of`. A PostgreSQL fact table partitioned into 60
+    monthly children yields 60 **extra** tables in the neutral model, and a
+    child is not a fact table: counting them would restate one partitioned fact
+    as 61 (a `CREATE TABLE c PARTITION OF p` child carries its own non-empty
+    `Declaration`, so it inflates the **partitioned** side — measured by
+    mutation), or invert the truth for a child form read without partition
+    grammar. Not hypothetical: measured through the real parser and the real
+    classifier, a child that declares its own foreign keys (which PostgreSQL 10
+    and earlier **required**, since a partitioned parent could not carry them)
+    comes out **fact-role** and would have been censused.
+  - **Completeness gating** is DW-005/DW-011's whole-rule abstain (ADR 0034
+    §2.5), never a per-table skip. The gate reads the **same census predicate**
+    as the census, and that is load-bearing: a `PARTITION OF` child is unproven
+    **by construction** (`ReasonPartitionChildInheritsStructure`), so gating on
+    children would make DW-020 abstain on every declaratively partitioned
+    PostgreSQL warehouse — structurally incapable of ever observing its own
+    positive case.
+  - **The schema gate (ADR 0037) needs no special handling and gets none:**
+    roles are read from the classification and never re-derived, so a **closed**
+    gate leaves every table unclassified, the census comes out empty and the
+    rule says nothing. Asking a partitioning question of a schema codefit did
+    not judge to be a warehouse would re-open the exact hole ADR 0037 closed.
+    Test-locked, not assumed.
+  - **Declared limits — three, all inherited from the model, none introduced
+    here.** (1) An empty `Of` is **not** proof a table is not a partition: a
+    child attached by `ALTER TABLE ... ATTACH PARTITION`, or dumped as a
+    standalone `CREATE TABLE` with no partition grammar of its own, is
+    indistinguishable from an ordinary table, and if it earns a fact role it
+    **is** censused as unpartitioned. This is live in real DDL — `pg_dump`
+    emits exactly that form, and vendored Pagila's `payment_p2022_*` children
+    are all attached that way. (2) An empty `Declaration` is not proof a table
+    is unpartitioned **in the database** — it reports the source codefit read.
+    (3) A partitioned parent whose foreign keys live on its **children** (the
+    PostgreSQL 10 pattern) gets no fan-out of its own, so the corroboration
+    gate demotes it to `unclassified` and it never enters the census at all.
+  - **Dogfood status:** every fire and non-fire path is proven **through the
+    real parser and the real classifier** on genuine PostgreSQL DDL, never a
+    hand-built `db.Table` literal — the uniform-absence positive, the mixed
+    positive with a real fact-role `PARTITION OF` child (which locks both the
+    census exclusion and the gate exemption), the every-fact-partitioned
+    negative, the unproven-member whole-rule abstention against a real
+    unrecognized `CREATE INDEX ... ON ONLY`, and the closed-schema-gate
+    silence.
+  - **Yield, measured over the same 26 corpora:** **8 emit exactly one DW-020
+    item each** (`dw-salesmart`, `dw-ssis-salesmart`, `dw-p4pa`, `dw-gamerec`,
+    `dw-kantor`, `dw-gravity`, vendored AdventureWorksDW, full
+    AdventureWorksDW), covering **16 fact tables** between them — the census
+    halves the item count overall and collapses full AdventureWorksDW's **8**
+    fact tables into **one** question. The other 18 emit nothing, for the
+    honest reason: their schema gate is closed, or they hold no fact-role
+    table. **Not one analytic corpus declares table partitioning on a fact
+    table** — precisely the measurement that made this rule schema-level. That
+    zero is **positively controlled**, not assumed: table partitioning *is*
+    present in the corpus set, in four **transactional** corpora (Pagila's
+    `payment`, the MySQL `employees_partitioned` fixtures, YugabyteDB Sakila),
+    and the parser reports it — it simply never coincides with a fact role. The
+    window-function false positive a naive `PARTITION BY` grep would have
+    produced is real too, and was excluded: `dw-ngthao`'s only `PARTITION`
+    mentions are `OVER (PARTITION BY ...)` query syntax, which never reaches
+    this model.
+  - **Prisma is zero-value for this rule**, like the S2 family and unlike
+    DW-021: `schema.prisma` expresses no table partitioning whatsoever, so
+    `db.Table.Partitioning` is always empty on that path and a fact-role Prisma
+    model always counts as unpartitioned — a faithful report of what the
+    **source** declares, not a claim about the database.
 
 ### Not covered (declared, not silent)
 
@@ -921,19 +1020,21 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse rule family (DW-0xx), narrowed again as of S3.**
+- **OLAP / data-warehouse rule family (DW-0xx) is now COMPLETE, as of S4.**
   Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
-  the star-schema/SCD checks (DW-001, DW-002, DW-005, DW-010, DW-011),
-  **and** the columnar/analytic-index check (**DW-021**) **are now covered**
-  (see above) — `dwrules.All()` is **six** rules as of S3. What **remains**
-  not covered: a partitioning check
-  (**DW-020**, planned for S4). It does not fire today, under any dialect. Its
-  **parser floor now exists** — as of `partition-capture` the reducer reads
-  table partitioning into `db.Table.Partitioning` (PostgreSQL/MySQL
-  `PARTITION BY`, PostgreSQL `PARTITION OF`, T-SQL's `ON <scheme>(<column>)`;
-  see the SQL-DDL known limits below) — but **no rule reads that field yet**.
-  The floor is not the check: `dwrules.All()` is still **six** rules, and
-  nothing in codefit today tells an agent that a fact table is unpartitioned.
+  the star-schema/SCD checks (DW-001, DW-002, DW-005, DW-010, DW-011), the
+  columnar/analytic-index check (**DW-021**) **and** the partitioning census
+  (**DW-020**) **are all covered** (see above) — `dwrules.All()` is **seven**
+  rules as of S4, and **no DW-0xx rule remains unbuilt**. DW-020 was the last
+  one: its parser floor landed with `partition-capture`
+  (`db.Table.Partitioning`) and the rule that reads it landed in S4.
+  What DW-020 still cannot see is a **model** limit, not an absent rule, and
+  is declared in its own entry above: an `ALTER TABLE ... ATTACH PARTITION`
+  child, or a child dumped as a standalone `CREATE TABLE` with no partition
+  grammar of its own (what `pg_dump` actually emits — vendored Pagila's
+  `payment_p2022_*` children are all attached that way), carries an empty
+  `Partitioning.Of` and is indistinguishable from an ordinary table, so if it
+  earns a fact role it is censused as unpartitioned.
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
@@ -1119,7 +1220,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   difference is the whole point: the colliding statement is recorded in that
   table's `Unreduced` list and the table is marked `Complete=false`, so `DB-050`
   **routes** it to `db-table-structure-unproven` and `DB-001`/`DB-052` plus all
-  six `DW-0xx` rules **abstain** rather than reading the merged shape as fact.
+  seven `DW-0xx` rules **abstain** rather than reading the merged shape as fact.
   Measured through the real parser, not inferred: three `CREATE TABLE`
   statements across `bronze`/`silver`/`gold` reduce to **two** tables, the
   surviving `orders` carrying only the **first** statement's columns. **Not

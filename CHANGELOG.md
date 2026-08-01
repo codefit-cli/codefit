@@ -16,10 +16,36 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Added
 
+- **DW-020 — this schema's fact tables, censused for declared table partitioning**, the
+  seventh rule in `dwrules.All()` and the close of slice S4. **The DW-0xx family is now
+  complete: no OLAP rule remains unbuilt.** It emits **one item for the whole schema**,
+  never one per table — a decision made from a measurement, not from taste: across the
+  26-corpus survey, no analytic corpus declares table partitioning at all, so a per-table
+  rule would fire on essentially every fact table of every warehouse. **Surface, never an
+  affirmation** (ADR 0017): whether partitioning is worth anything depends on each table's
+  real row count, growth rate and retention policy — runtime facts absent from static DDL —
+  so codefit hands over the census and the question, never a verdict. It fires when at
+  least one fact table declares no partitioning, **including the mixed case**, where the
+  already-partitioned siblings are named as a fact rather than used to suppress: letting
+  one partitioned fact table mute the question for the rest would be a silent false
+  negative. **Declared partition children are excluded from the census** — a partition is
+  not a fact table, and counting a `PARTITION OF` child would restate one partitioned fact
+  as two — and they are **exempt from the completeness gate** for the same reason: a child
+  is unproven *by construction*, so gating on it would abstain the rule on exactly the
+  warehouses that do partition. With the schema gate closed, no table holds a warehouse
+  role, the census is empty and the rule says nothing. Every fire and non-fire path is
+  proven through the **real parser and the real classifier** on genuine PostgreSQL DDL.
+  Measured over 26 public corpora: **8 emit exactly one item each**, covering 16 fact
+  tables between them — full AdventureWorksDW's 8 fact tables collapse into **one**
+  question instead of 8. Zero of the analytic corpora partition a fact table; that zero is
+  positively controlled against four transactional corpora that genuinely do partition,
+  and against the `OVER (PARTITION BY …)` window-function false positive a naive grep
+  would have produced. Known limit, inherited from the model: an `ATTACH PARTITION` child
+  (what `pg_dump` emits) carries no back-reference and is indistinguishable from an
+  ordinary table.
 - **The SQL-DDL reducer now reads table partitioning** into a new neutral
-  `db.Table.Partitioning`, closing the parser floor DW-020 was waiting on. **The DW-020
-  rule itself is still not built** — nothing in codefit tells an agent that a fact table
-  is unpartitioned; only the model now carries the fact. Read per dialect: PostgreSQL and
+  `db.Table.Partitioning`, the parser floor DW-020 was waiting on and now reads. Per
+  dialect: PostgreSQL and
   MySQL `PARTITION BY <strategy> (<key>)`, PostgreSQL's `PARTITION OF <parent>` child, and
   T-SQL's `ON <partition scheme> (<column>)` — the last resolving its strategy word through
   the scheme's own `CREATE PARTITION FUNCTION` when that statement is in the DDL read, and
