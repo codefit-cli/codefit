@@ -2,6 +2,12 @@
 
 **Status:** Accepted · **Date:** 2026-07-31 · **Phase:** 2 (RF-03 OLAP closure)
 
+**Extended by [ADR 0036](0036-schema-gate-sixth-signal-column-type-profile.md):**
+a SIXTH signal (`type_profile_split`, over column types) and a 26-corpus
+measurement of all six. Everything below still holds as written; 0036 changes
+what the numbers in "The measurement" section mean, since that section reads
+only the corpora this repository vendors.
+
 ## Context
 
 ADR 0033 built paradigm detection BOTTOM-UP: `paradigm.Detect` assigns a role
