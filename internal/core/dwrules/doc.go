@@ -15,7 +15,9 @@
 // strategies) — without touching that seam. S3 adds DW-021 (fact table with no
 // columnar/analytic index), reasoning over db.Index.Method the parser now
 // populates (index-method-capture, PR #79). DW-020 (partitioning, S4) is NOT
-// here yet and remains declared-not-covered.
+// here yet and remains declared-not-covered — even though its PARSER FLOOR
+// now exists (db.Table.Partitioning, partition-capture): a field no rule
+// reads is not a check.
 //
 // Every rule in this package is SURFACE-only (ADR 0017). A warehouse-modelling
 // choice is a design judgment, not a structurally undeniable defect: an

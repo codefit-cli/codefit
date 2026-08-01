@@ -21,7 +21,9 @@ type Rule interface {
 // All is the enumerated DW rule set, instantiated by hand exactly like
 // dbrules.All()/crossrules.All() — no registry (YAGNI). S2 (the star-schema +
 // SCD family) and S3 (the columnar-index rule) fill it; DW-020
-// (partitioning) remains declared-not-covered until S4.
+// (partitioning) remains declared-not-covered until S4 — its parser floor
+// (db.Table.Partitioning) landed with partition-capture, but no rule reads
+// that field yet, and a floor is not a check.
 func All() []Rule {
 	return []Rule{
 		dw001{}, // S2 — fact table with no FK to any dimension (surface)

@@ -46,6 +46,12 @@ type Table struct {
 	ForeignKeys []ForeignKey
 	Indexes     []Index
 
+	// Partitioning is what this table's DDL declares about TABLE
+	// partitioning. Its zero value means "the source codefit read declares
+	// none" — see the type's own doc for what a consumer may and may not
+	// conclude from that.
+	Partitioning Partitioning
+
 	// Complete=false means the parser met at least one statement affecting
 	// this table that it could NOT reduce, and could not rule out that the
 	// statement declared a key, index or column. A rule that concludes from
@@ -60,9 +66,16 @@ type Table struct {
 	// §8e).
 	//
 	// A DECLARED skip is NOT incompleteness: a form the parser recognizes and
-	// deliberately does not model (CHECK, EXCLUDE, PARTITION, ALTER COLUMN,
-	// RENAME, OWNER, ...) is known not to be a key/index/column and leaves
+	// deliberately does not model (CHECK, EXCLUDE, ALTER COLUMN, RENAME,
+	// OWNER, ...) is known not to be a key/index/column and leaves
 	// Complete=true (ADR 0018's declared subset, made machine-visible).
+	//
+	// A table's PARTITIONING clause is neither: it is now READ, into
+	// Partitioning below. Reading it likewise leaves Complete=true, and for
+	// the same reason — a partition key is not a primary key, an index or a
+	// column, so even a partitioning form the reducer cannot decompose
+	// cannot have hidden one. Partitioning reports its own partial reads
+	// internally (Partitioning.Declaration) instead of demoting the table.
 	//
 	// Zero value is false (fail-closed, design §1-D1b): a table nobody
 	// explicitly proved complete is unproven by default, never trustworthy by
@@ -126,6 +139,19 @@ const (
 	// over a table the parser never actually read at all, not merely one it
 	// read incompletely.
 	ReasonTableNeverDeclared Reason = "no CREATE TABLE statement was ever seen for this table"
+	// ReasonPartitionChildInheritsStructure: this table is declared as a
+	// PARTITION OF a parent table (PostgreSQL's "CREATE TABLE c PARTITION OF
+	// p FOR VALUES ..."). That statement declares the child's PARTITION
+	// BOUNDS and nothing else: its columns, primary key, foreign keys and
+	// constraints all come from the parent and appear NOWHERE in it. The
+	// child is therefore genuinely read (its name and its parent are in
+	// Partitioning.Of) but structurally unproven — distinct from
+	// ReasonUnreducedTableStatement, where the parser met a statement it
+	// could not decompose at all, and from ReasonTableNeverDeclared, where
+	// no CREATE TABLE was ever seen. An absence-based rule that affirmed
+	// over this table would report "no primary key" about a table whose
+	// primary key is declared on its parent.
+	ReasonPartitionChildInheritsStructure Reason = "this table is declared as a partition of another table: its columns and keys are inherited from the parent, not declared here"
 )
 
 // MarkUnproven records that a statement affecting t could not be reduced. It
@@ -233,6 +259,85 @@ type Index struct {
 	// documented set of accepted index types against every provider, so it
 	// makes no claim here beyond "this is what the source said".
 	Method string
+}
+
+// Partitioning is what a table's DDL declares about TABLE PARTITIONING —
+// PostgreSQL's `PARTITION BY <strategy> (<key>)` and `PARTITION OF <parent>`,
+// MySQL's `PARTITION BY RANGE|LIST|HASH|KEY (<key>)`, T-SQL's
+// `ON <partition scheme> (<column>)`. It is NOT window-function `PARTITION
+// BY`, which is query syntax and never reaches this model.
+//
+// Every field follows the empty-means-not-declared convention db.Index.Method
+// and db.Table.DBName already hold to: a value here was READ FROM THE SOURCE
+// (lowercased where the source word is a keyword), never guessed, never
+// defaulted.
+//
+// WHAT A CONSUMER MAY CONCLUDE
+//
+//   - Declaration != "" — the DDL codefit read declares table partitioning
+//     for this table. This is the single authoritative "is it partitioned?"
+//     predicate: Strategy, Scheme, Key and Of may ALL be empty for a form the
+//     reducer recognized as partitioning but could not decompose, and reading
+//     any one of them alone would then answer "no" to a table that said yes.
+//   - Declaration == "" — the DDL codefit read declares NO partitioning for
+//     this table. That is NOT the same as "this table is not partitioned in
+//     the database": a table can be partitioned by a form this parser does
+//     not read, by a statement in a file the scan never saw, or by a
+//     PostgreSQL `ALTER TABLE ... ATTACH PARTITION` naming it (which lands on
+//     the parent's honest-abstention floor, not here). This field reports the
+//     SOURCE, not the database.
+//   - Of != "" — the source declares this table AS A PARTITION of that
+//     parent. A partition child is modelled as ITS OWN TABLE (it is one: it
+//     has its own storage, its own indexes, and pg_dump emits most of them as
+//     ordinary standalone CREATE TABLEs) AND carries this back-reference. It
+//     is deliberately not folded into the parent, which would discard the
+//     child's own indexes, and not left parentless, which would make a rule
+//     count every monthly child of one partitioned fact table as a separate
+//     unpartitioned fact table.
+//   - Of == "" does NOT mean "not a child": a child attached by `ALTER TABLE
+//     ... ATTACH PARTITION`, or dumped as a standalone CREATE TABLE with no
+//     partition grammar of its own (what pg_dump actually emits — Pagila's
+//     payment_p2022_01 is exactly this), is indistinguishable here from an
+//     ordinary table.
+type Partitioning struct {
+	// Declaration is the partitioning clause VERBATIM from the user's own
+	// DDL (modulo the identifier-quote canonicalization every SQL-DDL
+	// statement goes through before reduction) — the structural analogue of
+	// Unreduced.Text: parser internals never reach it. NON-EMPTY is the
+	// authoritative "this table declares partitioning" answer.
+	Declaration string
+
+	// Strategy is the partitioning strategy word as the SOURCE spells it,
+	// lowercased: "range", "list", "hash", "key", … EMPTY means the strategy
+	// is not in the DDL read — either because the dialect does not state one
+	// at the table (T-SQL puts it in the partition FUNCTION) or because the
+	// clause was not decomposed. codefit does not maintain a closed
+	// vocabulary here: whatever word follows PARTITION BY is captured.
+	Strategy string
+
+	// Scheme is the T-SQL partition scheme the table is created ON, name
+	// only (normalized like any other identifier in the model). EMPTY on
+	// dialects that have no partition schemes. codefit does NOT resolve the
+	// scheme's range boundaries — only, when the DDL read also contains the
+	// scheme's CREATE PARTITION FUNCTION, its Strategy.
+	Scheme string
+
+	// Key is the partition key as a list of plain COLUMN identifiers, in
+	// source order. EMPTY when the source key is not a plain column list —
+	// most commonly an expression (`PARTITION BY RANGE (YEAR(sold_on))`,
+	// `PARTITION BY RANGE (extract(year from d))`). A partition key is never
+	// GUESSED into columns: an expression decomposed by a column-list
+	// splitter yields an invented column name ("YEAR(sold_on") that exists in
+	// no table, which is exactly the fabrication class the completeness
+	// contract cannot catch (it covers drops, not fabrications). When Key is
+	// empty and Declaration is not, read Declaration.
+	Key []string
+
+	// Of names the PARENT table of a partition CHILD (PostgreSQL's `CREATE
+	// TABLE c PARTITION OF p ...`), normalized like every other table
+	// reference. EMPTY means the source did not declare this table as a
+	// child — which is not proof that it is not one (see the type doc).
+	Of string
 }
 
 // View, Procedure and Trigger complete the OLTP surface. They are DEFINED here so

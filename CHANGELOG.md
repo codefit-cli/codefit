@@ -16,6 +16,35 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Added
 
+- **The SQL-DDL reducer now reads table partitioning** into a new neutral
+  `db.Table.Partitioning`, closing the parser floor DW-020 was waiting on. **The DW-020
+  rule itself is still not built** — nothing in codefit tells an agent that a fact table
+  is unpartitioned; only the model now carries the fact. Read per dialect: PostgreSQL and
+  MySQL `PARTITION BY <strategy> (<key>)`, PostgreSQL's `PARTITION OF <parent>` child, and
+  T-SQL's `ON <partition scheme> (<column>)` — the last resolving its strategy word through
+  the scheme's own `CREATE PARTITION FUNCTION` when that statement is in the DDL read, and
+  never defaulting when it is not. A partition **child** is modelled as its own table plus
+  a back-reference to its parent, and is marked structurally unproven (a new
+  `db.ReasonPartitionChildInheritsStructure`): that statement declares the child's bounds
+  and nothing else, so its columns and keys live on the parent. Before this change the
+  child statement matched **no dispatch branch at all** and the entire table vanished from
+  the model without a trace.
+- Two fabrication guards come with that read, both mutation-proven. An **expression**
+  partition key (`PARTITION BY RANGE (YEAR(sold_on))`) leaves `Partitioning.Key` empty and
+  reports the clause verbatim instead — running it through the ordinary column-list
+  splitter invents the column `YEAR("sold_on")`, which exists in no table and which
+  `db.Table.Complete` cannot catch (it covers drops, not fabrications). And the tail is
+  searched at **top level only**, outside parens and string literals: `PARTITION BY` is
+  also window-function syntax, and `CREATE TABLE s (a, b) AS SELECT … OVER (PARTITION BY
+  c)` is valid PostgreSQL that this very path dispatches. T-SQL's `ON [PRIMARY]` filegroup
+  clause — which all three vendored AdventureWorksDW tables carry — is likewise never read
+  as a partition scheme; only the parenthesized column distinguishes the two.
+- Reading partitioning **never demotes a table**. Measured through the real parser across
+  all 17 vendored corpora: table counts and structure-proven counts are identical before
+  and after. No vendored corpus declares table partitioning at all (every `PARTITION`
+  under `testdata/` is inside a comment), so the read is proven by constructed DDL plus
+  real-corpus negative controls.
+
 - **DW-021 — a fact table with no columnar/analytic index**, the sixth rule in
   `dwrules.All()` and the close of slice S3. A fact-role table with no index using a
   recognized columnar/analytic access method is emitted as **surface, never an

@@ -171,9 +171,17 @@ CREATE UNIQUE INDEX idx_unq_rental_rental_date_inventory_id_customer_id ON publi
 -- (e.g. payment_p2022_01) is itself dumped by pg_dump as a completely
 -- ordinary, standalone CREATE TABLE — the same shape as any other table,
 -- with no "PARTITION OF" grammar in its own statement at all. Verified
--- directly: codefit's sqlddl parser does NOT handle the literal
--- "CREATE TABLE x PARTITION OF y FOR VALUES ..." grammar form (reported,
--- not used here) — this is the real, unmodified pg_dump text for
+-- directly: at the time this excerpt was vendored, codefit's sqlddl parser
+-- did NOT handle the literal "CREATE TABLE x PARTITION OF y FOR VALUES ..."
+-- grammar form (reported, not used here). It DOES now (partition-capture:
+-- the child is registered, names its parent in Partitioning.Of, and is
+-- marked structurally unproven since it declares no columns) — which
+-- changes NOTHING for this fixture, because the text below carries no
+-- partition grammar of any kind. That is the point worth keeping: pg_dump's
+-- ordinary standalone form is INDISTINGUISHABLE from a non-partitioned
+-- table, so codefit reports no partitioning for payment_p2022_01 and is
+-- right to — the source it read declares none.
+-- This is the real, unmodified pg_dump text for
 -- payment_p2022_01, no PARTITION OF/ATTACH PARTITION/ALTER TABLE ONLY
 -- anywhere in it, which upstream genuinely carries TWO indexes on the
 -- identical (customer_id) column list: idx_fk_payment_p2022_01_customer_id

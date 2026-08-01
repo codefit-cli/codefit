@@ -27,9 +27,13 @@ import (
 // PARTITION" statement) — but pg_dump's own on-disk form of a partition
 // CHILD table is an entirely ordinary, standalone CREATE TABLE, with no
 // "PARTITION OF" grammar in its own statement at all. Verified directly
-// (throwaway parse, not assumed): codefit's sqlddl parser does NOT handle
-// the literal "CREATE TABLE x PARTITION OF y FOR VALUES ..." grammar form
-// (the resulting table gets zero columns), and separately does NOT handle
+// (throwaway parse, not assumed): AS OF THIS FIXTURE'S VENDORING codefit's
+// sqlddl parser did NOT handle the literal "CREATE TABLE x PARTITION OF y
+// FOR VALUES ..." grammar form at all — the whole table vanished from the
+// model. That has since CHANGED (partition-capture): the child is now
+// registered as its own table, naming its parent in Partitioning.Of and
+// marked structurally unproven, because that statement still declares no
+// columns. The parser separately does NOT handle
 // PostgreSQL's "ALTER TABLE ONLY <table> ..." idiom used for the ATTACH
 // PARTITION statement and for every real pg_dump PRIMARY KEY/FOREIGN KEY
 // constraint (mis-parses the literal token "ONLY" as the table name,
