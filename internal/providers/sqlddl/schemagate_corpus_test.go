@@ -25,38 +25,57 @@ import (
 //	mysql/sakila_excerpt.sql            OLTP      no_audit_timestamps, star_topology
 //	pagila_excerpt.sql                  OLTP      no_audit_timestamps
 //	tsql/adventureworks_excerpt.sql     OLTP      no_audit_timestamps
-//	tsql/adventureworksdw_real_objects  WAREHOUSE calendar_table
+//	tsql/adventureworksdw_real_objects  WAREHOUSE calendar_table, no_audit_timestamps
 //	(every other corpus)                --        none
 //
 // Read the first and fourth rows together. The ONE genuine Kimball warehouse in
-// the repository fires ONE signal; a three-table excerpt of Sakila — a rental
-// shop's transactional schema — fires TWO. A naive ">= 2 signals means
-// warehouse" threshold, applied today, would classify Sakila as a warehouse and
-// AdventureWorksDW as not one.
+// the repository and a three-table excerpt of Sakila — a rental shop's
+// transactional schema — fire the SAME NUMBER of signals, two each. A naive
+// "count the signals" threshold cannot tell them apart at all, at any cutoff:
+// at >= 2 both are warehouses, at >= 3 neither is. WHICH signals fired is the
+// only thing that separates them.
+//
+// HOW THIS TABLE WAS READ WHEN THE DECISION WAS MADE, and why it still says the
+// same thing: at stage 1 (ADR 0035) the warehouse fired ONE signal and Sakila
+// TWO, so a >= 2 threshold got both backwards. The T-SQL
+// ALTER TABLE ... ADD CONSTRAINT reducer fix (PR #82) then landed on main and
+// proved the warehouse's three tables, which let no_audit_timestamps stop
+// abstaining and moved this row from one signal to two. The counting argument
+// got no weaker for it — it merely changed from "the threshold ranks them
+// backwards" to "the threshold cannot rank them at all". Both readings are
+// measured, neither is a hunch, and stage 2 selects rather than counts either
+// way.
 //
 // STAGE 2 (ADR 0037) decided from that shape, plus the 26-corpus measurement in
 // ADR 0036: the verdict SELECTS the three zero-false-positive signals and
 // requires ANY ONE of them, rather than counting all six. This table is what
 // that decision looks like on real vendored DDL — Sakila's two signals are
 // exactly the two that do NOT vote, so it stays transactional, while
-// AdventureWorksDW's single calendar_table opens the gate. The gateOpen column
+// AdventureWorksDW's calendar_table opens the gate and the no_audit_timestamps
+// it now shares with Sakila is worth no votes to either. The gateOpen column
 // below records it, corpus by corpus.
 //
 // The three causes behind those numbers, each independently verifiable above:
 //
-//  1. AdventureWorksDW's structure is entirely UNPROVEN — the T-SQL reducer
-//     drops all three shapes of ALTER TABLE ... ADD CONSTRAINT this corpus uses
-//     (a pre-existing parser gap, documented in dw_integration_test.go), so its
-//     three real primary keys and eight real foreign keys are invisible. Both
-//     absence-based signals therefore ABSTAIN rather than affirm, and
-//     star_topology has no foreign keys left to see. The gate is behaving
-//     exactly as designed here: it refuses to conclude from a model it cannot
-//     prove complete. Fix that parser gap and this row should change.
+//  1. AdventureWorksDW's structure is fully PROVEN as of the reducer fix above:
+//     its three real primary keys and eight real foreign keys are in the model,
+//     so the absence-based signals judge it instead of abstaining. That is why
+//     no_audit_timestamps affirms here (none of its three tables declares
+//     created_at/updated_at) while bulk_load_shape does NOT: eight declared
+//     foreign keys falsify its no-FKs premise outright, rather than leaving it
+//     unable to conclude. star_topology also stays silent, for a third reason
+//     again — six of those eight foreign keys point at dimension tables this
+//     three-table excerpt does not vendor, and an absent spoke can never be
+//     shown to be a leaf. Before the fix, ALL of these abstained on unproven
+//     structure, which was correct behavior over a model the parser could not
+//     prove complete and is why ADR 0035 named that fix a stage-2 prerequisite.
 //  2. no_audit_timestamps fires on all three OLTP corpora because they spell
 //     their audit stamp last_update (Sakila, Pagila) or ModifiedDate
 //     (AdventureWorks), and the signal reuses db052's created_at/updated_at
 //     convention rather than inventing a second spelling rule. A real false
-//     positive, measured rather than guessed.
+//     positive, measured rather than guessed — and now visibly a signal that
+//     fires on BOTH sides of the question, which is precisely why it does not
+//     vote.
 //  3. star_topology fires on Sakila because film_actor references actor and
 //     film and neither references anything back — a textbook depth-1 star that
 //     is in fact a join table. This is the architectural premise restated: no
@@ -69,12 +88,12 @@ import (
 //   - every vendored OLTP corpus is a 3-to-5-table excerpt whose tables are
 //     uniformly mixed — there is no split to see, which is the correct answer
 //     and the acceptance bar this signal was required to clear;
-//   - the reference warehouse abstains for a reason that has nothing to do with
-//     the ALTER TABLE gap the rest of this file blames: AdventureWorksDW
-//     brackets its type names ([int], [nvarchar](50)), the T-SQL type map never
-//     matches them, and all 74 of its parsed columns land on db.TypeUnknown. A
-//     SECOND, independent parser gap — fixing the ALTER one alone will not move
-//     this row. Locked with real DDL in
+//   - the reference warehouse abstains on a gap the ALTER TABLE fix above was
+//     never going to touch, which is exactly what ADR 0036 predicted:
+//     AdventureWorksDW brackets its type names ([int], [nvarchar](50)), the
+//     T-SQL type map never matches them, and all 74 of its parsed columns land
+//     on db.TypeUnknown. A SECOND, independent parser gap, still open. Locked
+//     with real DDL in
 //     TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes.
 //
 // This file is ALSO the end-to-end half of the wiring lock: every row asserts
@@ -145,20 +164,31 @@ var gateCorpusExpectations = []gateCorpusCase{
 	},
 	{path: "tsql/adventureworks_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
-		// THE reference warehouse, and it fires ONE signal — fewer than Sakila.
-		// DimDate is recognized by name; everything else abstains because the
-		// T-SQL ALTER gap leaves all three tables unproven and key-less.
+		// THE reference warehouse, and the ONLY vendored corpus the gate OPENS.
+		// It is the stage-2 decision in miniature: ONE deciding signal
+		// (calendar_table, from DimDate's name) beats Sakila's TWO excluded
+		// ones. no_audit_timestamps fires alongside it and does NOT vote —
+		// which is exactly the point of separating fired from deciding.
 		//
-		// It is also the ONLY vendored corpus the gate OPENS, and the pair of
-		// facts on this row is the stage-2 decision in miniature: one DECIDING
-		// signal beats Sakila's two EXCLUDED ones. The paradigm still reads oltp
-		// because with no parsed keys the A5 corroboration gate demotes all
-		// three recognized names anyway — an open gate grants permission to
-		// classify, it never classifies on its own.
-		path: "tsql/adventureworksdw_real_objects.sql", tables: 3, proven: 0,
-		fired:      []paradigm.Signal{paradigm.SignalCalendarTable},
+		// Re-measured after the T-SQL ALTER TABLE ... ADD CONSTRAINT reducer
+		// fix (PR #82) landed on main: all three tables are proven now, and
+		// their three primary keys and eight foreign keys are in the model.
+		// That moved two rows here — no_audit_timestamps stopped abstaining on
+		// unproven tables and now affirms (none of the three declares
+		// created_at/updated_at), and the paradigm reads olap, because the A5
+		// corroboration gate finally has structure to corroborate the
+		// recognized PascalCase names with. star_topology and bulk_load_shape
+		// still do not fire, and for NEW reasons worth keeping straight:
+		// bulk_load_shape because eight declared foreign keys falsify its
+		// no-FKs premise outright, star_topology because six of those eight
+		// point at dimension tables this three-table excerpt does not vendor,
+		// so its spokes cannot be shown to be leaves. type_profile_split still
+		// abstains on the SEPARATE bracketed-type gap (ADR 0036), which that
+		// fix was never going to move.
+		path: "tsql/adventureworksdw_real_objects.sql", tables: 3, proven: 3,
+		fired:      []paradigm.Signal{paradigm.SignalCalendarTable, paradigm.SignalNoAuditTimestamps},
 		gateOpen:   true,
-		paradigmIs: paradigm.ParadigmOLTP,
+		paradigmIs: paradigm.ParadigmOLAP,
 	},
 	{path: "tsql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{path: "tsql/constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},

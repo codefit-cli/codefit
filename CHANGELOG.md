@@ -146,11 +146,14 @@ All notable changes to codefit are documented here. The format is based on
   behavioral test proving `Detect` does not move on a schema where the gate fires. No new
   capability, nothing to use from `main`, and `COVERAGE.md` is deliberately untouched.
   **What the measurement says** (locked over every vendored corpus through the real parser, see
-  [ADR 0035](docs/decisions/0035-schema-gate-stage-1-inert-signals.md)): the one genuine
-  warehouse in the repository, AdventureWorksDW, fires **one** signal, while a three-table
-  excerpt of Sakila — a rental shop — fires **two**. A naive "≥ 2 means warehouse" threshold
-  would today get both backwards. Publishing that number before wiring anything is the entire
-  point of building this stage inert.
+  [ADR 0035](docs/decisions/0035-schema-gate-stage-1-inert-signals.md)): when this stage was
+  built, the one genuine warehouse in the repository, AdventureWorksDW, fired **one** signal
+  while a three-table excerpt of Sakila — a rental shop — fired **two**, so a naive
+  "≥ 2 means warehouse" threshold got both backwards. The T-SQL `ALTER TABLE … ADD CONSTRAINT`
+  fix above then proved that corpus's three tables, `no_audit_timestamps` stopped abstaining,
+  and the two now fire **two signals each** — so no threshold separates them at any cutoff.
+  The counting argument survived its own re-measurement; only its shape changed. Publishing
+  those numbers before wiring anything is the entire point of building this stage inert.
 
 ## [0.2.5-alpha.2] — 2026-07-31
 

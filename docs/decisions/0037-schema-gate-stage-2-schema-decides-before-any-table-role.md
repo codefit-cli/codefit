@@ -39,11 +39,25 @@ not qualify, every warehouse role (fact, dimension, staging, mart) is withheld,
 table, and the schema folds to `oltp`. If it qualifies, roles are assigned
 exactly as ADR 0033 specified — nothing about role assignment changed.
 
-An OPEN gate is PERMISSION to classify, never a classification. The reference
-warehouse in this repository shows both halves at once: `adventureworksdw_real_objects.sql`
-opens the gate on `calendar_table` and still classifies `oltp`, because the T-SQL
-`ALTER TABLE ... ADD CONSTRAINT` gap leaves it key-less and the A5 corroboration
-gate demotes all three recognized names anyway.
+An OPEN gate is PERMISSION to classify, never a classification. The gate decides
+whether roles MAY be assigned in this schema; each table still earns its own from
+its name PLUS the A5 corroboration gate, so an open gate over a schema whose
+tables carry no recognized warehouse name yields `oltp` and zero roles, and a
+recognized name structure cannot corroborate still lands in
+`Classification.Unprovable`.
+
+The reference warehouse in this repository, `adventureworksdw_real_objects.sql`,
+showed BOTH halves at once when this decision was taken: it opened the gate on
+`calendar_table` and still classified `oltp`, because the T-SQL
+`ALTER TABLE ... ADD CONSTRAINT` gap left it key-less and the A5 corroboration
+gate demoted all three recognized names anyway. That gap has since been closed
+(PR #82, merged to `main` before this change landed), so the corpus now measures
+the OTHER outcome of the same rule: gate open on `calendar_table`, three tables
+proven, 3 primary keys and 8 foreign keys corroborating the recognized PascalCase
+names, paradigm `olap`, roles fact / dimension / dimension, `Unprovable` empty.
+The design point is unchanged and is arguably better shown by the pair: the same
+open gate produced no roles then and three roles now, purely because the
+structural evidence changed underneath it.
 
 ### 2. The verdict: SELECT three signals, do not COUNT six
 

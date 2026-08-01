@@ -532,10 +532,18 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   - **Declared consequence of the no-vacuous-truths floor:** a schema of **fewer
     than 3 tables** is never judged, so it can never qualify. An explicit
     `database.paradigm` is the escape hatch.
-  - **An open gate is permission, not a classification.** The vendored
-    AdventureWorksDW opens the gate on `calendar_table` and still classifies
-    `oltp`, because the T-SQL `ALTER TABLE` parser gap leaves it key-less and
-    the corroboration gate below demotes every recognized name anyway.
+  - **An open gate is permission, not a classification.** It lets roles be
+    assigned in that schema; each table must still earn its own from **name
+    plus structure**. A schema whose gate opens but whose tables carry no
+    recognized warehouse name reads `oltp` with zero roles, and a recognized
+    name that structure cannot corroborate still lands in
+    `Classification.Unprovable`. **Measured** on the vendored AdventureWorksDW —
+    the only vendored corpus whose gate opens: `calendar_table` alone decides
+    it (`no_audit_timestamps` fires too and is worth no vote), and now that the
+    reducer reads the `ALTER TABLE ... ADD CONSTRAINT` shapes that DDL uses,
+    its 3 primary keys and 8 foreign keys corroborate the recognized PascalCase
+    names — it classifies `olap`, `FactInternetSales` → fact,
+    `DimCustomer`/`DimDate` → dimension, `Classification.Unprovable` **empty**.
 
   **Inside a schema that qualifies**, role assignment is exactly as it was:
   the table **name** is the **primary** signal, corroborated by **real

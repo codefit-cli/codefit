@@ -326,10 +326,15 @@ const (
 //
 // "This schema declares no foreign keys" is an ABSENCE claim, so it abstains
 // whenever ANY table's structure is unproven — a dropped statement may be the
-// very FK block that falsifies it. That guard is not theoretical:
-// AdventureWorksDW's real DDL declares eight foreign keys that the T-SQL
-// reducer currently drops, so without it this signal would confidently report
-// "no foreign keys" over DDL that plainly declares them.
+// very FK block that falsifies it. That guard is not theoretical, and the
+// vendored AdventureWorksDW corpus is its worked example in BOTH states: its
+// real DDL declares eight foreign keys, the T-SQL reducer used to drop every
+// one of them (the ALTER TABLE ... ADD CONSTRAINT gap, closed in PR #82), and
+// without this guard the signal would have confidently reported "no foreign
+// keys" over DDL that plainly declares them. Now that those eight reach the
+// model, the signal reaches the same answer for the honest reason — it sees
+// the foreign keys and returns false — instead of abstaining. The guard still
+// carries every corpus whose structure is not proven, which is why it stays.
 func hasBulkLoadShape(s *db.Schema) bool {
 	schemaWide, inOneTable := 0, 0
 	for _, t := range s.Tables {

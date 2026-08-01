@@ -243,12 +243,20 @@ tables and no dbt project can be measured this way at all.
 - Nothing codefit detects or reports changes. `internal/core/dbcoverage` and
   `COVERAGE.md` stay untouched, for the reason 0035 gave: announcing inert
   machinery as coverage is over-promising.
-- Two vendored rows are expected to MOVE and are not final: the parallel T-SQL
-  `ALTER TABLE ... ADD CONSTRAINT` fix makes
-  `tsql/adventureworksdw_real_objects.sql` parse 3/3 proven with real primary
-  keys and 8 foreign keys, which will change its `star_topology` and
-  `bulk_load_shape` answers. Its `type_profile_split` answer will NOT move until
-  the bracketed-type gap is fixed as well.
+- Vendored rows were expected to MOVE once the parallel T-SQL
+  `ALTER TABLE ... ADD CONSTRAINT` fix landed, and they did — measured rather
+  than predicted, since that fix (PR #82) is now on `main`:
+  `tsql/adventureworksdw_real_objects.sql` parses 3/3 proven with its real
+  primary keys and 8 foreign keys, and the row that actually moved is
+  **`no_audit_timestamps`**, which stopped abstaining on unproven structure and
+  now affirms. `star_topology` and `bulk_load_shape` kept the same ANSWER but
+  changed their REASON, which is the more interesting half: both used to abstain
+  for want of proof, and now conclude on evidence — eight declared foreign keys
+  falsify `bulk_load_shape`'s no-FKs premise, and six of those eight reference
+  dimension tables this three-table excerpt does not vendor, so `star_topology`
+  cannot establish that its spokes are leaves. As stated here, the corpus's
+  `type_profile_split` answer did NOT move: the bracketed-type gap is untouched
+  and still open.
 - Stage 2 inherits a concrete recommendation with counts behind it: select
   signals by measured precision, do not count them.
 

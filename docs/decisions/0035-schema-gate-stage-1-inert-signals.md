@@ -105,9 +105,10 @@ boundary, the doctrine `segmentRole` already applies to role tokens.
 
 ### The measurement, which is the point of stage 1
 
-Over every SQL corpus vendored in this repository, through the real parser
-(`internal/providers/sqlddl/schemagate_corpus_test.go`, where the numbers are
-test-locked):
+Over every SQL corpus vendored in this repository, through the real parser, **as
+measured at stage 1** (see the update below for what the live test locks today —
+this table is the historical record that drove the stage-2 decision, not the
+current measurement):
 
 | Corpus | What it is | Signals fired |
 |---|---|---|
@@ -117,10 +118,10 @@ test-locked):
 | `tsql/adventureworksdw_real_objects.sql` | **warehouse** | `calendar_table` |
 | every other corpus | — | none |
 
-**The reference warehouse fires ONE signal; a three-table excerpt of Sakila
-fires TWO.** A naive ">= 2 means warehouse" threshold applied today would
-classify Sakila as a warehouse and AdventureWorksDW as not one. Stage 2 must not
-pick a threshold from these numbers as they stand.
+**The reference warehouse fired ONE signal; a three-table excerpt of Sakila
+fired TWO.** A naive ">= 2 means warehouse" threshold applied to those numbers
+would have classified Sakila as a warehouse and AdventureWorksDW as not one.
+Stage 2 must not pick a threshold from these numbers as they stand.
 
 Three causes, each independently verifiable:
 
@@ -139,6 +140,35 @@ Three causes, each independently verifiable:
    `film` and neither references anything back — a textbook depth-1 star that is
    a join table. This is the premise of this ADR restated: no single table, and
    no single signal, separates a warehouse from a transactional schema.
+
+#### Update — the prerequisite in cause 1 was fixed, and the row moved
+
+Cause 1 named the T-SQL `ALTER TABLE ... ADD CONSTRAINT` gap a **prerequisite for
+stage 2**. It was closed (PR #82) and merged to `main` before the stage-2 change
+landed, which is exactly the "fix that parser gap and this row should change"
+outcome this ADR asked for. Re-measured through the same real parser, the
+warehouse row now reads:
+
+| Corpus | What it is | Signals fired |
+|---|---|---|
+| `tsql/adventureworksdw_real_objects.sql` | **warehouse** | `calendar_table`, `no_audit_timestamps` |
+
+Its three tables are proven, its 3 primary keys and 8 foreign keys are in the
+model, and `no_audit_timestamps` therefore stopped abstaining and now affirms
+(none of the three declares `created_at`/`updated_at`). `bulk_load_shape` and
+`star_topology` still do not fire, and no longer for want of proof: eight
+declared foreign keys falsify `bulk_load_shape` outright, and six of them point
+at dimension tables this three-table excerpt does not vendor, so `star_topology`
+cannot show its spokes are leaves. `type_profile_split` still abstains on the
+separate bracketed-type gap, exactly as ADR 0036 predicted it would.
+
+**This does not weaken the counting argument; it changes its shape.** At stage 1
+a `>= 2` threshold ranked the warehouse and Sakila *backwards*. Now they fire two
+signals each, so no threshold ranks them *at all* — at `>= 2` both are
+warehouses, at `>= 3` neither is. Selecting three zero-false-positive signals,
+which is what stage 2 did, is the answer to both readings. The live per-corpus
+numbers are test-locked in
+`internal/providers/sqlddl/schemagate_corpus_test.go`.
 
 ### Not a declared capability
 

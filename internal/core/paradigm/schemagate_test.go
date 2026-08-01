@@ -285,10 +285,14 @@ func TestSignalBulkLoadShape_PlainIdPerTableDoesNotFire(t *testing.T) {
 // TestSignalBulkLoadShape_UnprovenStructureAbstains is the doctrinal guard, and
 // the one that keeps the gate honest on REAL corpora. "No foreign keys" is an
 // absence claim; a table the parser could not fully reduce may have declared
-// the very FK block that would falsify it. AdventureWorksDW is exactly this
-// case: its DDL plainly declares eight foreign keys that the T-SQL reducer
-// drops. Affirming "this schema declares no foreign keys" there would be a
-// confident false claim over DDL that says otherwise.
+// the very FK block that would falsify it. AdventureWorksDW was exactly this
+// case until PR #82 taught the T-SQL reducer to read
+// ALTER TABLE ... ADD CONSTRAINT: its DDL plainly declares eight foreign keys,
+// and every one of them was being dropped, so affirming "this schema declares
+// no foreign keys" there would have been a confident false claim over DDL that
+// says otherwise. That corpus is proven now and no longer needs the guard —
+// which is precisely why this test uses a constructed unproven table instead
+// of leaning on a corpus that may be fixed out from under it.
 func TestSignalBulkLoadShape_UnprovenStructureAbstains(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{
 		provenTable("sales", "date_key", "customer_key", "product_key", "store_key", "promo_key", "created_at"),
