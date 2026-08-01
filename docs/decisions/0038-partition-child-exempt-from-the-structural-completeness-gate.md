@@ -7,6 +7,25 @@ on ONE point: WHICH tables a schema-level census judgment must gate on. 0034's
 invariant (absence-based rules are sound only over a model proven complete; parser
 silence is not evidence) is untouched and still holds, including for DW-020.
 
+**Superseded in scope (2026-08-01) by
+[ADR 0039](0039-census-membership-scopes-the-completeness-gate-for-every-census-rule.md).**
+Two statements below are no longer true of the code, and this ADR is not rewritten —
+read them together with 0039:
+
+- **Decision 4's DW-020-only scope, and the DW-005 false negative it left open, are
+  CLOSED.** DW-005 and DW-011 now scope their gates to their own census members
+  through the same shared predicate, so the measured "adding one fact-role partition
+  child makes DW-005 vanish" no longer happens.
+- **Decision 4's DW-011 claim was WRONG.** "DW-011's gate reads dimension-role tables
+  only, so a fact-role child never reaches it" is true and incomplete: a DIMENSION can
+  be partitioned, and when a fact references a specific partition (which PostgreSQL
+  before 12 required) the child earns a dimension role and DOES reach DW-011's gate.
+  Measured through the real parser; `dw-mixed-scd-strategies` vanished the same way
+  DW-005's item did.
+
+Everything else below still holds as written, including the third declared limit —
+which 0039 gives the test it never had.
+
 This ADR is deliberately narrow. DW-020 itself — a schema-level census of fact-table
 partitioning, at most one item per schema — follows the idiom DW-005 and DW-011
 already shipped under, and needs no ADR of its own. What needs one is the single

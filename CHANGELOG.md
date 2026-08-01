@@ -121,6 +121,33 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **DW-005 and DW-011 no longer go silent on a declaratively partitioned PostgreSQL
+  warehouse.** A `CREATE TABLE c PARTITION OF p` child is marked structurally unproven
+  *by construction* — its columns and keys are declared on the parent, so nothing was
+  dropped and no parser failed — and both rules were gating their whole-rule
+  completeness abstention on it. Adding one partition child to a star therefore made
+  `dw-no-time-dimension` disappear from a schema that had emitted it a moment earlier,
+  and a **dimension** partition child did the same to `dw-mixed-scd-strategies`. Both
+  measured through the real parser and the real classifier, before and after, never a
+  hand-built table. The gate is now scoped to each rule's own census **members** through
+  one shared predicate per rule (the shape DW-020 already shipped with, ADR 0038, now
+  the idiom for all three census rules — ADR 0039). A child is excluded from the
+  censuses as well as the gate, and that half prevents a *new* wrong answer rather than
+  fixing an old one: a child declares no columns, so counting one would have reported an
+  SCD-1 dimension fabricated out of a partition. **A warehouse that partitions its
+  calendar is still recognized**, by the parent's name, so the fix does not trade one
+  false negative for a false claim. **No affirmation changed** — all three rules remain
+  pure surface — and **not one of the 26 measured corpora changes output in either
+  direction**: none declares a partition child that holds a warehouse role behind an
+  open schema gate. That zero is positively controlled against constructed schemas that
+  do, where the two items reappear.
+- **ADR 0038's third declared limit now has a test.** A partitioned parent whose foreign
+  keys live on its children (the PostgreSQL ≤ 10 pattern) has fan-out 0, loses its fact
+  role to the role-corroboration gate, and is invisible to DW-020 — a real limit that
+  lived only in prose in `dw020.go` and `dbcoverage.go`, "verified by direct probe".
+  It is now locked through the real parser, with the schema gate, the parent's proven
+  structure and zero fan-out, its demotion, and the child's fact role all asserted, so a
+  change to role classification cannot make those two comments quietly false.
 - **The SQL-DDL reducer now reads T-SQL's `ALTER TABLE … ADD CONSTRAINT` family**, the
   shapes Microsoft's own generated scripts use to declare keys: the
   `WITH CHECK` / `WITH NOCHECK` prefix, **any** whitespace run between `ADD` and

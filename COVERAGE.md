@@ -447,11 +447,30 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   the whole table vanished silently, which is strictly worse than an unproven
   one. DW-005, DW-011 and DW-020 are schema-level census judgments and abstain
   the **whole rule** — never a per-table skip, which would silently shrink the
-  census and still emit. DW-020 adds one deliberate refinement the other two do
-  not need: a **partition child is exempt from its gate**, because a child is
-  not in its census in the first place and its unprovenness here is *by
-  construction* rather than a parser failure — gating on it would abstain the
-  rule on precisely the warehouses that **do** partition.
+  census and still emit. **All three** scope that whole-rule gate to their own
+  census **members**, so a declared **partition child is exempt from it**
+  (ADR 0038, generalized by ADR 0039): a child is not in any of their censuses
+  in the first place, and its unprovenness is *by construction* rather than a
+  parser failure, so gating on it abstained those rules on precisely the
+  warehouses that **do** partition. DW-020 shipped with that exemption; DW-005
+  and DW-011 did not, and the cost was **measured**, not reasoned — adding one
+  fact-role partition child to a star made DW-005 stop emitting
+  `dw-no-time-dimension` over it (ADR 0038 §4 recorded that as an open false
+  negative), and a **dimension** partition child, which ADR 0038 believed could
+  never reach DW-011, did the same to `dw-mixed-scd-strategies`. The exclusion
+  is enforced through **one membership predicate per rule**, consulted by both
+  the gate and the census loop (`internal/core/dwrules/census.go`), so a table
+  can never be gated without being censused. Excluding a child from the census
+  is not optional bookkeeping either: a child declares no columns of its own,
+  so counting one would have **fabricated an SCD-1 dimension** for DW-011 and
+  inflated DW-005's fact/dimension lists by one name per partition. DW-005 pays
+  for its own exclusion where the exclusion costs something: a partition child
+  of a **calendar-named parent** still counts as this schema's time dimension
+  (read from `db.Partitioning.Of` through the same name vocabulary the rule
+  already applies), because a warehouse that partitions its calendar and
+  references a specific partition — which every PostgreSQL before 12 required —
+  loses the parent's dimension role to ADR 0033's fan-in gate, and DW-005 would
+  otherwise claim it has no calendar at all.
   A genuinely PK-less table with a proven-complete
   structure still affirms DB-050 at confidence 1.0 — honesty costs nothing here.
   Per-scan, `sensors/db.Result.Note` (reaching the agent through scan-all's
@@ -746,7 +765,24 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     definition); counting one as SCD-1 would fire this rule on essentially
     every correctly built warehouse. The exclusion uses the **same**
     time-dimension test as DW-005 above, so widening one never leaves the other
-    behind. A genuine split between two other dimensions still fires. DW-010 and DW-011 share one history vocabulary, and
+    behind. A genuine split between two other dimensions still fires.
+    **Declared partition children are excluded too**, from DW-005's and
+    DW-011's censuses alike (ADR 0039): a `CREATE TABLE c PARTITION OF p` child
+    declares its bounds and nothing else, so it carries no columns of its own
+    and is a restatement of its parent, not an independent fact or dimension.
+    Counting one would inflate DW-005's lists by one name per partition (a
+    five-year monthly range is 60) and hand DW-011 a dimension with no history
+    markers — an SCD-1 dimension **fabricated out of a partition**, which on a
+    uniformly SCD-2 warehouse is enough to report a mix that does not exist.
+    The same predicate scopes each rule's completeness gate, which is what
+    stopped both rules from going silent on every declaratively partitioned
+    warehouse. DW-005 keeps **one** reading of an excluded child: when the
+    child's **parent** is calendar-named, the schema *has* a time dimension —
+    not a second vocabulary, but the same name test applied to
+    `db.Partitioning.Of`, and it exists because a warehouse that partitions its
+    calendar and has its fact reference a specific partition (required before
+    PostgreSQL 12) loses the parent's dimension role to ADR 0033's fan-in
+    corroboration. DW-010 and DW-011 share one history vocabulary, and
     its **declared limit**: a dimension using a different vocabulary
     (AdventureWorksDW's `DimProduct` uses `StartDate`/`EndDate`/`Status`) reads
     as SCD-1.
@@ -930,7 +966,10 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     **by construction** (`ReasonPartitionChildInheritsStructure`), so gating on
     children would make DW-020 abstain on every declaratively partitioned
     PostgreSQL warehouse — structurally incapable of ever observing its own
-    positive case.
+    positive case. DW-005 and DW-011 now hold to the same idiom through the
+    shared helper in `internal/core/dwrules/census.go` (ADR 0039), which closes
+    the DW-005 false negative ADR 0038 §4 measured and left open, and a DW-011
+    twin that ADR was wrong to rule out.
   - **The schema gate (ADR 0037) needs no special handling and gets none:**
     roles are read from the classification and never re-derived, so a **closed**
     gate leaves every table unclassified, the census comes out empty and the
@@ -949,6 +988,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     (3) A partitioned parent whose foreign keys live on its **children** (the
     PostgreSQL 10 pattern) gets no fan-out of its own, so the corroboration
     gate demotes it to `unclassified` and it never enters the census at all.
+    That third limit is **no longer prose alone**: it is locked through the real
+    parser by `TestDW020_RealParser_PartitionedParentWithFKsOnChildrenOnly_EmitsNothing`
+    (`internal/providers/sqlddl/partition_child_census_integration_test.go`),
+    which asserts the open schema gate, the parent's proven structure, its zero
+    foreign keys, its demotion to `unclassified`, the child's two foreign keys
+    and fact role, and DW-020's resulting silence — so a change to the role
+    heuristic cannot make this paragraph quietly false (ADR 0034 §2.7).
   - **Dogfood status:** every fire and non-fire path is proven **through the
     real parser and the real classifier** on genuine PostgreSQL DDL, never a
     hand-built `db.Table` literal — the uniform-absence positive, the mixed
