@@ -131,13 +131,17 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Internal — no behavior change
 
-- **Schema gate, stage 1: five schema-wide warehouse signals, wired to nothing.** Paradigm
-  detection works bottom-up today, so one table named `dim_status` with fan-in ≥ 1 inside an
-  otherwise transactional schema decides its own silencing of the DB-002/DB-003 1NF surface —
-  the schema gets no vote. `internal/core/paradigm` now computes five independently-named
+- **Schema gate, stage 1: five schema-wide warehouse signals, wired to nothing.**
+  **Superseded within this same unreleased cycle** by "The schema decides before any table gets
+  a warehouse role" under Changed, above: the gate is wired now, and none of the inertness this
+  entry describes still holds. It is kept because the *reason* it was built inert is the reason
+  the verdict could be selected from numbers. Paradigm
+  detection worked bottom-up at the time, so one table named `dim_status` with fan-in ≥ 1 inside an
+  otherwise transactional schema decided its own silencing of the DB-002/DB-003 1NF surface —
+  the schema got no vote. `internal/core/paradigm` computes five independently-named
   signals over the whole schema (`calendar_table`, `surrogate_key_names`, `bulk_load_shape`,
-  `no_audit_timestamps`, `star_topology`) as a first step toward inverting that. **Nothing calls
-  them.** `Detect`, `Resolve` and the sensor's 3NF suppression behave exactly as before, and two
+  `no_audit_timestamps`, `star_topology`) as a first step toward inverting that. **Nothing called
+  them at this point.** `Detect`, `Resolve` and the sensor's 3NF suppression behaved exactly as before, and two
   tests lock that inertness — an AST scan proving no production file references the gate, and a
   behavioral test proving `Detect` does not move on a schema where the gate fires. No new
   capability, nothing to use from `main`, and `COVERAGE.md` is deliberately untouched.

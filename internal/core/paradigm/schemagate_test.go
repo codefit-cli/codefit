@@ -7,8 +7,12 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/paradigm"
 )
 
-// This file locks the SCHEMA GATE signals (stage 1: computed, named, and wired
-// to NOTHING). Every test here asks one question of one signal, and the whole
+// This file locks the SCHEMA GATE's individual SIGNALS — what each one sees,
+// and what it refuses to conclude. The VERDICT those signals feed (which three
+// of the six decide, and what Detect/Resolve do with the answer) is a separate
+// question, locked in schemagate_verdict_test.go.
+//
+// Every test here asks one question of one signal, and the whole
 // set is built around the guard that matters more than any individual signal:
 // NO VACUOUS TRUTHS. Two of the five signals ("no foreign keys", "no audit
 // timestamps") conclude from ABSENCE, and absence is trivially true of an empty
