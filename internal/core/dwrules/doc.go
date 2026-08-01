@@ -14,10 +14,17 @@
 // dimension), DW-010 (SCD-2 without a currency index) and DW-011 (mixed SCD
 // strategies) — without touching that seam. S3 adds DW-021 (fact table with no
 // columnar/analytic index), reasoning over db.Index.Method the parser now
-// populates (index-method-capture, PR #79). DW-020 (partitioning, S4) is NOT
-// here yet and remains declared-not-covered — even though its PARSER FLOOR
-// now exists (db.Table.Partitioning, partition-capture): a field no rule
-// reads is not a check.
+// populates (index-method-capture, PR #79). S4 adds DW-020 (fact tables
+// censused for declared table partitioning), reasoning over the
+// db.Table.Partitioning floor partition-capture laid, and closes the family:
+// All() is seven rules and no DW-0xx rule remains unbuilt.
+//
+// DW-005, DW-011 and DW-020 are SCHEMA-LEVEL: each emits at most ONE item for
+// the whole schema, because each asks a census question ("does this schema
+// have a time dimension at all", "does it mix SCD strategies", "which of its
+// fact tables declare partitioning") whose answer would be N identical copies
+// under a per-table rule. All three therefore abstain as a WHOLE when the
+// census cannot be trusted, never per table (ADR 0034 §2.5).
 //
 // Every rule in this package is SURFACE-only (ADR 0017). A warehouse-modelling
 // choice is a design judgment, not a structurally undeniable defect: an

@@ -79,8 +79,10 @@ stage" — it does **not** claim `0.1.0` is done.
   all), not the rule, so the fix landed at that layer first, on `main`, past this tag
   and still untagged as of this writing; a rule-only DW-021 was then rebuilt from
   scratch and **has since merged to `main`** (still untagged), closing slice S3 and
-  taking `dwrules.All()` to **six** rules. **DW-020 (partitioning) remains open.**
-  Neither DW-021 nor DW-020 has shipped in a *tagged* release
+  taking `dwrules.All()` to **six** rules. **DW-020 (partitioning) has since been
+  built too** — a schema-level census over the `db.Table.Partitioning` floor,
+  closing slice S4 and taking `dwrules.All()` to **seven** rules, with no DW-0xx
+  rule left unbuilt. Neither DW-021 nor DW-020 has shipped in a *tagged* release
   yet — this bullet is history, not current status.
 - **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
   warehouse from a transactional database and audits its modelling: paradigm/table-role
@@ -97,8 +99,9 @@ stage" — it does **not** claim `0.1.0` is done.
   segment at this tag; declared, test-locked, not silent. (Both of that bullet's limits have
   since moved on `main`, past this tag and still untagged as of this writing: `db.Index.Method`
   landed — see the `alpha.2` entry above — the `PARTITION BY`/`PARTITION OF`/T-SQL
-  partition-scheme capture DW-020 was waiting on landed too (`db.Table.Partitioning`; the
-  DW-020 RULE is still not built), and the role vocabulary now recognizes
+  partition-scheme capture DW-020 was waiting on landed too (`db.Table.Partitioning`),
+  **and the DW-020 rule that reads it has since been built as well**, and the role
+  vocabulary now recognizes
   underscore-delimited leading **and** trailing tokens plus separator-free PascalCase, all
   case-insensitively, so Kimball's `FactInternetSales`/`DimCustomer` spelling is recognized;
   all-caps names remain unclassified by design.)

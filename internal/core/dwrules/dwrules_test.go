@@ -128,15 +128,13 @@ func TestAll_RuleIDsAreUniqueAndNonEmpty(t *testing.T) {
 }
 
 // TestAll_RegistersTheDWFamily locks the EXACT rule set built so far — S2 (the
-// star-schema/SCD family) plus S3's DW-021. DW-020 (partitioning, S4) is
-// deliberately ABSENT and must stay declared-not-covered in
-// dbcoverage.go/COVERAGE.md until it is actually built — a rule appearing
-// here before its coverage prose, or coverage prose before the rule, is the
-// exact drift this project's honesty doctrine exists to prevent. (Renamed
-// from TestAll_RegistersTheS2Family: the S2-only name became misleading the
-// moment DW-021 landed.)
+// star-schema/SCD family), S3's DW-021 and S4's DW-020. A rule appearing here
+// before its coverage prose, or coverage prose before the rule, is the exact
+// drift this project's honesty doctrine exists to prevent. (Renamed from
+// TestAll_RegistersTheS2Family: the S2-only name became misleading the moment
+// DW-021 landed.)
 func TestAll_RegistersTheDWFamily(t *testing.T) {
-	want := []string{"DW-001", "DW-002", "DW-005", "DW-010", "DW-011", "DW-021"}
+	want := []string{"DW-001", "DW-002", "DW-005", "DW-010", "DW-011", "DW-020", "DW-021"}
 	got := make([]string, 0, len(dwrules.All()))
 	for _, r := range dwrules.All() {
 		got = append(got, r.ID())
@@ -160,6 +158,7 @@ func TestOwnedCategories_CoversEveryDWRule(t *testing.T) {
 		string(surface.CategoryDWNoTimeDimension),
 		string(surface.CategoryDWSCD2NoCurrencyIndex),
 		string(surface.CategoryDWMixedSCDStrategies),
+		string(surface.CategoryDWFactsNotPartitioned),
 		string(surface.CategoryDWNoColumnarIndex),
 	}
 	got := dwrules.OwnedCategories()

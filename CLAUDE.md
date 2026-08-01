@@ -307,12 +307,16 @@ de oro: se edita la FUENTE, después se espeja.**
   - `internal/core/dbrules/` — las 14 reglas schema-only (`dbrules.All()`), contadas
     contra el código, no contra este archivo: si agregás o quitás una, actualizá el
     número acá en el mismo cambio.
-  - `internal/core/dwrules/` — la familia DW-0xx (star schema / SCD + el chequeo de
-    índice columnar/analítico), que corre DENTRO del sensor DB con la clasificación de
-    paradigma como segundo input. Son **6** reglas hoy (`dwrules.All()`: DW-001, DW-002,
-    DW-005, DW-010, DW-011, DW-021), contadas contra el código igual que `dbrules`: si
-    agregás o quitás una, actualizá el número acá en el mismo cambio. DW-020
-    (particionado) sigue sin construirse.
+  - `internal/core/dwrules/` — la familia DW-0xx (star schema / SCD, el chequeo de
+    índice columnar/analítico y el censo de particionado), que corre DENTRO del sensor
+    DB con la clasificación de paradigma como segundo input. Son **7** reglas hoy
+    (`dwrules.All()`: DW-001, DW-002, DW-005, DW-010, DW-011, DW-020, DW-021), contadas
+    contra el código igual que `dbrules`: si agregás o quitás una, actualizá el número
+    acá en el mismo cambio. La familia está COMPLETA: no queda ninguna DW-0xx sin
+    construir. Tres de ellas — DW-005, DW-011 y DW-020 — son juicios de CENSO a nivel
+    esquema: emiten **un ítem por esquema como máximo**, nunca uno por tabla, y por eso
+    se abstienen como REGLA ENTERA cuando el censo no es confiable (un censo encogido
+    que igual emite es peor mentira que el silencio).
   - `internal/core/paradigm/` — detección de paradigma y rol de tabla, más la
     supresión 3NF que aplica el sensor (`internal/sensors/db/`). Desde ADR 0037 el
     orden está **invertido**: el SCHEMA GATE juzga el esquema ANTES de que ninguna

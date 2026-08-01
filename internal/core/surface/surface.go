@@ -144,9 +144,17 @@ const (
 	// CategoryDWNoColumnarIndex (DW-021, S3 of the RF-03 OLAP closure) — a
 	// fact-role table with no index using a recognized columnar/analytic
 	// access method (db.Index.Method). Same per-rule/one-category convention
-	// as the S2 family above; the DW-020 (partitioning, S4) category is not
-	// added here — that rule is not built yet.
+	// as the S2 family above.
 	CategoryDWNoColumnarIndex Category = "dw-fact-no-columnar-index" // DW-021: fact table with no recognized columnar/analytic index
+
+	// CategoryDWFactsNotPartitioned (DW-020, S4 of the RF-03 OLAP closure) —
+	// the schema's fact tables, censused for declared TABLE partitioning
+	// (db.Table.Partitioning). Same one-category-per-rule convention as the
+	// family above, but note what it does NOT share: DW-020 emits at most ONE
+	// item for the WHOLE SCHEMA, so this category's baseline identity is
+	// schema-level, not table-level. Declared partition CHILDREN are excluded
+	// from the census — see internal/core/dwrules/dw020.go.
+	CategoryDWFactsNotPartitioned Category = "dw-facts-not-partitioned" // DW-020: fact tables censused for declared table partitioning
 
 	// Name-heuristic DB categories (slice 2b) — pure surface (ADR 0017).
 	CategoryDBFKTextType           Category = "db-fk-text-type"          // DB-051: FK typed as text vs a numeric/uuid key
