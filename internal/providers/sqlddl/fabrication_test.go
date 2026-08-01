@@ -26,14 +26,21 @@ import (
 //
 // Per spec Scenario A (CONFIRMED): fabrication gets its OWN disposition — the
 // completeness contract alone does not cover a reducer that believes it
-// succeeded. Design §8c's disposition (narrow the fabrication at its source
-// in applyAlterAction, converting a CONSTRAINT-prefixed remainder to
-// MarkUnproven instead of applyColumn) IS IMPLEMENTED — see reduce.go's
-// applyAlterAction (the leadingKeyword check just before the "ADD "/"ADD
-// COLUMN" branch's default column handling). R1-a/R1-b below assert the
-// CORRECTED, current behavior: Complete=false + an Unreduced entry, no
-// phantom column/key — NOT the CONFIRMED output quoted above, which is
-// preserved here only as the historical record of the branch decision.
+// succeeded. Design §8c's first disposition narrowed the fabrication at its
+// source, converting a CONSTRAINT-prefixed remainder to MarkUnproven instead
+// of applyColumn — an honest abstention, but still a DROP of a constraint the
+// DDL plainly declares.
+//
+// tsql-alter-add-constraint SUPERSEDES that disposition with the real fix:
+// applyAlterAdd dispatches on the item's LEADING KEYWORD, so the whitespace
+// between ADD and CONSTRAINT is irrelevant and every case below now REDUCES
+// correctly. What these tests still lock — and the reason they were kept
+// rather than deleted — is that the phantom column literally named
+// "CONSTRAINT" never comes back: it is the observable signature of the
+// original fabrication, and it is asserted absent in every case.
+//
+// The verbatim CONFIRMED output above is preserved as the historical record
+// of the branch decision; it is no longer this reducer's behavior.
 func TestSQLDDL_R1_FabricationHypothesis(t *testing.T) {
 	const tableDecl = "CREATE TABLE [dbo].[f]([a] [int] NOT NULL,[b] [int] NOT NULL);\nGO\n"
 	parse := func(t *testing.T, src string) db.Table {
@@ -66,52 +73,47 @@ func TestSQLDDL_R1_FabricationHypothesis(t *testing.T) {
 	// modifiers, fabricating a phantom column literally named "CONSTRAINT"
 	// plus a phantom key (see this file's history / commit "test(sqlddl):
 	// settle R1 fabrication hypothesis — CONFIRMED" for the original verbatim
-	// output). Design §8c's disposition — narrowing the fabrication at its
-	// source in applyAlterAction via leadingKeyword(rest), converting it to
-	// MarkUnproven instead of applyColumn — is now implemented, so these
-	// assertions are UPDATED (not loosened) to lock the CORRECTED behavior:
-	// no phantom column/key, Complete=false, one Unreduced entry.
-	t.Run("R1-a: ADD  CONSTRAINT (double space) before a PRIMARY KEY — fabrication FIXED, now recorded as a drop", func(t *testing.T) {
+	// output). Under tsql-alter-add-constraint the keyword-driven dispatch
+	// reduces these correctly, so the assertions are UPDATED (not loosened):
+	// the REAL key is read, the phantom column is still absent, and the table
+	// stays proven because nothing was dropped.
+	t.Run("R1-a: ADD  CONSTRAINT (double space) before a PRIMARY KEY — reduced, not fabricated", func(t *testing.T) {
 		got := parse(t, tableDecl+"ALTER TABLE [dbo].[f] ADD  CONSTRAINT [pk] PRIMARY KEY ([a]);\nGO\n")
-		if len(got.PrimaryKey) != 0 {
-			t.Errorf("PrimaryKey = %v, want empty (no more phantom key)", got.PrimaryKey)
+		if len(got.PrimaryKey) != 1 || got.PrimaryKey[0] != "a" {
+			t.Errorf("PrimaryKey = %v, want [a] — the DDL declares it", got.PrimaryKey)
 		}
 		if hasColumn(got, "CONSTRAINT") {
 			t.Errorf("columns = %v, want no phantom CONSTRAINT column", columnNames(got))
 		}
-		if got.Complete {
-			t.Error("Complete = true, want false — the dropped ADD CONSTRAINT must be recorded, not silently believed complete")
-		}
-		if len(got.Unreduced) != 1 {
-			t.Errorf("Unreduced = %d entries, want 1", len(got.Unreduced))
+		if !got.Complete {
+			t.Errorf("Complete = false, want true — nothing was dropped; Unreduced = %+v", got.Unreduced)
 		}
 	})
 
-	t.Run("R1-b: ADD  CONSTRAINT (double space) before a FOREIGN KEY — fabrication FIXED, now recorded as a drop", func(t *testing.T) {
+	t.Run("R1-b: ADD  CONSTRAINT (double space) before a FOREIGN KEY — reduced, not fabricated", func(t *testing.T) {
 		got := parse(t, tableDecl+"ALTER TABLE [dbo].[f] ADD  CONSTRAINT [fk] FOREIGN KEY ([a]) REFERENCES [dbo].[d]([a]);\nGO\n")
-		if len(got.ForeignKeys) != 0 {
-			t.Errorf("ForeignKeys = %v, want empty (no more phantom FK)", got.ForeignKeys)
+		if len(got.ForeignKeys) != 1 || got.ForeignKeys[0].RefTable != "d" {
+			t.Errorf("ForeignKeys = %+v, want the one declared, referencing d", got.ForeignKeys)
 		}
 		if hasColumn(got, "CONSTRAINT") {
 			t.Errorf("columns = %v, want no phantom CONSTRAINT column", columnNames(got))
 		}
-		if got.Complete {
-			t.Error("Complete = true, want false — the dropped ADD CONSTRAINT must be recorded, not silently believed complete")
+		if !got.Complete {
+			t.Errorf("Complete = false, want true — nothing was dropped; Unreduced = %+v", got.Unreduced)
 		}
 	})
 
-	// R1-c predicts a clean drop: "ADD " (reduce.go:534, re-verified at 4R
-	// repair time — line numbers drift as the file grows) requires a literal
-	// single space, so a tab falls straight to the applyAlterAction default —
-	// no phantom column, no phantom key.
-	t.Run("R1-c: ADD + tab + CONSTRAINT — predicts a clean drop, no fabrication", func(t *testing.T) {
+	// R1-c used to predict a clean DROP, because the old dispatch's "ADD "
+	// prefix required a literal single space and a tab fell straight to the
+	// applyAlterAction default. Keyword dispatch makes the separator
+	// irrelevant, so a tab now reads exactly like a space.
+	t.Run("R1-c: ADD + tab + CONSTRAINT — the separator no longer decides anything", func(t *testing.T) {
 		got := parse(t, tableDecl+"ALTER TABLE [dbo].[f] ADD\tCONSTRAINT [pk] PRIMARY KEY ([a]);\nGO\n")
-		t.Logf("R1-c actual output: PrimaryKey=%v Columns=%v", got.PrimaryKey, columnNames(got))
-		if len(got.PrimaryKey) != 0 {
-			t.Errorf("PrimaryKey = %v, want empty (predicted clean drop per design §8a)", got.PrimaryKey)
+		if len(got.PrimaryKey) != 1 || got.PrimaryKey[0] != "a" {
+			t.Errorf("PrimaryKey = %v, want [a]", got.PrimaryKey)
 		}
 		if hasColumn(got, "CONSTRAINT") {
-			t.Errorf("columns = %v, want no phantom CONSTRAINT column (predicted clean drop per design §8a)", columnNames(got))
+			t.Errorf("columns = %v, want no phantom CONSTRAINT column", columnNames(got))
 		}
 	})
 }

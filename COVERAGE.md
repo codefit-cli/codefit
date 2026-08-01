@@ -656,21 +656,33 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     fire paths of all five rules are proven by **constructed** (declared
     synthetic, ADR 0028) schemas, **not** by real vendored DDL. Microsoft's
     AdventureWorksDW **is** vendored
-    (`testdata/tsql/adventureworksdw_real_objects.sql`, MIT) and still yields
-    **no** DW finding — but for **one** test-locked reason now, not two.
-    The **naming half is closed**: the role-name vocabulary recognizes its
-    PascalCase Kimball spelling (`FactInternetSales`, `DimCustomer`), locked
-    against the **real parsed corpus** by
-    `TestDW_AdventureWorksDW_PascalCaseNaming_IsNowRecognized`, which asserts
-    all three tables reach `Classification.Unprovable` — the public signal
-    that a name **was** recognized and the demotion was structural.
-    What still blocks it: the T-SQL reducer drops the
-    `ALTER TABLE ... ADD CONSTRAINT` shapes this DDL uses, so its three real
-    primary keys and all eight real foreign keys never reach the model at all
-    (see SQL-DDL known limits (6)). With no keys, the corroboration gate has
-    nothing to corroborate with and demotes every recognized name back to
-    `unclassified`. Closing that parser gap is what would let the real corpus
-    carry the fire paths.
+    (`testdata/tsql/adventureworksdw_real_objects.sql`, MIT) and it **is now
+    reached, as vendored**, under Microsoft's own names, with no rename or
+    mutation of any kind — the first time this family measures anything on
+    real third-party warehouse DDL. **Both** of the reasons it used to yield
+    nothing are closed: the **naming** half by the role-name vocabulary (it
+    recognizes the PascalCase Kimball spelling `FactInternetSales` /
+    `DimCustomer`), and the **parser** half by the reducer now reading the
+    `ALTER TABLE ... ADD CONSTRAINT` shapes this DDL uses (see SQL-DDL known
+    limits (6)). Its three real primary keys and all eight real foreign keys
+    are in the model, all three tables are `StructureProven`, the schema
+    classifies `olap`, and the roles come out fact / dimension / dimension —
+    locked positively over the real parsed corpus by
+    `TestDW_AdventureWorksDW_StarIsVisible_AsVendored`.
+    `Classification.Unprovable` is **empty** there now, which is the advance
+    rather than a regression: a recognized name lands in `Unprovable` only
+    while structure cannot corroborate it.
+    **What it actually yields**, stated exactly rather than as a win: of these
+    five S2 rules only **DW-002** fires, twice (`DimCustomer` and `DimDate`),
+    and it fires for a **parser** reason rather than a modelling defect — both
+    keys **are** single-column integer surrogates, but the bracketed T-SQL type
+    name (`[int]`) reads as `TypeUnknown`, so "provably an integer" cannot be
+    satisfied (SQL-DDL known limit (8)). DW-001 does not fire (the fact reaches
+    both vendored dimensions), DW-005 does not fire (`DimDate` is recognized by
+    name), and DW-010/DW-011 do not fire (this excerpt carries no SCD columns).
+    So the corpus proves the family **reaches** real warehouse DDL end to end;
+    it does not yet carry the five rules' positive fire paths, which stay on
+    constructed fixtures per ADR 0028.
   - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
     warehouse concept, so these rules can only classify a Prisma project whose
     models happen to carry a recognized warehouse name.
@@ -752,14 +764,19 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `internal/providers/sqlddl/testdata/
     pg_constructed_unrecognized_index_forms.sql` and
     `dw021_integration_test.go` exercise) confirming the table lands
-    `StructureProven()=false` and DW-021 emits nothing for it. No real
-    vendored warehouse corpus is used for DW-021's dogfood **in this
-    repository** — the same AdventureWorksDW `ALTER … ADD CONSTRAINT` parser
-    limit that keeps the whole DW-0xx family blind to that corpus (see
-    above) applies here too: its PascalCase names **are** now recognized by
-    the role vocabulary, but with no parsed keys the corroboration gate
-    demotes them to `unclassified`, so no fact role ever reaches this rule —
-    but that is a statement about what this
+    `StructureProven()=false` and DW-021 emits nothing for it. DW-021's own
+    fire and trap paths are still proven by **constructed** DDL rather than by
+    a vendored warehouse corpus, but the blindness that used to justify that is
+    **gone**: the two limits described above are closed, so real vendored
+    AdventureWorksDW now classifies `olap`, `FactInternetSales` holds a fact
+    role, and **this rule fires on it** — one `dw-fact-no-columnar-index` item,
+    because that excerpt declares no index at all beyond its primary key
+    (`existing_index_methods` reports the PK, which carries no access method
+    and therefore never satisfies the vocabulary). What the corpus still cannot
+    carry is the **negative** side — it declares no columnstore index, so the
+    suppression path has nothing to exercise there and stays on constructed
+    T-SQL. The statement below about vendoring is therefore narrower than it
+    was, but it still holds: it is a statement about what this
     repository vendors, **not** a claim that no such corpus exists: a
     separate empirical yield measurement (4R review + yield measurement,
     coordinator round) surveyed 22 real public corpora (463 tables, 427
@@ -826,23 +843,25 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (`FactInternetSales`, `DimCustomer` — as Microsoft's own AdventureWorksDW
   does), underscore-delimited **leading and trailing** tokens, and all of them
   **case-insensitively** (the exact vocabulary is in the paradigm entry above).
-  Recognizing a **name** is not promoting a **table**, and AdventureWorksDW is
-  exactly where the two part ways: its names **are** now recognized, but the
-  T-SQL reducer still drops the `ALTER TABLE ... ADD CONSTRAINT` shapes that
-  DDL uses, so with no parsed keys the corroboration gate has nothing to
-  corroborate with and demotes every recognized name back to `unclassified` —
-  those tables surface in `Classification.Unprovable` instead, and no DW rule,
-  DW-021 included, ever evaluates them. What blocks that corpus is a **parser**
-  limit now, not a vocabulary one.
+  Recognizing a **name** is still not promoting a **table** — the
+  corroboration gate is untouched, and a recognized name with no supporting
+  structure lands in `Classification.Unprovable` rather than in a role.
+  AdventureWorksDW used to be the standing example of that split, and it no
+  longer is: the T-SQL reducer now reads the `ALTER TABLE ... ADD CONSTRAINT`
+  shapes that DDL uses, so its keys reach the model, structure corroborates the
+  recognized names, and the corpus classifies `olap` with real fact/dimension
+  roles that the DW rules — DW-021 included — **do** evaluate. Both the
+  vocabulary limit and the parser limit that used to block it are closed.
   What the vocabulary still does **not** recognize, by deliberate design rather
   than oversight: an **all-caps** name (`FACTORY_SETTINGS`, `DIMENSION_CONFIG`)
   — `FACT`+`OR` is genuinely ambiguous, so such a table stays `unclassified`
   and gets no DW value; and a name with **neither** an underscore **nor** a
   PascalCase `Fact`/`Dim` boundary. Both are **false negatives accepted on
   purpose**, since a wrong promotion silences that table's 1NF findings. That
-  residual gap remains a naming-vocabulary limit, not a rule gap, and it is
-  locked as a test against the vendored AdventureWorksDW DDL rather than left
-  silent.
+  residual gap remains a naming-vocabulary limit, not a rule gap, and each
+  spelling it refuses is locked as a test in
+  `internal/core/paradigm/vocabulary_test.go` and
+  `internal/core/paradigm/role_token_test.go` rather than left silent.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
@@ -878,34 +897,46 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (ADR 0034) cannot catch it — the reducer believes it succeeded; the
   completeness contract's own doc comment states this boundary explicitly
   ("`Complete` covers DROPS, not FABRICATIONS") rather than over-promising a
-  guarantee this mechanism does not provide. (6) **Three shapes of
-  `ALTER TABLE ... ADD CONSTRAINT` are dropped** by the reducer, so the keys
-  they declare never reach the model: T-SQL's
+  guarantee this mechanism does not provide. (6) **Closed** as of
+  `tsql-alter-add-constraint`, 2026-07-31 — kept, not deleted, because it names
+  what the reducer now **does** and these shapes were previously declared
+  unparsed here. The reducer **reads** all three T-SQL
+  `ALTER TABLE ... ADD CONSTRAINT` shapes it used to drop: T-SQL's
   `WITH CHECK` / `WITH NOCHECK` prefix (`ALTER TABLE x WITH CHECK ADD
-  CONSTRAINT ...`); any whitespace other than a single space between `ADD` and
-  `CONSTRAINT` (a newline, as formatted DDL commonly writes it); and
-  comma-chained constraint lists (`ADD CONSTRAINT a ..., CONSTRAINT b ...`),
-  where every constraint after the first is lost because it does not repeat
-  `ADD`. Confirmed against real vendored AdventureWorksDW DDL, which uses **all
-  three** — its three real primary keys and all eight real foreign keys are
-  invisible. These three **shapes are still not parsed** (deliberately deferred
-  parser-shape debt, unchanged by `db-model-completeness-contract`) — but the
-  drop is **no longer silent**: each now marks the table's structural
-  completeness (`db.Table.Complete=false`, ADR 0034) and DB-050 **routes** the
-  table to a `db-table-structure-unproven` surface item (the raw unreduced
-  statement plus `file:line`) instead of affirming. Real vendored
-  AdventureWorksDW now yields **zero** DB-050 false affirmations and exactly 3
-  routed surface items, locked in
+  CONSTRAINT ...`); **any** whitespace run between `ADD` and `CONSTRAINT` (a
+  newline, as formatted DDL commonly writes it, plus the two-space and tab
+  forms SSMS emits) — the ADD item is dispatched on its leading **keyword**, so
+  the separator no longer decides anything; and comma-chained constraint lists
+  (`ADD CONSTRAINT a ..., CONSTRAINT b ...`), whose later items repeat no verb
+  and are read as further items of the same `ADD`. The SSMS **tails** are read
+  too: a `WITH (PAD_INDEX = OFF, ...)` option list and an `ON [PRIMARY]`
+  filegroup clause after the column list are ignored without derailing the
+  constraint, and the option list's own commas are never mistaken for the
+  constraint separator. T-SQL's standalone `CHECK CONSTRAINT` /
+  `NOCHECK CONSTRAINT` statement (SSMS emits one after every generated foreign
+  key) is a **declared, recognized skip** — it only enables or disables
+  checking of an existing constraint, so it can never declare a key, an index
+  or a column, and no longer demotes its table to unproven. Measured against
+  real vendored AdventureWorksDW DDL, which uses **all three** shapes: 3
+  tables, **3/3 `StructureProven`**, its three real primary keys and all eight
+  real foreign keys in the model, **zero** routed
+  `db-table-structure-unproven` items and an **empty** completeness note.
+  Locked in `internal/providers/sqlddl/tsql_alter_add_constraint_test.go` and
   `internal/providers/sqlddl/dw_integration_test.go`
-  (`TestDB050_AdventureWorksDW_NoFalseAffirmation_RoutesToSurfaceInstead`).
-  Separately, the same investigation found and **closed** a related but
-  distinct defect: a non-single-space `ADD`/`CONSTRAINT` (e.g. "`ADD  CONSTRAINT`",
-  two spaces) used to hit the generic "`ADD `" column branch and **fabricate** a
-  phantom column/key literally named "`CONSTRAINT`" rather than dropping
-  cleanly — this fabrication path is now recognized at its source and converted
-  into a recorded drop exactly like the three shapes above; it does not gain new
-  parsing support, it stops inventing data. Locked in
-  `internal/providers/sqlddl/fabrication_test.go`. (7) **Narrowed** as of
+  (`TestDB050_AdventureWorksDW_KeysAreRead_NothingAffirmedOrRouted`). The
+  related **fabrication** this investigation had previously converted into a
+  recorded drop — a non-single-space `ADD`/`CONSTRAINT` (e.g.
+  "`ADD  CONSTRAINT`", two spaces) hitting the generic "`ADD `" column branch
+  and inventing a phantom column/key literally named "`CONSTRAINT`" — is now
+  **reduced correctly** instead of abstained on; the phantom column's absence
+  stays asserted in `internal/providers/sqlddl/fabrication_test.go`. In its
+  place a **narrower floor** is enforced at the constraint level: a
+  `PRIMARY KEY` / `UNIQUE` / `FOREIGN KEY` / `KEY` / `INDEX` constraint whose
+  parenthesized column list cannot be **read** (absent, unbalanced, or empty)
+  is **not** reduced to a silently empty key — it marks the table unproven
+  (ADR 0034), because a silently empty `PrimaryKey` is exactly what DB-050
+  reads as "declares no primary key" and would affirm an absence the reducer
+  merely failed to read. (7) **Narrowed** as of
   `index-method-capture`, 2026-07-31: `reCreateIndex` now **does** parse an
   anonymous PostgreSQL index (`CREATE INDEX ON t (...)`, no index name —
   PostgreSQL generates the name) and T-SQL's ordinary `CREATE [UNIQUE]
@@ -943,7 +974,33 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `USING` position), and
   `internal/providers/sqlddl/tsql_ordinary_index_completeness_test.go` (the
   now-recognized T-SQL `CLUSTERED`/`NONCLUSTERED` form, deliberately flipped
-  to its opposite, now-correct outcome).
+  to its opposite, now-correct outcome). (8) A **bracketed T-SQL type name is
+  not mapped**: the tokenizer canonicalizes `[int]` to `"int"` (quoting is
+  canonicalized for identifiers, and a type name sits in an identifier
+  position) while the T-SQL type vocabulary is keyed on the bare word, so the
+  lookup misses and the column's neutral type falls back to `db.TypeUnknown`.
+  That is the honest fallback the DB-050 entry already describes, never a wrong
+  type — but it is a **real blind spot on the exact form Microsoft's own
+  generated scripts use for every column** (`[CustomerKey] [int] IDENTITY(1,1)
+  NOT NULL`). Measured consequence, on the vendored AdventureWorksDW corpus
+  **as vendored** (no rename needed any more — see the DW S2 entry above):
+  DW-002 fires on **both** `DimCustomer` and `DimDate` even though
+  `CustomerKey` and `DateKey` **are** single-column integer surrogates, because
+  "provably an integer" cannot be satisfied by a type that read as unknown.
+  Those two items are this limit's cost, stated where the agent will meet it.
+  The vendored T-SQL golden fixture writes its types **unbracketed** (`INT`),
+  which is why this stayed invisible until a real Microsoft script was parsed
+  end to end. **Not fixed** as of `tsql-alter-add-constraint` (a type-vocabulary
+  change with its own blast radius, deliberately out of that slice's scope) —
+  recorded here rather than left silent. (9) **Two `CREATE TABLE` statements
+  with no separator** between them (neither `;` nor a `GO` batch line) reduce to
+  only the **first** table, and the loss is **silent**: the second table simply
+  does not exist in the model, the first is left `StructureProven`, and nothing
+  is recorded in `Schema.Unreduced` or the completeness note. T-SQL makes the
+  statement terminator optional, so this is valid input, not malformed DDL.
+  Like limit (5), this is a case `db.Table.Complete` cannot catch — the reducer
+  never sees the statement it lost. Measured, not inferred; **not fixed** as of
+  `tsql-alter-add-constraint` (a tokenizer change, out of that slice's scope).
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

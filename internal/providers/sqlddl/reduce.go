@@ -412,13 +412,8 @@ func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 	up := strings.ToUpper(item)
 	kw := leadingKeyword(item)
 	switch {
-	case strings.HasPrefix(up, "CONSTRAINT "):
-		// strip "CONSTRAINT <name>" then treat the rest as a table constraint
-		rest := strings.TrimSpace(item[len("CONSTRAINT "):])
-		if sp := strings.IndexAny(rest, " \t\n("); sp >= 0 {
-			rest = strings.TrimSpace(rest[sp:])
-		}
-		b.applyTableConstraint(t, rest, pos)
+	case kw == "CONSTRAINT":
+		b.applyTableConstraint(t, stripConstraintName(item), pos)
 	case strings.HasPrefix(up, "PRIMARY KEY"), strings.HasPrefix(up, "UNIQUE"),
 		strings.HasPrefix(up, "FOREIGN KEY"), strings.HasPrefix(up, "CHECK"),
 		strings.HasPrefix(up, "EXCLUDE"), strings.HasPrefix(up, "PARTITION"):
@@ -473,22 +468,25 @@ func (b *builder) isInlineKeyIndexForm(item string) bool {
 	return !isType
 }
 
-// isAddKeyIndexForm reports whether an ALTER TABLE action is the "ADD
-// KEY|INDEX|FULLTEXT KEY|SPATIAL KEY ... (cols)" secondary-index shorthand
-// rather than a column named KEY/INDEX/FULLTEXT/SPATIAL being added (MySQL
-// allows omitting COLUMN, e.g. "ADD key varchar(255)"). Same TypeMap-driven
-// discriminator as isInlineKeyIndexForm.
-func (b *builder) isAddKeyIndexForm(act string) bool {
-	up := strings.ToUpper(act)
-	if !strings.HasPrefix(up, "ADD ") {
-		return false
+// stripConstraintName removes the "CONSTRAINT <name>" preamble from a named
+// table constraint, returning the constraint BODY ("PRIMARY KEY (a)",
+// "FOREIGN KEY (a) REFERENCES t (b)", …). item must already be known to lead
+// with the CONSTRAINT keyword. The separator is ANY whitespace or '(' — not a
+// literal single space — because T-SQL's own generated scripts wrap a long
+// constraint over several lines ("CONSTRAINT [pk] PRIMARY KEY CLUSTERED\n(\n
+// [a]\n)").
+//
+// An item that is nothing BUT "CONSTRAINT <name>" (no body at all) is
+// returned UNCHANGED rather than blanked: the text is what
+// applyTableConstraint's honest-abstention floor records for the agent to
+// read, and blanking it would hand the agent an empty claim.
+func stripConstraintName(item string) string {
+	rest := strings.TrimSpace(item[len(leadingKeyword(item)):])
+	sp := strings.IndexAny(rest, " \t\n(")
+	if sp < 0 {
+		return item
 	}
-	rest := act[len("ADD "):]
-	kw := leadingKeyword(rest)
-	if kw != "KEY" && kw != "INDEX" && kw != "FULLTEXT" && kw != "SPATIAL" {
-		return false
-	}
-	return b.isInlineKeyIndexForm(strings.TrimSpace(rest))
+	return strings.TrimSpace(rest[sp:])
 }
 
 // leadingKeyword extracts the first table-item keyword: the run of
@@ -509,18 +507,47 @@ func leadingKeyword(s string) string {
 	return strings.ToUpper(s[:i])
 }
 
+// applyTableConstraint reduces ONE table-constraint body (the text AFTER any
+// "CONSTRAINT <name>" preamble) into the neutral model. It is shared by every
+// path that can carry a constraint — a CREATE TABLE body item
+// (applyTableItem) and an ALTER TABLE ... ADD item (applyAlterAdd) — and by
+// every dialect; it must therefore stay dialect-free CODE.
+//
+// FABRICATION GUARD (tsql-alter-add-constraint): the key-declaring forms all
+// read their columns from a BALANCED parenthesized list (parenCols). When
+// that list cannot be read at all — absent, unbalanced, or empty — the
+// constraint is NOT reduced to a silently empty key/index: it falls to the
+// honest-abstention floor (MarkUnproven, ADR 0034), the same floor a
+// constraint form the dispatch does not recognize already uses. A silently
+// empty PrimaryKey is not a neutral no-op — it is the exact input DB-050
+// reads as "this table declares no primary key", so it would AFFIRM an
+// absence over DDL the reducer merely failed to read: the very class of false
+// affirmation the completeness contract exists to prevent.
 func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 	up := strings.ToUpper(strings.TrimSpace(c))
 	kw := leadingKeyword(c)
 	switch {
 	case strings.HasPrefix(up, "PRIMARY KEY"):
-		t.PrimaryKey = parenCols(c)
-	case strings.HasPrefix(up, "UNIQUE"):
-		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: true, Method: indexMethodOutsideParens(c)})
-	case strings.HasPrefix(up, "FOREIGN KEY"):
-		if fk, ok := parseForeignKey(c, pos); ok {
-			t.ForeignKeys = append(t.ForeignKeys, fk)
+		cols := parenCols(c)
+		if len(cols) == 0 {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, c, pos)
+			return
 		}
+		t.PrimaryKey = cols
+	case strings.HasPrefix(up, "UNIQUE"):
+		cols := parenCols(c)
+		if len(cols) == 0 {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, c, pos)
+			return
+		}
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: cols, Unique: true, Method: indexMethodOutsideParens(c)})
+	case strings.HasPrefix(up, "FOREIGN KEY"):
+		fk, ok := parseForeignKey(c, pos)
+		if !ok {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, c, pos)
+			return
+		}
+		t.ForeignKeys = append(t.ForeignKeys, fk)
 	case kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL":
 		// MySQL inline KEY/INDEX/FULLTEXT KEY/SPATIAL KEY shorthand (task
 		// I4b) — recorded as a plain (non-unique) index by its base columns.
@@ -529,7 +556,12 @@ func (b *builder) applyTableConstraint(t *db.Table, c string, pos db.Pos) {
 		// either before the column list (index_type) or after it
 		// (index_option) — indexMethodOutsideParens reads either position,
 		// same convention as the standalone CREATE INDEX capture site.
-		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: parenCols(c), Unique: false, Method: indexMethodOutsideParens(c)})
+		cols := parenCols(c)
+		if len(cols) == 0 {
+			t.MarkUnproven(db.ReasonUnreducedTableStatement, c, pos)
+			return
+		}
+		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: cols, Unique: false, Method: indexMethodOutsideParens(c)})
 	case kw == "CHECK" || kw == "EXCLUDE" || kw == "PARTITION":
 		// Declared, RECOGNIZED skips (ADR 0018) — known not to be a
 		// key/index/column, so this is NOT incompleteness. Recording these
@@ -599,9 +631,110 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 	}
 	// offset of the action group within the statement, for per-action line numbers
 	actOff := strings.Index(st.text, m[2])
-	for _, p := range splitTopLevelParts(m[2]) {
+	// inAddList tracks whether the part just applied was an ADD whose item
+	// list a following comma-separated part CONTINUES. "ALTER TABLE t ADD a,
+	// b" is ONE ADD taking a list — the later items repeat no verb — while
+	// "ALTER TABLE t ADD a, DROP b" is two independent actions. Only a part
+	// whose own leading keyword names a constraint form is ever read as a
+	// continuation (isAddListContinuation); anything else ends the list and is
+	// dispatched as its own action exactly as before, so no dialect that
+	// repeats the verb per action is affected.
+	inAddList := false
+	for i, p := range splitTopLevelParts(m[2]) {
 		line := st.line + strings.Count(st.text[:actOff+p.off], "\n")
-		b.applyAlterAction(t, strings.TrimSpace(p.text), db.Pos{File: file, Line: line})
+		pos := db.Pos{File: file, Line: line}
+		act := strings.TrimSpace(p.text)
+		if i == 0 {
+			act = trimWithCheckPrefix(act)
+		}
+		switch {
+		case leadingKeyword(act) == "ADD":
+			inAddList = true
+			b.applyAlterAdd(t, strings.TrimSpace(act[len("ADD"):]), pos)
+		case inAddList && isAddListContinuation(act):
+			b.applyAlterAdd(t, act, pos)
+		default:
+			inAddList = false
+			b.applyAlterAction(t, act, pos)
+		}
+	}
+}
+
+// trimWithCheckPrefix removes T-SQL's "WITH CHECK" / "WITH NOCHECK" preamble
+// from an ALTER TABLE action group ("ALTER TABLE t WITH CHECK ADD CONSTRAINT
+// …" — the shape Microsoft's own generated scripts, including
+// AdventureWorksDW's, use for every key they declare). The preamble only
+// states whether existing rows are validated against the constraint being
+// added; it declares nothing itself, so dropping it leaves the ADD action
+// underneath to be dispatched normally.
+//
+// Nothing else is trimmed: an action group starting with WITH but NOT
+// followed by CHECK/NOCHECK is returned unchanged and reaches the dispatch
+// as-is, where an unrecognized form still falls to the abstention floor.
+func trimWithCheckPrefix(act string) string {
+	if leadingKeyword(act) != "WITH" {
+		return act
+	}
+	rest := strings.TrimSpace(act[len("WITH"):])
+	switch kw := leadingKeyword(rest); kw {
+	case "CHECK", "NOCHECK":
+		return strings.TrimSpace(rest[len(kw):])
+	default:
+		return act
+	}
+}
+
+// isAddListContinuation reports whether a comma-separated ALTER TABLE part is
+// a further ITEM of the preceding ADD rather than an action of its own — i.e.
+// whether it leads with a constraint keyword instead of an action verb. The
+// vocabulary is deliberately narrow (constraint forms only): a bare column
+// definition continuing an "ADD a int, b int" list is NOT claimed here, so it
+// keeps falling to the abstention floor rather than being guessed at.
+func isAddListContinuation(act string) bool {
+	switch leadingKeyword(act) {
+	case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyAlterAdd reduces ONE item of an ALTER TABLE ADD list — the text AFTER
+// the ADD verb, or a comma-continuation item of the same list. It dispatches
+// on the item's own LEADING KEYWORD rather than on a fixed-spacing prefix
+// ("ADD CONSTRAINT" with exactly one space, as this dispatch used to), so any
+// whitespace run between the verb and the item — the newline T-SQL scripts
+// wrap long constraints with, SSMS's double space, a tab — reads identically.
+//
+// The fabrication narrowing this replaces (design §8c, spec "R1 — Fabrication
+// Hypothesis") is not lost, it is SUBSUMED: every constraint keyword R1
+// diverted to the abstention floor because the prefix match had missed it is
+// now dispatched to applyTableConstraint, which reduces it when it can read
+// the column list and falls to that same floor when it cannot. No path here
+// can reach applyColumn with a constraint keyword in hand, which is what
+// produced the phantom column literally named "CONSTRAINT".
+func (b *builder) applyAlterAdd(t *db.Table, item string, pos db.Pos) {
+	kw := leadingKeyword(item)
+	switch {
+	case kw == "CONSTRAINT":
+		b.applyTableConstraint(t, stripConstraintName(item), pos)
+	case kw == "PRIMARY" || kw == "UNIQUE" || kw == "FOREIGN" || kw == "CHECK" || kw == "EXCLUDE":
+		b.applyTableConstraint(t, item, pos)
+	case (kw == "KEY" || kw == "INDEX" || kw == "FULLTEXT" || kw == "SPATIAL") && b.isInlineKeyIndexForm(item):
+		// ADD KEY idx (cols) / ADD INDEX idx (cols) / ADD FULLTEXT KEY (cols) /
+		// ADD SPATIAL KEY (cols) — MySQL's secondary-index shorthand via ALTER
+		// TABLE. Same TypeMap-driven discriminator as applyTableItem's inline
+		// case: without it, a column legitimately named key/index would be
+		// misread as an index (Unit I rework, C2).
+		b.applyTableConstraint(t, item, pos)
+	default:
+		rest := trimPrefixFold(item, "COLUMN")
+		rest = trimPrefixFold(rest, "IF NOT EXISTS")
+		name, _ := firstToken(rest)
+		if hasColumn(t, normalizeName(name)) {
+			return // idempotent add
+		}
+		b.applyColumn(t, rest, pos)
 	}
 }
 
@@ -625,64 +758,48 @@ func isAlterActionRecognizedSkip(up string) bool {
 	return false
 }
 
+// applyAlterAction dispatches ONE non-ADD ALTER TABLE action. ADD actions and
+// their comma-continuation items are routed by applyAlterTable to
+// applyAlterAdd before reaching here.
 func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 	up := strings.ToUpper(act)
 	switch {
-	case strings.HasPrefix(up, "ADD CONSTRAINT"):
-		rest := strings.TrimSpace(act[len("ADD CONSTRAINT"):])
-		if sp := strings.IndexAny(rest, " \t\n("); sp >= 0 {
-			rest = strings.TrimSpace(rest[sp:])
-		}
-		b.applyTableConstraint(t, rest, pos)
-	case strings.HasPrefix(up, "ADD PRIMARY KEY"), strings.HasPrefix(up, "ADD UNIQUE"), strings.HasPrefix(up, "ADD FOREIGN KEY"):
-		b.applyTableConstraint(t, strings.TrimSpace(act[len("ADD"):]), pos)
-	case b.isAddKeyIndexForm(act):
-		// ADD KEY idx (cols) / ADD INDEX idx (cols) / ADD FULLTEXT KEY (cols) /
-		// ADD SPATIAL KEY (cols) — MySQL's secondary-index shorthand via
-		// ALTER TABLE. Unit I rework (C2 MINOR): the generic "ADD " column
-		// branch below previously turned this into a phantom column literally
-		// named "KEY". Same parenthesized-column-list discriminator as
-		// applyTableItem's inline case.
-		b.applyTableConstraint(t, strings.TrimSpace(act[len("ADD"):]), pos)
-	case strings.HasPrefix(up, "ADD COLUMN"), strings.HasPrefix(up, "ADD "):
-		rest := strings.TrimSpace(act[len("ADD"):])
-		// R1 disposition (design §8c, spec "R1 — Fabrication Hypothesis",
-		// CONFIRMED): a non-single-space ADD/CONSTRAINT (e.g. "ADD  CONSTRAINT")
-		// still lands here because "ADD " only needs ONE space to match. Before
-		// treating the remainder as a column, check whether it is actually a
-		// constraint form the dispatch above MISSED (its own leading keyword
-		// says so) — narrowing the fabrication at its source converts it into a
-		// recorded drop, which the completeness contract then covers, instead
-		// of inventing a phantom column/key literally named "CONSTRAINT".
-		if kw := leadingKeyword(rest); kw == "CONSTRAINT" || kw == "PRIMARY" || kw == "UNIQUE" || kw == "FOREIGN" || kw == "CHECK" {
-			t.MarkUnproven(db.ReasonUnreducedTableStatement, act, pos)
-			return
-		}
-		rest = trimPrefixFold(rest, "COLUMN")
-		rest = trimPrefixFold(rest, "IF NOT EXISTS")
-		name, _ := firstToken(rest)
-		if hasColumn(t, normalizeName(name)) {
-			return // idempotent add
-		}
-		b.applyColumn(t, rest, pos)
 	case strings.HasPrefix(up, "DROP COLUMN"), strings.HasPrefix(up, "DROP "):
 		rest := strings.TrimSpace(act[len("DROP"):])
 		rest = trimPrefixFold(rest, "COLUMN")
 		rest = trimPrefixFold(rest, "IF EXISTS")
 		name, _ := firstToken(rest)
 		dropColumn(t, normalizeName(name))
-	case isAlterActionRecognizedSkip(up):
+	case isAlterActionRecognizedSkip(up), isConstraintCheckToggle(act):
 		// ALTER COLUMN / RENAME / OWNER / ENABLE / DISABLE / CLUSTER / SET /
 		// RESET / VALIDATE / NO … — declared, RECOGNIZED skips (N2): known
 		// not to declare a key/index/column, so this is NOT incompleteness.
 	default:
 		// A genuinely UNRECOGNIZED alter action — the dispatch does not know
 		// what this declares, so it cannot rule out a key/index (D2 site 5,
-		// design §2). This is the dominant chokepoint: AdventureWorksDW's
-		// WITH CHECK ADD / newline-ADD / comma-chained CONSTRAINT shapes all
-		// land here.
+		// design §2).
 		t.MarkUnproven(db.ReasonUnreducedTableStatement, act, pos)
 	}
+}
+
+// isConstraintCheckToggle reports whether an ALTER TABLE action is T-SQL's
+// "CHECK CONSTRAINT <name>|ALL" / "NOCHECK CONSTRAINT <name>|ALL" — a
+// declared, RECOGNIZED skip: it only enables or disables constraint CHECKING
+// on a constraint that already exists, so it can never declare a key, an
+// index or a column. SSMS emits one after every foreign key it generates, so
+// without this a T-SQL script would demote each of its tables to unproven for
+// a statement that says nothing about structure.
+//
+// It is matched by leading KEYWORDS, not by the alterActionRecognizedSkips
+// prefix list, for two reasons: "NOCHECK" is not covered by that list's "NO "
+// entry (no space follows NO), and a bare "CHECK" prefix there would also
+// swallow a genuine "CHECK (expr)" form — this requires CONSTRAINT to follow.
+func isConstraintCheckToggle(act string) bool {
+	kw := leadingKeyword(act)
+	if kw != "CHECK" && kw != "NOCHECK" {
+		return false
+	}
+	return leadingKeyword(strings.TrimSpace(act[len(kw):])) == "CONSTRAINT"
 }
 
 // markUnrecognizedIndexShape attributes a genuinely unrecognized CREATE
