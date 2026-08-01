@@ -25,13 +25,27 @@
 -- gives FactInternetSales its real fan-out, and the DDL parser is structural —
 -- it does not resolve cross-object references at parse time.
 --
--- DECLARED LIMIT this fixture PROVES (it is here for the honest negative as
--- much as for the positive): AdventureWorksDW uses PascalCase Kimball naming
--- (FactInternetSales, DimCustomer), while codefit's S1 table-role detection
--- recognizes only the snake_case prefixes fact_/dim_/stg_/mart_ (locked
--- decision A5, ADR 0033). So EVERY table in this file classifies as
--- "unclassified" and NO DW-0xx rule fires on it as written. That gap is
--- test-locked, not silent — see internal/providers/sqlddl/dw_integration_test.go.
+-- WHAT THIS FIXTURE PROVES TODAY: the star is visible AS VENDORED, under
+-- Microsoft's own names, with no rename or mutation. This header used to
+-- declare the opposite — that PascalCase Kimball naming
+-- (FactInternetSales, DimCustomer) went unrecognized and that therefore every
+-- table classified "unclassified" with NO DW-0xx rule firing. BOTH limits
+-- behind that are now closed: the role-name vocabulary recognizes the
+-- separator-free PascalCase spelling, and the reducer reads the
+-- ALTER TABLE ... ADD CONSTRAINT shapes this DDL uses, so its 3 primary keys
+-- and 8 foreign keys reach the model and corroborate the recognized names.
+-- Measured here: 3 tables, 3/3 StructureProven, paradigm olap,
+-- FactInternetSales -> fact and DimCustomer/DimDate -> dimension.
+-- Test-locked, not prose — see
+-- internal/providers/sqlddl/dw_integration_test.go
+-- (TestDW_AdventureWorksDW_StarIsVisible_AsVendored).
+--
+-- The limit that DOES remain on this corpus is a different one, one layer
+-- down: its bracketed T-SQL type names ([int], [nvarchar](50)) do not match
+-- the type vocabulary, so all 74 of its columns read as db.TypeUnknown. That
+-- is why DW-002 fires on DimCustomer and DimDate even though both keys really
+-- are single-column integer surrogates. Declared in the coverage manifest,
+-- not silent.
 --
 -- License: MIT (Microsoft SQL Server Sample Code)
 --   Copyright (c) Microsoft Corporation. All rights reserved.

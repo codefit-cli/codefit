@@ -24,27 +24,29 @@
 // It parses a DECLARED SUBSET; everything outside (CHECK constraints, ON DELETE
 // actions, partial-index WHERE, CREATE TYPE, ALTER COLUMN, all DML) is
 // skip-and-declared, each locked by a test. View/Procedure/Trigger are populated
-// with Name/Pos (and Table for triggers); their bodies, view columns, and the
-// materialized flag are NOT captured — a declared limit for the future
-// DB-020..041 rules. No SQL parsing library is used (CGO_ENABLED=0).
+// with Name/Pos (and Table for triggers) AND with their BODY (db.Body{Text,
+// Complete}), which is what the DB-020/030/031/040/041 rules read; view columns
+// and the materialized flag are still NOT captured — a declared limit. No SQL
+// parsing library is used (CGO_ENABLED=0).
 //
-// Known limit (Unit I rework, disclosed not silent): codefit does not model
-// stored-procedure/trigger routine BODIES. For MySQL, a body wrapped by the
-// client-tool "DELIMITER //" ... "DELIMITER ;" convention is handled
-// correctly — split.go's DELIMITER tracking keeps the whole body as ONE
-// statement, so it is captured by the routine/trigger HEAD regex and no
+// Routine bodies, and how the two dialect families get there (disclosed, not
+// silent): for MySQL, a body wrapped by the client-tool "DELIMITER //" ...
+// "DELIMITER ;" convention is kept as ONE statement by split.go's DELIMITER
+// tracking, so it is captured by the routine/trigger HEAD regex and no
 // body-internal fragment is ever reduced as its own top-level statement. For
-// T-SQL, a GO-batched routine/trigger body has no such protection (its
-// internal ';'s terminate normally, each becoming its own statement); a body
-// fragment that happens to be CREATE-TABLE-shaped MAY therefore surface as a
-// spurious top-level table. An earlier "inRoutineBody" guard tried to
-// speculatively suppress this by matching BEGIN/END as raw text, but that
-// guard was itself unsound — it matched BEGIN/END inside string literals,
-// was not depth-counted (a nested BEGIN...END closed it early), and was
-// never reset between files (a stuck-open guard from one file could swallow
-// a later file's real tables) — real regressions on VALID input. It has been
-// removed; the T-SQL routine-body case is now a documented, rare limit
-// rather than a fragile guard. Separately, the "GO" batch-separator
+// T-SQL, the body is captured to the "GO" batch separator (or EOF) per ADR
+// 0027, so a CREATE-TABLE-shaped fragment inside a GO-batched routine body is
+// ABSORBED into that body rather than surfacing as a spurious top-level table
+// — which closes the phantom-table limit ADR 0022 had declared. The trade ADR
+// 0027 accepted is the opposite shape: a T-SQL routine with NO trailing GO
+// swallows whatever follows it up to EOF. An earlier "inRoutineBody" guard
+// tried to suppress the phantom speculatively by matching BEGIN/END as raw
+// text, but that guard was itself unsound — it matched BEGIN/END inside
+// string literals, was not depth-counted (a nested BEGIN...END closed it
+// early), and was never reset between files (a stuck-open guard from one file
+// could swallow a later file's real tables) — real regressions on VALID
+// input. It was removed and replaced by the batch-boundary capture above,
+// which is structural rather than speculative. Separately, the "GO" batch-separator
 // recognition (split.go) requires the ENTIRE trimmed line to be exactly
 // "GO", so it cannot match part of a longer identifier — but it also means a
 // column literally named "go" standing alone on its own line (vanishingly
