@@ -78,7 +78,9 @@ stage" — it does **not** claim `0.1.0` is done.
   4R traced the unsoundness to the PARSER (it could not read index access methods at
   all), not the rule, so the fix landed at that layer first, on `main`, past this tag
   and still untagged as of this writing; a rule-only DW-021 was then rebuilt from
-  scratch on a new branch. Neither DW-021 nor DW-020 has shipped in a tagged release
+  scratch and **has since merged to `main`** (still untagged), closing slice S3 and
+  taking `dwrules.All()` to **six** rules. **DW-020 (partitioning) remains open.**
+  Neither DW-021 nor DW-020 has shipped in a *tagged* release
   yet — this bullet is history, not current status.
 - **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
   warehouse from a transactional database and audits its modelling: paradigm/table-role
