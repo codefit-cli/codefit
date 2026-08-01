@@ -2,6 +2,16 @@
 
 **Status:** Accepted · **Date:** 2026-07-30 · **Phase:** 2 (`db-model-completeness-contract`)
 
+**Refined (2026-08-01) by
+[ADR 0038](0038-partition-child-exempt-from-the-structural-completeness-gate.md):**
+§2.5's whole-rule census abstention is scoped to a rule's census MEMBERS. A
+declared PostgreSQL partition child is unproven BY CONSTRUCTION
+(`db.ReasonPartitionChildInheritsStructure`, added after this ADR), with no parser
+failure involved, and DW-020 excludes it from both its census and its gate through
+one shared predicate. Everything below still holds as written; 0038 adds the case
+this ADR's four reasons did not anticipate — unprovenness that is not a measurement
+failure.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares
