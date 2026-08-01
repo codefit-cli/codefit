@@ -307,10 +307,16 @@ de oro: se edita la FUENTE, después se espeja.**
   - `internal/core/dbrules/` — las 14 reglas schema-only (`dbrules.All()`), contadas
     contra el código, no contra este archivo: si agregás o quitás una, actualizá el
     número acá en el mismo cambio.
-  - `internal/core/dwrules/` — la familia DW-0xx (star schema / SCD), que corre
-    DENTRO del sensor DB con la clasificación de paradigma como segundo input.
+  - `internal/core/dwrules/` — la familia DW-0xx (star schema / SCD + el chequeo de
+    índice columnar/analítico), que corre DENTRO del sensor DB con la clasificación de
+    paradigma como segundo input. Son **6** reglas hoy (`dwrules.All()`: DW-001, DW-002,
+    DW-005, DW-010, DW-011, DW-021), contadas contra el código igual que `dbrules`: si
+    agregás o quitás una, actualizá el número acá en el mismo cambio. DW-020
+    (particionado) sigue sin construirse.
   - `internal/core/paradigm/` — detección de paradigma y rol de tabla, más la
-    supresión 3NF que aplica el sensor (`internal/sensors/db/`).
+    supresión 3NF que aplica el sensor (`internal/sensors/db/`). Desde ADR 0037 el
+    orden está **invertido**: el SCHEMA GATE juzga el esquema ANTES de que ninguna
+    tabla reciba rol de warehouse; el paradigma ya no se deriva bottom-up de los roles.
   - `internal/core/crossrules/` — el cruce código×schema (DB-010/DB-013), que corre
     fuera del sensor, solo en `scan-all`, y cuyas categorías se unen al scope del
     baseline de db (ADR 0019/0029).
@@ -338,8 +344,13 @@ de oro: se edita la FUENTE, después se espeja.**
   lo correcto. Es la fuente la que sirve `codefit-coverage` al agente: si miente, el
   agente le cree.
 - **Espejo 2º nivel:** `COVERAGE.md`, para humanos, mantenido a mano (no hay generador;
-  verificado: sin `go:generate`, ningún `.go` emite markdown). Su encabezado promete
-  auto-generación futura que no existe — claim stale, verificar la línea antes de tocar.
+  re-verificado en `docs/phase-2-documentation-sync`: sin `go:generate`, ningún `.go`
+  emite markdown). Su encabezado YA NO promete auto-generación — esa promesa stale se
+  removió; hoy el encabezado declara la cadena de 3 niveles y dice explícitamente que no
+  hay generador. Lo que SÍ había que corregir ahí era otra cosa: llamaba "source of truth"
+  a `coverage.go`, que es espejo-a-mano, no fuente pura — el drift un nivel más abajo que
+  esta misma tabla advierte. Corregido en la misma pasada, junto al doc comment de
+  `internal/providers/typescript/coverage.go`, que repetía el mismo claim.
 
 | Doc | Rol | Cadencia | Notas |
 |-----|-----|----------|-------|

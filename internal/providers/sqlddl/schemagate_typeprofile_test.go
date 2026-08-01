@@ -177,9 +177,16 @@ func TestSchemaGate_TypeProfileSplit_DoesNotFireOnRealOLTPDDL(t *testing.T) {
 // TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes locks the
 // measured cause of the reference warehouse's abstention, which is NOT the
 // ALTER TABLE parser gap the rest of the DW family hits: AdventureWorksDW
-// brackets its type names, the T-SQL type map never matches them, and all 359
-// of its columns parse as db.TypeUnknown. The signal fails closed on that, and
-// this test is what says so with real DDL rather than with a claim.
+// brackets its type names, the T-SQL type map never matches them, and its
+// columns parse as db.TypeUnknown. TWO DIFFERENT CORPORA, two different
+// numbers, kept apart on purpose: the corpus THIS repository vendors
+// (testdata/tsql/adventureworksdw_real_objects.sql, a 3-table excerpt)
+// measures 74 of 74 columns unclassified; the FULL upstream install script,
+// which is NOT vendored here, measures 359 of 359 (that is the figure ADR
+// 0036 and schemagate.go's maxUnclassifiedPct cite). Either way the share is
+// 100%, which is the only property this test rests on. The signal fails
+// closed on that, and this test is what says so with real DDL rather than
+// with a claim.
 //
 // Only the FACT table is bracketed here. Its three dimensions declare the same
 // T-SQL types WITHOUT brackets, so they type normally and the text pole is

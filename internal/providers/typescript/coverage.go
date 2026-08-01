@@ -6,8 +6,12 @@ import (
 )
 
 // CoverageManifest declares, in plain prose, what codefit audits for TypeScript
-// and how — the single source for the human-facing COVERAGE.md and the
-// codefit-coverage tool (PRD §10, RF-07). The two categories that split between
+// and how — what the codefit-coverage tool serves and what the human-facing
+// COVERAGE.md mirrors (PRD §10, RF-07). It is NOT itself the root source: the
+// rules (rules/<lang>/, internal/sensors/, and the DB dimension's four rule
+// roots) are, and this manifest is a HAND-MAINTAINED mirror of them that has to
+// be verified against them before it is edited. Calling it the source is how
+// drift returns one level down. The two categories that split between
 // a deterministic rule and mapped surface (ADR 0004) appear in BOTH lists, each
 // side describing exactly what it covers, so an evaluator reads a division of
 // labor, not a gap.

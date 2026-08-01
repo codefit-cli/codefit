@@ -5,16 +5,21 @@ detected deterministically (codefit **affirms** it), what is mapped as surface
 for the agent to reason (codefit **asks**), and what is **not covered** at all —
 so a blind spot is *declared and known*, never silent (PRD §10).
 
-> Source of truth: the per-provider manifest in code
-> (`internal/providers/<lang>/coverage.go`, exposed by the `codefit-coverage`
-> tool as JSON), composed with the neutral DB dimension's own coverage source
-> (`internal/core/dbcoverage/dbcoverage.go`, schema-driven and
-> language-independent — appended into every provider's manifest, never
-> duplicated per provider). This file is a **hand-maintained mirror** of that
-> composed manifest for human reading — the MCP server has landed, but
-> `codefit-coverage` returns JSON, not markdown, so this file is kept in sync
-> manually whenever the in-code manifest changes. Today only the
-> **TypeScript** provider has a full manifest.
+> **The truth chain has three levels, and this file is the last one.** The
+> ROOT source is the rules themselves — `rules/<lang>/`, the sensors in
+> `internal/sensors/`, and the DB dimension's four rule roots
+> (`internal/core/dbrules/`, `internal/core/dwrules/`, `internal/core/paradigm/`,
+> `internal/core/crossrules/`). Those are what codefit actually detects.
+> The manifests in code — `internal/core/dbcoverage/dbcoverage.go` (the neutral,
+> language-independent DB dimension) and `internal/providers/<lang>/coverage.go`
+> (which composes it by `append`, never duplicating it) — are **hand-maintained
+> mirrors of those rules**, not pure sources; they are verified against the rule
+> roots before they are edited. This file is a further **hand-maintained mirror**
+> of the composed manifest, for human reading: `codefit-coverage` serves the
+> in-code manifest to an agent as JSON, and there is **no generator** for this
+> markdown (no `go:generate`, no `.go` that emits it), so it is kept in sync by
+> hand whenever the manifest changes. Edit in that order — rules, then manifest,
+> then this file. Today only the **TypeScript** provider has a full manifest.
 
 ## TypeScript / Next.js / Express / Fastify / NestJS / Prisma
 
@@ -526,6 +531,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `bulk_load_shape` fired on **nothing** across all 26, and the other two
     fired 6/5 and 6/5, near coin flips that carry almost no information and are
     exactly what forces a counting threshold up.
+  - **What that measurement could NOT show, stated rather than implied.** Not
+    **one** of the 13 transactional corpora had a table promoted to a warehouse
+    role before the gate existed, so not one of them exhibits the hazard the
+    gate closes (a lone `dim_`-named table silencing its own 1NF findings inside
+    an otherwise OLTP schema). The corpus set therefore demonstrates the gate's
+    **cost** and **cannot** demonstrate its **benefit** — the benefit is shown
+    **by construction**, in the positive control and in
+    `TestSchemaGate_MovesDetect` over the exact `dim_status` shape ADR 0035
+    identified. The cost, by contrast, is measured: see the DW `NotCovered`
+    entry, where `dw-barousse` — a real warehouse — loses 10 roles and 2 DW-021
+    items because its calendar is spelled `dim_date_month`.
   - **What a closed gate does.** No table in that schema receives a warehouse
     role at all, the schema folds to `oltp`, and the roles that *would* have
     been assigned are **reported**, never dropped silently.
@@ -1074,6 +1090,20 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   Like limit (5), this is a case `db.Table.Complete` cannot catch — the reducer
   never sees the statement it lost. Measured, not inferred; **not fixed** as of
   `tsql-alter-add-constraint` (a tokenizer change, out of that slice's scope).
+  (10) **Two `CREATE TABLE` statements whose schema-qualified names differ only
+  by schema** (`bronze.orders` and `silver.orders`) **collapse into one table**:
+  the reducer keys the model on the **bare** table name, so the second statement
+  targets the table the first created and the columns unique to the second never
+  enter the model. **Unlike limit (9), this loss is *not* silent**, and the
+  difference is the whole point: the colliding statement is recorded in that
+  table's `Unreduced` list and the table is marked `Complete=false`, so `DB-050`
+  **routes** it to `db-table-structure-unproven` and `DB-001`/`DB-052` plus all
+  six `DW-0xx` rules **abstain** rather than reading the merged shape as fact.
+  Measured through the real parser, not inferred: three `CREATE TABLE`
+  statements across `bronze`/`silver`/`gold` reduce to **two** tables, the
+  surviving `orders` carrying only the **first** statement's columns. **Not
+  fixed:** keying the model by schema-qualified name is a neutral-model change
+  (`db.Table` would have to carry its schema), deliberately outside this slice.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

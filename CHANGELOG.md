@@ -14,6 +14,56 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **DW-021 — a fact table with no columnar/analytic index**, the sixth rule in
+  `dwrules.All()` and the close of slice S3. A fact-role table with no index using a
+  recognized columnar/analytic access method is emitted as **surface, never an
+  affirmation** (ADR 0017): whether the absence matters depends on the table's real size
+  and query pattern, which codefit cannot see from static DDL. The vocabulary lives in
+  exactly one place (`dwrules.columnarIndexMethods`) and the agent-facing prose is derived
+  from that same map rather than restated: PostgreSQL contributes `brin`, T-SQL
+  contributes `columnstore`, MySQL contributes **nothing** (its only methods, `btree` and
+  `hash`, are ordinary row-store methods). PostgreSQL's `gin`/`gist`/`spgist` are
+  **deliberately excluded** — they are specialized lookup structures, not column-store or
+  analytic-scan ones, and admitting one while rejecting its two siblings would have been
+  an arbitrary cut. Gated per table on `db.Table.StructureProven()` (ADR 0034), which is
+  the whole mechanism that makes the rule dialect-agnostic: any statement that *could*
+  have declared the very columnar index the rule asks about already marks its table
+  incomplete, so the single gate abstains with no per-dialect branch in `dw021.go`.
+  **Prisma is not zero-value here**, unlike its DW-001/002/005/010/011 siblings:
+  `@@index([col], type: Brin)` genuinely suppresses the rule, proven end to end through the
+  real Prisma provider. **Measured yield:** across 22 real public corpora (463 tables, 427
+  FKs, 771 indexes) DW-021 fires unmodified on **3** — the only DW-0xx rule that fires on
+  unmodified real third-party DDL. It also fires on the vendored AdventureWorksDW
+  (`FactInternetSales`, one item), which declares no index beyond its primary key.
+- **The neutral index model carries its declared access method** (`db.Index.Method`), the
+  parser floor DW-021 reads. Captured, lowercased at every site for one convention across
+  dialects: PostgreSQL's `USING <method>` before the column list; MySQL's `USING
+  BTREE|HASH` in the **different** post-column-list position, and the same clause on the
+  **inline** and `ALTER TABLE ADD` table-constraint forms in either grammar position;
+  T-SQL's `CLUSTERED`/`NONCLUSTERED` ordinary-index kind; and T-SQL's
+  `CREATE [CLUSTERED] COLUMNSTORE INDEX`, parsed by its **own** dedicated regex (a
+  genuinely different statement shape carrying no column list) and captured as
+  `columnstore` with `Columns` left **empty**, never synthesized — that statement names no
+  column in its own grammar, and inventing one would misrepresent the source. Prisma's
+  `@@index(..., type: X)` is captured the same way, verbatim and only lowercased,
+  deliberately **not** validated against any codefit-maintained vocabulary. **Empty means
+  "no access method declared in source"** and is never defaulted to a guessed `btree`.
+  **Declared boundary:** a PostgreSQL **expression** index (`ON t (lower(email))`) stays
+  out of scope — making the index name optional widened the grammar enough to also match
+  an expression index's outer parens, which without a guard would have truncated at the
+  first nested `)` and **fabricated** a phantom column from the truncated expression text.
+  The column-list span is now verified against `balancedParen`, and a mismatch routes the
+  statement to honest abstention rather than silent fabrication.
+- **`CREATE INDEX`-family shapes the dispatch cannot recognize are now recorded** instead
+  of being dropped without trace, so the completeness contract (ADR 0034) marks the
+  affected table unproven rather than letting an absence-based rule conclude from parser
+  silence. This closed the standalone `FULLTEXT`/`SPATIAL`/`XML`/`PRIMARY XML` forms and
+  PostgreSQL's `ON ONLY` clause, and corrected a **wrong reason** previously attributed to
+  phantom tables — a mis-attributed reason is its own dishonesty, since the note is what
+  the agent reads to decide what was not measured.
+
 ### Fixed
 
 - **The SQL-DDL reducer now reads T-SQL's `ALTER TABLE … ADD CONSTRAINT` family**, the
@@ -36,6 +86,17 @@ All notable changes to codefit are documented here. The format is based on
   list is absent, unbalanced or empty now marks the table unproven (ADR 0034) instead of
   reducing to `PrimaryKey: []` — the exact input `DB-050` reads as "declares no primary
   key", which would have affirmed an absence the reducer merely failed to read.
+- **A zero-column index is rendered honestly instead of as a bare `[]`.** A T-SQL
+  `CLUSTERED COLUMNSTORE INDEX` legitimately carries no columns, and DB-001's
+  `existing_indexes` signal printed it as the literal `[]` — indistinguishable from a
+  rendering bug or from "no index at all", while hiding the `Method`, the one fact the
+  agent needs to judge whether an ordered index is still warranted. It now reads
+  `(covers all columns) method=<name>`. Index **coverage** semantics are unchanged: a
+  columnstore still never satisfies an ordered-prefix lookup, so DB-001 correctly keeps
+  asking about an uncovered FK on such a table — only the rendering was dishonest.
+  Relatedly, `DB-011a` (exact-duplicate index) no longer keys duplicate detection on an
+  empty column list, which would have reported two *different* zero-column indexes as
+  "duplicates another index on the same columns `[]`" — a claim with no content.
 
 ### Changed
 
@@ -277,8 +338,10 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
 - **Dogfood status.** All five rules' fire and trap paths are proven by constructed,
   declared-synthetic schemas (ADR 0028). Microsoft's AdventureWorksDW **is** vendored
   (MIT) and yielded no DW finding, for two independent test-locked reasons at this
-  release: its PascalCase names, and a pre-existing T-SQL reducer gap. (The naming half
-  was closed after this tag — see *Unreleased*; the reducer gap remains.)
+  release: its PascalCase names, and a pre-existing T-SQL reducer gap. (**Both halves
+  were closed after this tag, and neither is in a tagged release yet** — the naming one
+  by the widened role vocabulary and the reducer one by the `ALTER TABLE … ADD
+  CONSTRAINT` fix; see *Unreleased*.)
 
 ### Known issues
 
@@ -288,7 +351,9 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
   consequence is that **DB-050 — a deterministic affirmation at certainty 1.0 — reports
   three tables as having no primary key over DDL that plainly declares one for each.**
   Not introduced here and not fixed here; documented in the coverage manifest and locked
-  by tests written to go red once the reducer is fixed.
+  by tests written to go red once the reducer is fixed. (**Fixed after this tag, still
+  untagged** — see *Unreleased*. Those two limit-locks did go red and were replaced by a
+  single positive lock over the real corpus, `TestDW_AdventureWorksDW_StarIsVisible_AsVendored`.)
 
 ### Not yet covered (Phase 2.5 remainder)
 

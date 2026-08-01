@@ -30,10 +30,12 @@ import (
 // real fact/dimension roles, locked by
 // TestDW_AdventureWorksDW_StarIsVisible_AsVendored in
 // internal/providers/sqlddl/dw_integration_test.go. What that corpus still
-// does NOT carry is the per-rule fire paths: of these five rules only DW-002
-// fires on it, and it fires for a parser reason (the bracketed [int] type
-// reads as unknown), so the positive and TRAP (negative) cases below stay
-// constructed for each rule.
+// does NOT carry is the per-rule fire paths: of the five S2 rules
+// (DW-001/002/005/010/011) only DW-002 fires on it, and it fires for a parser
+// reason (the bracketed [int] type reads as unknown), so the positive and TRAP
+// (negative) cases below stay constructed for each rule. (S3's DW-021 does
+// fire on that corpus — one dw-fact-no-columnar-index item — but it is not one
+// of the five this file's family covers.)
 
 // dwtbl builds a positioned table.
 func dwtbl(name string, cols ...db.Column) db.Table {

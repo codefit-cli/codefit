@@ -109,8 +109,14 @@ func TestVocabulary_SingleLetterPrefixes(t *testing.T) {
 
 // TestVocabulary_PascalCaseKimball locks the no-separator PascalCase form
 // (FactInternetSales / DimCustomer) that Microsoft's own AdventureWorksDW
-// uses — the corpus THIS REPOSITORY vendors and that dbcoverage.go currently
-// declares as a known blind spot.
+// uses — the corpus THIS REPOSITORY vendors, and the naming half of the two
+// limits that used to keep that corpus silent. Both are closed now (the
+// parser half by the T-SQL ALTER TABLE ... ADD CONSTRAINT reducer), so
+// dbcoverage.go no longer declares it a blind spot; it records the reach
+// instead. What dbcoverage.go still declares as a blind spot on this corpus
+// is a DIFFERENT limit one layer down — the bracketed T-SQL type name
+// ([int]) reading as db.TypeUnknown, which is a type-vocabulary gap, not a
+// naming one.
 //
 // Lowercasing alone cannot reach it: "factinternetsales" does not carry the
 // "fact_" prefix. The discriminator is PascalCase's own signal — the

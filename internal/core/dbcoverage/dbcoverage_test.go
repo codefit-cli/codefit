@@ -139,10 +139,11 @@ var ruleIDToken = regexp.MustCompile(`\bD[BW]-[0-9]+[a-z]?\b`)
 // every rule-ID-shaped token the manifest MENTIONS in Deterministic()/
 // Reasoning() must be either a REGISTERED rule, or ALSO named in
 // NotCovered() — the legitimate way to describe a not-yet-built rule (e.g.
-// DW-020/DW-021, which Reasoning names as future work and NotCovered
-// explicitly declares not covered). A token that is neither is a phantom
-// capability: prose describing a rule that does not exist and is not
-// declared absent either.
+// DW-020, the partitioning check, which Reasoning names as future work and
+// NotCovered explicitly declares not covered; DW-021 took the OTHER branch
+// when it shipped in S3 and is now a registered rule). A token that is
+// neither is a phantom capability: prose describing a rule that does not
+// exist and is not declared absent either.
 func TestManifest_NoPhantomCapability(t *testing.T) {
 	registered := map[string]bool{}
 	for _, id := range registeredIDs() {
