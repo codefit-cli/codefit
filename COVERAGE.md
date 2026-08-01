@@ -500,10 +500,45 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   the SQL-DDL known limits below (item 7) for the narrower set of
   `CREATE INDEX`-family shapes still genuinely unread after this slice.
 - **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
-  tables (S1, RF-03 OLAP closure).** codefit computes a schema's **paradigm**
+  tables (S1, RF-03 OLAP closure; inverted to top-down by the **schema gate**,
+  ADR 0037).** codefit computes a schema's **paradigm**
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
   `dimension` | `staging` | `mart` | `unclassified`) as a pure function of the
-  schema: the table **name** is the **primary** signal, corroborated by **real
+  schema — and it asks the **schema** first.
+  - **The schema gate, and why it exists.** 3NF-suppression (below) reads the
+    **per-table** role, so before ADR 0037 a single table named `dim_status`
+    with one inbound foreign key, sitting in an otherwise purely transactional
+    schema, could silence its own DB-002/DB-003 1NF findings. The schema got no
+    vote. It votes first now: before any role is assigned, codefit evaluates
+    **six** schema-wide warehouse signals, reports every one that fired, and
+    lets **three** of them decide.
+  - **The verdict.** A schema is a warehouse **iff any one** of `calendar_table`
+    (a dedicated calendar/date/time table is declared), `surrogate_key_names`
+    (the `_sk` convention — 3+ such columns across 2+ tables) or
+    `type_profile_split` (column types split into a numeric-dominated pole plus
+    several text-dominated ones) fires. **Measured, not reasoned:** over 26
+    public corpora (13 analytic / 13 transactional, pinned in ADR 0036) those
+    three fired 8/0, 3/0 and 3/0 warehouse-to-transactional — **zero** false
+    positives — and requiring one of them identifies **9 of 13** warehouses,
+    where counting instead ("any 3 of the 6") identifies only **5** at the same
+    precision. The other three — `bulk_load_shape`, `no_audit_timestamps`,
+    `star_topology` — are still computed and still **reported**, and never vote:
+    `bulk_load_shape` fired on **nothing** across all 26, and the other two
+    fired 6/5 and 6/5, near coin flips that carry almost no information and are
+    exactly what forces a counting threshold up.
+  - **What a closed gate does.** No table in that schema receives a warehouse
+    role at all, the schema folds to `oltp`, and the roles that *would* have
+    been assigned are **reported**, never dropped silently.
+  - **Declared consequence of the no-vacuous-truths floor:** a schema of **fewer
+    than 3 tables** is never judged, so it can never qualify. An explicit
+    `database.paradigm` is the escape hatch.
+  - **An open gate is permission, not a classification.** The vendored
+    AdventureWorksDW opens the gate on `calendar_table` and still classifies
+    `oltp`, because the T-SQL `ALTER TABLE` parser gap leaves it key-less and
+    the corroboration gate below demotes every recognized name anyway.
+
+  **Inside a schema that qualifies**, role assignment is exactly as it was:
+  the table **name** is the **primary** signal, corroborated by **real
   relational structure** — a fact candidate needs foreign-key fan-out to 2+
   distinct tables, a dimension candidate needs to be **referenced** (fan-in) by
   at least one other table. A lone single-column surrogate primary key is
@@ -547,7 +582,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
   `database.paradigm` defaults to `"auto"` (detection decides); an
   **explicit** `oltp`/`olap`/`mixed` value in `.codefit.yaml` **always wins**
-  over detection — developer autonomy is innegotiable. This slice's first
+  over detection — developer autonomy is innegotiable — and that now includes
+  **outranking the schema gate, in one direction only** (ADR 0037). An explicit
+  `olap` or `mixed` is the developer **asserting** this is a warehouse, so it
+  **restores** every role a closed gate withheld: leaving them withheld would
+  hand the whole DW-0xx family an empty role map and run **zero** warehouse
+  rules over a schema the developer just declared to be one. An explicit `oltp`
+  restores **nothing** — manufacturing a warehouse role there would overrule the
+  developer in the one direction that **silences** findings. The gate's evidence
+  survives either override unchanged, and codefit keeps "codefit judged this a
+  warehouse" and "you told codefit this is a warehouse" apart when it reports.
+  This slice's first
   consumer: DB-002 (multivalued column) and DB-003 (repeating groups) — still
   schema-only, deterministic 1NF checks, unchanged in shape — are
   **suppressed** for fact/dimension/mart-role tables under auto detection or
@@ -557,7 +602,16 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   any detected role — the identical shape still fires exactly as before this
   slice. Suppression is never silent: when items are withheld, the note
   records how many and on how many tables, plus the `database.paradigm: oltp`
-  escape hatch to see them. The DW-0xx partitioning rule is **not yet built**
+  escape hatch to see them. **The gate is not silent either**, in either
+  direction: when it **closes** over a schema that names warehouse tables, the
+  note states how many roles were withheld and from which tables (bounded to
+  five names plus a count), names the three deciding signals it looked for and
+  did not find, and names `database.paradigm: olap` (or `mixed`) as the escape
+  hatch — this is the state a developer could not otherwise discover, since the
+  visible consequence is 1NF items that *would* have been suppressed simply
+  appearing; when it **opens**, the note names *which* deciding signals opened
+  it, or says plainly that an explicit setting did. Both traces stay empty when
+  the gate changed nothing. The DW-0xx partitioning rule is **not yet built**
   (see Not covered, below); the star-schema/SCD half landed in S2 — next
   entry — and the columnar/analytic-index check landed in S3 — the entry
   after that.
@@ -862,6 +916,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   spelling it refuses is locked as a test in
   `internal/core/paradigm/vocabulary_test.go` and
   `internal/core/paradigm/role_token_test.go` rather than left silent.
+  A **second, larger false-negative class** was accepted with the schema gate
+  (ADR 0037), and it is **measured** rather than estimated: because no table
+  gets a warehouse role inside a schema showing none of the three deciding
+  signals, **4 of the 13 analytic corpora measured** (`dw-kenap`, `dw-ngthao`,
+  `tpch`, `dw-barousse`) get **no DW-0xx evaluation at all** under auto
+  detection. Only `dw-barousse` actually lost output to it — 10 roles and 2
+  DW-021 items — and it lost them to a limit **already declared above** rather
+  than a new one: its calendar is spelled `dim_date_month`, and the calendar
+  signal recognizes only a role token plus exactly `date`/`time`/`calendar`.
+  One line of `database.paradigm: olap` restores every one of these schemas in
+  full.
 - **Express/Fastify handler passed by reference.** A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler

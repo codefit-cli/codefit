@@ -39,6 +39,38 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Changed
 
+- **The schema decides before any table gets a warehouse role.** Detection was bottom-up: each
+  table earned a role from its name plus local corroboration, and the schema's paradigm folded
+  out of those roles. Because 3NF-suppression reads the **per-table** role, one table named
+  `dim_status` with a single inbound foreign key could silence its own DB-002/DB-003 1NF
+  findings inside an otherwise purely transactional schema — the schema got no vote. It votes
+  first now: codefit evaluates six schema-wide warehouse signals **before** assigning any role,
+  and a schema that does not qualify gets **no** fact/dimension/staging/mart role at all.
+  **The verdict is measured, not reasoned** (26 public corpora, 13 analytic / 13 transactional):
+  a schema is a warehouse iff **any one** of `calendar_table`, `surrogate_key_names` or
+  `type_profile_split` fires — the three that measured 8/0, 3/0 and 3/0 warehouse-to-
+  transactional, zero false positives, identifying 9 of 13 warehouses. Counting all six instead
+  ("any 3") identifies only 5 at the same precision, because `bulk_load_shape` fired on nothing
+  at all and `no_audit_timestamps`/`star_topology` are near coin flips (6/5 each). All six stay
+  computed and **reported**; only three vote. Measured over the same 26 corpora, this changed
+  exactly **one** of them — `dw-barousse`, a **warehouse**, whose calendar is spelled
+  `dim_date_month` and so misses an already-declared limit of the calendar signal. **No
+  transactional corpus was affected, and not one DB-002/DB-003 item changed state anywhere**:
+  under `auto` the post-gate role map is always a subset of the pre-gate one, so suppression can
+  only ever decrease. See ADR 0037.
+- **`database.paradigm` outranks the schema gate, in one direction only.** An explicit `olap` or
+  `mixed` is the developer asserting this **is** a warehouse, so it **restores** every role a
+  closed gate withheld — otherwise the whole DW-0xx family would receive an empty role map and
+  run zero warehouse rules over a schema the developer just declared to be one. An explicit
+  `oltp` restores **nothing**: manufacturing a role there would overrule the developer in the one
+  direction that silences findings.
+- **The gate is never silent.** When it closes over a schema that names warehouse tables, the DB
+  sensor's note states how many roles were withheld and from which (bounded), names the three
+  deciding signals it looked for and did not find, and names `database.paradigm: olap` as the
+  escape hatch — otherwise the only visible consequence is 1NF items that *would* have been
+  suppressed simply appearing, which looks like nothing happened. When it opens, the note names
+  **which** signals opened it, or says plainly that an explicit setting did. Both stay empty when
+  the gate changed nothing.
 - **Table-role detection recognizes the naming real warehouses actually use.** An empirical
   yield measurement over 22 real public corpora found the DW-0xx family measuring near-zero
   because of its **name vocabulary**, not its rule logic: it matched four snake_case prefixes
