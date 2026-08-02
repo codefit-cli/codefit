@@ -170,8 +170,8 @@ All notable changes to codefit are documented here. The format is based on
   - **28 vendored corpora, zero delta** — tables, proven counts, columns, keys,
     indexes, views, routines, triggers, every emitted item and the whole scan note are
     identical before and after; the measurement was proven sensitive by positive
-    control. **No corpus could have caught this**, which is its own finding: all 29 are
-    UTF-8 with no mark. Three authored twins under `internal/sensors/db/testdata/` are
+    control. **No corpus could have caught this**, which is its own finding: all 28
+    of them were UTF-8 with no mark. Three authored twins under `internal/sensors/db/testdata/` are
     the only control.
 - **A `CREATE … TABLE` head no branch can reduce no longer evaporates** — the
   `CREATE TABLE` family gets the honest-abstention floor `reIndexShapedHead` has

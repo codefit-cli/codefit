@@ -1,8 +1,11 @@
 # `internal/sensors/db/testdata` — the encoding twins
 
 Three files, one schema. They exist because **no other corpus in this repository
-could catch an encoding regression**: all 29 vendored `.sql`/`.prisma` files are
-UTF-8 with no byte-order mark (measured, not assumed).
+could catch an encoding regression**: all 28 that predate them are UTF-8 with no
+byte-order mark, measured in Go over every `.sql`/`.prisma` in the tree (three
+`rg` probes written for this were found broken first — an invalid-UTF-8 pattern
+exiting 2, an empty `$'\x00'` pattern matching every file, and a BOM pattern that
+did not fire on a file that has one).
 
 | file | bytes | what it locks |
 |---|---|---|

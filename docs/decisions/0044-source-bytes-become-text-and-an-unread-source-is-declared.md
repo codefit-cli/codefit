@@ -226,7 +226,7 @@ cross.
   correctly encoded file in the repository is. The measurement was proven
   sensitive by positive control (a sentinel row diffs).
 - **No corpus could have caught a regression here**, which is its own finding:
-  every vendored `.sql` and `.prisma` is UTF-8 without a mark. Three authored
+  all 28 were UTF-8 with no byte-order mark. Three authored
   fixtures are the only control — `internal/sensors/db/testdata/twin_utf8.sql`
   and its two UTF-16LE twins — and they live under the SENSOR, not the parser,
   because that is where the decode is.
