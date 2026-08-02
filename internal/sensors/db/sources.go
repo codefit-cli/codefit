@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/providers"
 )
 
@@ -18,6 +19,15 @@ import (
 // path that is a file is read as-is. Order across entries is config order; within a
 // directory it is Flyway version order. A configured-but-unreadable path is a hard
 // error (a real misconfiguration, not "no DB").
+//
+// Bytes become TEXT here, through sourcetext.Decode, and this is the right layer
+// for it by ADR 0014's own division: the parser is filesystem-free and receives
+// text, while a byte-order mark is a property of the FILE, not of the SQL in it.
+// Before this, a pg_dump written under PowerShell (UTF-16LE with a mark) reached
+// the tokenizer as NUL-interleaved bytes and produced a schema with zero of
+// everything and no complaint. The decoded content is what is stored in the
+// content map too, so snippets, fingerprints and file:line positions are all
+// computed against the same text the parser saw.
 func readSchemaSources(root string, paths []string) ([]providers.SourceFile, map[string][]byte, error) {
 	var sources []providers.SourceFile
 	content := map[string][]byte{}
@@ -26,13 +36,14 @@ func readSchemaSources(root string, paths []string) ([]providers.SourceFile, map
 		if err != nil {
 			return fmt.Errorf("reading schema %q: %w", abs, err)
 		}
+		text, _ := sourcetext.Decode(data)
 		rel, relErr := filepath.Rel(root, abs)
 		if relErr != nil {
 			rel = abs
 		}
 		rel = filepath.ToSlash(rel)
-		sources = append(sources, providers.SourceFile{Path: rel, Content: data})
-		content[rel] = data
+		sources = append(sources, providers.SourceFile{Path: rel, Content: text})
+		content[rel] = text
 		return nil
 	}
 
