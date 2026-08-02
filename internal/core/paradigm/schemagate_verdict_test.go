@@ -14,8 +14,11 @@ import (
 // decides, and it locks BOTH halves of the split:
 //
 //   - a schema is a warehouse iff ANY ONE of calendar_table,
-//     surrogate_key_names, type_profile_split fires (measured 8/0, 3/0 and 3/0
-//     over 26 corpora — zero transactional false positives, ADR 0037);
+//     surrogate_key_names, type_profile_split fires (measured 9/0, 3/0 and 4/0
+//     over 26 corpora — zero transactional false positives across the NINE of
+//     the 13 transactional corpora that have parseable tables; the other four
+//     parse to zero tables and are refused below minJudgeableTables, so they
+//     could not have produced one. ADR 0037, re-measured 2026-08-02);
 //   - bulk_load_shape, no_audit_timestamps and star_topology are still COMPUTED
 //     and still REPORTED, and can never open the gate on their own.
 //
@@ -148,8 +151,9 @@ func TestGateOpeningTables_ActuallyOpenTheGate(t *testing.T) {
 }
 
 // TestWarehouseEvidence_EachDecidingSignalQualifiesAlone locks the "ANY ONE"
-// half. Requiring one of these three reaches 9 of 13 real warehouses with zero
-// transactional false positives; requiring two reaches 4.
+// half. Requiring one of these three reaches 10 of 13 real warehouses with zero
+// false positives over the nine transactional corpora that have parseable
+// tables; requiring two reaches 5.
 func TestWarehouseEvidence_EachDecidingSignalQualifiesAlone(t *testing.T) {
 	cases := []struct {
 		name   string

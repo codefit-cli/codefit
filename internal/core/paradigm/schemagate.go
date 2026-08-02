@@ -80,19 +80,33 @@ var allSignals = []struct {
 
 // decidingSignals are the ONLY signals that can open the gate, and the split is
 // measured, not reasoned. Over 26 public corpora (13 analytic / 13
-// transactional, pinned in ADR 0036) each of these three fired on warehouses
-// and on NO transactional schema at all — 8/0, 3/0 and 3/0 — while the three
-// excluded signals measured:
+// transactional, pinned in ADR 0036; re-measured on main 2026-08-02) each of
+// these three fired on warehouses and on NO transactional schema at all —
+// 9/0, 3/0 and 4/0 — while the three excluded signals measured:
 //
 //	bulk_load_shape       0 W / 0 O — fired on NOTHING; empirically inert
-//	no_audit_timestamps   6 W / 5 O — a coin flip; carries almost no information
-//	star_topology         6 W / 5 O — same, and it fires on any OLTP join table
+//	no_audit_timestamps   9 W / 5 O — a coin flip; carries almost no information
+//	star_topology         7 W / 5 O — same, and it fires on any OLTP join table
 //
-// Requiring ANY ONE of the three below identifies 9 of 13 warehouses with zero
-// false positives. The obvious alternative, "any 3 of the 6", identifies 5 of 13
+// Requiring ANY ONE of the three below identifies 10 of 13 warehouses with zero
+// false positives. The obvious alternative, "any 3 of the 6", identifies 6 of 13
 // at the SAME zero false positives — strictly worse recall for the same
 // precision, because the two coin-flip signals are exactly what forces a
 // counting threshold that high.
+//
+// WHAT THAT ZERO RESTS ON, because the denominator is not what it looks like:
+// FOUR of the 13 corpora in the transactional column parse to ZERO tables (three
+// vendor only views/procedures/triggers; jaffle-shop-dbt's dbt models are
+// SELECTs, not DDL). Below minJudgeableTables a schema can never qualify BY
+// CONSTRUCTION — see judgeable — so those four are structurally incapable of
+// producing a false positive and are not evidence of precision. The claim these
+// three signals actually earn is ZERO FALSE POSITIVES ACROSS NINE transactional
+// corpora with parseable tables. On the recall side, tpch is filed analytic but
+// is TPC-H's deliberately normalized order-entry schema (no date dimension, no
+// _sk vocabulary, no numeric-dominated table): a shut gate is the CORRECT answer
+// there, not a miss. Excluding it, shape-based analytic recall is 10 of 12, and
+// the two genuine misses are dw-barousse and dw-ngthao. See ADR 0036
+// §"Re-measurement (2026-08-02)" for the per-corpus attribution.
 //
 // THE OTHER THREE ARE STILL COMPUTED AND STILL REPORTED (see
 // WarehouseEvidence.Fired). They remain evidence a consuming agent may want to

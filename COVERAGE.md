@@ -567,17 +567,30 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     (the `_sk` convention — 3+ such columns across 2+ tables) or
     `type_profile_split` (column types split into a numeric-dominated pole plus
     several text-dominated ones) fires. **Measured, not reasoned:** over 26
-    public corpora (13 analytic / 13 transactional, pinned in ADR 0036) those
-    three fired 8/0, 3/0 and 3/0 warehouse-to-transactional — **zero** false
-    positives — and requiring one of them identifies **9 of 13** warehouses,
-    where counting instead ("any 3 of the 6") identifies only **5** at the same
-    precision. The other three — `bulk_load_shape`, `no_audit_timestamps`,
-    `star_topology` — are still computed and still **reported**, and never vote:
-    `bulk_load_shape` fired on **nothing** across all 26, and the other two
-    fired 6/5 and 6/5, near coin flips that carry almost no information and are
+    public corpora (13 analytic / 13 transactional, pinned in ADR 0036 and
+    re-measured on `main` on 2026-08-02) those three fired 9/0, 3/0 and 4/0
+    warehouse-to-transactional — **zero** false positives — and requiring one of
+    them identifies **10 of 13** warehouses, where counting instead ("any 3 of
+    the 6") identifies only **6** at the same precision. The other three —
+    `bulk_load_shape`, `no_audit_timestamps`, `star_topology` — are still
+    computed and still **reported**, and never vote: `bulk_load_shape` fired on
+    **nothing** across all 26, and the other two fired 9/5 and 7/5, near coin
+    flips on the transactional side that carry almost no information and are
     exactly what forces a counting threshold up.
+  - **What that precision figure rests on, stated rather than rounded up.**
+    **Four** of the 13 corpora in the transactional column parse to **zero
+    tables** — three vendor only views, procedures and triggers, and
+    `jaffle-shop-dbt`'s dbt models are `SELECT`s, not DDL. A zero-table schema is
+    below the 3-table no-vacuous-truths floor, so it can never qualify **by
+    construction** and is structurally incapable of producing a false positive.
+    The zero is real; its evidence base is **9** corpora, not 13. Read the recall
+    figure the same way: `tpch` is filed analytic, but its schema is TPC-H's
+    deliberately normalized order-entry model — no date dimension, no `_sk`
+    vocabulary, no numeric-dominated table — so a shut gate is the **correct**
+    answer there rather than a miss. Excluding it, shape-based analytic recall is
+    **10 of 12**, and the two genuine misses are `dw-barousse` and `dw-ngthao`.
   - **What that measurement could NOT show, stated rather than implied.** Not
-    **one** of the 13 transactional corpora had a table promoted to a warehouse
+    **one** of the transactional corpora had a table promoted to a warehouse
     role before the gate existed, so not one of them exhibits the hazard the
     gate closes (a lone `dim_`-named table silencing its own 1NF findings inside
     an otherwise OLTP schema). The corpus set therefore demonstrates the gate's
@@ -1123,12 +1136,25 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   A **second, larger false-negative class** was accepted with the schema gate
   (ADR 0037), and it is **measured** rather than estimated: because no table
   gets a warehouse role inside a schema showing none of the three deciding
-  signals, **4 of the 13 analytic corpora measured** (`dw-kenap`, `dw-ngthao`,
-  `tpch`, `dw-barousse`) get **no DW-0xx evaluation at all** under auto
-  detection. Only `dw-barousse` actually lost output to it — 10 roles and 2
-  DW-021 items — and it lost them to a limit **already declared above** rather
-  than a new one: its calendar is spelled `dim_date_month`, and the calendar
-  signal recognizes only a role token plus exactly `date`/`time`/`calendar`.
+  signals, **3 of the 13 analytic corpora measured** (`dw-ngthao`, `tpch`,
+  `dw-barousse`) get **no DW-0xx evaluation at all** under auto detection.
+  Re-measured on `main` on 2026-08-02: that list was four, and **`dw-kenap` has
+  left it** — the run-on statement-separation fix (ADR 0041) took that corpus
+  from 1 parsed table to 7 of 7 proven, so `calendar_table` now fires on its
+  `Dim_Date`, the gate opens, and it classifies `olap` with 6 dimensions and 1
+  fact. Of the three that remain, `tpch` is a **mislabelled** analytic corpus
+  rather than a miss — its schema is a normalized order-entry model presenting no
+  dimensional evidence at all, so a shut gate is the correct answer — which
+  leaves `dw-barousse` and `dw-ngthao` as the genuine ones. Only `dw-barousse`
+  actually lost output to it — 10 roles and 2 DW-021 items — and it lost them to
+  a limit **already declared above** rather than a new one: its calendar is
+  spelled `dim_date_month`, and the calendar signal recognizes only a role token
+  plus exactly `date`/`time`/`calendar`. **`dw-ngthao`'s miss is not a parser
+  limit**, though its 9-tables/3-proven parse invites that reading: measured on
+  its gold layer alone the model is 3 of 3 proven at 100% profiled coverage and
+  the gate **still** stays shut — `fact_sales` is 5 numeric of 9 columns (under
+  the 60% numeric-pole floor), no calendar table is declared, and no `_sk` column
+  is used. A genuine three-way miss on evidence.
   One line of `database.paradigm: olap` restores every one of these schemas in
   full.
 - **Express/Fastify handler passed by reference.** A handler that is a named
