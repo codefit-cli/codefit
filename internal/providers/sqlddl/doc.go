@@ -21,6 +21,14 @@
 // identifier canonicalized to ANSI "..." as it tokenizes, so the reducer's
 // regexes never need to know the source dialect's quoting style.
 //
+// Two boundaries inside the reducer are DERIVED rather than lexical, because
+// neither is expressed by a delimiter the splitter can see. A statement run onto
+// a CREATE TABLE's tail with no terminator is cut at that tail (ADR 0041), and a
+// CREATE TABLE body item missing its separating comma before a table-level key
+// constraint is cut at the constraint head (ADR 0042). Both rest on a grammar
+// fact rather than a guess, both leave the host table proven, and both route
+// anything they find but cannot reduce to the honest-abstention floor.
+//
 // It parses a DECLARED SUBSET; everything outside (CHECK constraints, ON DELETE
 // actions, partial-index WHERE, CREATE TYPE, ALTER COLUMN, all DML) is
 // skip-and-declared, each locked by a test. View/Procedure/Trigger are populated

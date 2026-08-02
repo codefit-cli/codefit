@@ -121,6 +121,89 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **Two `CREATE TABLE` statements with no separator between them are now separated
+  instead of silently collapsing to the first** — closing SQL-DDL known limit (9),
+  the **last silent structural loss** in this parser (ADR 0041). T-SQL makes the
+  statement terminator optional, so `CREATE TABLE a (…)` immediately followed by
+  `CREATE TABLE b (…)` — no `;`, no `GO` — is valid input. The reducer read `a` and
+  discarded everything after it **with no trace at all**: no `Schema.Unreduced`
+  entry, no completeness note, and `a` still `StructureProven`. Blindness with no
+  trace is the one outcome the completeness contract (ADR 0034) exists to prevent.
+  The boundary is now **derived, not guessed**: a table's body is located with
+  balanced parentheses — the primitive the column loop and the partitioning reader
+  already trust — and only the **tail** after it is scanned, for a
+  `CREATE`/`ALTER`/`DROP` keyword at paren depth 0, outside any string literal and
+  outside any quoted identifier. Those three words and no others, because they are
+  the only statement kinds that can affect table structure **and** the only ones
+  that cannot legally appear in a tail: `WITH` and `SET` can (`WITH
+  (autovacuum_enabled = off)`, `WITH (DATA_COMPRESSION = PAGE)`), so admitting them
+  would cut a table's own options away from it. The remainder is dispatched as a
+  statement in its own right, recursively, so a run of *N* tables recovers all *N*,
+  each with its own source line — and a residual the boundary rule **found** but no
+  dispatch branch reduces (`CREATE TYPE`, `CREATE SEQUENCE`, …) is recorded
+  verbatim on `Schema.Unreduced` rather than dropped: nothing is recovered while
+  anything detected is lost in silence. The host table is never demoted for it —
+  its own body was read in full, so demoting it would be the false demotion ADR
+  0034 §2.4 warns about — and the host is **truncated** at the boundary so it
+  cannot read the *next* statement's `PARTITION BY` clause as its own.
+  **Measured, both directions**: on a public warehouse script that declares 7
+  tables and contains zero `;`, the parse goes from **1 table to 7** (41 columns, 7
+  foreign keys, all structure-proven, line numbers verified statement by statement
+  against the source). Across 26 public corpora **exactly one changes** — the other
+  25 are identical on tables, structure-proven count, columns, foreign keys,
+  indexes, views, procedures, triggers, paradigm, every emitted item and the scan
+  note — and **no golden file was regenerated**, because none of the repository's
+  own 18 fixtures contains a run-on tail under any of the three dialects. Each
+  fabrication guard (string literal, quoted identifier, paren depth, word boundary)
+  is locked by a test that was **mutation-proven to invent a phantom table** when
+  its guard is removed. The lowercase `go` batch separator was investigated and is
+  **not** the cause: `GO` recognition has always been case-insensitive, and `go` was
+  already accepted — the run-on statements are separated by nothing at all.
+- **A `CREATE TABLE` body item missing its comma before a table-level key constraint
+  no longer fabricates a single-column key** — closing SQL-DDL known limit (12),
+  declared earlier in this same unreleased cycle, and narrowing the fabrication
+  boundary ADR 0034 §2.6 had left open (ADR 0042). `Profit INT` followed by
+  `PRIMARY KEY(Car_sid, Date_from)` with no comma between them read the constraint
+  as an **inline** key on `Profit`, so the declared composite key was replaced by a
+  single-column one **while the table still reported `Complete=true`** — a
+  **fabrication, not a drop**, which is exactly the class the completeness contract
+  structurally cannot catch, because the reducer believes it succeeded. It is
+  **delimiter-independent** (reproduced on an ordinary `;`-terminated statement
+  under all three dialects) and therefore pre-existing; run-on separation only made
+  it *reachable* on real DDL. The boundary is **decided by the grammar, not
+  guessed**: in PostgreSQL, MySQL and T-SQL alike an inline `PRIMARY KEY`/`UNIQUE`
+  takes **no bare parenthesized column list** (`WITH (…)`, `INCLUDE (…)`,
+  `USING INDEX TABLESPACE`, T-SQL's `ON scheme (…)` always intervene) and
+  `FOREIGN KEY (…)` is not a column-constraint form at all — so
+  `<column definition> <head> (` has exactly **one** legal reading, and the item is
+  cut there and both halves reduced, recursively. The host column is **not
+  demoted** (nothing was dropped) and a residual whose column list cannot be read
+  still falls to the existing honest-abstention floor. **Measured, both
+  directions**, over 29 corpora — the 26-corpus external survey (which already
+  includes verbatim copies of the vendored fixtures) plus three jobs covering
+  every `.sql` corpus in this repository's own `testdata`: exactly **three**
+  change, all in the same
+  direction — `dw-kenap`'s `Fact_Reservation` from `[Profit]` to the **six**
+  columns its DDL declares, and `dw-salesmart` / `dw-ssis-salesmart`'s `dim_date`
+  from `[calendar_month_name]` to `[date_key]` / `[date_sk]` — removing **one false
+  `DB-001` and two false `DW-002`** items. The other 26 are identical on tables,
+  structure-proven count, columns, indexes, foreign keys, views, procedures,
+  triggers, column raw types, paradigm, every emitted item and the scan note, and
+  **no golden was regenerated**. That zero carries a positive control: with the
+  `(` requirement removed from the head rule, **all 29** corpora change. Each
+  fabrication guard (string literal, quoted identifier, paren depth, the
+  `CONSTRAINT <name>` backward walk, the closed optional-token set) is locked by a
+  test **mutation-proven to fabricate a key** when the guard is removed. A second
+  fabrication of the same class was closed with it: a column's inline-constraint
+  scans now read the modifier tail **masked to top level**, so a `COMMENT` string
+  reading `PRIMARY KEY` no longer declares a key and one reading `NOT NULL` no
+  longer marks the column non-nullable. **Still not covered, and declared:** MySQL's
+  bare `KEY`/`INDEX` shorthand (a bare `KEY` is *also* a legal inline modifier, and
+  cutting on it would fabricate on a column typed `key(10)`), `CHECK`/`EXCLUDE`
+  (legal inline, and identical either way), `PRIMARY KEY USING BTREE (…)`,
+  `UNIQUE NULLS NOT DISTINCT (…)`, and a missing comma between two plain columns —
+  each locked as a characterization test so the limit stays machine-visible
+  (ADR 0034 §2.7).
 - **A delimited SQL type name (`[int]`, `` `int` ``, `"int"`) is now classified instead of
   falling back to `db.TypeUnknown`** — closing SQL-DDL known limit (8) and, with it, a
   **live false positive**. Microsoft's own generated scripts delimit the type of *every*
