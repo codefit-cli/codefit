@@ -19,6 +19,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
+	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/sensors"
@@ -114,10 +115,26 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 // (regex + provider AST) and the mapped surface for the agent to reason about.
 // codefit never runs a layer-3 LLM — the surface is returned to the agent.
 func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, []findings.SurfaceItem, error) {
-	content, err := os.ReadFile(abs)
+	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Bytes become TEXT before any layer sees them. A source file carrying a
+	// byte-order mark — an ordinary thing in a repository a Windows tool has
+	// touched — used to reach layer 1's regexes and the provider's AST as
+	// NUL-interleaved bytes and yield ZERO findings at score 100, the same
+	// false all-clear sensors/db carried for schema dumps. Decoding here rather
+	// than in the provider keeps providers.SourceFile a text contract, and
+	// keeps the fingerprints/snippets stamped below computed over exactly the
+	// text the layers read.
+	//
+	// DECLARED RESIDUAL (ADR 0044): a BOM-LESS UTF-16 source file is still read
+	// as-is and still yields nothing, silently. sourcetext.Decode refuses to
+	// guess an encoding, and the source-level floor that turns that refusal
+	// into a report exists only for the DB dimension's small, CONFIGURED source
+	// list — a per-file note across a whole repository walk, where yielding no
+	// finding is the ordinary case, would be noise rather than signal.
+	content, _ := sourcetext.Decode(raw)
 	src := providers.SourceFile{Path: rel, Content: content}
 	var out []findings.Finding
 

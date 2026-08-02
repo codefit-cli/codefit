@@ -129,6 +129,17 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 		return Result{}, fmt.Errorf("parsing database schema: %w", err)
 	}
 
+	// The source-level floor (unread.go), BEFORE any rule runs: a configured
+	// file that contributed nothing to the model is declared, and a scan in
+	// which NO file contributed anything is not a measurement at all. Running
+	// the rules over an empty schema and reporting score 100 is the false
+	// all-clear this sensor exists to make impossible.
+	unread := unreadSources(sources, schema)
+	unreadTrace := unreadNote(unread, len(sources))
+	if wholeScanBlind(unread, len(sources)) {
+		return notMeasured(unreadTrace), nil
+	}
+
 	fs, surf := dbrules.Run(schema)
 
 	// Paradigm assembly (design §2c): the sensor is the natural join point —
@@ -143,7 +154,7 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	surf = append(surf, dwS...)
 
 	surf, suppressed := suppress3NF(surf, cls, override)
-	note := joinTraces(completenessNote(schema), withheldNote(schema), schemaGateNote(cls, override), suppressed)
+	note := joinTraces(unreadTrace, completenessNote(schema), withheldNote(schema), schemaGateNote(cls, override), suppressed)
 
 	stampFingerprints(fs, surf, content)
 
@@ -160,13 +171,14 @@ func notMeasured(note string) Result { return Result{Measured: false, Note: note
 
 // joinTraces composes the sensor's audit traces into Result.Note (design
 // SS7a). Each trace is INDEPENDENT and self-contained; a trace with nothing
-// to say contributes nothing. Order is FIXED — measurement inventory, then the
-// schema-gate verdict, then suppression — so the note is deterministic and
-// diffable, and so each trace qualifies the ones after it: "I could not read 3
-// tables" changes how "this schema is not a warehouse" should be read, and that
-// verdict in turn is WHY the suppression line says what it says. Three
-// producers share this one channel by construction, never by one overwriting
-// another.
+// to say contributes nothing. Order is FIXED — the unread-source floor, then
+// the measurement inventory, then withholding, then the schema-gate verdict,
+// then suppression — so the note is deterministic and diffable, and so each
+// trace qualifies the ones after it: "I read nothing at all from schema.sql"
+// changes how "I could not prove 3 tables complete" should be read, which in
+// turn changes how "this schema is not a warehouse" should be read, and that
+// verdict is WHY the suppression line says what it says. FOUR producers share
+// this one channel by construction, never by one overwriting another.
 func joinTraces(traces ...string) string {
 	var nonEmpty []string
 	for _, t := range traces {

@@ -16,6 +16,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/query"
 	"github.com/codefit-cli/codefit/internal/core/report"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
+	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
@@ -403,10 +404,17 @@ func collectQueryFilters(root string, exts []string, ex providers.QueryExtractor
 		if !slices.Contains(exts, filepath.Ext(path)) {
 			return nil
 		}
-		content, rerr := os.ReadFile(path)
+		raw, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return nil
 		}
+		// Same bytes-to-text decode the two sensors do (sensors/db/sources.go,
+		// sensors/security/security.go): a BOM-marked source file used to reach
+		// the extractor as NUL-interleaved bytes and yield no filter at all.
+		// Milder here — the cross emits surface items, never an affirmation, so
+		// the cost is questions not asked rather than a false finding — but the
+		// same blindness, silent in the same way.
+		content, _ := sourcetext.Decode(raw)
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			rel = path
