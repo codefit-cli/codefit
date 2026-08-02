@@ -24,8 +24,10 @@ type Rule struct {
 
 // Engine matches rules against a parsed file and emits deterministic findings.
 //
-// Skeleton: the ast argument is intentionally abstract (any) until the
-// per-language AST adapter is designed in Fase 1. No implementation yet.
+// NOT IMPLEMENTED by anything today: the working matcher is the package-level
+// [Compile]/[Match] pair over [syntax.Node]. This interface is kept for the
+// per-language AST adapter it was drawn for, which is why its ast argument is
+// still abstract (any).
 type Engine interface {
 	// Match runs the rules against a parsed AST and returns the findings.
 	Match(rules []Rule, ast any) ([]findings.Finding, error)

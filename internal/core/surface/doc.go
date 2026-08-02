@@ -4,9 +4,12 @@
 // auditable structural surface, distinct from the Semgrep-format rules used for
 // deterministic findings — PRD section 17).
 //
-// Status: SKELETON. Today it declares the surface categories. The aggregation
-// framework and the SurfaceQuery type and runner are implemented in Fase 1.
-// The per-language enumeration currently lives in each provider's
-// AnalyzeSurface (ADR 0001, provisional); core/surface will host the shared
-// machinery once a second language exists to factor it against.
+// Status: PARTIAL, and the gap is deliberate. Built: the surface categories and
+// the shared framework (stable ids, fingerprinting). NOT built: the SurfaceQuery
+// type and its runner — no such type exists in the tree, and an earlier draft of
+// this comment claiming it would land in Fase 1 was wrong.
+//
+// The per-language enumeration lives in each provider's AnalyzeSurface (ADR
+// 0001, provisional); core/surface will host the shared machinery once a second
+// language exists to factor it against.
 package surface

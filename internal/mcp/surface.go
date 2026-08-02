@@ -11,8 +11,8 @@ import (
 )
 
 // This file implements the surface tool HANDLERS and their JSON contracts. The
-// transport (stdio/HTTP-SSE) is still a skeleton (see Server); when it is built
-// it will unmarshal a tool call into these requests and marshal the responses.
+// stdio transport is built (see NewServer/Serve) and unmarshals a tool call into
+// these requests, marshalling the responses back; HTTP/SSE is still unbuilt.
 // Keeping the logic here means the transport only has to dispatch to handlers
 // that already work and are tested.
 

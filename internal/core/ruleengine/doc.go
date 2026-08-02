@@ -9,7 +9,11 @@
 // Deliberately NOT supported: taint mode and pattern-sources/sinks/sanitizers —
 // their role is covered by the agent reasoning over mapped surface.
 //
-// Status: SKELETON. This declares the rule shape ([Rule]) and the matcher
-// contract ([Engine]). The matcher itself is implemented in Fase 1; the AST
-// argument is abstract (any) until the per-language AST adapter is designed.
+// Status: BUILT (Fase 1). The rule shape ([Rule]), the YAML loader, and the
+// matcher itself ([Compile], [Match], [Matches]) are implemented, and the
+// TypeScript provider runs its deterministic security rules through them.
+// Note the shape: the matcher is package-level FUNCTIONS over
+// [syntax.Node], not the [Engine] interface — [Engine] is a declared contract
+// that nothing implements today, kept for the per-language adapter it was drawn
+// for. Do not read it as the entry point.
 package ruleengine

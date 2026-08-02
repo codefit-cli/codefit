@@ -4,7 +4,9 @@
 // GitHub Advisory Database, Linux distro feeds and more), so the data is always
 // fresh and maintained by infrastructure the whole world already runs.
 //
-// Status: SKELETON — implementation pending (RF-09). This declares the
-// [Dependency] and [Vulnerability] types and the [Client] contract only; the
-// OSV.dev HTTP client and the dependency-manifest parsing are not implemented yet.
+// Status: BUILT (RF-09). The OSV.dev HTTP client and the dependency-manifest
+// parsing are implemented and reachable through the codefit-check-cves tool:
+// exact versions are read from package-lock.json and go.mod, never guessed from
+// a package.json range — a manifest present without its lockfile is reported as
+// a note instead.
 package cve

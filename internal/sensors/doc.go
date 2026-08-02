@@ -4,6 +4,7 @@
 // and ask the active LanguageProvider for the concrete, language-specific data
 // (queries, rules, schema parsing).
 //
-// Skeleton: only the interface is declared; concrete sensors (security, review,
-// db, ...) arrive in later phases.
+// This package declares only the interface. The concrete sensors live in
+// subpackages: security and db are built (sensors/security, sensors/db); review,
+// complexity and tests arrive in later phases.
 package sensors
