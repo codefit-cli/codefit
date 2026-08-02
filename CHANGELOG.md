@@ -121,6 +121,43 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A `CREATE … TABLE` head no branch can reduce no longer evaporates** — the
+  `CREATE TABLE` family gets the honest-abstention floor `reIndexShapedHead` has
+  given the `CREATE INDEX` family since ADR 0034, and it closes a **class**, not a
+  list of forms (ADR 0043, SQL-DDL known limit (13)). **Measured through the real
+  DB sensor:** a schema whose only statement was `CREATE UNLOGGED TABLE events (…)`
+  audited as `Measured=true`, empty note, **0 tables, 0 findings, 0 surface** — the
+  false *"audited, 0 findings"* state over DDL codefit never read, indistinguishable
+  from a clean bill of health. **Twelve** forms were confirmed silent that way:
+  PostgreSQL's `UNLOGGED`, `UNLOGGED … IF NOT EXISTS`, `TEMP`, `TEMPORARY`,
+  `GLOBAL TEMPORARY`, `LOCAL TEMPORARY`; MySQL's `TEMPORARY`; T-SQL's `#Local` /
+  `##Global` name prefixes; plus `CREATE FOREIGN TABLE`, `CREATE TABLE … AS SELECT`
+  and a quoted name outside the reducer's identifier class. (`CREATE TABLE IF NOT
+  EXISTS` was never affected.) Three **different** dispositions, because they are
+  different facts: an **`UNLOGGED` table is now modeled** (it only skips the
+  write-ahead log — ordinary persistent storage); a **temporary table is withheld**
+  from the model with its own trace (it is dropped with its session, and admitting
+  it would have DB-050 affirm "table without a primary key" over scratch space at
+  confidence 1.0); **everything else table-shaped is declared** verbatim on
+  `Schema.Unreduced` and reaches the agent through the per-scan note. Withholding
+  gets a **separate carrier** (`Schema.Withheld`, a closed `WithheldReason`
+  vocabulary distinct from the completeness `Reason` set) precisely because
+  reporting it as "could not be reduced" would describe a scoping decision as a
+  parser failure. The catcher **declares without guessing**: it never invents a
+  table name out of a grammar it does not know, since a fabricated table is the one
+  class the completeness contract structurally cannot catch. Its modifier window is
+  bounded to **two words**, which is what keeps `CREATE TYPE x AS TABLE`,
+  `CREATE STATISTICS s ON t` and `CREATE SCHEMA s CREATE TABLE …` out. Withholding
+  is **never silent** — the per-scan note states the count, the reason and up to
+  five names, bounded so 200 staged temporary tables are one line, not 200.
+  **Measured over 29 corpora: zero delta** on tables, proven counts, columns, keys,
+  indexes, views, routines, triggers, paradigm, items and notes; the three schema
+  goldens gained one additive key. A zero delta is also what a broken harness
+  produces, so sensitivity was proven by positive control (a three-word window moves
+  `adventureworks-oltp-pg`; a mandatory `UNLOGGED` prefix moves 22 of 29). No corpus
+  could have caught a regression here — the forms have zero top-level prevalence —
+  so two authored fixtures are the only control, and both are registered in the
+  schema-gate corpus table.
 - **Two `CREATE TABLE` statements with no separator between them are now separated
   instead of silently collapsing to the first** — closing SQL-DDL known limit (9),
   the **last silent structural loss** in this parser (ADR 0041). T-SQL makes the

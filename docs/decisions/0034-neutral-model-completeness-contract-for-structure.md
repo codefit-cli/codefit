@@ -46,6 +46,25 @@ the `ADD  CONSTRAINT` one is still closed. The lesson 0042 adds is that this
 class is reachable on ORDINARY real DDL, not only on constructed input, so it
 needs measurement rather than only a declared boundary.
 
+**Extended (2026-08-02) by
+[ADR 0043](0043-table-shaped-head-floor-and-withheld-session-scoped-tables.md):**
+§2.4's two-way split — a DECLARED skip versus a genuinely unrecognized statement
+— had no word for a THIRD case: a declaration the parser reads perfectly and
+deliberately declines to model. 0043 gives the `CREATE TABLE` family the
+abstention floor `reIndexShapedHead` has given the `CREATE INDEX` family since
+this ADR (a `CREATE <anything> TABLE` head no branch reduces is now DECLARED on
+`Schema.Unreduced` rather than falling through `apply()`'s `default:` — measured
+silent on twelve forms, including `CREATE UNLOGGED TABLE`, which produced
+`Measured=true, Note="", tables=0, findings=0`), and adds `Schema.Withheld` with
+its own CLOSED `WithheldReason` vocabulary for temporary tables. The new
+vocabulary is a DISTINCT TYPE from `Reason` on purpose: `Reason` answers "why
+could this table's structure not be proven complete", and an answer to that
+question is grounds for an absence-based rule to abstain, while a withheld
+declaration raises no such question. §2.5's dispositions, §2.6's fabrication
+boundary (which is why the new catcher declares without guessing a table name)
+and §2.8's measurement/diagnostics boundary are unchanged; 0043's own trace is a
+third independent producer on §2.8's existing note channel.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares
