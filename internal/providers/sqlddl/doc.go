@@ -29,6 +29,17 @@
 // fact rather than a guess, both leave the host table proven, and both route
 // anything they find but cannot reduce to the honest-abstention floor.
 //
+// Not every relation the reducer READS is a table, and it remembers the
+// difference (ADR 0045). A CREATE SEQUENCE and a CREATE (MATERIALIZED) VIEW put
+// their NAME in a reducer-internal registry with no model surface of their own,
+// so the ownership statement pg_dump writes for every relation it dumps —
+// "ALTER TABLE public.<name>_id_seq OWNER TO <role>", which PostgreSQL legally
+// accepts for every relation kind — is not mistaken for a table declaration.
+// Without it, a sequence became a zero-column table that DB-050 then asked the
+// agent about. The guard is EVIDENCE-driven, never name- or action-driven: a
+// name nothing in the scanned files declared still materializes with
+// db.ReasonTableNeverDeclared, exactly as before.
+//
 // It parses a DECLARED SUBSET; everything outside (CHECK constraints, ON DELETE
 // actions, partial-index WHERE, CREATE TYPE, ALTER COLUMN, all DML) is
 // skip-and-declared, each locked by a test. View/Procedure/Trigger are populated

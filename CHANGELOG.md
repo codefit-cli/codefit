@@ -121,6 +121,50 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A `CREATE SEQUENCE` no longer becomes a phantom table** (ADR 0045, SQL-DDL known
+  limit (14)). `pg_dump` writes one sequence per serial/identity column and then, for
+  every relation it dumps, an ownership statement spelled with `ALTER TABLE` — which
+  PostgreSQL legally accepts for every relation kind. The reducer had **no branch for
+  `CREATE SEQUENCE` at all**, so when `ALTER TABLE public.<name>_id_seq OWNER TO
+  postgres` arrived the name was unknown and a table was materialized from it: zero
+  columns, structurally unproven, and a routed `db-table-structure-unproven` surface
+  item asking the agent whether a **sequence** declares a primary key. **Measured
+  through the real DB sensor on a real Spring/Hibernate `pg_dump`: 9 sequences became
+  9 phantom tables — 9 of that run's 23 surface items** — and the per-scan note
+  described them as "9 table(s)" codefit could not read. The same mechanism ran for
+  **views and materialized views**: on the vendored Pagila corpus, 21 of its 23
+  unproven "tables" were 13 sequences, 7 views and 1 materialized view. The reducer
+  now recognizes `CREATE SEQUENCE` and remembers the **name** of every sequence and
+  every view it reads — reducer-internally, with no model surface of its own — and
+  the four branches that can create a table from a *reference* rather than a
+  *declaration* consult one predicate before doing so. A sequence declaration itself
+  stays a silent declared skip: it is neither unreadable (`Schema.Unreduced`) nor a
+  withheld table (`Schema.Withheld`). **A genuinely declared table whose `CREATE
+  TABLE` this scan never read still materializes with `ReasonTableNeverDeclared`** —
+  the simpler rule "`OWNER TO` never creates a table" was evaluated and rejected
+  because it would have deleted those. Measured over 26 external corpora, both
+  directions: exactly two corpora move, **23 items removed, zero added**, everything
+  else identical — a zero proven sensitive with a positive control build that
+  reproduces all 23.
+- **Every `CREATE TABLE` body item is now anchored on its own source line** (ADR 0045,
+  SQL-DDL known limit (15)). The reducer counted newlines up to the **comma
+  boundary**, which sits before the newline preceding the item's text, so every column
+  and every table-level constraint pointed one line early — and so did the second and
+  later actions of a multi-action `ALTER TABLE`. **Measured on a real `pg_dump`:
+  DB-053 reported `password` at line 33, whose content is
+  `lastname character varying(255),`** — an unrelated column quoted back to the agent.
+  **BREAKING for committed baselines:** the baseline fingerprint is hashed from the
+  *content* of the line at the anchor, so **every DB finding or surface item anchored
+  on a `CREATE TABLE` body item changes fingerprint and a committed baseline entry for
+  one stops matching** — the finding reappears as new until it is re-accepted. Items
+  anchored on a table's own `CREATE TABLE` line (DB-052) or on a single-action `ALTER
+  TABLE` (DB-001's foreign keys, the shape `pg_dump` writes) are byte-identical: on
+  the real dump 13 of 14 surviving fingerprints are unchanged. Column-anchored rules
+  — DB-002, DB-003, DB-051, DB-053 — are the ones that move. The three schema
+  goldens were regenerated: **64 values changed, every one a `Pos.Line` going N →
+  N+1, no other field touched**, and the new numbers are locked against the source
+  rather than against themselves (every column of every `.sql` corpus under
+  `testdata/` must sit on a line containing its own name — 195 anchors, 22 corpora).
 - **A schema file codefit cannot read is no longer reported as a clean one** (ADR 0044).
   A PostgreSQL dump produced by `pg_dump` under PowerShell is **UTF-16LE with a
   byte-order mark** — not exotic, just what the tool writes when its output is

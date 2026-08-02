@@ -156,6 +156,24 @@ var gateCorpusExpectations = []gateCorpusCase{
 	{path: "pg_constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{path: "pg_constructed_n2_recognized_skips.sql", tables: 2, proven: 2, paradigmIs: paradigm.ParadigmOLTP},
 	{
+		// The pg_dump sequence fixture (ADR 0045). The PARSE FACTS carry this
+		// row and are exactly what regressed before: it declares TWO sequences
+		// and TWO tables, and the sequences used to become tables — so this row
+		// measured 4/2 (two phantom entries, neither proven) before the
+		// non-table relation registry. If tables ever returns to 4, a sequence
+		// is back in the model; if proven drops below 2, a real table lost its
+		// structure.
+		//
+		// No signal fires and the gate is not even evaluated: two tables is
+		// below minJudgeableTables = 3 (no vacuous truths). That is not this
+		// fixture avoiding the question — it is the same floor the temporary-
+		// table fixture sits under, and it is worth recording that REMOVING
+		// phantom relations moves a small schema DOWN across that floor exactly
+		// as withholding does.
+		path: "pg_constructed_pgdump_sequences.sql", tables: 2, proven: 2,
+		paradigmIs: paradigm.ParadigmOLTP,
+	},
+	{
 		// The table-shaped-head fixture (ADR 0043). The PARSE FACTS carry this
 		// row: it declares TEN table-shaped statements and exactly THREE of
 		// them are persistent tables (keeper, and the two UNLOGGED ones). If

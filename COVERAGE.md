@@ -1342,8 +1342,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   and still lost silently**, unchanged by this fix and stated here rather than
   implied. What the fix guarantees is the other half: nothing is recovered while
   anything **detected** is lost in silence — a residual the boundary rule found
-  but no dispatch branch reduces (`CREATE TYPE`, `CREATE SEQUENCE`, `ALTER
-  SCHEMA`, …) is appended **verbatim** to `Schema.Unreduced` and reaches the
+  but no dispatch branch reduces (`CREATE TYPE`, `ALTER SCHEMA`, … — `CREATE
+  SEQUENCE` is no longer one of them, see limit (14)) is appended **verbatim**
+  to `Schema.Unreduced` and reaches the
   agent through the per-scan inventory, and the host table is never demoted for
   it (its own body was read in full, so demoting it would be a false demotion).
   Blast radius measured across 26 external corpora: exactly **one** corpus
@@ -1549,6 +1550,92 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   table still materializes a phantom table carrying `ReasonTableNeverDeclared`,
   exactly as before: withholding removes the `CREATE` from the model, it does not
   teach the other branches that the name is temporary.
+  (14) **Closed as of `non-table-relation-registry`, 2026-08-02 (ADR 0045)** —
+  kept rather than deleted because it names what this reducer now **does** and
+  because the guard has a boundary of its own. PostgreSQL's `ALTER TABLE` accepts
+  every relation **kind** for its ownership actions, and `pg_dump` uses that: it
+  writes `ALTER TABLE public.<name>_id_seq OWNER TO <role>` for every **sequence**
+  and `ALTER TABLE public.<view> OWNER TO <role>` for every **view** it dumps.
+  `CREATE SEQUENCE` had **no dispatch branch at all**, so a sequence's name was
+  unknown when its `ALTER TABLE` arrived and `getTable` **materialized a phantom
+  table** from it: zero columns, `StructureProven()==false`, one `Unreduced`
+  entry, `ReasonTableNeverDeclared`, and a routed `db-table-structure-unproven`
+  surface item asking the agent whether a *sequence* declares a primary key —
+  which a sequence cannot have. **Measured** through the real `Sensor.Audit` on a
+  Spring/Hibernate `pg_dump`: **9 sequences produced 9 phantom tables, 9 of that
+  run's 23 surface items**, and the per-scan note reported "9 table(s)" whose
+  structure codefit could not prove — describing sequences as unreadable
+  *tables*. The reducer now **recognizes `CREATE SEQUENCE`** and records the
+  **name** of every sequence and every (materialized) view it reads,
+  reducer-internally, with **no model surface of its own** — the same discipline
+  `CREATE PARTITION FUNCTION` / `CREATE PARTITION SCHEME` already use. Every site
+  that can materialize a table from a **reference** rather than from a
+  declaration (`applyAlterTable`, `applyCreateIndex`,
+  `applyCreateColumnstoreIndex`, `markUnrecognizedIndexShape`) consults **one**
+  predicate before creating one: a name this parse already read as a sequence or
+  a view, and that no `CREATE TABLE` has declared, is not turned into a table. The
+  declaration itself is a **declared, recognized skip** (ADR 0034 §2.4), reported
+  through **neither** `Schema.Unreduced` ("codefit could not read this" — false,
+  it read it perfectly) **nor** `Schema.Withheld` ("codefit read a *table* and
+  chose to leave it out" — also false, a sequence is not a table). The guard is
+  driven by **positive evidence**, never by the action being harmless: "`OWNER TO`
+  never creates a table" was evaluated and **rejected**, because a genuinely
+  declared table whose `CREATE TABLE` this scan did not read must keep
+  materializing with `ReasonTableNeverDeclared` instead of vanishing.
+  **Measured** over 26 external corpora, both directions: exactly **two** corpora
+  move, **23 items removed and zero added** — `pagila` loses 21 phantom
+  relations (13 sequences, 7 views, 1 materialized view) and
+  `adventureworks-oltp-pg` loses 2 views; tables, structure-proven counts,
+  columns, foreign keys, indexes, views, procedures, triggers, paradigm and every
+  other emitted item are identical everywhere else, and **no golden moved** for
+  this change. The zero was proven **sensitive** with a positive control: a build
+  with the predicate forced to `false` reproduces all 23 items exactly.
+  **What remains not covered**, each a decision rather than an oversight:
+  (i) an `ALTER TABLE` or `CREATE INDEX` naming a sequence or view declared in a
+  file this scan did **not** read still materializes a phantom table — codefit
+  reports what it read, and the order dependence is locked as a test rather than
+  left implicit. (ii) The registry is deliberately **not** extended to withheld
+  **temporary** tables, so limit (13)(v) stands unchanged: a temporary table *is*
+  a table, so an absence-based question about one is not nonsense, and — unlike
+  a table/sequence/view triple, which PostgreSQL keeps in **one** relation
+  namespace per schema so their names cannot legitimately collide — a temporary
+  table and a persistent one routinely share a name across `pg_temp` and
+  `public`, which this reducer's schema-qualifier stripping would collapse.
+  (iii) An index declared over a **materialized view** is dropped rather than
+  re-homed: `db.View` carries no index field, because the DB dimension's rules are
+  about tables, and inventing a table to hold it would be the **fabrication** class
+  `db.Table.Complete` cannot catch. An index *form* the reducer cannot read over a
+  view still goes to `Schema.Unreduced`, because that statement genuinely was not
+  read.
+  (15) **Closed as of `body-item-line-anchors`, 2026-08-02 (ADR 0045).** Every
+  `CREATE TABLE` body item, and every second-or-later action of a multi-action
+  `ALTER TABLE`, was anchored **one line early**: the reducer counted newlines up
+  to the **comma boundary**, which sits *before* the newline that precedes the
+  item's own text. **Measured** on a real `pg_dump`: DB-053 reported column
+  `password` at line 33, whose content is `lastname character varying(255),` — a
+  different column entirely. This was never cosmetic. The baseline **fingerprint**
+  is stamped from the **content** of the source line at the anchor
+  (`sensors/db.stampFingerprints`), so a finding's committed identity was bound to
+  the *previous* item's text, and a surface item's snippet quoted the wrong
+  declaration back to the agent. **Consequence for existing baselines**, stated
+  here rather than left for a user to discover: every DB finding and surface item
+  anchored on a `CREATE TABLE` body item **changes fingerprint**, so a committed
+  baseline entry for one stops matching and the finding reappears as new until it
+  is re-accepted. Items anchored on a table's own declaration line (DB-052) or on
+  a single-action `ALTER TABLE` (DB-001's foreign keys — the shape `pg_dump`
+  writes) are byte-identical: verified on the real dump, where 13 of the 14
+  surviving fingerprints are unchanged and only the DB-053 column item moved.
+  **Measured** over 26 external corpora: 24 item groups move, every one onto the
+  line the item is actually written on, and **zero** items appear or disappear
+  from this correction; the three schema goldens changed in exactly **64** places,
+  every one a `Pos.Line` going *N* → *N+1*, with no other field touched. A move is
+  not always exactly one line, and the exception is real rather than theoretical:
+  a body item preceded by a **line comment** moves two, because `split()` removes
+  the comment's text while keeping its newline (measured once, on `dw-barousse`'s
+  flat mart). The new numbers are locked against the **source** rather than
+  against themselves — every column of every `.sql` corpus under `testdata/` must
+  be anchored on a line **containing its own name** (195 anchors across 22
+  corpora), which no off-by-one can satisfy.
 - **Schema-file encoding, and the source-level floor under it (ADR 0044).**
   - *What is read.* codefit decodes the three **byte-order-marked** encodings
     before any tokenizer sees a schema file: UTF-8 (`EF BB BF`), UTF-16LE
