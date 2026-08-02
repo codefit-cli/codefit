@@ -82,6 +82,21 @@ fabrication boundary and §2.8's measurement/diagnostics boundary are unchanged;
 and it deliberately treats an `Unreduced`/`Withheld` record as PROOF the file was
 read, so a declared drop is never re-reported as blindness.
 
+**Narrowed a second time (2026-08-02) by
+[ADR 0044](0044-non-table-relations-and-body-item-line-anchors.md):**
+§2.6's class shrinks again, and in a direction neither 0042 nor 0043 covered.
+Both defects 0044 closes are FABRICATIONS the `Complete` flag structurally
+cannot see, because nothing was dropped: a `CREATE SEQUENCE` (and a `CREATE
+VIEW`) whose name a later `ALTER TABLE` turned into a zero-column TABLE, and a
+body item anchored one line early — which bound a finding's BASELINE IDENTITY to
+an unrelated column's text, since the fingerprint hashes the content of the line
+at the anchor. §2.4's declared-skip rule is what decides the first (a sequence is
+recognized and deliberately not modeled, so it is reported through neither
+`Unreduced` nor `Withheld`), and §2.8's measurement/diagnostics boundary is
+unchanged by both. 0043's limit (v) is deliberately left standing: a temporary
+table IS a table, and unlike a table/sequence/view triple its name CAN
+legitimately collide with a persistent one across `pg_temp` and `public`.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares

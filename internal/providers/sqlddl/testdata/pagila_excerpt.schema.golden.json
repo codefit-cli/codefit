@@ -13,7 +13,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 40
+            "Line": 41
           },
           "Type": "int",
           "RawType": "integer",
@@ -25,7 +25,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 41
+            "Line": 42
           },
           "Type": "text",
           "RawType": "text",
@@ -37,7 +37,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 42
+            "Line": 43
           },
           "Type": "text",
           "RawType": "text",
@@ -49,7 +49,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 43
+            "Line": 44
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -84,7 +84,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 103
+            "Line": 104
           },
           "Type": "int",
           "RawType": "integer",
@@ -96,7 +96,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 104
+            "Line": 105
           },
           "Type": "int",
           "RawType": "integer",
@@ -108,7 +108,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 105
+            "Line": 106
           },
           "Type": "text",
           "RawType": "text",
@@ -120,7 +120,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 106
+            "Line": 107
           },
           "Type": "text",
           "RawType": "text",
@@ -132,7 +132,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 107
+            "Line": 108
           },
           "Type": "text",
           "RawType": "text",
@@ -144,7 +144,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 108
+            "Line": 109
           },
           "Type": "int",
           "RawType": "integer",
@@ -156,7 +156,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 109
+            "Line": 110
           },
           "Type": "bool",
           "RawType": "boolean",
@@ -168,7 +168,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 110
+            "Line": 111
           },
           "Type": "datetime",
           "RawType": "date",
@@ -180,7 +180,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 111
+            "Line": 112
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -192,7 +192,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 112
+            "Line": 113
           },
           "Type": "int",
           "RawType": "integer",
@@ -252,7 +252,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 138
+            "Line": 139
           },
           "Type": "int",
           "RawType": "integer",
@@ -264,7 +264,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 139
+            "Line": 140
           },
           "Type": "text",
           "RawType": "text",
@@ -276,7 +276,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 140
+            "Line": 141
           },
           "Type": "text",
           "RawType": "text",
@@ -288,7 +288,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 141
+            "Line": 142
           },
           "Type": "text",
           "RawType": "text",
@@ -300,7 +300,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 142
+            "Line": 143
           },
           "Type": "int",
           "RawType": "integer",
@@ -312,7 +312,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 143
+            "Line": 144
           },
           "Type": "text",
           "RawType": "text",
@@ -324,7 +324,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 144
+            "Line": 145
           },
           "Type": "text",
           "RawType": "text",
@@ -336,7 +336,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 145
+            "Line": 146
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -383,7 +383,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 149
+            "Line": 150
           },
           "Type": "int",
           "RawType": "integer",
@@ -395,7 +395,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 150
+            "Line": 151
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -407,7 +407,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 151
+            "Line": 152
           },
           "Type": "int",
           "RawType": "integer",
@@ -419,7 +419,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 152
+            "Line": 153
           },
           "Type": "int",
           "RawType": "integer",
@@ -431,7 +431,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 153
+            "Line": 154
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -443,7 +443,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 154
+            "Line": 155
           },
           "Type": "int",
           "RawType": "integer",
@@ -455,7 +455,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 155
+            "Line": 156
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",
@@ -504,7 +504,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 189
+            "Line": 190
           },
           "Type": "int",
           "RawType": "integer",
@@ -516,7 +516,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 190
+            "Line": 191
           },
           "Type": "int",
           "RawType": "integer",
@@ -528,7 +528,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 191
+            "Line": 192
           },
           "Type": "int",
           "RawType": "integer",
@@ -540,7 +540,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 192
+            "Line": 193
           },
           "Type": "int",
           "RawType": "integer",
@@ -552,7 +552,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 193
+            "Line": 194
           },
           "Type": "float",
           "RawType": "numeric(5,2)",
@@ -564,7 +564,7 @@
           "DBName": "",
           "Pos": {
             "File": "pagila_excerpt.sql",
-            "Line": 194
+            "Line": 195
           },
           "Type": "datetime",
           "RawType": "timestamp with time zone",

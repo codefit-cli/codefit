@@ -13,7 +13,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 1
+            "Line": 2
           },
           "Type": "int",
           "RawType": "INT",
@@ -25,7 +25,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 2
+            "Line": 3
           },
           "Type": "string",
           "RawType": "uniqueidentifier",
@@ -37,7 +37,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 3
+            "Line": 4
           },
           "Type": "string",
           "RawType": "nvarchar(10)",
@@ -49,7 +49,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 4
+            "Line": 5
           },
           "Type": "bool",
           "RawType": "bit",
@@ -61,7 +61,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 5
+            "Line": 6
           },
           "Type": "datetime",
           "RawType": "datetime2",
@@ -110,7 +110,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 9
+            "Line": 10
           },
           "Type": "int",
           "RawType": "INT",
@@ -122,7 +122,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 10
+            "Line": 11
           },
           "Type": "int",
           "RawType": "INT",
@@ -134,7 +134,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 11
+            "Line": 12
           },
           "Type": "datetime",
           "RawType": "datetime2",
@@ -146,7 +146,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 12
+            "Line": 13
           },
           "Type": "float",
           "RawType": "money",
@@ -161,7 +161,7 @@
         {
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 13
+            "Line": 14
           },
           "Columns": [
             "CustomerId"
@@ -197,7 +197,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 17
+            "Line": 18
           },
           "Type": "int",
           "RawType": "INT",
@@ -209,7 +209,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 18
+            "Line": 19
           },
           "Type": "int",
           "RawType": "INT",
@@ -221,7 +221,7 @@
           "DBName": "",
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 19
+            "Line": 20
           },
           "Type": "float",
           "RawType": "money",
@@ -237,7 +237,7 @@
         {
           "Pos": {
             "File": "tsql/adventureworks_excerpt.sql",
-            "Line": 21
+            "Line": 22
           },
           "Columns": [
             "SalesOrderId"

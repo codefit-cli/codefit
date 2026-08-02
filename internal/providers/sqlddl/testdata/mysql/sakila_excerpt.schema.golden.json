@@ -13,7 +13,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 7
+            "Line": 8
           },
           "Type": "int",
           "RawType": "SMALLINT",
@@ -25,7 +25,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 8
+            "Line": 9
           },
           "Type": "string",
           "RawType": "VARCHAR(45)",
@@ -37,7 +37,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 9
+            "Line": 10
           },
           "Type": "string",
           "RawType": "VARCHAR(45)",
@@ -49,7 +49,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 10
+            "Line": 11
           },
           "Type": "datetime",
           "RawType": "TIMESTAMP",
@@ -98,7 +98,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 17
+            "Line": 18
           },
           "Type": "int",
           "RawType": "SMALLINT",
@@ -110,7 +110,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 18
+            "Line": 19
           },
           "Type": "string",
           "RawType": "VARCHAR(255)",
@@ -122,7 +122,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 19
+            "Line": 20
           },
           "Type": "text",
           "RawType": "TEXT",
@@ -134,7 +134,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 20
+            "Line": 21
           },
           "Type": "datetime",
           "RawType": "YEAR",
@@ -146,7 +146,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 21
+            "Line": 22
           },
           "Type": "enum",
           "RawType": "ENUM('G','PG','PG-13','R','NC-17')",
@@ -158,7 +158,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 22
+            "Line": 23
           },
           "Type": "enum",
           "RawType": "SET('Trailers','Commentaries','Deleted Scenes','Behind the Scenes')",
@@ -195,7 +195,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 27
+            "Line": 28
           },
           "Type": "int",
           "RawType": "SMALLINT",
@@ -207,7 +207,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 28
+            "Line": 29
           },
           "Type": "int",
           "RawType": "SMALLINT",
@@ -219,7 +219,7 @@
           "DBName": "",
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 29
+            "Line": 30
           },
           "Type": "datetime",
           "RawType": "TIMESTAMP",
@@ -235,7 +235,7 @@
         {
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 31
+            "Line": 32
           },
           "Columns": [
             "actor_id"
@@ -248,7 +248,7 @@
         {
           "Pos": {
             "File": "mysql/sakila_excerpt.sql",
-            "Line": 32
+            "Line": 33
           },
           "Columns": [
             "film_id"

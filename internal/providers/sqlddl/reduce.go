@@ -871,7 +871,9 @@ func (b *builder) reduceCreateTable(file string, st stmt) {
 	}
 	t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
 	for _, p := range splitTopLevelParts(inner) {
-		line := st.line + strings.Count(st.text[:innerStart+p.off], "\n")
+		// p.textOff(), never p.off: the comma boundary sits before the newline
+		// that precedes the item's own text (ADR 0044).
+		line := st.line + strings.Count(st.text[:innerStart+p.textOff()], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
 	}
 	// Partitioning is declared in the TAIL — the text after the body's
@@ -1143,10 +1145,14 @@ func firstTopLevelMatch(s string, re *regexp.Regexp) []int {
 func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 	if host, residual, cut, ok := cutMissingComma(item); ok {
 		b.applyTableItem(t, host, pos)
-		// The residual reports ITS OWN line, counted over the raw item so the
-		// newlines the caller did not count are included — the same convention
-		// cutRunOn uses for a run-on residual.
-		b.applyTableItem(t, residual, db.Pos{File: pos.File, Line: pos.Line + strings.Count(item[:cut], "\n")})
+		// The residual reports ITS OWN line, counted from the item's TEXT — the
+		// first non-whitespace byte — not from its raw start. pos already points
+		// at that byte's line (part.textOff, ADR 0044); counting the leading
+		// newlines again here would advance the residual one line per blank
+		// line before the host, which is exactly what
+		// TestSQLDDL_MissingCommaCut_ReportsTheConstraintsOwnLine caught.
+		lead := len(item) - len(strings.TrimLeft(item, " \t\r\n"))
+		b.applyTableItem(t, residual, db.Pos{File: pos.File, Line: pos.Line + strings.Count(item[lead:cut], "\n")})
 		return
 	}
 	item = strings.TrimSpace(item)
@@ -1635,7 +1641,13 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 	// repeats the verb per action is affected.
 	inAddList := false
 	for i, p := range splitTopLevelParts(m[2]) {
-		line := st.line + strings.Count(st.text[:actOff+p.off], "\n")
+		// p.textOff(), never p.off — same comma-boundary correction as the
+		// CREATE TABLE body loop (ADR 0044). It is invisible on pg_dump output,
+		// which writes ONE action per statement (reAlterTable's own `\s+(.*)$`
+		// has already consumed the newline before the first action), and it is
+		// the SECOND and later actions of a multi-action statement that were
+		// anchored a line early.
+		line := st.line + strings.Count(st.text[:actOff+p.textOff()], "\n")
 		pos := db.Pos{File: file, Line: line}
 		act := strings.TrimSpace(p.text)
 		if i == 0 {
@@ -2134,6 +2146,30 @@ func splitTypeAndMods(rest string, modifiers map[string]bool) (typeExpr, mods st
 type part struct {
 	text string
 	off  int
+}
+
+// textOff is the offset of the part's FIRST NON-WHITESPACE byte — the offset a
+// LINE ANCHOR must be counted to (ADR 0044).
+//
+// off is the COMMA BOUNDARY: splitTopLevelParts starts each part at the byte
+// after the separating ',' (or at 0 for the first one), which sits BEFORE the
+// newline that separates the items in ordinary multi-line DDL. Counting newlines
+// up to off therefore anchors every item one line EARLY, and the anchor is not
+// cosmetic: the baseline fingerprint is stamped from the CONTENT of the line at
+// the anchor, so a finding's committed identity was bound to the PREVIOUS item's
+// text (measured on a real pg_dump: DB-053 reported `password` at the line
+// reading `lastname character varying(255),`).
+//
+// A part that is entirely whitespace returns off unchanged rather than the
+// offset past its end: there is no item text to anchor on, and moving the anchor
+// forward across a trailing blank fragment would only push it onto an unrelated
+// line.
+func (p part) textOff() int {
+	trimmed := strings.TrimLeft(p.text, " \t\r\n")
+	if trimmed == "" {
+		return p.off
+	}
+	return p.off + len(p.text) - len(trimmed)
 }
 
 // splitTopLevelParts splits by commas at paren-depth 0, respecting single-quoted

@@ -1607,6 +1607,35 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `db.Table.Complete` cannot catch. An index *form* the reducer cannot read over a
   view still goes to `Schema.Unreduced`, because that statement genuinely was not
   read.
+  (15) **Closed as of `body-item-line-anchors`, 2026-08-02 (ADR 0044).** Every
+  `CREATE TABLE` body item, and every second-or-later action of a multi-action
+  `ALTER TABLE`, was anchored **one line early**: the reducer counted newlines up
+  to the **comma boundary**, which sits *before* the newline that precedes the
+  item's own text. **Measured** on a real `pg_dump`: DB-053 reported column
+  `password` at line 33, whose content is `lastname character varying(255),` — a
+  different column entirely. This was never cosmetic. The baseline **fingerprint**
+  is stamped from the **content** of the source line at the anchor
+  (`sensors/db.stampFingerprints`), so a finding's committed identity was bound to
+  the *previous* item's text, and a surface item's snippet quoted the wrong
+  declaration back to the agent. **Consequence for existing baselines**, stated
+  here rather than left for a user to discover: every DB finding and surface item
+  anchored on a `CREATE TABLE` body item **changes fingerprint**, so a committed
+  baseline entry for one stops matching and the finding reappears as new until it
+  is re-accepted. Items anchored on a table's own declaration line (DB-052) or on
+  a single-action `ALTER TABLE` (DB-001's foreign keys — the shape `pg_dump`
+  writes) are byte-identical: verified on the real dump, where 13 of the 14
+  surviving fingerprints are unchanged and only the DB-053 column item moved.
+  **Measured** over 26 external corpora: 24 item groups move, every one onto the
+  line the item is actually written on, and **zero** items appear or disappear
+  from this correction; the three schema goldens changed in exactly **64** places,
+  every one a `Pos.Line` going *N* → *N+1*, with no other field touched. A move is
+  not always exactly one line, and the exception is real rather than theoretical:
+  a body item preceded by a **line comment** moves two, because `split()` removes
+  the comment's text while keeping its newline (measured once, on `dw-barousse`'s
+  flat mart). The new numbers are locked against the **source** rather than
+  against themselves — every column of every `.sql` corpus under `testdata/` must
+  be anchored on a line **containing its own name** (195 anchors across 22
+  corpora), which no off-by-one can satisfy.
 - **Schema-file encoding, and the source-level floor under it (ADR 0044).**
   - *What is read.* codefit decodes the three **byte-order-marked** encodings
     before any tokenizer sees a schema file: UTF-8 (`EF BB BF`), UTF-16LE
