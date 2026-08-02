@@ -88,13 +88,20 @@ import (
 //   - every vendored OLTP corpus is a 3-to-5-table excerpt whose tables are
 //     uniformly mixed — there is no split to see, which is the correct answer
 //     and the acceptance bar this signal was required to clear;
-//   - the reference warehouse abstains on a gap the ALTER TABLE fix above was
-//     never going to touch, which is exactly what ADR 0036 predicted:
-//     AdventureWorksDW brackets its type names ([int], [nvarchar](50)), the
-//     T-SQL type map never matches them, and all 74 of its parsed columns land
-//     on db.TypeUnknown. A SECOND, independent parser gap, still open. Locked
-//     with real DDL in
-//     TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes.
+//   - the reference warehouse used to abstain on a SECOND, independent parser
+//     gap that the ALTER TABLE fix was never going to touch, exactly as ADR
+//     0036 predicted: AdventureWorksDW delimits its type names ([int],
+//     [nvarchar](50)) and all 74 of its parsed columns landed on
+//     db.TypeUnknown. THAT GAP IS NOW CLOSED (tsql-bracketed-type-names): all
+//     74 classify, and the signal reaches the corpus for the first time. It
+//     still does not FIRE here, and for an honest arithmetic reason rather
+//     than an abstention — this 3-table excerpt profiles one numeric pole
+//     (FactInternetSales) but only ONE text-dominated table (DimCustomer;
+//     DimDate is 63% numeric), and textPoleMinTables is 2. Measured on the
+//     FULL upstream install script, which is not vendored here, the signal
+//     DOES fire. The abstention mechanism itself is now locked with a fixture
+//     that produces genuinely unclassified types, in
+//     TestSchemaGate_TypeProfileSplit_UnclassifiedBudget.
 //
 // This file is ALSO the end-to-end half of the wiring lock: every row asserts
 // what paradigm.Detect returns over the same real parse, so the verdict and its
@@ -182,9 +189,17 @@ var gateCorpusExpectations = []gateCorpusCase{
 		// bulk_load_shape because eight declared foreign keys falsify its
 		// no-FKs premise outright, star_topology because six of those eight
 		// point at dimension tables this three-table excerpt does not vendor,
-		// so its spokes cannot be shown to be leaves. type_profile_split still
-		// abstains on the SEPARATE bracketed-type gap (ADR 0036), which that
-		// fix was never going to move.
+		// so its spokes cannot be shown to be leaves.
+		//
+		// Re-measured a SECOND time after tsql-bracketed-type-names: this row
+		// did NOT move, and the reason changed underneath it. All 74 columns
+		// now classify (they read as db.TypeUnknown before), so
+		// type_profile_split no longer abstains — it is EVALUATED here and
+		// returns false on the arithmetic: one numeric pole (FactInternetSales,
+		// 20 of 26 numeric) but only ONE text-dominated table (DimCustomer, 20
+		// of 29 descriptive; DimDate is 12 of 19 numeric and qualifies as
+		// neither), against textPoleMinTables = 2. Same fired set, an honest
+		// verdict instead of a fail-closed one.
 		path: "tsql/adventureworksdw_real_objects.sql", tables: 3, proven: 3,
 		fired:      []paradigm.Signal{paradigm.SignalCalendarTable, paradigm.SignalNoAuditTimestamps},
 		gateOpen:   true,

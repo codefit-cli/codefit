@@ -8,6 +8,15 @@ measurement of all six. Everything below still holds as written; 0036 changes
 what the numbers in "The measurement" section mean, since that section reads
 only the corpora this repository vendors.
 
+**One sentence below is superseded in scope (2026-08-01) by
+[ADR 0040](0040-delimited-type-names-resolve-at-the-canonical-form.md),** and this
+ADR is not rewritten: the re-measurement paragraph ends "`type_profile_split` still
+abstains on the separate bracketed-type gap, exactly as ADR 0036 predicted it
+would." That gap is now CLOSED. On the vendored AdventureWorksDW excerpt the signal
+no longer abstains — it is evaluated and returns false on the arithmetic (one
+text-dominated table against a floor of two). **The corpus's fired set, the gate's
+verdict and every counting argument in this ADR are unchanged.**
+
 ## Context
 
 ADR 0033 built paradigm detection BOTTOM-UP: `paradigm.Detect` assigns a role

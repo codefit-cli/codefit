@@ -806,14 +806,20 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `Classification.Unprovable` is **empty** there now, which is the advance
     rather than a regression: a recognized name lands in `Unprovable` only
     while structure cannot corroborate it.
-    **What it actually yields**, stated exactly rather than as a win: of these
-    five S2 rules only **DW-002** fires, twice (`DimCustomer` and `DimDate`),
-    and it fires for a **parser** reason rather than a modelling defect — both
-    keys **are** single-column integer surrogates, but the bracketed T-SQL type
-    name (`[int]`) reads as `TypeUnknown`, so "provably an integer" cannot be
-    satisfied (SQL-DDL known limit (8)). DW-001 does not fire (the fact reaches
-    both vendored dimensions), DW-005 does not fire (`DimDate` is recognized by
-    name), and DW-010/DW-011 do not fire (this excerpt carries no SCD columns).
+    **What it actually yields**, stated exactly rather than as a win: **none**
+    of these five S2 rules fires on it. **DW-002** used to fire twice
+    (`DimCustomer` and `DimDate`), and it fired for a **parser** reason rather
+    than a modelling defect — both keys **are** single-column integer
+    surrogates, but the delimited T-SQL type name (`[int]`) read as
+    `TypeUnknown`, so "provably an integer" could not be satisfied. That was
+    SQL-DDL known limit (8), and it is **closed**: all 74 of this corpus's
+    columns now classify and both items are gone. Both directions are locked in
+    `TestDW002_AdventureWorksDW_SurrogateKeysAreProven` — the `[int]` types
+    **and** the absence of any `dw-dimension-no-surrogate-key` item, because
+    either assertion alone would pass over a different regression. DW-001 does
+    not fire (the fact reaches both vendored dimensions), DW-005 does not fire
+    (`DimDate` is recognized by name), and DW-010/DW-011 do not fire (this
+    excerpt carries no SCD columns).
     So the corpus proves the family **reaches** real warehouse DDL end to end;
     it does not yet carry the five rules' positive fire paths, which stay on
     constructed fixtures per ADR 0028.
@@ -1231,25 +1237,51 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `USING` position), and
   `internal/providers/sqlddl/tsql_ordinary_index_completeness_test.go` (the
   now-recognized T-SQL `CLUSTERED`/`NONCLUSTERED` form, deliberately flipped
-  to its opposite, now-correct outcome). (8) A **bracketed T-SQL type name is
-  not mapped**: the tokenizer canonicalizes `[int]` to `"int"` (quoting is
-  canonicalized for identifiers, and a type name sits in an identifier
-  position) while the T-SQL type vocabulary is keyed on the bare word, so the
-  lookup misses and the column's neutral type falls back to `db.TypeUnknown`.
-  That is the honest fallback the DB-050 entry already describes, never a wrong
-  type — but it is a **real blind spot on the exact form Microsoft's own
-  generated scripts use for every column** (`[CustomerKey] [int] IDENTITY(1,1)
-  NOT NULL`). Measured consequence, on the vendored AdventureWorksDW corpus
-  **as vendored** (no rename needed any more — see the DW S2 entry above):
-  DW-002 fires on **both** `DimCustomer` and `DimDate` even though
-  `CustomerKey` and `DateKey` **are** single-column integer surrogates, because
-  "provably an integer" cannot be satisfied by a type that read as unknown.
-  Those two items are this limit's cost, stated where the agent will meet it.
-  The vendored T-SQL golden fixture writes its types **unbracketed** (`INT`),
-  which is why this stayed invisible until a real Microsoft script was parsed
-  end to end. **Not fixed** as of `tsql-alter-add-constraint` (a type-vocabulary
-  change with its own blast radius, deliberately out of that slice's scope) —
-  recorded here rather than left silent. (9) **Two `CREATE TABLE` statements
+  to its opposite, now-correct outcome). (8) **CLOSED** as of
+  `tsql-bracketed-type-names`, 2026-08-01. The entry is kept (not deleted)
+  because it names what this parser now **does**, and because the gap was
+  previously declared here as a live blind spot. It used to read: a **delimited
+  type name is not mapped** — the tokenizer canonicalizes `[int]` to `"int"`
+  (quoting is canonicalized for identifiers, and a type name sits in an
+  identifier position) while the type vocabulary is keyed on the bare word, so
+  the lookup missed and the column's neutral type fell back to
+  `db.TypeUnknown`. That was a **real blind spot on the exact form Microsoft's
+  own generated scripts use for every column** (`[CustomerKey] [int]
+  IDENTITY(1,1) NOT NULL`), and its measured cost was DW-002 firing on **both**
+  `DimCustomer` and `DimDate` even though `CustomerKey` and `DateKey` **are**
+  single-column integer surrogates. The column-type lookup now **unwraps the
+  canonical delimiters** before consulting the dialect's `TypeMap`
+  (`internal/providers/sqlddl/types.go`, `typeLookupKey`), so `[int]`,
+  `` `int` `` and `"int"` all classify exactly like the bare word. The fix is
+  **dialect-free** and closes all three dialects at once — the tokenizer had
+  already collapsed every dialect's quoting onto one canonical form, so there is
+  no bracket strip and no per-dialect branch anywhere; MySQL backtick-quoted and
+  ANSI double-quoted type names were probed on `main` and confirmed to carry the
+  **same** defect, and the same seam closes them. What did **not** change,
+  deliberately: `RawType` still carries the source spelling verbatim;
+  `typeBase` itself is untouched, so the `KEY`/`INDEX`-vs-column discriminator
+  (limit (4)) still reads a delimited token as an index **name** rather than a
+  type; and an **unrecognized** keyword still falls back to `db.TypeUnknown` —
+  the fix maps a delimited *spelling* onto the same lookup key, it never widens
+  the vocabulary or guesses. A form that is not exactly **one** quoted
+  identifier (`[dbo].[MyType]`, canonicalized to `"dbo"."MyType"`) is left
+  untouched and stays `TypeUnknown` rather than being half-stripped.
+  **Measured over 26 corpora, both directions**: exactly two corpora moved, and
+  only DW-002's item count changed anywhere — **26 items to 8**, all 18 removed
+  items belonging to the two AdventureWorksDW corpora, **zero** items added by
+  any rule. The vendored 3-table excerpt goes from 74 of 74 columns unclassified
+  to 0 of 74; the full upstream install script (not vendored here) from 359 of
+  359 to **6** of 359, and those 6 are the honest fallback still working
+  (`[sysname]` x5, `[xml]` x1 — real T-SQL types outside the declared
+  vocabulary). The 8 surviving DW-002 items are text/varchar-keyed dimensions
+  the rule should fire on. The schema gate's `type_profile_split` signal (ADR
+  0036) newly **reaches** both corpora: it fires on the full install script, and
+  on the 3-table excerpt it is now evaluated and returns false on the arithmetic
+  (one text-dominated table against a floor of two) instead of failing closed.
+  **No gate verdict changed on any corpus.** No golden file changed, because all
+  three golden fixtures write their types **undelimited** — which is exactly why
+  this stayed invisible until a real Microsoft script was parsed end to end.
+  (9) **Two `CREATE TABLE` statements
   with no separator** between them (neither `;` nor a `GO` batch line) reduce to
   only the **first** table, and the loss is **silent**: the second table simply
   does not exist in the model, the first is left `StructureProven`, and nothing

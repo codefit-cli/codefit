@@ -121,6 +121,31 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A delimited SQL type name (`[int]`, `` `int` ``, `"int"`) is now classified instead of
+  falling back to `db.TypeUnknown`** — closing SQL-DDL known limit (8) and, with it, a
+  **live false positive**. Microsoft's own generated scripts delimit the type of *every*
+  column (`[CustomerKey] [int] IDENTITY(1,1) NOT NULL`), so on the vendored AdventureWorksDW
+  corpus **all 74** parsed columns read as unknown, and **DW-002 claimed `DimCustomer` and
+  `DimDate` have no surrogate key** over DDL where `CustomerKey` and `DateKey` are plainly
+  single-column `[int]` primary keys — contradicting DW-002's own doc comment, which cites
+  that exact column as the shape that must *not* fire. The fix is **dialect-free and one
+  seam wide**: the tokenizer already canonicalizes every dialect's quoting to ANSI `"…"`
+  before the reducer runs, so the column-type lookup unwraps *that* form (`typeLookupKey`)
+  and all three dialects are closed at once — no bracket strip, no per-dialect branch, no
+  new dialect datum. MySQL backticks and ANSI double quotes were **probed on `main` and
+  confirmed to carry the same defect**, not assumed. `RawType` still carries the source
+  spelling verbatim, `typeBase` is untouched so the `KEY`/`INDEX`-vs-column discriminator
+  keeps reading a delimited token as an index *name*, and an **unrecognized keyword still
+  falls back to `db.TypeUnknown`** — a delimited *spelling* now maps onto the same lookup
+  key, the vocabulary was never widened. **Measured over 26 public corpora, both
+  directions:** only DW-002 moved anywhere — **26 items to 8**, all 18 removals belonging to
+  the two AdventureWorksDW corpora, **zero** items added by any rule, and the 8 survivors
+  are text-keyed dimensions the rule should fire on. Unclassified columns: the vendored
+  excerpt 74/74 → 0/74, the full upstream install script 359/359 → **6**/359 (`[sysname]`,
+  `[xml]` — the honest fallback still working). The schema gate's `type_profile_split`
+  signal now **reaches** both corpora rather than failing closed; **no gate verdict changed
+  on any corpus**, and **no golden file changed** (all three golden fixtures write their
+  types undelimited, which is why this stayed invisible).
 - **DW-005 and DW-011 no longer go silent on a declaratively partitioned PostgreSQL
   warehouse.** A `CREATE TABLE c PARTITION OF p` child is marked structurally unproven
   *by construction* — its columns and keys are declared on the parent, so nothing was

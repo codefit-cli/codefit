@@ -910,7 +910,7 @@ func (b *builder) applyColumn(t *db.Table, def string, pos db.Pos) {
 		DBName:  "",
 		Pos:     pos,
 		RawType: strings.TrimSpace(rawType),
-		Type:    b.dialect.mapType(typeBase(rawType)),
+		Type:    b.dialect.mapType(typeLookupKey(rawType)),
 		List:    strings.Contains(rawType, "[]"),
 	}
 	upMods := strings.ToUpper(mods)

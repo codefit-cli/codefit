@@ -25,6 +25,14 @@ import (
 // every well-modelled warehouse uses (AdventureWorksDW's
 // DimCustomer.CustomerKey is exactly this), and it needs no name guessing.
 //
+// That example was a LIE for as long as it stood here, and is now a lock. The
+// SQL-DDL parser did not classify a delimited T-SQL type name, so [int] read as
+// db.TypeUnknown and this rule fired on the very column its own doc comment
+// cited — 18 of the 26 items it emitted over a 26-corpus survey were that one
+// parser artifact. Closed by ADR 0040; asserted over the real vendored corpus,
+// in both directions, by TestDW002_AdventureWorksDW_SurrogateKeysAreProven
+// (internal/providers/sqlddl/dw_integration_test.go).
+//
 // DECLARED LIMIT: a UUID/GUID surrogate key is typed as a string in the
 // neutral model, so it reads as "not provably an integer surrogate" and DOES
 // fire. That is a known, stated false positive rather than a silent one — the
