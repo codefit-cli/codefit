@@ -66,8 +66,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   Postgres. All DB rules (DB-050 and below) are **dialect-agnostic**: they reason
   over the neutral `db.Schema` model regardless of which dialect parsed the DDL. An
   unmapped type keyword falls back to `db.TypeUnknown` — an honest fallback, never a
-  silent guess. The DB dimension covers only what the schema states — no query
-  analysis.
+  silent guess. A **temporary** table (PostgreSQL/MySQL `TEMP`/`TEMPORARY`, T-SQL's
+  `#`/`##` name prefix) is deliberately **excluded from the model entirely**
+  (ADR 0043), so DB-050 and every other DB/DW rule never sees one: a session-scoped
+  table is dropped with its session and is not part of the persistent schema. That
+  withholding is **never silent** — the per-scan note states how many declarations
+  were withheld and why. The DB dimension covers only what the schema states — no
+  query analysis.
 
 ### Reasoning — codefit maps surface, the agent judges
 
@@ -1428,6 +1433,96 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   data rather than syntax (a `COMMENT` string reading `PRIMARY KEY` no longer
   declares a key, and one reading `NOT NULL` no longer reports the column
   non-nullable). It changed nothing on any of the 29 corpora.
+
+  (13) **Closed as of `table-shaped-head-floor`, 2026-08-02 (ADR 0043)**, and it
+  closes a **class** rather than a list of forms. Before it, a
+  `CREATE <anything> TABLE` head that no dispatch branch reduced fell through
+  `apply()`'s `default:` and left **no trace of any kind** — no table in the
+  model, no `Schema.Unreduced` entry, no note. **Measured** through the real
+  `Sensor.Audit`, not inferred: a schema whose only statement is a
+  `CREATE UNLOGGED TABLE` audited as `Measured=true`, empty `Note`, `tables=0`,
+  `findings=0`, `surface=0` — the false *"audited, 0 findings"* state over DDL
+  codefit never read, which is the worst state an auditor can be in because it is
+  indistinguishable from a clean bill of health. **Twelve** forms were confirmed
+  silent this way, each under the dialect it belongs to: PostgreSQL's `UNLOGGED`
+  and `UNLOGGED … IF NOT EXISTS`, `TEMP`, `TEMPORARY`, `GLOBAL TEMPORARY` and
+  `LOCAL TEMPORARY`; MySQL's `TEMPORARY`; T-SQL's `#Local` and `##Global` name
+  prefixes; plus `CREATE FOREIGN TABLE`, `CREATE TABLE … AS SELECT`, and a table
+  whose quoted name falls outside the reducer's identifier class.
+  `CREATE TABLE IF NOT EXISTS` was **never** affected — it is an explicit group
+  in the regex and has always worked. The fix is the structural analogue of what
+  `reIndexShapedHead` has done for the `CREATE INDEX` family since ADR 0034: a
+  **last-resort net after every real table branch**, so a form nobody has taught
+  this parser yet is *declared* instead of evaporating.
+  **Three dispositions**, deliberately different because they are different facts
+  about the schema:
+  **(a) modeled** — `CREATE UNLOGGED TABLE`, admitted to the model like any other
+  table; an unlogged table only skips the write-ahead log, it is ordinary
+  persistent storage and its keys are as real as any other's.
+  **(b) withheld** — the `TEMP`/`TEMPORARY` family and T-SQL's `#`/`##` name
+  prefix. These are **read correctly and deliberately left out** of the model: a
+  temporary table is dropped with the session that created it, so it is not part
+  of the persistent schema, and admitting it would have DB-050 affirm "table
+  without a primary key" over session scratch space at confidence 1.0.
+  Withholding is **never silent** — it is recorded on `Schema.Withheld` with the
+  core's closed `WithheldReason` vocabulary, the declared name and the verbatim
+  statement, and reported in the per-scan note as its **own** trace, aggregated by
+  reason and capped at five names, never one line per table. It is deliberately
+  **not** reported through `Schema.Unreduced`: that channel means "codefit could
+  not read this", and using it for a scoping decision would tell an agent the
+  parser failed where it in fact succeeded.
+  **(c) declared** — every other table-shaped head, recorded verbatim on
+  `Schema.Unreduced` and reaching the agent through the per-scan inventory,
+  exactly as ADR 0041's found residual does.
+  **The catcher never guesses a name**, and that is a decision rather than an
+  omission: unlike a `CREATE INDEX` form, which always carries an `ON` clause a
+  drop can be attributed to, the forms landing here are by definition ones whose
+  grammar this reducer does not know, so it does not know where their name sits
+  either (a `CREATE TABLE … AS SELECT` puts it in one position, a
+  `CREATE FOREIGN TABLE … SERVER` in another). Registering a table from a guessed
+  span would be the **fabrication** class `db.Table.Complete` structurally cannot
+  catch — strictly worse than the silence it replaces — so the verbatim statement
+  plus its `file:line` is what carries the name to the agent.
+  The catcher's modifier window is **at most two words** between `CREATE` and
+  `TABLE`, and that bound is load-bearing: it admits every real one- and two-word
+  form (`UNLOGGED`, `FOREIGN`, `EXTERNAL`, `TRANSIENT`, `GLOBAL TEMPORARY`,
+  `LOCAL TEMP`, `OR REPLACE`, `SET`/`MULTISET`) while excluding three-word shapes
+  that are **not** table declarations — T-SQL's `CREATE TYPE x AS TABLE` (a
+  user-defined table *type*), `CREATE STATISTICS s ON t`, and
+  `CREATE SCHEMA s CREATE TABLE …` (the SQL-standard element list).
+  **Measured** over the same 29 corpora ADR 0042 used: **zero delta** on tables,
+  structure-proven counts, columns, foreign keys, indexes, views, procedures,
+  triggers, paradigm, every emitted item and the scan note; the three schema
+  goldens gained one additive key (`Withheld`) and nothing else. A zero delta is
+  exactly what a broken harness also produces, so the measurement was proven
+  **sensitive** with positive controls: widening the catcher's window to three
+  words moves `adventureworks-oltp-pg` (5 new `Schema.Unreduced` entries from its
+  `CREATE SCHEMA` element lists), making the `UNLOGGED` prefix **mandatory** moves
+  22 of 29 corpora with table counts collapsing, and admitting `TEMP`/`TEMPORARY`
+  into `reCreateTable` puts session scratch into the model on the authored
+  fixture.
+  **What remains not covered**, each a decision rather than an oversight:
+  (i) T-SQL's `#` recognition is proven by **constructed** DDL only. The form does
+  occur in the external survey — `dw-gravity`'s
+  `DWH Scripts/1.1_CreateDimDate.sql` declares `CREATE TABLE #tmpHoliday(…)` at
+  the top level of a batch script — but that occurrence is unreachable for an
+  unrelated, **pre-existing** reason, confirmed through the real parser rather
+  than assumed: the preceding `UPDATE` is unterminated, so the whole run is one
+  statement whose head is `UPDATE` and no head regex ever sees the `CREATE`. That
+  is the run-on class, not this one. (ii) A **three-word** modifier form
+  (MariaDB's `CREATE OR REPLACE TEMPORARY TABLE`) falls outside the catcher's
+  window and stays silent. (iii) `CREATE SCHEMA s CREATE TABLE …` remains the open
+  gap ADR 0041 recorded: it is deliberately outside the window, because admitting
+  it would start declaring statements on a corpus that is read correctly today.
+  (iv) Withholding **shrinks the modeled table count**, which can move a small
+  schema below the schema gate's `minJudgeableTables` floor of 3 and silence every
+  warehouse signal. That is the correct reading — session scratch space is not
+  evidence about whether a schema is a warehouse — but it is a real consequence,
+  measured on the authored T-SQL fixture and recorded in its schema-gate corpus
+  row. (v) A later `ALTER TABLE` or `CREATE INDEX` naming a withheld temporary
+  table still materializes a phantom table carrying `ReasonTableNeverDeclared`,
+  exactly as before: withholding removes the `CREATE` from the model, it does not
+  teach the other branches that the name is temporary.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

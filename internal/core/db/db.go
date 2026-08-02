@@ -18,7 +18,66 @@ type Schema struct {
 	// gates NOTHING per-table (there is no table to gate); it surfaces only in
 	// the per-scan completeness inventory (sensors/db.Result.Note).
 	Unreduced []Unreduced
+
+	// Withheld carries declarations the parser READ correctly and
+	// DELIBERATELY did not model (ADR 0043). It is a different fact from
+	// Unreduced and deliberately a different channel: Unreduced means the
+	// parser could not read a statement, Withheld means it could and chose,
+	// for a stated reason, that the thing it read does not belong in the
+	// schema codefit audits. Reporting a scoping decision as a parser failure
+	// would misdescribe it in the opposite direction — it would tell an agent
+	// codefit is blind where it is in fact seeing clearly.
+	//
+	// Withholding is never silent (CLAUDE.md, developer autonomy): it reaches
+	// the agent through its own bounded trace in the per-scan note
+	// (sensors/db.Result.Note), aggregated by reason, never one line per table.
+	// It gates nothing per-table — there is no table to gate, because the
+	// withheld declaration never entered the model.
+	Withheld []Withheld
 }
+
+// Withheld is one declaration the parser read and deliberately left out of the
+// model, kept verbatim with its source position so the agent can read the DDL
+// itself (ADR 0043).
+type Withheld struct {
+	// Name is the declared name, as the source spells it, when the recognized
+	// form puts it somewhere the parser knows. EMPTY means the form carries
+	// none the parser can read faithfully — never a guess, and never
+	// back-filled from the statement text.
+	Name string
+	// Text is the VERBATIM source statement — the user's own DDL, never
+	// codefit's internals (the same measurement/diagnostics boundary
+	// Unreduced.Text observes, ADR 0034 §2.8).
+	Text string
+	Pos  Pos
+	// Reason is drawn from this package's closed WithheldReason vocabulary.
+	Reason WithheldReason
+}
+
+// WithheldReason is why a declaration the parser RECOGNIZED was deliberately
+// left out of the model. A CLOSED set, and a DISTINCT type from Reason rather
+// than a new constant added to it: Reason answers "why could this table's
+// structure not be proven complete", and an answer to that question is grounds
+// for an absence-based rule to abstain. A withheld declaration raises no such
+// question — nothing about it is unproven, it is simply not part of the
+// persistent schema — so the two vocabularies must not be assignable to each
+// other, or a future reader will route one into the other's carrier and turn a
+// scoping decision into a reported parser failure.
+type WithheldReason string
+
+// Reasons a recognized declaration is deliberately not modeled. A CLOSED set,
+// defined in this package (never provider-authored prose).
+const (
+	// ReasonSessionScopedTable: the declaration is a TEMPORARY table —
+	// PostgreSQL's and MySQL's TEMP/TEMPORARY (with or without GLOBAL/LOCAL)
+	// and T-SQL's '#'/'##' name prefix. Such a table lives only for the
+	// duration of a session and is dropped with it, so it is not part of the
+	// persistent schema the DB dimension audits. Admitting it would put
+	// scratch space in front of every absence-based rule — DB-050 would
+	// affirm "table without a primary key" over a temporary work table, at
+	// confidence 1.0.
+	ReasonSessionScopedTable WithheldReason = "declared as a temporary, session-scoped table: it is dropped with the session that created it, so it is not part of the persistent schema"
+)
 
 // Pos is the origin of a schema element: the file it was parsed from and its
 // 1-based line. Every element carries one so a finding and the baseline can anchor
