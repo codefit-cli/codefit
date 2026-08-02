@@ -1523,6 +1523,43 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   table still materializes a phantom table carrying `ReasonTableNeverDeclared`,
   exactly as before: withholding removes the `CREATE` from the model, it does not
   teach the other branches that the name is temporary.
+- **Schema-file encoding, and the source-level floor under it (ADR 0044).**
+  - *What is read.* codefit decodes the three **byte-order-marked** encodings
+    before any tokenizer sees a schema file: UTF-8 (`EF BB BF`), UTF-16LE
+    (`FF FE`) and UTF-16BE (`FE FF`). The UTF-16LE case is not exotic — it is
+    exactly what `pg_dump` produces when PowerShell redirects its output. Before
+    this, a real 9-table / 9-primary-key / 11-foreign-key dump measured
+    `Measured=true`, score 100, empty note and **zero tables**: the false
+    all-clear, byte-for-byte indistinguishable from a clean scan.
+  - *What is never guessed.* A file with **no** byte-order mark is not sniffed.
+    Detecting BOM-less UTF-16 means inferring from NUL bytes at regular offsets,
+    and a wrong inference silently rewrites the content of a Latin-1 or
+    binary-ish file — a corruption strictly worse than the silence, and
+    undetectable downstream. Such a file is **declared unread** instead, on the
+    positive observation that NUL bytes survived decoding.
+  - *What makes the silence impossible.* A configured schema source that
+    contributes **nothing** to the neutral model — no table, view, routine or
+    trigger, and not even a statement recorded on `Schema.Unreduced` /
+    `Schema.Withheld` — is reported in the scan note, whatever the cause (an
+    encoding nobody has written a branch for, a truncated file, a future
+    format). When **every** configured source is unread that way, the scan
+    reports `Measured=false` rather than "audited, 0 findings", and the db
+    dimension drops out of the weighted score instead of contributing a fake
+    100. The floor is written against the **outcome**, not against a list of
+    encodings, so it closes the class rather than the cases.
+  - *The benign half.* A genuinely empty or comment-only file is reported too,
+    with its own wording and without changing `Measured` — it is legitimate, and
+    recording it is what keeps "no tables" from ever being ambiguous.
+  - *Declared imprecision, in the reporting direction only.* The
+    whitespace/comment test is a **union** of SQL's `--`, `/* */`, MySQL's `#`
+    and Prisma's `//`, not a per-dialect tokenizer, so a `--` inside a string
+    literal reads as a comment opener. A misjudgement moves a file between two
+    **reported** buckets; it can never return one to silence.
+  - *Declared residual.* The security dimension and the code×schema cross take
+    the same decoding but have **no** such floor — they walk a whole repository,
+    where a file yielding nothing is the ordinary case — so a BOM-less UTF-16
+    **source** file (not schema file) is still read as-is and still yields
+    nothing, silently.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

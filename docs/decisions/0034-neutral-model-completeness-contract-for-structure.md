@@ -65,6 +65,23 @@ boundary (which is why the new catcher declares without guessing a table name)
 and §2.8's measurement/diagnostics boundary are unchanged; 0043's own trace is a
 third independent producer on §2.8's existing note channel.
 
+**Extended (2026-08-02) by
+[ADR 0044](0044-source-bytes-become-text-and-an-unread-source-is-declared.md):**
+every disposition below — §2.4's declared skip, 0041's found residual, 0043's
+withheld declaration — describes what happens INSIDE a file codefit successfully
+read. None of them could fire for a file whose BYTES never became statements: a
+UTF-16 `pg_dump` reached the tokenizer as `C\x00R\x00E\x00A\x00T\x00E\x00`, so
+nothing was dropped, no carrier filled, and a 9-table schema measured
+`Measured=true, Note="", tables=0, findings=0` — this contract's carriers all
+empty and its whole apparatus bypassed. 0044 decodes at the filesystem boundary
+and adds the floor one level up: a configured SOURCE that contributes no position
+to the model is declared, and a scan in which no source contributed anything is
+`Measured=false` rather than "audited, 0 findings". §2.5's dispositions, §2.6's
+fabrication boundary and §2.8's measurement/diagnostics boundary are unchanged;
+0044's trace is a fourth independent producer on §2.8's existing note channel,
+and it deliberately treats an `Unreduced`/`Withheld` record as PROOF the file was
+read, so a declared drop is never re-reported as blindness.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares

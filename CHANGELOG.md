@@ -121,6 +121,58 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A schema file codefit cannot read is no longer reported as a clean one** (ADR 0044).
+  A PostgreSQL dump produced by `pg_dump` under PowerShell is **UTF-16LE with a
+  byte-order mark** — not exotic, just what the tool writes when its output is
+  redirected on Windows. **Measured through the real DB sensor**, a dump declaring
+  **9 tables, 9 primary keys and 11 foreign keys** audited as `Measured=true`,
+  **score 100**, **empty note**, **0 tables, 0 findings, 0 surface items**. No
+  abstention floor fired, because nothing was *dropped*: the tokenizer saw
+  `C\x00R\x00E\x00A\x00T\x00E\x00` and never recognized a statement at all, so every
+  carrier ADR 0034 and ADR 0043 built stayed empty and the output was
+  **indistinguishable from a clean bill of health**. The same four-row probe now
+  reads 18 tables for the file as it sits on disk, identical to its UTF-8 conversion.
+  - **What is decoded:** the three byte-order-marked encodings — UTF-8 (`EF BB BF`),
+    UTF-16LE (`FF FE`), UTF-16BE (`FE FF`) — at the filesystem boundary, before any
+    tokenizer sees the bytes. No new dependency: `unicode/utf16` from the standard
+    library (`golang.org/x/text` is pure Go and would have been admissible, but it is
+    not currently a dependency — checked in both `go.mod` and `go.sum`).
+  - **What is never guessed:** a file with **no** mark is returned byte-identical.
+    Sniffing BOM-less UTF-16 means inferring an encoding from NUL bytes at regular
+    offsets, and a wrong inference silently rewrites a Latin-1 or binary-ish file —
+    a corruption strictly worse than the silence, and undetectable downstream. Such a
+    file is **declared unread** instead, on the positive observation that NUL bytes
+    survived decoding.
+  - **What makes the silence impossible** — the durable half, and the reason this is
+    not just an encoding fix. A configured schema source that contributes **nothing**
+    to the neutral model (no table, view, routine or trigger, and not even a statement
+    recorded on `Schema.Unreduced`/`Schema.Withheld`) is now reported in the scan note,
+    **whatever the cause** — a future format, a truncated file, an encoding nobody has
+    written a branch for. Written against the **outcome**, not a list of encodings, so
+    it closes the class rather than the cases. When **every** configured source is
+    unread that way, the scan reports `Measured=false` and the db dimension **drops out
+    of the weighted score** instead of contributing a fake 100.
+  - A file codefit read and **declared** it could not reduce is explicitly *not* unread:
+    an `Unreduced`/`Withheld` record is proof the file was read, and re-reporting it as
+    blindness would undo exactly what ADR 0034 and 0043 built.
+  - A genuinely **empty or comment-only** file is legitimate, does not change
+    `Measured`, and is still recorded in its own wording — so "0 tables" is never
+    ambiguous.
+  - **The same blindness, probed rather than assumed, in two more readers**, both now
+    decoding: the **security sensor** (a UTF-16 `.ts` file scanned as **0 findings,
+    score 100**, where its UTF-8 twin reports SEC-001 at score 90) and the
+    **code×schema cross extractor**. Probed and found **not** in the class, so
+    untouched: `.codefit.yaml` loading (`yaml.v3` handles marks itself and fails loudly
+    without one) and Prisma provider detection (degrades to a default, not to an
+    all-clear). **Declared residual:** the security dimension and the cross have no
+    unread-source floor — they walk a whole repository, where a file yielding nothing is
+    the ordinary case — so a BOM-less UTF-16 *source* file stays silently unread there.
+  - **28 vendored corpora, zero delta** — tables, proven counts, columns, keys,
+    indexes, views, routines, triggers, every emitted item and the whole scan note are
+    identical before and after; the measurement was proven sensitive by positive
+    control. **No corpus could have caught this**, which is its own finding: all 29 are
+    UTF-8 with no mark. Three authored twins under `internal/sensors/db/testdata/` are
+    the only control.
 - **A `CREATE … TABLE` head no branch can reduce no longer evaporates** — the
   `CREATE TABLE` family gets the honest-abstention floor `reIndexShapedHead` has
   given the `CREATE INDEX` family since ADR 0034, and it closes a **class**, not a
