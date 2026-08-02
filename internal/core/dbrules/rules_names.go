@@ -72,10 +72,27 @@ func (db051) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 	return nil, out
 }
 
-// db052 — a table with NEITHER createdAt NOR updatedAt. Fires only when BOTH are
-// missing (the clearest smell); "only one missing" is a DEFERRED candidate
-// (DB-052b) to decide with dogfood evidence, not a permanent exclusion. It exposes
-// looks_like_join_table so the agent can dismiss link tables — it does not suppress.
+// db052 — a table carrying NO audit timestamp at all: not one column whose name
+// says when the row was created, last changed, or recorded. "Only one of the pair
+// missing" is a DEFERRED candidate (DB-052b) to decide with dogfood evidence, not
+// a permanent exclusion. It exposes looks_like_join_table so the agent can dismiss
+// link tables — it does not suppress.
+//
+// THE VOCABULARY IS SHARED AND MEASURED: db.IsAuditTimestampName owns it, and
+// paradigm's no_audit_timestamps signal asks the same function, so the two cannot
+// drift. It reads createdAt/updatedAt, the other spellings the corpora actually
+// produced (last_update, create_date, creation_date, update_date, ModifiedDate,
+// created_ts and siblings), and a bare `timestamp` — an append-only event table
+// whose one time column IS its creation time. Read that function's doc comment
+// before adding a name: the admission rule is measured evidence, not plausibility,
+// because admitting a name SILENCES a table.
+//
+// DECLARED LIMIT, in the direction that keeps this rule honest: it still fires on
+// a table that stamps its rows under a spelling no measured corpus produced
+// (created_on, date_created, inserted_at, last_modified, …). That is a false
+// positive the agent can dismiss from the columns: listed in the item, and it is
+// the deliberate trade — the opposite error, guessing a name and going quiet over
+// a table that really has no audit trail, is the one that hides.
 type db052 struct{}
 
 func (db052) ID() string { return "DB-052" }
@@ -88,18 +105,15 @@ func (db052) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 			// declared created_at/updated_at.
 			continue
 		}
-		hasCreated, hasUpdated := false, false
+		stamped := false
 		names := make([]string, 0, len(t.Columns))
 		for _, c := range t.Columns {
 			names = append(names, c.Name)
-			switch normalizeIdent(c.Name) {
-			case "createdat":
-				hasCreated = true
-			case "updatedat":
-				hasUpdated = true
+			if db.IsAuditTimestampName(c.Name) {
+				stamped = true
 			}
 		}
-		if hasCreated || hasUpdated {
+		if stamped {
 			continue
 		}
 		out = append(out, findings.SurfaceItem{
@@ -115,8 +129,10 @@ func (db052) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 				"has_updated_at":        false,
 				"looks_like_join_table": looksLikeJoinTable(t),
 			},
-			ReasonToReview: "This table has no created/updated audit timestamps. Should it track them, or is it a " +
-				"link/config table where their absence is intentional?",
+			ReasonToReview: "This table has no audit timestamp: not one column named for when the row was created, " +
+				"changed or recorded. Should it track one, or is it a link/config table where the absence is " +
+				"intentional? (The name vocabulary is measured, not exhaustive — if a stamp IS in the columns: list " +
+				"under an unusual spelling, that is what happened.)",
 		})
 	}
 	return nil, out
@@ -236,12 +252,6 @@ func columnIndex(s *db.Schema) map[string]map[string]db.Column {
 
 func storableSecretType(t db.Type) bool {
 	return t == db.TypeString || t == db.TypeText || t == db.TypeBytes
-}
-
-// normalizeIdent lowercases and drops separators, so createdAt / created_at both
-// normalize to "createdat".
-func normalizeIdent(s string) string {
-	return strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(s))
 }
 
 // looksLikeJoinTable reports a composite-PK table whose every column is part of

@@ -335,6 +335,46 @@ func TestSignalNoAuditTimestamps_OneStampAnywhereDisqualifies(t *testing.T) {
 	}
 }
 
+// TestSignalNoAuditTimestamps_MatchesTheSharedVocabularyExactly is the
+// ANTI-DRIFT lock, and the reason db.IsAuditTimestampName exists at all. This
+// signal and dbrules' DB-052 answer the same question about a column name, at
+// two different scopes, from two different packages. They used to answer it
+// with two hand-copied two-name lists; the DW-005 / timeDimensionName incident
+// in this repository is what that costs when the lists grow apart.
+//
+// The assertion is an EQUIVALENCE, not a list: for each name, the signal must
+// fire exactly when the shared vocabulary does NOT recognize it. Widening one
+// side without the other fails here, whichever side moves — which a list of
+// expected names could not do.
+func TestSignalNoAuditTimestamps_MatchesTheSharedVocabularyExactly(t *testing.T) {
+	names := []string{
+		// Recognized by the shared vocabulary (signal must NOT fire).
+		"created_at", "updated_at", "createdAt", "last_update", "create_date",
+		"creation_date", "update_date", "ModifiedDate", "created_ts",
+		"creation_ts", "creation_time", "inserted_ts", "added_ts", "added_at",
+		"timestamp",
+		// NOT recognized (signal must fire): real business columns from the
+		// measured corpora, plus the type spellings.
+		"street", "payment_date", "start_date", "creator", "update_trace_id",
+		"commission_created", "dv_create_date", "stage_at_time", "timestamptz",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			s := &db.Schema{Tables: []db.Table{
+				provenTable("orders", "id", "total"),
+				provenTable("customers", "id", "name"),
+				provenTable("addresses", "id", name),
+			}}
+			got := paradigm.WarehouseSignals(s).Has(paradigm.SignalNoAuditTimestamps)
+			want := !db.IsAuditTimestampName(name)
+			if got != want {
+				t.Errorf("no_audit_timestamps fired = %v, want %v — db.IsAuditTimestampName(%q) = %v; "+
+					"the gate and DB-052 must read ONE vocabulary", got, want, name, db.IsAuditTimestampName(name))
+			}
+		})
+	}
+}
+
 // TestSignalNoAuditTimestamps_UnprovenStructureAbstains: same absence doctrine
 // as db052, which skips a table whose structure is unproven because a dropped
 // ADD COLUMN might have declared created_at.

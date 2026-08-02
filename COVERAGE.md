@@ -265,9 +265,32 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     uuid/cuid key does **not** fire (it is a structural type-mismatch check, not a
     name guess); an unresolvable reference does not fire. Facts: `type_mismatch`,
     `text_key`, `referenced_type_resolved`.
-  - **Missing audit timestamps (DB-052).** A table with **neither** `createdAt`
-    **nor** `updatedAt`. `looks_like_join_table` is exposed so link tables can be
+  - **Missing audit timestamps (DB-052).** A table carrying **no audit-timestamp
+    column at all** — not one column named for when the row was created, changed
+    or recorded. `looks_like_join_table` is exposed so link tables can be
     dismissed. "Only one missing" is a **deferred candidate**, not fired yet.
+    - **The vocabulary is measured and shared.** One definition
+      (`db.IsAuditTimestampName`) answers this for DB-052 **per table** and for
+      the schema gate's `no_audit_timestamps` signal **per schema**, so the two
+      cannot drift. It holds 16 names: `createdAt`/`updatedAt`, `last_update`,
+      `create_date`, `creation_date`, `update_date`, `ModifiedDate`,
+      `created_ts`, `creation_ts`, `creation_time`, `inserted_ts`, `added_ts`,
+      `added_at`, and a bare `timestamp` (an append-only event table whose one
+      time column **is** its creation time). Every entry was read off a real
+      corpus, on a table this rule was firing on. Widening it took DB-052 from
+      **424 items to 375** over 29 corpora, silenced **49 tables** and started
+      firing on **none**.
+    - **A name, by equality, never a type.** Matching is equality over the
+      lowercased, separator-stripped name: a column named `logged_value`
+      **typed** `timestamp` is not a stamp and still fires, and `creator`,
+      `update_trace_id`, `commission_created` (all real columns of firing
+      tables) are not admitted.
+    - **Declared limit, in the noisy direction on purpose.** A stamp spelled in
+      a way no measured corpus produced (`created_on`, `date_created`,
+      `inserted_at`, `last_modified`) **still fires**: admitting a guessed name
+      **silences** a table, and a false negative is the error that hides. The
+      `columns:` signal lists every column, so such an item is dismissible in
+      one step.
   - **Sensitive column in the clear (DB-053).** A column whose name matches a
     sensitive token (`password`, `token`, `apiKey`, `ssn`, …) held in a
     `String`/`Text`/`Bytes` type. It **always emits**; an encryption hint in the
@@ -577,6 +600,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     **nothing** across all 26, and the other two fired 9/5 and 7/5, near coin
     flips on the transactional side that carry almost no information and are
     exactly what forces a counting threshold up.
+    - **`no_audit_timestamps` was re-measured** after its audit-stamp
+      vocabulary was widened and **shared** with DB-052
+      (`db.IsAuditTimestampName`): it now reads **8 W / 3 O** over the same 26
+      corpora. Quieter, and no longer wrong about Sakila, Pagila and
+      AdventureWorks, which **do** stamp their rows under names it could not
+      read. Still **excluded** — a deciding signal's bar is **zero**
+      transactional fires. **No verdict moved** anywhere in that re-measurement
+      (29 corpora, six of which stopped firing the signal), which is exactly
+      what an excluded signal changing is supposed to look like.
   - **What that precision figure rests on, stated rather than rounded up.**
     **Four** of the 13 corpora in the transactional column parse to **zero
     tables** — three vendor only views, procedures and triggers, and
