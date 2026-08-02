@@ -135,29 +135,32 @@ func columnNames(t db.Table) []string {
 	return out
 }
 
-// TestSQLDDL_MissingCommaBeforeTableConstraint_FabricatesTheWrongKey
-// characterizes a SECOND fabrication of the ADR 0034 §2.6 class — a reducer
-// that believes it succeeded — found while measuring run-on separation (ADR
-// 0041) and DELIBERATELY not fixed there.
+// TestSQLDDL_MissingCommaBeforeTableConstraint_ReadsTheDeclaredKey was a
+// CHARACTERIZATION test of a SECOND fabrication of the ADR 0034 §2.6 class — a
+// reducer that believes it succeeded — found while measuring run-on separation
+// (ADR 0041) and DELIBERATELY not fixed there.
 //
 // A CREATE TABLE body item that is missing its separating comma before a
 // table-level PRIMARY KEY is not split by splitTopLevelParts (which splits on
-// top-level commas), so the whole run is one item, it starts with a column
-// name, and the trailing PRIMARY KEY reads as that column's INLINE key. The
-// composite key the DDL declares is replaced by a single-column one, and the
-// table still reports Complete=true — the completeness contract cannot see it,
-// because nothing was dropped.
+// top-level commas), so the whole run was one item, it started with a column
+// name, and the trailing PRIMARY KEY read as that column's INLINE key. The
+// composite key the DDL declares was replaced by a single-column one, and the
+// table still reported Complete=true — the completeness contract cannot see
+// that, because nothing was dropped.
 //
-// It is PRE-EXISTING and has nothing to do with run-on separation: the "with a
-// terminator" case below is an ordinary ';'-delimited statement and fabricates
+// It was PRE-EXISTING and had nothing to do with run-on separation: the "with a
+// terminator" case below is an ordinary ';'-delimited statement and fabricated
 // identically. Run-on separation only made it REACHABLE on real DDL —
-// dw-kenap's Fact_Reservation is written this way and reports pk=[Profit]
+// dw-kenap's Fact_Reservation is written this way and reported pk=[Profit]
 // where its DDL declares a six-column key.
 //
-// This is a CHARACTERIZATION test: it asserts today's wrong output on purpose,
-// so the limit declared in dbcoverage.go is machine-visible (ADR 0034 §2.7). It
-// must be INVERTED, not deleted, when the reducer learns this shape.
-func TestSQLDDL_MissingCommaBeforeTableConstraint_FabricatesTheWrongKey(t *testing.T) {
+// ADR 0042 closes it: the head of a table-level key constraint cannot legally
+// follow a column definition in any supported dialect, so the boundary is
+// decidable and the item is cut there. Per this test's own former instruction
+// the assertions are INVERTED, not deleted — the composite key the DDL declares
+// is now read, in BOTH the delimited and the run-on case, which keeps proving
+// the defect was delimiter-independent.
+func TestSQLDDL_MissingCommaBeforeTableConstraint_ReadsTheDeclaredKey(t *testing.T) {
 	cases := []struct {
 		name string
 		src  string
@@ -187,18 +190,16 @@ func TestSQLDDL_MissingCommaBeforeTableConstraint_FabricatesTheWrongKey(t *testi
 			if tb == nil {
 				t.Fatalf("table fact_reservation missing; have %v", sortedTableNames(s))
 			}
-			// The DDL declares PRIMARY KEY(car_sid, profit). The reducer
-			// reports the LAST column alone. Asserted as-is: this is the
-			// defect, characterized.
-			if !equalStrings(tb.PrimaryKey, []string{"profit"}) {
-				t.Errorf("PrimaryKey = %v, want [profit] — this test characterizes a KNOWN "+
-					"defect (the DDL declares [car_sid profit]); if it now reads [car_sid profit], "+
-					"the defect is FIXED: invert this test and close the coverage limit", tb.PrimaryKey)
+			// The DDL declares PRIMARY KEY(car_sid, profit). It used to report
+			// the LAST column alone.
+			if !equalStrings(tb.PrimaryKey, []string{"car_sid", "profit"}) {
+				t.Errorf("PrimaryKey = %v, want [car_sid profit] — the DDL declares it; "+
+					"[profit] is the fabrication ADR 0042 closed", tb.PrimaryKey)
 			}
-			// And the reason the contract cannot catch it: nothing was dropped.
+			// Nothing is dropped either, so the table stays proven — the
+			// recovery must not trade a fabrication for a false demotion.
 			if !tb.StructureProven() {
-				t.Errorf("StructureProven = false (note %q), want true — the point of this "+
-					"characterization is that a FABRICATION reports itself complete", tb.Note)
+				t.Errorf("StructureProven = false (note %q), want true — nothing was dropped", tb.Note)
 			}
 		})
 	}

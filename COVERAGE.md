@@ -1370,19 +1370,64 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   a partition scheme, and a corpus-wide sweep asserting no table in any of the 17
   corpora reports partitioning. Locked in
   `internal/providers/sqlddl/partition_capture_test.go`.
-  (12) A `CREATE TABLE` body item **missing its separating comma** before a
-  table-level `PRIMARY KEY` reads that constraint as an **inline** key on the
-  preceding column: `profit INT` / newline / `PRIMARY KEY(car_sid, profit)`
-  yields `PrimaryKey=[profit]` instead of the declared composite, while the table
-  still reports `Complete=true`. Like limit (5) this is a **fabrication, not a
-  drop**, so the completeness contract cannot catch it — the reducer believes it
-  succeeded. It is **delimiter-independent** (reproduced on an ordinary
-  `;`-terminated statement, so it has nothing to do with run-on separation) and
-  was found while measuring ADR 0041, which made it **reachable** on real DDL for
-  the first time: a public warehouse script writes its fact table exactly this
-  way. **Not fixed** — splitting a body item on anything other than a top-level
-  comma is a different, riskier slice. Characterized, with its comma-present
-  control, in `internal/providers/sqlddl/fabrication_test.go`.
+  (12) **Closed as of `missing-comma-constraint-separation`, 2026-08-02
+  (ADR 0042).** The entry is kept rather than deleted because what it described
+  was a **fabrication** rather than a drop, and because the rule that closed it
+  has a declared boundary of its own. A `CREATE TABLE` body item **missing its
+  separating comma** before a table-level key constraint used to read that
+  constraint as an **inline** one on the preceding column: `Profit INT` /
+  newline / `PRIMARY KEY(Car_sid, Date_from)` yielded `PrimaryKey=[Profit]`
+  instead of the declared composite, while the table still reported
+  `Complete=true`. Like limit (5) that is a **fabrication, not a drop**, so the
+  completeness contract could not catch it — the reducer believed it succeeded.
+  It was **delimiter-independent** (reproduced on an ordinary `;`-terminated
+  statement, so it had nothing to do with run-on separation) and was found while
+  measuring ADR 0041, which made it **reachable** on real DDL for the first
+  time: a public warehouse script writes its fact table exactly this way.
+  The reducer now **cuts** the body item at the constraint head and reduces both
+  halves, because the grammar **decides** the reading rather than leaving it to a
+  guess: in PostgreSQL, MySQL and T-SQL alike an **inline** `PRIMARY KEY`/`UNIQUE`
+  takes **no bare parenthesized column list** (`WITH (…)`, `INCLUDE (…)`,
+  `USING INDEX TABLESPACE`, T-SQL's `ON scheme (…)` always intervene) and
+  `FOREIGN KEY (…)` is not a column-constraint form at all (T-SQL's inline
+  `FOREIGN KEY REFERENCES t (c)` always puts a table name before the paren), so
+  `<column definition> <head> (` has exactly **one** legal reading. Heads
+  recovered, each also with a `CONSTRAINT <name>` preamble:
+  `PRIMARY KEY [CLUSTERED|NONCLUSTERED] (…)`,
+  `UNIQUE [CLUSTERED|NONCLUSTERED] (…)`, `UNIQUE KEY|INDEX [name] (…)`,
+  `FOREIGN KEY [name] (…)`. The host column is **not demoted** — nothing was
+  dropped — and a residual whose column list cannot actually be read still falls
+  to the pre-existing `MarkUnproven` floor. **Measured** over 29 corpora (the
+  26-corpus external survey ADR 0041 used, which already includes verbatim copies
+  of the vendored fixtures, plus three jobs covering every `.sql` corpus under
+  this repo's own `testdata`): exactly three changed, all in the
+  **same direction**, a fabricated single-column key replaced by the declared one
+  — `dw-kenap`'s `Fact_Reservation` from `[Profit]` to its six declared columns,
+  and `dw-salesmart` / `dw-ssis-salesmart`'s `dim_date` from
+  `[calendar_month_name]` to `[date_key]` / `[date_sk]` — which removed one false
+  `DB-001` and two false `DW-002` items. Table counts, structure-proven counts,
+  columns, indexes, foreign keys, views, procedures, triggers, column `RawType`s
+  and paradigm were byte-identical on all 29.
+  **What remains not covered**, each a decision rather than an oversight, and
+  each locked as a characterization test in
+  `internal/providers/sqlddl/missing_comma_test.go`: (a) MySQL's bare
+  `KEY`/`INDEX`/`FULLTEXT`/`SPATIAL` secondary-index shorthand — a bare `KEY` is
+  **also** a legal inline column modifier (it means `PRIMARY KEY`), and cutting
+  on it would fabricate on a column whose user-defined **type** is named `key`
+  (`b key(10)`), so that index is still lost and the preceding column's
+  `RawType` still absorbs the clause; (b) `CHECK` and `EXCLUDE`, which have a
+  legal inline reading and declare no key, index or column either way, so both
+  readings reduce to the same model; (c) `PRIMARY KEY USING BTREE (…)` and
+  `UNIQUE NULLS NOT DISTINCT (…)`, whose extra tokens the closed optional set
+  deliberately does not admit; (d) a missing comma between two **plain** column
+  definitions, which no keyword marks at all — the two still read as one column.
+  A **separate fabrication of the same class** was closed in the same change and
+  is not a parser limit but a scan discipline: `applyColumn`'s inline-constraint
+  scans now read the column's modifier tail **masked to top level**, so a keyword
+  inside a string literal, a quoted identifier or a parenthesized expression is
+  data rather than syntax (a `COMMENT` string reading `PRIMARY KEY` no longer
+  declares a key, and one reading `NOT NULL` no longer reports the column
+  non-nullable). It changed nothing on any of the 29 corpora.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing

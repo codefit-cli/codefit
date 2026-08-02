@@ -31,6 +31,21 @@ parser that still lost table structure with no trace at all. §2.5's disposition
 and §2.6's fabrication boundary are unchanged; 0041's own guards are written
 against that boundary rather than assuming it away.
 
+**Narrowed (2026-08-02) by
+[ADR 0042](0042-missing-comma-before-a-table-level-key-constraint-is-decidable.md):**
+§2.6's boundary — "`Complete` covers DROPS, not FABRICATIONS" — still holds as
+written, and the flag still cannot catch that class. What 0042 changes is the
+SIZE of the class: a `CREATE TABLE` body item missing its separating comma
+before a table-level key constraint used to fabricate a single-column key at
+`Complete=true`, and it is now recovered, because the grammar of all three
+supported dialects leaves the shape exactly one legal reading. A second instance
+found in the same work — a keyword read out of a string literal in a column's
+modifier tail — was closed the same way. §2.6's own two named instances are
+unaffected: Pagila's `film.fulltext` discriminator collision is still open, and
+the `ADD  CONSTRAINT` one is still closed. The lesson 0042 adds is that this
+class is reachable on ORDINARY real DDL, not only on constructed input, so it
+needs measurement rather than only a declared boundary.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares

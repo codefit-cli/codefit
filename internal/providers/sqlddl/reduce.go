@@ -575,11 +575,36 @@ func cutRunOn(st stmt) (host, residual stmt, ok bool) {
 // firstTopLevelMatch is consulted by partitioning over text it must read
 // byte-identically to before, and it does not track identifier quoting.
 func firstTopLevelStatementHead(tail string) int {
+	topLevel := topLevelBytes(tail)
+	for _, m := range reRunOnStatementHead.FindAllStringIndex(tail, -1) {
+		if m[0] < len(topLevel) && topLevel[m[0]] {
+			return m[0]
+		}
+	}
+	return -1
+}
+
+// topLevelBytes marks every byte of s that sits at paren depth 0, outside a
+// single-quoted string literal AND outside a canonical "..."-quoted identifier.
+// The delimiters themselves ('"()) are marked false, which costs nothing: no
+// keyword match ever starts on one.
+//
+// It is the shared FABRICATION guard of this file's text walks (ADR 0041 §2.3),
+// and each of the three exclusions is a shape a dialect actually writes: MySQL
+// puts keywords inside COMMENT='...' strings, T-SQL writes filegroups as ON
+// [name] which split() re-emits as ON "name", and both PostgreSQL and T-SQL
+// write storage options as WITH (...). Reading a keyword out of any of those
+// would invent structure the DDL never declares.
+//
+// It stays a SEPARATE walk from firstTopLevelMatch, which partitioning consults
+// over text it must keep reading byte-identically and which does not track
+// identifier quoting.
+func topLevelBytes(s string) []bool {
 	depth := 0
 	inStr, inIdent := false, false
-	topLevel := make([]bool, len(tail))
-	for i := 0; i < len(tail); i++ {
-		c := tail[i]
+	topLevel := make([]bool, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
 		switch {
 		case inStr:
 			if c == '\'' {
@@ -601,12 +626,27 @@ func firstTopLevelStatementHead(tail string) int {
 			topLevel[i] = depth == 0
 		}
 	}
-	for _, m := range reRunOnStatementHead.FindAllStringIndex(tail, -1) {
-		if m[0] < len(topLevel) && topLevel[m[0]] {
-			return m[0]
+	return topLevel
+}
+
+// maskNonTopLevel returns s with every byte topLevelBytes rejects replaced by a
+// space. Offsets and length are preserved, so a match found in the masked text
+// indexes the original.
+//
+// It exists so a keyword SCAN cannot read syntax out of data: without it,
+// `b INT DEFAULT 0 COMMENT 'PRIMARY KEY (a, b)'` declares a primary key on b,
+// and `b INT COMMENT 'NOT NULL'` reports b as non-nullable — fabrications of
+// the ADR 0034 §2.6 class, invisible to the completeness contract because
+// nothing was dropped.
+func maskNonTopLevel(s string) string {
+	top := topLevelBytes(s)
+	out := []byte(s)
+	for i := range out {
+		if !top[i] {
+			out[i] = ' '
 		}
 	}
-	return -1
+	return string(out)
 }
 
 // reduceCreateTable reduces ONE CREATE TABLE statement — the statement
@@ -896,8 +936,35 @@ func firstTopLevelMatch(s string, re *regexp.Regexp) []int {
 }
 
 // applyTableItem parses one comma-separated item of a CREATE TABLE body: a table
-// constraint or a column definition.
+// constraint or a column definition — first separating any TABLE-LEVEL key
+// constraint that a MISSING COMMA glued to the end of a column definition
+// (ADR 0042).
+//
+// splitTopLevelParts splits on commas, so a body written
+//
+//	Profit INT
+//	PRIMARY KEY (Car_sid, Date_from)
+//
+// arrives here as ONE item. It starts with a column name, so the constraint used
+// to read as that column's INLINE key: the declared composite key was replaced
+// by a single-column one named after whichever column happened to precede it,
+// and the table still reported StructureProven()==true. That is a FABRICATION of
+// the ADR 0034 §2.6 class — the completeness contract cannot see it, because
+// nothing is dropped.
+//
+// The cut is recursive (a body item may be missing more than one comma) and
+// terminates: the residual starts AT the head, so on re-entry the head sits at
+// offset 0 and cutMissingComma declines. Order is preserved — the host column is
+// applied before its residual — matching applyCreateTable's run-on recursion.
 func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
+	if host, residual, cut, ok := cutMissingComma(item); ok {
+		b.applyTableItem(t, host, pos)
+		// The residual reports ITS OWN line, counted over the raw item so the
+		// newlines the caller did not count are included — the same convention
+		// cutRunOn uses for a run-on residual.
+		b.applyTableItem(t, residual, db.Pos{File: pos.File, Line: pos.Line + strings.Count(item[:cut], "\n")})
+		return
+	}
 	item = strings.TrimSpace(item)
 	up := strings.ToUpper(item)
 	kw := leadingKeyword(item)
@@ -931,6 +998,218 @@ func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 	default:
 		b.applyColumn(t, item, pos)
 	}
+}
+
+// cutMissingComma separates a CREATE TABLE body item at the head of a
+// TABLE-LEVEL key constraint that a missing separating comma glued to the end of
+// a column definition. It returns the host (everything before the head), the
+// residual (the constraint), the cut offset within item, and whether a boundary
+// was found at all. When none is found host is item unchanged — the
+// overwhelmingly common case, and the one every existing fixture and golden
+// exercises.
+//
+// The boundary is DECIDED by the grammar, not guessed. In PostgreSQL, MySQL and
+// T-SQL alike a COLUMN constraint `PRIMARY KEY`/`UNIQUE` takes no bare
+// parenthesized column list — every parenthesized continuation those dialects
+// admit is keyword-introduced (`WITH (…)`, `INCLUDE (…)`, `USING INDEX
+// TABLESPACE …`, T-SQL's `ON scheme (…)`) — and `FOREIGN KEY (…)` is not a
+// column-constraint form at all (T-SQL's inline `FOREIGN KEY REFERENCES t (c)`
+// always puts REFERENCES and a table name between the keyword and the paren).
+// So `<column definition> <head> (` has exactly one legal reading: a missing
+// comma. That is why this recovers rather than routing to the abstention floor —
+// abstaining would demote a table whose structure is fully readable, and would
+// mute every DW rule on the fact table of a star schema, the precise trade ADR
+// 0041 rejected for the run-on case.
+//
+// Nothing is recovered on a guess: the residual is dispatched back through
+// applyTableItem, so a constraint whose column list cannot actually be read
+// falls to applyTableConstraint's existing MarkUnproven floor.
+func cutMissingComma(item string) (host, residual string, cut int, ok bool) {
+	lead := len(item) - len(strings.TrimLeft(item, " \t\r\n"))
+	for _, off := range tableConstraintHeads(item) {
+		// A named constraint's `CONSTRAINT <name>` preamble belongs to the
+		// residual, not to the host column: without this walk the item
+		// `b INT CONSTRAINT pk PRIMARY KEY (a, b)` would cut at PRIMARY,
+		// leaving the name dangling on the column — and, worse, the PROPERLY
+		// comma-separated item `CONSTRAINT pk PRIMARY KEY (a, b)` would be cut
+		// at all, since its own head does not sit at offset 0.
+		off = constraintPreambleStart(item, off)
+		if off <= lead {
+			// The item's OWN head. Not a boundary — and skipping past it
+			// rather than giving up is what lets a run of several missing
+			// commas recover every constraint in it.
+			continue
+		}
+		return item[:off], item[off:], off, true
+	}
+	return item, "", 0, false
+}
+
+// constraintPreambleStart returns the offset of the `CONSTRAINT <name>` preamble
+// immediately preceding off, or off when the two tokens before off are not one.
+func constraintPreambleStart(item string, off int) int {
+	head := strings.TrimRight(item[:off], " \t\r\n")
+	nameStart := strings.LastIndexAny(head, " \t\r\n") + 1
+	if nameStart == 0 || nameStart == len(head) {
+		return off
+	}
+	rest := strings.TrimRight(head[:nameStart-1], " \t\r\n")
+	kwStart := strings.LastIndexAny(rest, " \t\r\n") + 1
+	if !strings.EqualFold(rest[kwStart:], "CONSTRAINT") {
+		return off
+	}
+	return kwStart
+}
+
+// tableItemToken is one TOP-LEVEL token of a CREATE TABLE body item: an
+// uppercased bare word, or the literal "(" of a top-level parenthesized list.
+// Single-quoted strings, "..."-quoted identifiers and whole parenthesized groups
+// are opaque — they are emitted as a non-word placeholder so a head cannot be
+// read out of data, and so a token sequence cannot silently span them.
+type tableItemToken struct {
+	text string
+	off  int
+	word bool
+}
+
+// topLevelTokens tokenizes s at paren depth 0. Tokenizing stops at an unbalanced
+// '(' : past it the depth is unknown, so no further token can be trusted to be
+// top level.
+func topLevelTokens(s string) []tableItemToken {
+	var out []tableItemToken
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch c {
+		case ' ', '\t', '\n', '\r', ',':
+			i++
+		case '\'', '"':
+			j := i + 1
+			for j < len(s) && s[j] != c {
+				j++
+			}
+			out = append(out, tableItemToken{off: i})
+			i = j + 1
+		case '(':
+			out = append(out, tableItemToken{text: "(", off: i})
+			inner, innerStart, balanced := balancedParen(s, i)
+			if !balanced {
+				return out
+			}
+			i = innerStart + len(inner) + 1
+		case ')':
+			i++
+		default:
+			j := i
+			for j < len(s) && !isTableItemTokenBreak(s[j]) {
+				j++
+			}
+			out = append(out, tableItemToken{text: strings.ToUpper(s[i:j]), off: i, word: true})
+			i = j
+		}
+	}
+	return out
+}
+
+func isTableItemTokenBreak(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' || c == '(' || c == ')' || c == '\'' || c == '"'
+}
+
+// tableConstraintHeads returns, in source order, the byte offset of every
+// TABLE-LEVEL key constraint head in item. The caller decides which of them is a
+// MISPLACED head (one strictly after the item's first token) and which is the
+// item's own legitimate start.
+func tableConstraintHeads(item string) []int {
+	toks := topLevelTokens(item)
+	var out []int
+	for i, tk := range toks {
+		if tk.word && isTableConstraintHead(toks[i:]) {
+			out = append(out, tk.off)
+		}
+	}
+	return out
+}
+
+// isTableConstraintHead reports whether toks BEGINS with a key-constraint head
+// that can only be table-level, ending in the '(' that opens its column list.
+//
+// The parenthesis is required, and it is what makes each form decidable — an
+// inline `PRIMARY KEY`, `UNIQUE`, `UNIQUE KEY` or (T-SQL) `FOREIGN KEY` is legal
+// column syntax on its own, but none of them may be followed directly by a bare
+// column list. The optional tokens are a CLOSED set for the same reason:
+//
+//   - CLUSTERED/NONCLUSTERED (T-SQL) can precede the list of a table-level key,
+//     and cannot precede a bare '(' inline (there, WITH or ON always intervenes).
+//   - a single index NAME is admitted only after KEY/INDEX/FOREIGN KEY, never
+//     after a bare UNIQUE: PostgreSQL's inline `UNIQUE WITH (fillfactor = 70)`
+//     is exactly the shape a one-identifier wildcard would mis-cut.
+//
+// Deliberately NOT covered, because each has a legal inline reading this rule
+// cannot tell apart, or needs a discriminator it does not have: CHECK, EXCLUDE,
+// MySQL's bare KEY/INDEX/FULLTEXT/SPATIAL shorthand (bare KEY is ALSO a legal
+// inline column modifier meaning PRIMARY KEY), `PRIMARY KEY USING BTREE (…)`,
+// `UNIQUE NULLS NOT DISTINCT (…)`, and a missing comma between two plain column
+// definitions, which no keyword marks at all. They are declared as known limit
+// (12) of dbcoverage.go and locked as characterization tests.
+func isTableConstraintHead(toks []tableItemToken) bool {
+	switch {
+	case tokensAre(toks, "PRIMARY", "KEY"):
+		return headEndsAtColumnList(toks[2:], true, false)
+	case tokensAre(toks, "UNIQUE", "KEY"), tokensAre(toks, "UNIQUE", "INDEX"):
+		return headEndsAtColumnList(toks[2:], false, true)
+	case tokensAre(toks, "FOREIGN", "KEY"):
+		return headEndsAtColumnList(toks[2:], false, true)
+	case tokensAre(toks, "UNIQUE"):
+		return headEndsAtColumnList(toks[1:], true, false)
+	}
+	return false
+}
+
+func tokensAre(toks []tableItemToken, words ...string) bool {
+	if len(toks) < len(words) {
+		return false
+	}
+	for i, w := range words {
+		if !toks[i].word || toks[i].text != w {
+			return false
+		}
+	}
+	return true
+}
+
+// headEndsAtColumnList reports whether rest begins with the optional tokens the
+// head admits, followed by the '(' of a column list.
+func headEndsAtColumnList(rest []tableItemToken, allowClustered, allowName bool) bool {
+	if allowClustered && len(rest) > 0 && rest[0].word &&
+		(rest[0].text == "CLUSTERED" || rest[0].text == "NONCLUSTERED") {
+		rest = rest[1:]
+	}
+	if allowName && len(rest) > 0 && rest[0].word && !reservedHeadContinuation[rest[0].text] {
+		rest = rest[1:]
+	}
+	return len(rest) > 0 && rest[0].text == "("
+}
+
+// reservedHeadContinuation are the words that may follow a key-constraint
+// keyword in a LEGAL inline reading, and can therefore never be the index name
+// of a misplaced table-level constraint. It is consulted only where an index
+// name is admitted at all (UNIQUE KEY/UNIQUE INDEX/FOREIGN KEY).
+//
+// CHECK and DEFAULT are the two entries a test can prove load-bearing, because
+// they are the only legal inline continuations that are ONE word followed
+// directly by a parenthesis: without them `id INT UNIQUE KEY CHECK (other > 0)`
+// and `id INT UNIQUE KEY DEFAULT (0)` are cut, fabricating a unique index over
+// whatever the parentheses contain (locked by
+// TestSQLDDL_LegalInlineKeyConstraint_IsNeverCut, mutation-proven). The rest —
+// REFERENCES included, since T-SQL's inline `FOREIGN KEY REFERENCES t (c)`
+// always puts a TABLE NAME between REFERENCES and the paren and so is already
+// refused by the single-name limit — are defensive depth, not load-bearing on
+// any shape found so far.
+var reservedHeadContinuation = map[string]bool{
+	"REFERENCES": true, "WITH": true, "ON": true, "USING": true, "NOT": true,
+	"NULL": true, "NULLS": true, "ASC": true, "DESC": true, "CHECK": true,
+	"CONSTRAINT": true, "DEFAULT": true, "COLLATE": true, "COMMENT": true,
+	"PRIMARY": true, "UNIQUE": true, "FOREIGN": true, "KEY": true, "INDEX": true,
+	"CLUSTERED": true, "NONCLUSTERED": true,
 }
 
 // isInlineKeyIndexForm reports whether item — already known to start with the
@@ -1080,7 +1359,13 @@ func (b *builder) applyColumn(t *db.Table, def string, pos db.Pos) {
 		Type:    b.dialect.mapType(typeLookupKey(rawType)),
 		List:    strings.Contains(rawType, "[]"),
 	}
-	upMods := strings.ToUpper(mods)
+	// The inline-constraint scans read the modifier tail MASKED to top level:
+	// a keyword inside a string literal, a quoted identifier or a parenthesized
+	// expression is DATA, not syntax. Unmasked, `b INT COMMENT 'PRIMARY KEY'`
+	// declares a key on b and `b INT COMMENT 'NOT NULL'` reports b as
+	// non-nullable — fabrications the completeness contract structurally cannot
+	// see, since nothing is dropped (ADR 0034 §2.6).
+	upMods := strings.ToUpper(maskNonTopLevel(mods))
 	col.Nullable = !strings.Contains(upMods, "NOT NULL") && !strings.Contains(upMods, "PRIMARY KEY")
 	t.Columns = append(t.Columns, col)
 
@@ -1090,11 +1375,22 @@ func (b *builder) applyColumn(t *db.Table, def string, pos db.Pos) {
 	if containsWord(upMods, "UNIQUE") {
 		t.Indexes = append(t.Indexes, db.Index{Pos: pos, Columns: []string{col.Name}, Unique: true})
 	}
-	if m := reReferences.FindStringSubmatch(mods); m != nil {
+	// REFERENCES needs the ORIGINAL text (its referenced columns live inside
+	// the parens the mask blanks), so the mask is used only to require that the
+	// keyword itself sits at top level.
+	if m := reReferences.FindStringSubmatchIndex(mods); m != nil && isTopLevelOffset(mods, m[0]) {
 		t.ForeignKeys = append(t.ForeignKeys, db.ForeignKey{
-			Pos: pos, Columns: []string{col.Name}, RefTable: normalizeName(m[1]), RefColumns: splitIdents(m[2]),
+			Pos: pos, Columns: []string{col.Name},
+			RefTable: normalizeName(mods[m[2]:m[3]]), RefColumns: splitIdents(mods[m[4]:m[5]]),
 		})
 	}
+}
+
+// isTopLevelOffset reports whether the byte at off in s sits at paren depth 0,
+// outside a string literal and outside a quoted identifier.
+func isTopLevelOffset(s string, off int) bool {
+	top := topLevelBytes(s)
+	return off >= 0 && off < len(top) && top[off]
 }
 
 func (b *builder) applyAlterTable(file string, st stmt) {

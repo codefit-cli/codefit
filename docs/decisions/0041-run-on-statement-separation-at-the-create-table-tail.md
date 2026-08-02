@@ -10,6 +10,18 @@ receive from a delimiter — a case 0034's declared-skip rule did not distinguis
 and the one remaining path through this parser that lost table structure with no
 trace at all.
 
+**Followed (2026-08-02) by
+[ADR 0042](0042-missing-comma-before-a-table-level-key-constraint-is-decidable.md):**
+the SECOND item under "Consequences" below — the missing comma before a
+table-level `PRIMARY KEY`, recorded here as measured, characterized and
+deliberately NOT addressed — is now CLOSED. Nothing in this ADR's decision
+changes; only that consequence is superseded, and it is left in place as the
+record of what this change measured and chose not to do. 0042 confirms both of
+its claims: the defect is pre-existing and delimiter-independent (reproduced on
+an ordinary `;`-terminated statement under all three dialects), and this change
+only made it reachable. The FIRST adjacent gap recorded there,
+`CREATE SCHEMA x CREATE TABLE …`, remains open and remains non-silent.
+
 ## Context
 
 `split()` is a tokenizer: it ends a statement at the dialect's active terminator,

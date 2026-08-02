@@ -206,6 +206,30 @@ var gateCorpusExpectations = []gateCorpusCase{
 		paradigmIs: paradigm.ParadigmOLAP,
 	},
 	{path: "tsql/constructed_dynamic_sql_proc.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{
+		// The missing-comma fixture (ADR 0042): Fact_Reservation declares a
+		// four-column PRIMARY KEY on the line after its last column, with no
+		// separating comma. The PARSE FACTS are not what carries this row —
+		// tables and proven read 4/4 before the boundary rule too, because the
+		// defect FABRICATED rather than dropped; what moved is the key itself,
+		// asserted in TestSQLDDL_MissingComma_RealFixture.
+		//
+		// The signals were MEASURED, not assumed, and the row is worth reading:
+		// three fire, and the gate opens on calendar_table (Dim_Date). This is
+		// the second vendored corpus the gate opens on, and unlike
+		// AdventureWorksDW it also fires star_topology — the recovered composite
+		// key is not what does that (star_topology reads foreign keys), the
+		// four inline T-SQL references from Fact_Reservation to three leaf
+		// dimensions are.
+		path: "tsql/constructed_missing_comma_table_constraint.sql", tables: 4, proven: 4,
+		fired: []paradigm.Signal{
+			paradigm.SignalCalendarTable,
+			paradigm.SignalNoAuditTimestamps,
+			paradigm.SignalStarTopology,
+		},
+		gateOpen:   true,
+		paradigmIs: paradigm.ParadigmOLAP,
+	},
 	{path: "tsql/constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		// The run-on fixture (ADR 0041): four CREATE TABLE statements with no

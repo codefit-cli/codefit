@@ -63,7 +63,14 @@ type Table struct {
 	// BOUNDARY, so the contract does not over-promise: Complete covers DROPS,
 	// not FABRICATIONS. A reducer that believes it succeeded while inventing
 	// data reports Complete=true; that class needs its own control (design
-	// §8e).
+	// §8e). The boundary still holds, but the class is SMALLER than when it was
+	// written and is known to be reachable on ordinary real DDL, not only on
+	// constructed input: ADR 0042 closed the missing-comma-before-a-table-level-
+	// key fabrication (measured on three public warehouse corpora) with a
+	// grammar-decided boundary rule in the reducer, plus a second instance where
+	// an inline-constraint keyword was read out of a string literal. Each such
+	// instance needs its own control at its own site — none of them can be caught
+	// HERE.
 	//
 	// A DECLARED skip is NOT incompleteness: a form the parser recognizes and
 	// deliberately does not model (CHECK, EXCLUDE, ALTER COLUMN, RENAME,
