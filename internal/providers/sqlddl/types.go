@@ -110,9 +110,9 @@ func sqlserverModifiers() map[string]bool {
 	}
 }
 
-// mapType maps a base type name (already stripped of length/precision and
-// array markers by typeBase) to the neutral db.Type via this dialect's
-// TypeMap. An unmapped keyword is the honest db.TypeUnknown fallback.
+// mapType maps a base type name (already reduced to a TypeMap lookup key by
+// typeLookupKey) to the neutral db.Type via this dialect's TypeMap. An
+// unmapped keyword is the honest db.TypeUnknown fallback.
 func (d *Dialect) mapType(base string) db.Type {
 	if t, ok := d.TypeMap[strings.ToLower(strings.TrimSpace(base))]; ok {
 		return t
@@ -121,7 +121,12 @@ func (d *Dialect) mapType(base string) db.Type {
 }
 
 // typeBase strips a type's length/precision "(...)" and array "[]" markers, leaving
-// the bare type name for mapping (VARCHAR(30) -> varchar, tag[] -> tag).
+// the bare type name (VARCHAR(30) -> varchar, tag[] -> tag).
+//
+// It deliberately does NOT remove identifier delimiters — see typeLookupKey for
+// why that step belongs to the TypeMap lookup and not here. isInlineKeyIndexForm
+// (reduce.go) is this function's OTHER caller and asks a different question, one
+// for which the delimiters are the discriminator rather than noise.
 func typeBase(raw string) string {
 	b := strings.TrimSpace(raw)
 	if i := strings.IndexByte(b, '('); i >= 0 {
@@ -129,4 +134,52 @@ func typeBase(raw string) string {
 	}
 	b = strings.TrimSuffix(strings.TrimSpace(b), "[]")
 	return strings.TrimSpace(b)
+}
+
+// typeLookupKey renders a COLUMN's declared type expression as the key mapType
+// looks up in the dialect's TypeMap: typeBase's length/precision and array
+// stripping, plus the removal of the identifier delimiters that WRAP the name.
+//
+// WHY THE UNWRAP IS DIALECT-FREE. Every dialect this package supports lets a
+// type name be written delimited — T-SQL's [int], MySQL's `int`, ANSI's "int" —
+// and Microsoft's own generated scripts do it for EVERY column
+// ([CustomerKey] [int] IDENTITY(1,1) NOT NULL). split() is the sole owner of
+// quoting (design §2, ADR 0022) and re-emits every dialect-quoted identifier
+// canonicalized to ANSI "..."; a type name occupies an identifier position, so
+// by the time this runs all three spellings have already collapsed onto the one
+// canonical form. Unwrapping THAT form therefore closes the gap on all three
+// dialects with no per-dialect branch and no new Dialect datum — and a fix
+// written as a bracket strip would have been both wrong (the tokenizer emits no
+// brackets) and dialect-specific.
+//
+// WHY IT CANNOT DISTURB PostgreSQL's ARRAY MARKER. The trailing [] is a SUFFIX
+// with a different meaning in the one dialect where '[' is not an identifier
+// quote at all, so it reaches here verbatim; typeBase strips it first, and
+// unquoteTypeIdent only ever removes a matched pair of the canonical '"' that
+// WRAPS what remains. Neither step can see the other's marker. "text"[] — both
+// at once — is locked in delimited_type_names_test.go.
+//
+// HONESTY IS PRESERVED. This maps a delimited SPELLING onto the same lookup key
+// as the bare word; it never widens the vocabulary. An unrecognized keyword,
+// delimited or not, still lands on db.TypeUnknown, and so does a form that is
+// not exactly ONE quoted identifier (a schema-qualified user type such as
+// [dbo].[MyType], which canonicalizes to "dbo"."MyType").
+func typeLookupKey(raw string) string {
+	return unquoteTypeIdent(typeBase(raw))
+}
+
+// unquoteTypeIdent removes the canonical ANSI '"' delimiters wrapping s, when s
+// is EXACTLY ONE quoted identifier — opened and closed by '"' with no further
+// '"' inside. Anything else (an undelimited name, a dotted multi-part name, an
+// identifier carrying a doubled '"' escape) is returned unchanged, so a name
+// this function cannot read whole is never half-stripped into a guess.
+func unquoteTypeIdent(s string) string {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return s
+	}
+	inner := s[1 : len(s)-1]
+	if strings.ContainsRune(inner, '"') {
+		return s
+	}
+	return inner
 }

@@ -44,3 +44,40 @@ func TestSplitTypeAndMods_TypeParensNotMistakenForModifier(t *testing.T) {
 		t.Errorf("mods = %q, want %q", rest, "NOT NULL")
 	}
 }
+
+// typeLookupKey's two steps, unit-level, because ONE of its guards has no
+// observable effect through the TypeMap and would otherwise be untestable —
+// see the WHOLE-IDENTIFIER cases below.
+//
+// The parser-level behavior is locked over real DDL in
+// delimited_type_names_test.go; this file locks the string transform itself, so
+// the guards can each be broken on purpose and seen to fail.
+func TestTypeLookupKey(t *testing.T) {
+	cases := []struct{ raw, want, why string }{
+		// typeBase's existing work, unchanged.
+		{"VARCHAR(30)", "VARCHAR", "length/precision stripped"},
+		{"tag[]", "tag", "PostgreSQL array marker stripped as a SUFFIX"},
+		{"integer", "integer", "a bare name passes through"},
+
+		// The unwrap: exactly ONE canonical quoted identifier.
+		{`"int"`, "int", "canonicalized [int] / `int` / \"int\" all arrive as this"},
+		{`"nvarchar"(50)`, "nvarchar", "parens stripped first, then unwrapped"},
+		{`"text"[]`, "text", "array marker stripped first, then unwrapped — the two compose"},
+
+		// WHOLE-IDENTIFIER GUARD. Each of these is NOT one quoted identifier, so
+		// it is returned untouched rather than half-stripped into a fragment.
+		// None of them maps to a db.Type either way, which is precisely why the
+		// guard cannot be falsified through mapType and is asserted here.
+		{`"dbo"."MyType"`, `"dbo"."MyType"`, "a schema-qualified user type is two identifiers, not one"},
+		{`"a""b"`, `"a""b"`, "a doubled-quote escape means the interior is not readable whole"},
+		{`"unterminated`, `"unterminated`, "no closing delimiter"},
+		{`trailing"`, `trailing"`, "no opening delimiter"},
+		{`"`, `"`, "a lone delimiter is not a wrapped name"},
+		{`""`, "", "an empty quoted identifier unwraps to empty, which maps to TypeUnknown"},
+	}
+	for _, tc := range cases {
+		if got := typeLookupKey(tc.raw); got != tc.want {
+			t.Errorf("typeLookupKey(%q) = %q, want %q — %s", tc.raw, got, tc.want, tc.why)
+		}
+	}
+}

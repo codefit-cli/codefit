@@ -174,34 +174,48 @@ func TestSchemaGate_TypeProfileSplit_DoesNotFireOnRealOLTPDDL(t *testing.T) {
 	}
 }
 
-// TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes locks the
-// measured cause of the reference warehouse's abstention, which is NOT the
-// ALTER TABLE parser gap the rest of the DW family hits: AdventureWorksDW
-// brackets its type names, the T-SQL type map never matches them, and its
-// columns parse as db.TypeUnknown. TWO DIFFERENT CORPORA, two different
-// numbers, kept apart on purpose: the corpus THIS repository vendors
-// (testdata/tsql/adventureworksdw_real_objects.sql, a 3-table excerpt)
-// measures 74 of 74 columns unclassified; the FULL upstream install script,
-// which is NOT vendored here, measures 359 of 359 (that is the figure ADR
-// 0036 and schemagate.go's maxUnclassifiedPct cite). Either way the share is
-// 100%, which is the only property this test rests on. The signal fails
-// closed on that, and this test is what says so with real DDL rather than
-// with a claim.
+// TestSchemaGate_TypeProfileSplit_UnclassifiedBudget locks the FAIL-CLOSED
+// budget (maxUnclassifiedPct): a table whose column types the dialect could not
+// classify beyond one in five is not profiled at all, because a proportion
+// computed over unclassified types is a guess.
 //
-// Only the FACT table is bracketed here. Its three dimensions declare the same
-// T-SQL types WITHOUT brackets, so they type normally and the text pole is
-// already satisfied — leaving the unclassified fact as the only thing between
-// this schema and a fire. A fixture with every table bracketed would prove
-// less: unclassified columns feed neither pole, so it could not fire under any
-// mutation.
-func TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes(t *testing.T) {
-	bracketed := `
-CREATE TABLE [dbo].[FactSales](
-  [DateKey] [int] NOT NULL, [CustomerKey] [int] NOT NULL, [ProductKey] [int] NOT NULL,
-  [StoreKey] [int] NOT NULL, [PromoKey] [int] NOT NULL, [ShipKey] [int] NOT NULL,
-  [Quantity] [int] NOT NULL, [UnitCost] [money] NOT NULL, [ListPrice] [money] NOT NULL,
-  [Discount] [money] NOT NULL, [NetPaid] [money] NOT NULL, [Profit] [money] NOT NULL
-);
+// THIS TEST USED TO REST ON THE WRONG CAUSE, and its predecessor said so in
+// writing: it declared that AdventureWorksDW abstains because it BRACKETS its
+// type names ([int], [nvarchar](50)), and it told its successor that "if the
+// T-SQL type map learns to read bracketed names, this fails — re-measure before
+// touching this expectation". It has. A delimited type name is now unwrapped
+// before the TypeMap lookup (internal/providers/sqlddl/types.go, typeLookupKey),
+// so bracketing classifies exactly like the bare word and is no longer a cause
+// of anything. The re-measurement, through the real sensor:
+//
+//   - the vendored 3-table excerpt (testdata/tsql/adventureworksdw_real_objects.sql)
+//     goes from 74 of 74 columns unclassified to 0 of 74;
+//   - the FULL upstream install script, which is NOT vendored here, goes from
+//     359 of 359 to 6 of 359 — and those 6 are the honest fallback still
+//     working, not a residue of the old gap: five [sysname] columns and one
+//     [xml], both real T-SQL types deliberately absent from sqlserverTypeMap.
+//
+// IT ALSO USED TO BE AN ORNAMENT WITH RESPECT TO THE BUDGET, which the rewrite
+// is really for. Its fact table was 100% unclassified, so deleting the budget
+// from profileOf changed NOTHING: the fact became profiled with zero numeric
+// and zero descriptive columns, qualified as neither pole, and the signal still
+// did not fire. It asserted the outcome while protecting none of the mechanism
+// — proven by mutation, which SURVIVED.
+//
+// So the fixture is now placed on the BOUNDARY and the test is two-sided. The
+// fact is numeric-dominated in every respect EXCEPT its unclassified share, and
+// the only difference between the two sub-cases is one more [sql_variant]
+// column: 3 of 12 (25%) is over the budget and abstains, 2 of 12 (17%) is under
+// it and fires. Delete the budget and the first sub-case fires — the mutation is
+// now available, and was run.
+//
+// [sql_variant] is a real T-SQL type deliberately absent from sqlserverTypeMap,
+// and the one whose whole meaning is "the type is not fixed". The schema is
+// CONSTRUCTED and declared synthetic (ADR 0028).
+func TestSchemaGate_TypeProfileSplit_UnclassifiedBudget(t *testing.T) {
+	// dims supplies the text pole (three text-dominated tables) so that the
+	// FACT's profile is the only variable between the two sub-cases below.
+	const dims = `
 CREATE TABLE DimCustomer(
   CustomerKey int NOT NULL, FirstName nvarchar(50), LastName nvarchar(50),
   Email nvarchar(120), City nvarchar(60), Country nvarchar(60)
@@ -215,25 +229,54 @@ CREATE TABLE DimStore(
   Address nvarchar(160)
 );
 `
-	s, unclassified := parseGateDDL(t, sqlddl.SQLServer(), bracketed)
-	if len(s.Tables) != 4 {
-		t.Fatalf("parsed %d tables, want 4", len(s.Tables))
-	}
-	// The premise, asserted exactly: the bracketed fact is entirely
-	// unclassified and NOTHING else is. If the T-SQL type map learns to read
-	// bracketed names, this fails — which is the point: the AdventureWorksDW
-	// measurement this signal reports would then have to be redone.
-	fact := s.Tables[0]
-	if fact.Name != "FactSales" {
-		t.Fatalf("table[0] = %q, want FactSales", fact.Name)
-	}
-	if unclassified != len(fact.Columns) || len(fact.Columns) == 0 {
-		t.Fatalf("%d columns unclassified over the whole schema, want exactly the %d bracketed fact columns — "+
-			"the bracketed-type gap this test rests on has changed; re-measure before touching this expectation",
-			unclassified, len(fact.Columns))
-	}
+	// Both facts are 12 columns wide with ZERO descriptive columns; they differ
+	// only in how many of those 12 the dialect cannot classify.
+	overBudget := `
+CREATE TABLE [dbo].[FactSales](
+  [DateKey] [int] NOT NULL, [CustomerKey] [int] NOT NULL, [ProductKey] [int] NOT NULL,
+  [StoreKey] [int] NOT NULL, [PromoKey] [int] NOT NULL, [ShipKey] [int] NOT NULL,
+  [Quantity] [int] NOT NULL, [UnitCost] [money] NOT NULL, [ListPrice] [money] NOT NULL,
+  [Discount] [sql_variant] NOT NULL, [NetPaid] [sql_variant] NOT NULL, [Profit] [sql_variant] NOT NULL
+);` + dims
+	underBudget := `
+CREATE TABLE [dbo].[FactSales](
+  [DateKey] [int] NOT NULL, [CustomerKey] [int] NOT NULL, [ProductKey] [int] NOT NULL,
+  [StoreKey] [int] NOT NULL, [PromoKey] [int] NOT NULL, [ShipKey] [int] NOT NULL,
+  [Quantity] [int] NOT NULL, [UnitCost] [money] NOT NULL, [ListPrice] [money] NOT NULL,
+  [Discount] [money] NOT NULL, [NetPaid] [sql_variant] NOT NULL, [Profit] [sql_variant] NOT NULL
+);` + dims
 
-	if e := paradigm.WarehouseSignals(s); e.Has(paradigm.SignalTypeProfileSplit) {
-		t.Errorf("type_profile_split fired over DDL whose every column type is unclassified, Fired = %v", e.Fired)
+	for _, tc := range []struct {
+		name             string
+		ddl              string
+		wantUnclassified int
+		wantFire         bool
+	}{
+		{"3_of_12_over_the_20pct_budget", overBudget, 3, false},
+		{"2_of_12_under_the_20pct_budget", underBudget, 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, unclassified := parseGateDDL(t, sqlddl.SQLServer(), tc.ddl)
+			if len(s.Tables) != 4 {
+				t.Fatalf("parsed %d tables, want 4", len(s.Tables))
+			}
+			fact := s.Tables[0]
+			if fact.Name != "FactSales" || len(fact.Columns) != 12 {
+				t.Fatalf("table[0] = %q with %d columns, want FactSales with 12", fact.Name, len(fact.Columns))
+			}
+			// The premise, asserted exactly rather than assumed: the unclassified
+			// columns are the [sql_variant] ones and NOTHING else is unclassified.
+			// A fixture whose premise drifted would make the verdict meaningless.
+			if unclassified != tc.wantUnclassified {
+				t.Fatalf("%d columns unclassified over the whole schema, want exactly %d — "+
+					"if sqlserverTypeMap learned [sql_variant], choose another unmapped keyword, "+
+					"never a weaker assertion", unclassified, tc.wantUnclassified)
+			}
+			got := paradigm.WarehouseSignals(s)
+			if fired := got.Has(paradigm.SignalTypeProfileSplit); fired != tc.wantFire {
+				t.Errorf("type_profile_split fired = %v, want %v (%d of 12 fact columns unclassified), Fired = %v",
+					fired, tc.wantFire, tc.wantUnclassified, got.Fired)
+			}
+		})
 	}
 }

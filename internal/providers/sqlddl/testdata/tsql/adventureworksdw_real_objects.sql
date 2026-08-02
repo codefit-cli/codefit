@@ -40,12 +40,19 @@
 -- internal/providers/sqlddl/dw_integration_test.go
 -- (TestDW_AdventureWorksDW_StarIsVisible_AsVendored).
 --
--- The limit that DOES remain on this corpus is a different one, one layer
--- down: its bracketed T-SQL type names ([int], [nvarchar](50)) do not match
--- the type vocabulary, so all 74 of its columns read as db.TypeUnknown. That
--- is why DW-002 fires on DimCustomer and DimDate even though both keys really
--- are single-column integer surrogates. Declared in the coverage manifest,
--- not silent.
+-- A THIRD limit, one layer further down, is CLOSED TOO as of
+-- tsql-bracketed-type-names. This header used to read: "its bracketed T-SQL
+-- type names ([int], [nvarchar](50)) do not match the type vocabulary, so all
+-- 74 of its columns read as db.TypeUnknown. That is why DW-002 fires on
+-- DimCustomer and DimDate even though both keys really are single-column
+-- integer surrogates." The tokenizer canonicalizes a delimited identifier to
+-- "..." and the type lookup now unwraps that form, so all 74 columns classify
+-- and the DW-002 false positive is GONE — CustomerKey and DateKey are proven
+-- integer surrogates, which is what DW-002's own doc comment always said this
+-- shape should be. Measured here: 74 of 74 columns classified, ZERO
+-- dw-dimension-no-surrogate-key items. Test-locked, not prose — see
+-- TestDW002_AdventureWorksDW_SurrogateKeysAreProven and
+-- TestDelimitedTypeName_TSQLBrackets_ResolveOnRealVendoredDDL.
 --
 -- License: MIT (Microsoft SQL Server Sample Code)
 --   Copyright (c) Microsoft Corporation. All rights reserved.

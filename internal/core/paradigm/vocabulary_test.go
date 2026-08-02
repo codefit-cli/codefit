@@ -113,10 +113,10 @@ func TestVocabulary_SingleLetterPrefixes(t *testing.T) {
 // limits that used to keep that corpus silent. Both are closed now (the
 // parser half by the T-SQL ALTER TABLE ... ADD CONSTRAINT reducer), so
 // dbcoverage.go no longer declares it a blind spot; it records the reach
-// instead. What dbcoverage.go still declares as a blind spot on this corpus
-// is a DIFFERENT limit one layer down — the bracketed T-SQL type name
-// ([int]) reading as db.TypeUnknown, which is a type-vocabulary gap, not a
-// naming one.
+// instead. A THIRD limit one layer down — the delimited T-SQL type name
+// ([int]) reading as db.TypeUnknown, a type-vocabulary gap rather than a
+// naming one — is closed too, as of tsql-bracketed-type-names; dbcoverage.go
+// records that one as CLOSED rather than as a blind spot.
 //
 // Lowercasing alone cannot reach it: "factinternetsales" does not carry the
 // "fact_" prefix. The discriminator is PascalCase's own signal — the

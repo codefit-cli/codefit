@@ -154,10 +154,17 @@ func TestSignalTypeProfileSplit_OneTextTableIsNotSeveral(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestSignalTypeProfileSplit_UnclassifiedTypesAbstain is not a hypothetical
-// guard. Measured: the real AdventureWorksDW install script parses with 359 of
-// 359 columns at db.TypeUnknown, because its T-SQL brackets its type names
-// ([int], [nvarchar](50)) and the dialect's type map never sees them. A profile
-// computed over types the parser did not classify is a guess.
+// guard: a profile computed over types the parser did not classify is a guess.
+//
+// THE WORKED EXAMPLE THIS COMMENT USED TO CITE IS GONE. It read "the real
+// AdventureWorksDW install script parses with 359 of 359 columns at
+// db.TypeUnknown, because its T-SQL brackets its type names ([int],
+// [nvarchar](50)) and the dialect's type map never sees them". That was a
+// parser defect and it is fixed (internal/providers/sqlddl/types.go,
+// typeLookupKey); re-measured, the same script parses with 6 of 359
+// unclassified — [sysname] and [xml], genuinely outside the T-SQL vocabulary.
+// The GUARD is unchanged and still needed: an unmapped keyword still yields
+// db.TypeUnknown, which is exactly the state this test constructs.
 //
 // The fixture puts the unclassified columns exactly where they can do damage:
 // the WOULD-BE numeric pole. Its three text-dominated companions are real, so

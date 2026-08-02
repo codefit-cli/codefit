@@ -182,6 +182,57 @@ func TestDW_AdventureWorksDW_StarIsVisible_AsVendored(t *testing.T) {
 	}
 }
 
+// TestDW002_AdventureWorksDW_SurrogateKeysAreProven is the DW family's third
+// closed limit on this corpus, and the one that was a live FALSE POSITIVE
+// rather than a silence: DW-002 used to fire on DimCustomer and DimDate,
+// claiming neither is keyed by a surrogate, over DDL where CustomerKey and
+// DateKey are plainly single-column [int] primary keys — the exact shape DW-002's
+// OWN doc comment cites as what must NOT fire. The cause was one layer down: the
+// tokenizer canonicalizes [int] to "int", the T-SQL type vocabulary is keyed on
+// the bare word, and the lookup missed, so "provably an integer" could not be
+// satisfied by a type that read as unknown (see types.go, typeLookupKey).
+//
+// Both halves are asserted, and neither alone would be a lock. The TYPE half
+// alone would pass over a rule that stopped reading types at all; the ABSENCE
+// half alone would pass over a DW-002 that went globally silent. Measured
+// alongside them over 26 corpora: DW-002's item count went 26 -> 8, and all 8
+// survivors are text/varchar-keyed dimensions it should fire on.
+func TestDW002_AdventureWorksDW_SurrogateKeysAreProven(t *testing.T) {
+	s := awdwSchema(t)
+
+	// The type half — transcribed from the DDL ("[CustomerKey] [int]",
+	// "[DateKey] [int]"), which is what makes the key a provable surrogate.
+	for _, tc := range []struct{ table, column string }{
+		{"DimCustomer", "CustomerKey"},
+		{"DimDate", "DateKey"},
+	} {
+		tb := tableNamed(t, s, tc.table)
+		if !slices.Equal(tb.PrimaryKey, []string{tc.column}) {
+			t.Fatalf("%s primary key = %v, want [%s]", tc.table, tb.PrimaryKey, tc.column)
+		}
+		var got db.Column
+		for _, c := range tb.Columns {
+			if c.Name == tc.column {
+				got = c
+			}
+		}
+		if got.Type != db.TypeInt {
+			t.Errorf("%s.%s Type = %q, want %q — the DDL declares it [int] (RawType %q)",
+				tc.table, tc.column, got.Type, db.TypeInt, got.RawType)
+		}
+	}
+
+	// The absence half — over the WHOLE corpus, not just those two tables.
+	c := paradigm.Detect(s)
+	_, surf := dwrules.Run(s, &c)
+	for _, it := range surf {
+		if it.Category == string(surface.CategoryDWDimensionNoSurrogateKey) {
+			t.Errorf("dw-dimension-no-surrogate-key at line %d — every dimension in this corpus "+
+				"is keyed by a single [int] surrogate: %v", it.Line, it.StructuralSignals)
+		}
+	}
+}
+
 // db-model-completeness-contract (2026-07-30): this test used to lock a KNOWN
 // BUG — DB-050 deterministically AFFIRMED (confidence 1.0) that these three
 // tables have no primary key, over real Microsoft-authored DDL that plainly

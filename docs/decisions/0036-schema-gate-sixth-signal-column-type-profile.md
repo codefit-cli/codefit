@@ -8,6 +8,37 @@ This ADR adds a sixth signal, and — more importantly — replaces 0035's
 five-corpus reading with a 26-corpus one that changes what the gate's numbers
 mean.
 
+**Superseded in scope (2026-08-01) by
+[ADR 0040](0040-delimited-type-names-resolve-at-the-canonical-form.md).**
+The DECISION below — the sixth signal, its thresholds, and the 26-corpus
+selection measurement — is untouched and still holds. What is no longer true is a
+PARSER FACT this ADR named as an open second gap, and this ADR is not rewritten —
+read the following together with 0040:
+
+- **The "Measured cause, found while building this" paragraph describes a defect
+  that is FIXED.** A delimited type name is now unwrapped at the canonical form
+  before the `TypeMap` lookup, so the two AdventureWorksDW corpora no longer parse
+  entirely unclassified: the vendored excerpt goes from 74 of 74 to **0 of 74**,
+  and the full upstream install script from 359 of 359 to **6 of 359** (the 6 are
+  `[sysname]` and `[xml]`, genuinely outside the T-SQL vocabulary).
+- **The prediction in the first bullet after it came true, and is now spent.** It
+  read: fixing `ALTER TABLE ... ADD CONSTRAINT` "will not move this signal's
+  AdventureWorksDW row; the bracketed-type gap is separate and must be fixed too".
+  Correct on both counts, and the second fix has now landed.
+- **The `✗` rows for the two AdventureWorksDW corpora in the measurement table no
+  longer abstain.** `type_profile_split` FIRES on the full install script (joining
+  `calendar_table` in its deciding set, with the gate's verdict unchanged), and on
+  the vendored 3-table excerpt it is evaluated and returns **false** on the
+  arithmetic — one text-dominated table against `textPoleMinTables = 2` — rather
+  than failing closed. **No signal's per-corpus verdict changed anywhere else, and
+  the selection measurement that decided `decidingSignals` is unaffected.**
+- **The test this ADR cites,
+  `TestSchemaGate_TypeProfileSplit_AbstainsOnBracketedTSQLTypes`, no longer
+  exists.** It was replaced by
+  `TestSchemaGate_TypeProfileSplit_UnclassifiedBudget`, which locks the same
+  fail-closed budget with genuinely unclassified types — see ADR 0040
+  §Consequences for why the original could not fail under mutation.
+
 ## Context
 
 ADR 0035 built five schema-wide signals and left them inert, to be MEASURED

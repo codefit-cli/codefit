@@ -534,11 +534,23 @@ const (
 	numericPoleMinSharePct = 10
 	// maxUnclassifiedPct is the FAIL-CLOSED budget: a table whose types the
 	// parser could not classify beyond this share is not profiled at all,
-	// because a proportion computed over unclassified types is a guess. This is
-	// not hypothetical — the real AdventureWorksDW install script parses with
-	// 359 of 359 columns at TypeUnknown, since its T-SQL brackets the type
-	// names ([int], [nvarchar](50)) and the dialect type map never sees them.
-	// The budget measured identically at every value from 0% to 99% over these
+	// because a proportion computed over unclassified types is a guess.
+	//
+	// THE WORKED EXAMPLE THIS COMMENT USED TO CITE IS GONE, and saying so is
+	// the point: it read "the real AdventureWorksDW install script parses with
+	// 359 of 359 columns at TypeUnknown, since its T-SQL brackets the type names
+	// ([int], [nvarchar](50)) and the dialect type map never sees them". That
+	// was a PARSER DEFECT, not a property of the corpus, and it is fixed — a
+	// delimited type name is now unwrapped before the TypeMap lookup
+	// (internal/providers/sqlddl/types.go, typeLookupKey). Re-measured through
+	// the real sensor: that script now parses with 6 of 359 unclassified, and
+	// those 6 are the honest fallback doing its job ([sysname] x5 and [xml] x1,
+	// real T-SQL types outside the declared vocabulary). 6 of 359 is 1.7%, well
+	// under this budget, so the script's tables are now profiled and the signal
+	// fires on it — which is the corrected answer, not a new risk.
+	//
+	// The budget still guards the state it was written for; only the example
+	// changed. It measured identically at every value from 0% to 99% over these
 	// corpora (no real corpus sits between "clean" and "entirely unclassified"),
 	// so 20% — one column in five — is reasoned, not measured.
 	maxUnclassifiedPct = 20
