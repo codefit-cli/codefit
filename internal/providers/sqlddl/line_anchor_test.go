@@ -11,7 +11,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
 
-// ADR 0044 — a body item's line anchor must be the line the item is WRITTEN on.
+// ADR 0045 — a body item's line anchor must be the line the item is WRITTEN on.
 //
 // The comma-separated parts of a CREATE TABLE body (and of an ALTER TABLE action
 // list) carry the byte offset of the COMMA BOUNDARY, which sits BEFORE the

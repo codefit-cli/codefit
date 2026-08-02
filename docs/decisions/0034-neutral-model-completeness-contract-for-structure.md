@@ -83,9 +83,9 @@ and it deliberately treats an `Unreduced`/`Withheld` record as PROOF the file wa
 read, so a declared drop is never re-reported as blindness.
 
 **Narrowed a second time (2026-08-02) by
-[ADR 0044](0044-non-table-relations-and-body-item-line-anchors.md):**
+[ADR 0045](0045-non-table-relations-and-body-item-line-anchors.md):**
 §2.6's class shrinks again, and in a direction neither 0042 nor 0043 covered.
-Both defects 0044 closes are FABRICATIONS the `Complete` flag structurally
+Both defects 0045 closes are FABRICATIONS the `Complete` flag structurally
 cannot see, because nothing was dropped: a `CREATE SEQUENCE` (and a `CREATE
 VIEW`) whose name a later `ALTER TABLE` turned into a zero-column TABLE, and a
 body item anchored one line early — which bound a finding's BASELINE IDENTITY to

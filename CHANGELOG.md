@@ -121,7 +121,7 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
-- **A `CREATE SEQUENCE` no longer becomes a phantom table** (ADR 0044, SQL-DDL known
+- **A `CREATE SEQUENCE` no longer becomes a phantom table** (ADR 0045, SQL-DDL known
   limit (14)). `pg_dump` writes one sequence per serial/identity column and then, for
   every relation it dumps, an ownership statement spelled with `ALTER TABLE` — which
   PostgreSQL legally accepts for every relation kind. The reducer had **no branch for
@@ -146,7 +146,7 @@ All notable changes to codefit are documented here. The format is based on
   directions: exactly two corpora move, **23 items removed, zero added**, everything
   else identical — a zero proven sensitive with a positive control build that
   reproduces all 23.
-- **Every `CREATE TABLE` body item is now anchored on its own source line** (ADR 0044,
+- **Every `CREATE TABLE` body item is now anchored on its own source line** (ADR 0045,
   SQL-DDL known limit (15)). The reducer counted newlines up to the **comma
   boundary**, which sits before the newline preceding the item's text, so every column
   and every table-level constraint pointed one line early — and so did the second and

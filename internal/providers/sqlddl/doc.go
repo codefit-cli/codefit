@@ -30,7 +30,7 @@
 // anything they find but cannot reduce to the honest-abstention floor.
 //
 // Not every relation the reducer READS is a table, and it remembers the
-// difference (ADR 0044). A CREATE SEQUENCE and a CREATE (MATERIALIZED) VIEW put
+// difference (ADR 0045). A CREATE SEQUENCE and a CREATE (MATERIALIZED) VIEW put
 // their NAME in a reducer-internal registry with no model surface of their own,
 // so the ownership statement pg_dump writes for every relation it dumps —
 // "ALTER TABLE public.<name>_id_seq OWNER TO <role>", which PostgreSQL legally

@@ -11,7 +11,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
 
-// ADR 0044 — a SEQUENCE is not a table, and neither is a VIEW.
+// ADR 0045 — a SEQUENCE is not a table, and neither is a VIEW.
 //
 // pg_dump emits, for every serial/identity column, a CREATE SEQUENCE followed by
 // the perfectly legal `ALTER TABLE public.<name>_id_seq OWNER TO <role>` (PG's

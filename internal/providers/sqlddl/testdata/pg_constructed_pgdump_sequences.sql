@@ -1,7 +1,7 @@
 -- CONSTRUCTED / SYNTHETIC fixture — NOT vendored, NOT copied from any upstream
 -- corpus. Hand-written for codefit's own test suite to reproduce the statement
 -- SEQUENCE that pg_dump emits around every serial/identity column, and the
--- PHANTOM TABLE it used to materialize (ADR 0044).
+-- PHANTOM TABLE it used to materialize (ADR 0045).
 --
 -- Why constructed: a case-insensitive grep for "^\s*create\s+sequence" across
 -- internal/providers/sqlddl/testdata/ returned ZERO hits before this file was

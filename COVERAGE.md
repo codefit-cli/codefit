@@ -1550,7 +1550,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   table still materializes a phantom table carrying `ReasonTableNeverDeclared`,
   exactly as before: withholding removes the `CREATE` from the model, it does not
   teach the other branches that the name is temporary.
-  (14) **Closed as of `non-table-relation-registry`, 2026-08-02 (ADR 0044)** —
+  (14) **Closed as of `non-table-relation-registry`, 2026-08-02 (ADR 0045)** —
   kept rather than deleted because it names what this reducer now **does** and
   because the guard has a boundary of its own. PostgreSQL's `ALTER TABLE` accepts
   every relation **kind** for its ownership actions, and `pg_dump` uses that: it
@@ -1607,7 +1607,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `db.Table.Complete` cannot catch. An index *form* the reducer cannot read over a
   view still goes to `Schema.Unreduced`, because that statement genuinely was not
   read.
-  (15) **Closed as of `body-item-line-anchors`, 2026-08-02 (ADR 0044).** Every
+  (15) **Closed as of `body-item-line-anchors`, 2026-08-02 (ADR 0045).** Every
   `CREATE TABLE` body item, and every second-or-later action of a multi-action
   `ALTER TABLE`, was anchored **one line early**: the reducer counted newlines up
   to the **comma boundary**, which sits *before* the newline that precedes the

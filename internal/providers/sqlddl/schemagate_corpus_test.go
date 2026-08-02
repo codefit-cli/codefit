@@ -156,7 +156,7 @@ var gateCorpusExpectations = []gateCorpusCase{
 	{path: "pg_constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{path: "pg_constructed_n2_recognized_skips.sql", tables: 2, proven: 2, paradigmIs: paradigm.ParadigmOLTP},
 	{
-		// The pg_dump sequence fixture (ADR 0044). The PARSE FACTS carry this
+		// The pg_dump sequence fixture (ADR 0045). The PARSE FACTS carry this
 		// row and are exactly what regressed before: it declares TWO sequences
 		// and TWO tables, and the sequences used to become tables — so this row
 		// measured 4/2 (two phantom entries, neither proven) before the

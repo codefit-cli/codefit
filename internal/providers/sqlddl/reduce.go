@@ -41,7 +41,7 @@ type builder struct {
 	// that a name is a sequence declares no column, key or index of any table.
 	//
 	// Its sole purpose is to stop applyAlterTable from MATERIALIZING A TABLE out
-	// of a statement that names one of them (ADR 0044). PostgreSQL's ALTER TABLE
+	// of a statement that names one of them (ADR 0045). PostgreSQL's ALTER TABLE
 	// accepts every relation kind for its ownership actions, and pg_dump uses
 	// that: it writes "ALTER TABLE public.<name>_id_seq OWNER TO <role>" for
 	// every sequence and "ALTER TABLE public.<view> OWNER TO <role>" for every
@@ -157,7 +157,7 @@ var (
 	//   group 4: the table name
 	reCreateColumnstoreIndex = regexp.MustCompile(`(?is)^create\s+(clustered\s+)?columnstore\s+index\s+` +
 		`(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\b`)
-	// reCreateSequence recognizes a SEQUENCE declaration (ADR 0044). A sequence
+	// reCreateSequence recognizes a SEQUENCE declaration (ADR 0045). A sequence
 	// is a relation, but it is not a table: it has no columns, no primary key
 	// and no indexes, and no rule of the DB dimension has anything to say about
 	// one. So this branch adds NO model surface — it only records the NAME, so a
@@ -423,7 +423,7 @@ func (b *builder) apply(file string, st stmt) bool {
 		// and recording it as withheld would report a scoping decision codefit
 		// never had to make. Only its NAME is kept, reducer-internally, so the
 		// ALTER TABLE pg_dump writes for it is not mistaken for a table
-		// (ADR 0044).
+		// (ADR 0045).
 		b.nonTableRelations[normalizeName(reCreateSequence.FindStringSubmatch(st.text)[1])] = true
 	case strings.HasPrefix(head, "alter table"):
 		b.applyAlterTable(file, st)
@@ -438,7 +438,7 @@ func (b *builder) apply(file string, st stmt) bool {
 		// for every view it dumps. Measured on the vendored Pagila corpus,
 		// where 8 of the 21 phantom tables were views (actor_info,
 		// customer_list, film_list, …) — the same mechanism as the sequences,
-		// at the same call site (ADR 0044).
+		// at the same call site (ADR 0045).
 		b.nonTableRelations[name] = true
 		b.views = append(b.views, db.View{Name: name, Pos: pos, Body: viewBody(st)})
 	case reRoutine.MatchString(st.text):
@@ -618,7 +618,7 @@ func (b *builder) getTable(name string, pos db.Pos) (*db.Table, bool) {
 
 // isKnownNonTable reports whether name is a relation THIS PARSE ALREADY READ
 // that is not a table — a sequence or a (materialized) view — and that no
-// CREATE TABLE has declared (ADR 0044).
+// CREATE TABLE has declared (ADR 0045).
 //
 // It is the one predicate guarding every site that can materialize a table from
 // a REFERENCE rather than from a declaration: applyAlterTable, applyCreateIndex,
@@ -872,7 +872,7 @@ func (b *builder) reduceCreateTable(file string, st stmt) {
 	t, _ := b.getTable(name, db.Pos{File: file, Line: st.line})
 	for _, p := range splitTopLevelParts(inner) {
 		// p.textOff(), never p.off: the comma boundary sits before the newline
-		// that precedes the item's own text (ADR 0044).
+		// that precedes the item's own text (ADR 0045).
 		line := st.line + strings.Count(st.text[:innerStart+p.textOff()], "\n")
 		b.applyTableItem(t, p.text, db.Pos{File: file, Line: line})
 	}
@@ -1147,7 +1147,7 @@ func (b *builder) applyTableItem(t *db.Table, item string, pos db.Pos) {
 		b.applyTableItem(t, host, pos)
 		// The residual reports ITS OWN line, counted from the item's TEXT — the
 		// first non-whitespace byte — not from its raw start. pos already points
-		// at that byte's line (part.textOff, ADR 0044); counting the leading
+		// at that byte's line (part.textOff, ADR 0045); counting the leading
 		// newlines again here would advance the residual one line per blank
 		// line before the host, which is exactly what
 		// TestSQLDDL_MissingCommaCut_ReportsTheConstraintsOwnLine caught.
@@ -1598,7 +1598,7 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 	name := normalizeName(m[1])
 	if b.isKnownNonTable(name) {
 		// This ALTER TABLE names a relation this parse ALREADY READ and that is
-		// not a table — a sequence or a view (ADR 0044). PostgreSQL's ALTER
+		// not a table — a sequence or a view (ADR 0045). PostgreSQL's ALTER
 		// TABLE accepts every relation kind for its ownership actions, and
 		// pg_dump uses that for both. Materializing a table here is the one
 		// thing that must not happen: it produces an entry with zero columns
@@ -1642,7 +1642,7 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 	inAddList := false
 	for i, p := range splitTopLevelParts(m[2]) {
 		// p.textOff(), never p.off — same comma-boundary correction as the
-		// CREATE TABLE body loop (ADR 0044). It is invisible on pg_dump output,
+		// CREATE TABLE body loop (ADR 0045). It is invisible on pg_dump output,
 		// which writes ONE action per statement (reAlterTable's own `\s+(.*)$`
 		// has already consumed the newline before the first action), and it is
 		// the SECOND and later actions of a multi-action statement that were
@@ -1836,7 +1836,7 @@ func (b *builder) markUnrecognizedIndexShape(file string, st stmt) {
 	} else {
 		// No attributable table — either the ON clause resolved to nothing (a
 		// wrong attribution is worse than none, design §2) or it resolved to a
-		// relation this parse already read that is NOT a table (ADR 0044): an
+		// relation this parse already read that is NOT a table (ADR 0045): an
 		// index form the reducer cannot read, declared over a view. Both are
 		// recorded at schema level, which gates nothing per-table. Silence was
 		// rejected for the second case as well — the statement genuinely was
@@ -1956,7 +1956,7 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		// (pagila's rental_category ON rental_by_category). The index is NOT
 		// re-homed: db.View carries no index field, because the DB dimension's
 		// rules are about tables, and materializing a table to hold it would
-		// hand DB-050 a "table" with zero columns (ADR 0044).
+		// hand DB-050 a "table" with zero columns (ADR 0045).
 		return
 	}
 	unique := m[1] != ""
@@ -2013,7 +2013,7 @@ func (b *builder) applyCreateColumnstoreIndex(file string, st stmt) {
 		return
 	}
 	if b.isKnownNonTable(normalizeName(m[4])) {
-		return // same disposition as applyCreateIndex (ADR 0044)
+		return // same disposition as applyCreateIndex (ADR 0045)
 	}
 	name := normalizeName(m[3])
 	if m[2] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
@@ -2149,7 +2149,7 @@ type part struct {
 }
 
 // textOff is the offset of the part's FIRST NON-WHITESPACE byte — the offset a
-// LINE ANCHOR must be counted to (ADR 0044).
+// LINE ANCHOR must be counted to (ADR 0045).
 //
 // off is the COMMA BOUNDARY: splitTopLevelParts starts each part at the byte
 // after the separating ',' (or at 0 for the first one), which sits BEFORE the

@@ -1,4 +1,4 @@
-# ADR 0044 — A sequence is not a table, and a body item is anchored on its own line
+# ADR 0045 — A sequence is not a table, and a body item is anchored on its own line
 
 **Status:** Accepted · **Date:** 2026-08-02 · **Phase:** 2 (RF-03 parser fidelity)
 
