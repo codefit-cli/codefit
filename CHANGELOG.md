@@ -372,8 +372,8 @@ All notable changes to codefit are documented here. The format is based on
   each locked as a characterization test so the limit stays machine-visible
   (ADR 0034 §2.7).
 - **A delimited SQL type name (`[int]`, `` `int` ``, `"int"`) is now classified instead of
-  falling back to `db.TypeUnknown`** — closing SQL-DDL known limit (8) and, with it, a
-  **live false positive**. Microsoft's own generated scripts delimit the type of *every*
+  falling back to `db.TypeUnknown`** (ADR 0040) — closing SQL-DDL known limit (8) and, with
+  it, a **live false positive**. Microsoft's own generated scripts delimit the type of *every*
   column (`[CustomerKey] [int] IDENTITY(1,1) NOT NULL`), so on the vendored AdventureWorksDW
   corpus **all 74** parsed columns read as unknown, and **DW-002 claimed `DimCustomer` and
   `DimDate` have no surrogate key** over DDL where `CustomerKey` and `DateKey` are plainly

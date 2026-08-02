@@ -753,10 +753,10 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   visible consequence is 1NF items that *would* have been suppressed simply
   appearing; when it **opens**, the note names *which* deciding signals opened
   it, or says plainly that an explicit setting did. Both traces stay empty when
-  the gate changed nothing. The DW-0xx partitioning rule is **not yet built**
-  (see Not covered, below); the star-schema/SCD half landed in S2 — next
-  entry — and the columnar/analytic-index check landed in S3 — the entry
-  after that.
+  the gate changed nothing. The star-schema/SCD half landed in S2 — next
+  entry — the columnar/analytic-index check landed in S3 — the entry after
+  that — and the partitioning census (DW-020) landed in S4, so the DW-0xx
+  family is now **complete** and nothing in its scope is left unbuilt.
 - **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
   S2, RF-03 OLAP closure).** Five rules reading the schema **plus** the S1
   paradigm/role classification. They reach **only** fact- and dimension-role
@@ -1098,9 +1098,10 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     table. **Not one analytic corpus declares table partitioning on a fact
     table** — precisely the measurement that made this rule schema-level. That
     zero is **positively controlled**, not assumed: table partitioning *is*
-    present in the corpus set, in four **transactional** corpora (Pagila's
-    `payment`, the MySQL `employees_partitioned` fixtures, YugabyteDB Sakila),
-    and the parser reports it — it simply never coincides with a fact role. The
+    present in the corpus set, in four **transactional** corpora — among them
+    Pagila's `payment`, the MySQL `employees_partitioned` fixtures and
+    YugabyteDB Sakila — and the parser reports it (Pagila: one declaring
+    table); it simply never coincides with a fact role. The
     window-function false positive a naive `PARTITION BY` grep would have
     produced is real too, and was excluded: `dw-ngthao`'s only `PARTITION`
     mentions are `OVER (PARTITION BY ...)` query syntax, which never reaches
@@ -1733,6 +1734,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     where a file yielding nothing is the ordinary case — so a BOM-less UTF-16
     **source** file (not schema file) is still read as-is and still yields
     nothing, silently.
+- **PII coverage is PARTIAL — an open design question, not a settled exclusion.**
+  DB-053 asks exactly one question, *"is this **secret** sitting in plaintext?"*,
+  and its vocabulary is built for that: `password`, `passwd`, `pwd`, `secret`,
+  `apikey`, `token`, `accesstoken`, `refreshtoken`, `privatekey`, `cvv`, `cvc`.
+  But it **already reaches past secrets into personal data** — `ssn`, `dni`,
+  `creditcard` and `cardnumber` sit in the same list — so the boundary is not
+  clean today. The consequence worth knowing: a column named `email` does **not**
+  fire DB-053, though it is plainly personal data, because *"is this secret in
+  plaintext?"* is not a question an email address answers — an email is *supposed*
+  to be readable by the application. Widening DB-053's vocabulary to cover
+  email/phone/address would make one rule mean two things at once. The candidate
+  under consideration is a **separate surface category for personal data**, asking
+  its own question (is this column regulated data, and is its handling declared?).
+  **Not decided, not scheduled** — recorded here rather than silently omitted,
+  because a manifest that leaves a known partial boundary unstated is the
+  over-promise this document exists to prevent.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
