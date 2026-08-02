@@ -336,10 +336,18 @@ All notable changes to codefit are documented here. The format is based on
   and a schema that does not qualify gets **no** fact/dimension/staging/mart role at all.
   **The verdict is measured, not reasoned** (26 public corpora, 13 analytic / 13 transactional):
   a schema is a warehouse iff **any one** of `calendar_table`, `surrogate_key_names` or
-  `type_profile_split` fires — the three that measured 8/0, 3/0 and 3/0 warehouse-to-
-  transactional, zero false positives, identifying 9 of 13 warehouses. Counting all six instead
-  ("any 3") identifies only 5 at the same precision, because `bulk_load_shape` fired on nothing
-  at all and `no_audit_timestamps`/`star_topology` are near coin flips (6/5 each). All six stay
+  `type_profile_split` fires — the three that measured 9/0, 3/0 and 4/0 warehouse-to-
+  transactional, zero false positives, identifying 10 of 13 warehouses. Counting all six instead
+  ("any 3") identifies only 6 at the same precision, because `bulk_load_shape` fired on nothing
+  at all and `no_audit_timestamps`/`star_topology` are near coin flips on the transactional side
+  (9/5 and 7/5). **What that zero rests on, stated rather than rounded up:** four of the 13
+  corpora in the transactional column parse to **zero tables** (three vendor only
+  views/procedures/triggers; `jaffle-shop-dbt`'s dbt models are `SELECT`s), and a zero-table
+  schema sits below the 3-table floor and can never qualify by construction — so the zero is
+  real but its evidence base is **9** corpora, not 13. On the other side, `tpch` is filed
+  analytic while its schema is TPC-H's normalized order-entry model, which presents no
+  dimensional evidence at all; excluding it, shape-based analytic recall is **10 of 12**, and
+  the two genuine misses are `dw-barousse` and `dw-ngthao`. All six stay
   computed and **reported**; only three vote. Measured over the same 26 corpora, this changed
   exactly **one** of them — `dw-barousse`, a **warehouse**, whose calendar is spelled
   `dim_date_month` and so misses an already-declared limit of the calendar signal. **No

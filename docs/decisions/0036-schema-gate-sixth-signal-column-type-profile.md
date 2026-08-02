@@ -39,6 +39,110 @@ read the following together with 0040:
   fail-closed budget with genuinely unclassified types — see ADR 0040
   §Consequences for why the original could not fail under mutation.
 
+**Re-measurement (2026-08-02) — the detection figure improved, and the precision
+claim overstated its evidence base.** This ADR is not rewritten; read the whole
+of the following together with the body. The DECISION — the sixth signal, its
+thresholds, and "select the zero-false-positive signals rather than count all
+six" — is untouched and comes out of the re-measurement better supported, not
+worse. What moved is the measurement, and the reading of it.
+
+Re-run on `main` at `4f81e85` through the same method the body describes: the
+real providers and the real gate (`paradigm.WarehouseSignals`, `paradigm.Detect`)
+driven by a throwaway harness over `internal/sensors/db.Sensor.Audit`, `auto`
+config throughout, over the same 26 corpora at the same pinned commits.
+**Positive control first**, for the same reason the body gives: four constructed
+fixtures through the same harness, one per deciding signal plus an OLTP negative
+— `calendar_table`, `surrogate_key_names` and `type_profile_split` each fire
+**alone** on their own fixture, and the OLTP fixture fires none. No zero below is
+a harness artifact.
+
+**1. Four rows differ from the measurement table, and only ONE of them is new.**
+Measured at `955e69d` — the very commit that last revised this ADR — and at
+`4f81e85`:
+
+| Corpus | table above | at `955e69d` | at `4f81e85` |
+|---|---|---|---|
+| `dw-kenap` | 1/1, no signal | 1/1, no signal | **7/7, `calendar_table`+`no_audit_timestamps`, gate OPEN, `olap`** |
+| `awdw-full` | 31/2, `cal` + `✗`type | 31/31, `cal`+`aud`+`star`+`type` | 31/31, `cal`+`aud`+`star`+`type` |
+| `vendored-awdw` | 3/0, `cal` + `✗`type | 3/3, `cal`+`aud` | 3/3, `cal`+`aud` |
+| `pagila` | 92/70 | 92/69 | 92/69 |
+
+Only `dw-kenap` moved after this ADR was written, and its cause is
+[ADR 0041](0041-run-on-statement-separation-at-the-create-table-tail.md): its
+`CREATE_DW.sql` declares 7 tables with no `;` between them, and before run-on
+separation the reducer read one and discarded six. It now parses 7/7 proven,
+fires `calendar_table` on `Dim_Date`, opens the gate and classifies `olap` with
+6 dimensions and 1 fact. **The other three rows were already stale when this ADR
+was last edited.** Two of them the ADR corrects in its own prose (the two
+AdventureWorksDW rows, in the block above and in §Consequences); `pagila`'s
+`92/70` is corrected nowhere and is simply wrong — it measures 92/69 at both
+trees. Its verdict is unaffected in every run: no signal fires, the gate stays
+shut.
+
+**2. The corrected per-signal totals over the 26.** Changes in bold:
+
+| Signal | fires on W | fires on O |
+|---|---:|---:|
+| `calendar_table` | **9** | 0 |
+| `surrogate_key_names` | 3 | 0 |
+| `type_profile_split` | **4** | 0 |
+| `no_audit_timestamps` | **9** | 5 |
+| `star_topology` | **7** | 5 |
+| `bulk_load_shape` | 0 | 0 |
+
+**3. The corrected counting table, and the argument it still makes.**
+
+| Rule | fires on W | fires on O |
+|---|---:|---:|
+| ≥ 1 signal | 12 | 7 |
+| ≥ 2 signals | 10 | 3 |
+| ≥ 3 signals | 6 | 0 |
+| ≥ 1 of {calendar, surrogate, type_profile} | **10** | **0** |
+| ≥ 2 of {calendar, surrogate, type_profile} | 5 | 0 |
+
+Selecting still beats counting, and by a wider margin than the body records:
+**10 of 13 against 6 of 13** at the same zero false positives, where the body
+read 9 against 5. Nothing about the decision needs revisiting.
+
+**4. The precision claim rests on 9 corpora, not 13 — the zero is real, its base
+was overstated.** Four of the 13 corpora in the transactional column parse to
+**zero tables**: `vendored-sakila`, `vendored-pagila` and `vendored-aw-oltp`
+vendor only views, procedures and triggers, and `jaffle-shop-dbt`'s dbt models
+are `SELECT`s (a fact this ADR already records, for `jaffle_shop` alone). A
+zero-table schema is below `minJudgeableTables = 3`, so `judgeable()` returns
+false, `WarehouseSignals` returns empty evidence and `Qualifies()` is false **by
+construction**. Those four corpora are structurally incapable of producing a
+false positive; counting them as evidence of precision credits the gate with
+work it never did. The correct statement is **zero false positives across the 9
+transactional corpora that have parseable tables**.
+
+**5. Two of the labels are wrong.** `tpch` is filed W. TPC-H is a
+decision-support *benchmark* by purpose, but its schema is deliberately
+normalized: eight tables (`NATION`, `REGION`, `PART`, `SUPPLIER`, `PARTSUPP`,
+`CUSTOMER`, `ORDERS`, `LINEITEM`), an order-entry model with no date dimension,
+no `_sk` vocabulary and no numeric-dominated table — verified by reading
+`dss.ddl` at the pinned commit. It presents no dimensional evidence, so the gate
+is **right** not to fire on it, and counting it as a miss understates the gate.
+`jaffle-shop-dbt` is filed O and is dbt's canonical *analytics* demo; it is inert
+either way at 0 tables.
+
+**6. The honest restatement.** Shape-based analytic recall of **10 of 12** —
+excluding `tpch`, which presents no dimensional evidence to detect — with **0
+false positives across 9 evidentially non-empty transactional corpora**. Both
+figures are robust to the relabelling in point 5: moving `jaffle-shop-dbt` to the
+analytic column changes neither denominator, because a zero-table corpus is
+excluded from both. The two real misses are `dw-barousse` and `dw-ngthao`.
+
+**7. `dw-ngthao`'s miss is NOT a parser limit.** The 9/3 row invites the reading
+that six unproven tables are what closes the gate. Tested by counterfactual:
+running its **gold layer alone** (`Script/Gold/create_table.sql`) parses **3
+tables, 3 proven, zero unclassified columns and 100% profiled coverage** — and
+the gate still stays **shut**. It is a genuine three-way miss on evidence, not on
+parsing: `fact_sales` is 5 numeric of 9 columns (55.6%, under
+`numericPolePct = 60`), the schema declares no calendar table, and it uses no
+`_sk` columns. The declared limit at the end of this ADR already names the first
+of those three causes; what is new is that the parser is not among them.
+
 ## Context
 
 ADR 0035 built five schema-wide signals and left them inert, to be MEASURED

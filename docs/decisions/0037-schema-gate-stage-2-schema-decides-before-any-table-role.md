@@ -13,6 +13,49 @@ qualify at all.
 six signals inert and measured them over 26 public corpora precisely so this
 decision could be made from numbers.
 
+**Re-measurement (2026-08-02): the numbers this ADR inherits from 0036 have
+moved, and the verdict is better supported for it.** This ADR is not rewritten;
+read the following together with §Decision 2 and §Consequences. The full
+correction — method, positive control, per-row attribution and the labelling
+critique — is recorded in
+[ADR 0036](0036-schema-gate-sixth-signal-column-type-profile.md)
+§"Re-measurement (2026-08-02)"; only what this ADR states in its own voice is
+restated here. Re-run on `main` at `4f81e85`, same corpora, same pinned commits,
+`auto` config, positive control first.
+
+- **§Decision 2's verdict table.** `>= 1 of the three selected` identifies
+  **10 of 13** warehouses, not 9, still with **0** false positives.
+  `>= 3 of any six` identifies **6 of 13**, not 5, also at 0. `>= 2 of any six`
+  identifies **10 of 13** with **3** false positives. The per-signal column
+  reads `calendar_table` **9/0**, `surrogate_key_names` 3/0,
+  `type_profile_split` **4/0**, `no_audit_timestamps` **9/5**, `star_topology`
+  **7/5**, `bulk_load_shape` 0/0. **Selecting still beats counting on recall at
+  identical precision, by a wider margin than the table below records** — the
+  decision needs no revisiting.
+- **§Consequences, "Recall traded, deliberately": the list of four is now a list
+  of three, and one of the four never belonged on it.** `dw-kenap` qualifies —
+  [ADR 0041](0041-run-on-statement-separation-at-the-create-table-tail.md)'s
+  run-on separation took it from 1 parsed table to 7/7 proven, and it now fires
+  `calendar_table`, opens the gate and classifies `olap` with 6 dimensions and 1
+  fact. `tpch` is mislabelled analytic: its schema is TPC-H's deliberately
+  normalized order-entry model, with no date dimension, no `_sk` vocabulary and
+  no numeric-dominated table, so the gate is **right** to stay shut on it. The
+  real misses are `dw-barousse` and `dw-ngthao`, and `dw-barousse` remains the
+  entire realised loss. **`dw-ngthao`'s miss is not a parser limit**, contrary to
+  what its 9/3 parse row suggests: its gold layer alone parses 3/3 proven at 100%
+  profiled coverage and the gate still stays shut, on three independent counts
+  (see 0036 §Re-measurement point 7).
+- **§Consequences, "transactional corpora affected at all — 0 of 13": the zero
+  holds, its denominator does not.** Four of those 13 corpora parse to zero
+  tables and sit below `minJudgeableTables = 3`, so they cannot produce a false
+  positive at all. The honest statement is **0 across the 9 transactional
+  corpora that have parseable tables**. This does not weaken the
+  conclusion this ADR draws from that row — it makes the claim smaller and true.
+- **Everything else in this ADR is unaffected.** The inversion, the override
+  semantics, the three-table floor, the `Unprovable` separation, the gate trace,
+  and the before/after delta whose single moved corpus is `dw-barousse` all
+  stand as written.
+
 ## Context
 
 ADR 0033 built paradigm detection BOTTOM-UP: `paradigm.Detect` assigned a role to
