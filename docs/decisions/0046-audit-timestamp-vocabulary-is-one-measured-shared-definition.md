@@ -1,6 +1,35 @@
 # ADR 0046 — The audit-timestamp vocabulary is ONE measured, shared definition
 
-**Status:** Accepted · **Date:** 2026-08-02 · **Phase:** 2 (RF-03, DB dimension)
+**Status:** PARTIALLY SUPERSEDED by
+[ADR 0047](0047-audit-stamp-is-a-verb-plus-a-time-affix-plus-a-type.md) · **Date:** 2026-08-02 ·
+**Phase:** 2 (RF-03, DB dimension)
+
+> **Annotation, added when 0047 landed (this text is appended; nothing below is
+> rewritten).** Decision **1** — one shared definition in the neutral model,
+> asked by DB-052 per table and by the gate's `no_audit_timestamps` per schema,
+> with the equivalence locked as a test — **STANDS**, and 0047 keeps it. What
+> 0047 replaces is decision **2** (a fixed list of sixteen names admitted only by
+> measurement) and the "never a TYPE" half of decision **3**.
+>
+> Why: the admission rule below is right that a *guessed* name is a false
+> negative that hides — but a list can only ever know the spellings that
+> happened to appear in the corpora that happened to be cloned. It rejected
+> `created_on`, `date_created`, `inserted_at`, `modified_at`, `last_modified` and
+> `updated_ts`, all unmistakably audit stamps, so any project spelling it one of
+> those ways got exactly the false warning this ADR set out to remove. 0047
+> replaces the list with a RULE — a creation/modification verb, a time affix
+> attached to it, and a type that can hold a time — which closes the family
+> instead of enumerating its members, and it is measured to fire identically to
+> this list over the same 29 corpora.
+>
+> The function's name changed with its signature: `db.IsAuditTimestampName(string)`
+> is now `db.IsAuditTimestampColumn(db.Column)`, so the type gate cannot be
+> skipped by a caller holding only a string. Every reference to the old name in
+> the text below is historical.
+>
+> Still true, and inherited unchanged by 0047: matching never reads a substring
+> or a prefixed form (`dv_create_date`), `timestamp` is an explicit COLUMN-name
+> entry, and a column merely TYPED `timestamp` is not a stamp.
 
 **Extends [ADR 0017](0017-name-heuristic-db-rules-as-pure-surface.md).** DB-052 is
 still pure SURFACE, still fires only when NOTHING in the table stamps a row, still exposes

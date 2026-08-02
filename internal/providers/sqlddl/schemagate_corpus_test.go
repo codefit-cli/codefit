@@ -29,7 +29,7 @@ import (
 //	(every other corpus)                --        none
 //
 // THE FIRST THREE ROWS MOVED when the audit-timestamp vocabulary was widened
-// and shared (db.IsAuditTimestampName). They read
+// and shared (db.IsAuditTimestampColumn). They read
 //
 //	mysql/sakila_excerpt.sql            OLTP      no_audit_timestamps, star_topology
 //	pagila_excerpt.sql                  OLTP      no_audit_timestamps
@@ -93,7 +93,7 @@ import (
 //     fire on all three. They spell their audit stamp last_update (Sakila,
 //     Pagila) or ModifiedDate (AdventureWorks); the signal reuses DB-052's
 //     vocabulary rather than inventing a second spelling rule, and that shared
-//     vocabulary is now the measured one (db.IsAuditTimestampName), so a schema
+//     test is now the shared verb+type rule (db.IsAuditTimestampColumn, ADR 0047), so a schema
 //     that stamps its rows no longer reads as one that does not. What is left
 //     here is the AdventureWorksDW row: a real warehouse whose three tables
 //     genuinely carry no row-level stamp. The signal still fires on both sides

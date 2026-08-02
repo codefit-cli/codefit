@@ -121,28 +121,40 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
-- **DB-052 stops asking for audit timestamps from tables that have them** (ADR 0046).
-  It compared a column name against exactly `createdAt`/`updatedAt`, so an append-only
-  event table whose creation time is a column literally named `"timestamp"` was reported
-  as untracked — with that very column listed in the item's own `columns:` signal. The
-  vocabulary is now **measured and shared**: one definition (`db.IsAuditTimestampName`)
-  that DB-052 asks per table and the schema gate's `no_audit_timestamps` signal asks per
-  schema, holding 16 names read off real corpora — `last_update` (Sakila/Pagila),
-  `create_date`, `creation_date`, `update_date`, `ModifiedDate` (AdventureWorks),
-  `created_ts`/`creation_ts`/`creation_time`/`inserted_ts`/`added_ts`/`added_at`
-  (Synapse's epoch stamps), and a bare `timestamp`. **Measured over 29 corpora: DB-052
-  goes from 424 items to 375** — 49 tables silenced, **zero** newly firing, every other
-  rule's per-corpus counts unchanged — and on the reporting project from 3 of 9 tables
-  to 1 of 9, the one that genuinely has no time column at all. Matching stays **equality
-  over the normalized name**, so `creator`, `update_trace_id` and `commission_created`
-  (real columns of firing tables) are not admitted, and it reads a **name, never a
-  type**: a column named `logged_value` typed `timestamp` still fires. Known limit,
-  chosen deliberately: a stamp spelled in a way no measured corpus produced
-  (`created_on`, `date_created`, `inserted_at`, `last_modified`) still fires — admitting
-  a guessed name **silences** a table, and a false negative is the error nobody sees.
-  Consequence for the schema gate, verified rather than assumed: six corpora stop firing
-  `no_audit_timestamps` (it goes from 9 W / 5 O to 8 W / 3 O over the ADR 0036 set), and
-  **not one paradigm verdict moves** — the signal casts no vote.
+- **DB-052 stops asking for audit timestamps from tables that have them** (ADR 0046 for
+  the shared seam, **ADR 0047** for the rule). It compared a column name against exactly
+  `createdAt`/`updatedAt`, so an append-only event table whose creation time is a column
+  literally named `"timestamp"` was reported as untracked — with that very column listed
+  in the item's own `columns:` signal. What counts as a stamp is now **one shared
+  definition** (`db.IsAuditTimestampColumn`) that DB-052 asks per table and the schema
+  gate's `no_audit_timestamps` signal asks per schema, and it is a **rule, not a list**:
+  a creation/modification **verb** (`create`/`created`/`creation`,
+  `insert`/`inserted`/`insertion`, `add`/`added`, `update`/`updated`,
+  `modify`/`modified`, `change`/`changed`), a **time affix** attached to it (the suffixes
+  `_at`, `_on`, `_ts`, `_time`, `_date`, `_datetime`, `_timestamp`, or the prefixes
+  `last_` and `date_`), and a **type that can hold a time** (`datetime`, or `int` for the
+  epoch `BIGINT` stamps Synapse really uses). A bare `timestamp` is the one explicit
+  entry, since it carries no verb.
+  **A suffix alone is deliberately not enough**: across the 29 measured corpora, 80
+  distinct columns end in `At` and **74 of them are business event times** (`expires_at`,
+  `started_at`, `finished_at`, `last_sync_at`, `paidAt`, `bannedAt`), and a table whose
+  only time column is `expires_at` genuinely does not record when its row was created —
+  admitting the suffix would silence it. The affix is load-bearing the other way too:
+  `created_by` is a creation verb naming a **person**, so `_by` is not a time affix.
+  **Measured over 29 corpora: DB-052 goes from 424 items to 375** — 49 tables silenced,
+  **zero** newly firing, every other rule's per-corpus counts unchanged — and on the
+  reporting project from 3 of 9 tables to 1 of 9, the one that genuinely has no time
+  column at all. Matching decomposes the **whole** normalized name with nothing left
+  over, so `creator`, `update_trace_id`, `commission_created`, `ts_added_ms` and
+  `dv_create_date` (real columns of firing tables) are not admitted, and it never reads a
+  **type as a name**: a column named `logged_value` typed `timestamp` still fires.
+  Known limits, chosen deliberately in the visible direction: a stamp with no verb
+  (`recorded_at`), a **prefixed** one (`dv_create_date`), or one typed in a way no corpus
+  produced (a `created_at` declared `VARCHAR`) still fires — admitting one **silences** a
+  table, and a false negative is the error nobody sees. Consequence for the schema gate,
+  verified per corpus rather than assumed: six corpora stop firing `no_audit_timestamps`
+  (it goes from 9 W / 5 O to 8 W / 3 O over the ADR 0036 set), and **not one paradigm
+  verdict moves** — the signal casts no vote.
 - **A `CREATE SEQUENCE` no longer becomes a phantom table** (ADR 0045, SQL-DDL known
   limit (14)). `pg_dump` writes one sequence per serial/identity column and then, for
   every relation it dumps, an ownership statement spelled with `ALTER TABLE` — which

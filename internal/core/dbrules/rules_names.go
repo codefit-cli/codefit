@@ -78,21 +78,27 @@ func (db051) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 // a permanent exclusion. It exposes looks_like_join_table so the agent can dismiss
 // link tables — it does not suppress.
 //
-// THE VOCABULARY IS SHARED AND MEASURED: db.IsAuditTimestampName owns it, and
-// paradigm's no_audit_timestamps signal asks the same function, so the two cannot
-// drift. It reads createdAt/updatedAt, the other spellings the corpora actually
-// produced (last_update, create_date, creation_date, update_date, ModifiedDate,
-// created_ts and siblings), and a bare `timestamp` — an append-only event table
-// whose one time column IS its creation time. Read that function's doc comment
-// before adding a name: the admission rule is measured evidence, not plausibility,
-// because admitting a name SILENCES a table.
+// THE TEST IS SHARED: db.IsAuditTimestampColumn owns it, and paradigm's
+// no_audit_timestamps signal asks the same function, so the two cannot drift. It
+// is a RULE, not a list — a creation/modification VERB, a TIME AFFIX attached to
+// it, and a TYPE that can hold a time (datetime, or int for an epoch stamp). Read
+// that function's doc comment before widening any of the three: admitting a
+// spelling SILENCES a table, so every part is justified against measurement.
 //
-// DECLARED LIMIT, in the direction that keeps this rule honest: it still fires on
-// a table that stamps its rows under a spelling no measured corpus produced
-// (created_on, date_created, inserted_at, last_modified, …). That is a false
-// positive the agent can dismiss from the columns: listed in the item, and it is
-// the deliberate trade — the opposite error, guessing a name and going quiet over
-// a table that really has no audit trail, is the one that hides.
+// DECLARED LIMITS, in the direction that keeps this rule honest — it still fires
+// on a table that does stamp its rows when:
+//   - the stamp carries no verb of creation or modification (`logged_on`,
+//     `recorded_at`, `stamp`), or none at all (`timestamp` is the one measured
+//     exception, and it is explicit);
+//   - the stamp is PREFIXED by something else (`dv_create_date`,
+//     `cst_create_date`) — admitting those means admitting every
+//     `<anything>_create_date`, including a business column;
+//   - the stamp is typed as something the corpora never produced (a `created_at`
+//     declared VARCHAR, or one the parser could not classify).
+//
+// Each is a false positive the agent can dismiss from the `columns:` list in the
+// item, and that is the deliberate trade: the opposite error — going quiet over a
+// table that really has no audit trail — is the one that hides.
 type db052 struct{}
 
 func (db052) ID() string { return "DB-052" }
@@ -109,7 +115,7 @@ func (db052) Check(s *db.Schema) ([]findings.Finding, []findings.SurfaceItem) {
 		names := make([]string, 0, len(t.Columns))
 		for _, c := range t.Columns {
 			names = append(names, c.Name)
-			if db.IsAuditTimestampName(c.Name) {
+			if db.IsAuditTimestampColumn(c) {
 				stamped = true
 			}
 		}

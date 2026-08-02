@@ -269,28 +269,52 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     column at all** — not one column named for when the row was created, changed
     or recorded. `looks_like_join_table` is exposed so link tables can be
     dismissed. "Only one missing" is a **deferred candidate**, not fired yet.
-    - **The vocabulary is measured and shared.** One definition
-      (`db.IsAuditTimestampName`) answers this for DB-052 **per table** and for
-      the schema gate's `no_audit_timestamps` signal **per schema**, so the two
-      cannot drift. It holds 16 names: `createdAt`/`updatedAt`, `last_update`,
-      `create_date`, `creation_date`, `update_date`, `ModifiedDate`,
-      `created_ts`, `creation_ts`, `creation_time`, `inserted_ts`, `added_ts`,
-      `added_at`, and a bare `timestamp` (an append-only event table whose one
-      time column **is** its creation time). Every entry was read off a real
-      corpus, on a table this rule was firing on. Widening it took DB-052 from
-      **424 items to 375** over 29 corpora, silenced **49 tables** and started
-      firing on **none**.
-    - **A name, by equality, never a type.** Matching is equality over the
-      lowercased, separator-stripped name: a column named `logged_value`
-      **typed** `timestamp` is not a stamp and still fires, and `creator`,
-      `update_trace_id`, `commission_created` (all real columns of firing
-      tables) are not admitted.
-    - **Declared limit, in the noisy direction on purpose.** A stamp spelled in
-      a way no measured corpus produced (`created_on`, `date_created`,
-      `inserted_at`, `last_modified`) **still fires**: admitting a guessed name
-      **silences** a table, and a false negative is the error that hides. The
-      `columns:` signal lists every column, so such an item is dismissible in
-      one step.
+    - **What counts as a stamp is a rule, and it is shared.** One definition
+      (`db.IsAuditTimestampColumn`, ADR 0047) answers this for DB-052 **per
+      table** and for the schema gate's `no_audit_timestamps` signal **per
+      schema**, so the two cannot drift. Three parts, each separately
+      load-bearing:
+      - a **verb** of creation or modification — `create`/`created`/`creation`,
+        `insert`/`inserted`/`insertion`, `add`/`added`, `update`/`updated`,
+        `modify`/`modified`, `change`/`changed`;
+      - a **time affix** attached to it — the suffixes `_at`, `_on`, `_ts`,
+        `_time`, `_date`, `_datetime`, `_timestamp`, or the prefixes `last_`
+        and `date_` (`last_update`, `date_created`). At least one affix is
+        required, so a bare `created` — which says *whether*, not *when* —
+        does not count;
+      - a **type that can hold a time** — `datetime`, or `int` for an epoch
+        stamp (synapse really declares `creation_ts BIGINT`).
+
+      A bare `timestamp` is the one explicit entry, since it carries no verb:
+      an append-only event table whose one time column **is** its creation time.
+    - **The verb is why a suffix is not enough.** Across 29 corpora, 80 distinct
+      columns end in `At` and **74 of them are business event times**
+      (`expires_at`, `started_at`, `finished_at`, `last_sync_at`, `paidAt`,
+      `bannedAt`). A table whose only time column is `expires_at` genuinely does
+      not record when its row was created, so admitting the suffix alone would
+      **silence** it.
+    - **The affix is load-bearing the other way too.** `created_by` is a
+      creation verb on a real audit field and it names a **person**: `_by` is
+      not a time affix, and it does not match.
+    - **The whole name, never a substring, and never a type.** The name must
+      decompose with nothing left over, so `creator`, `update_trace_id`,
+      `commission_created`, `ts_added_ms`, `dv_create_date` and
+      `wp_creation_date_sk` (all real columns of firing tables) are not
+      admitted — and neither is a TYPE: a column named `logged_value` **typed**
+      `timestamp` is not a stamp and still fires.
+    - **Measured.** Identical to the fixed list of 16 names it replaced over 29
+      corpora — **375 items, the same 375 tables**, the same **49** silenced,
+      **none** newly firing — because no corpus happened to spell a stamp
+      `created_on`, `date_created`, `inserted_at`, `modified_at`,
+      `last_modified` or `updated_ts`. Every project that does used to get a
+      false warning and no longer does.
+    - **Declared limits, in the noisy direction on purpose.** A stamp with no
+      verb (`recorded_at`, `logged_on`), a **prefixed** one (`dv_create_date`),
+      or one typed in a way no corpus produced (a `created_at` declared
+      `VARCHAR`, or one the parser could not classify) **still fires**:
+      admitting one **silences** a table, and a false negative is the error that
+      hides. The `columns:` signal lists every column, so such an item is
+      dismissible in one step.
   - **Sensitive column in the clear (DB-053).** A column whose name matches a
     sensitive token (`password`, `token`, `apiKey`, `ssn`, …) held in a
     `String`/`Text`/`Bytes` type. It **always emits**; an encryption hint in the
@@ -600,15 +624,19 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     **nothing** across all 26, and the other two fired 9/5 and 7/5, near coin
     flips on the transactional side that carry almost no information and are
     exactly what forces a counting threshold up.
-    - **`no_audit_timestamps` was re-measured** after its audit-stamp
-      vocabulary was widened and **shared** with DB-052
-      (`db.IsAuditTimestampName`): it now reads **8 W / 3 O** over the same 26
-      corpora. Quieter, and no longer wrong about Sakila, Pagila and
-      AdventureWorks, which **do** stamp their rows under names it could not
-      read. Still **excluded** — a deciding signal's bar is **zero**
-      transactional fires. **No verdict moved** anywhere in that re-measurement
-      (29 corpora, six of which stopped firing the signal), which is exactly
-      what an excluded signal changing is supposed to look like.
+    - **`no_audit_timestamps` was re-measured** after its audit-stamp test was
+      widened and **shared** with DB-052 (`db.IsAuditTimestampColumn`): it now
+      reads **8 W / 3 O** over the same 26 corpora. Quieter, and no longer wrong
+      about Sakila, Pagila and AdventureWorks, which **do** stamp their rows
+      under names it could not read. Still **excluded** — a deciding signal's
+      bar is **zero** transactional fires. **No verdict moved** anywhere in that
+      re-measurement (29 corpora, six of which stopped firing the signal), which
+      is exactly what an excluded signal changing is supposed to look like.
+    - **Re-measured again for the verb+type redesign** (ADR 0047): the
+      fired-signal sets, the paradigm verdicts and the `Deciding` sets are
+      **byte-identical** across all 29 corpora before and after it. 8 W / 3 O
+      still holds, and no verdict moved — verified per corpus rather than
+      argued from the code.
   - **What that precision figure rests on, stated rather than rounded up.**
     **Four** of the 13 corpora in the transactional column parse to **zero
     tables** — three vendor only views, procedures and triggers, and

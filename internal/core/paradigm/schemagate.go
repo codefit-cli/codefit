@@ -380,28 +380,30 @@ func hasBulkLoadShape(s *db.Schema) bool {
 // row-level audit stamp. Row-level audit stamps are an OLTP habit; a warehouse
 // timestamps its LOAD, not its rows.
 //
-// The per-table notion and the spellings that count are ONE shared definition,
-// db.IsAuditTimestampName — the same function dbrules' DB-052 asks per table.
-// It used to be a hand-copied two-name convention, with a comment saying the
-// normalizer should move to a shared home if a third consumer appeared. What
-// actually came due first was the vocabulary: two copies of a two-name list
-// drift silently, two copies of a sixteen-name list drift fast, and the
-// equivalence is now locked as a test
-// (TestSignalNoAuditTimestamps_MatchesTheSharedVocabularyExactly).
+// What counts as a stamp is ONE shared definition, db.IsAuditTimestampColumn —
+// the same function dbrules' DB-052 asks per table. It used to be a hand-copied
+// two-name convention, with a comment saying the normalizer should move to a
+// shared home if a third consumer appeared. What actually came due first was the
+// vocabulary: two copies of a two-name list drift silently, two copies of a
+// sixteen-name list drift fast, and the equivalence is locked as a test
+// (TestSignalNoAuditTimestamps_MatchesTheSharedDefinitionExactly), over COLUMNS
+// rather than names, so the shared TYPE gate cannot be skipped on one side.
 //
 // Two abstentions keep it from being vacuously true:
 //   - an unproven table (a dropped ADD COLUMN might have declared created_at —
 //     exactly why db052 skips such tables);
 //   - a table with no columns at all, which cannot testify to an absence.
 //
-// WHAT THE WIDENING DID TO THIS SIGNAL, measured rather than predicted: the
-// DECLARED LIMIT that used to live here — "Sakila and Pagila spell it
+// WHAT THE SHARED DEFINITION DID TO THIS SIGNAL, measured rather than predicted.
+// The DECLARED LIMIT that used to live here — "Sakila and Pagila spell it
 // last_update, AdventureWorks spells it ModifiedDate, and this signal fires on
-// all of them" — is GONE. All three vendored OLTP corpora stop firing it (see
-// internal/providers/sqlddl/schemagate_corpus_test.go, re-measured), and the
-// reference warehouse still fires it, which moves the signal's measured
-// 9 W / 5 O split further apart. It remains an EXCLUDED signal that casts no
-// vote (decidingSignals), so no verdict moves — verified over 29 corpora, not
+// all of them" — is GONE: all three vendored OLTP corpora stop firing it (see
+// internal/providers/sqlddl/schemagate_corpus_test.go), while the reference
+// warehouse still fires it, moving the signal's measured 9 W / 5 O split to
+// 8 W / 3 O. Re-measured again for the verb+type redesign (ADR 0047): the fired
+// signal sets, the paradigm verdicts and the Deciding sets are byte-identical
+// across all 29 corpora before and after it. This signal remains EXCLUDED from
+// the vote (decidingSignals), so no verdict moves — verified per corpus, not
 // assumed, because "it cannot change the verdict" is exactly the kind of claim
 // this repository requires evidence for.
 func hasNoAuditTimestamps(s *db.Schema) bool {
@@ -410,7 +412,7 @@ func hasNoAuditTimestamps(s *db.Schema) bool {
 			return false
 		}
 		for _, c := range t.Columns {
-			if db.IsAuditTimestampName(c.Name) {
+			if db.IsAuditTimestampColumn(c) {
 				return false
 			}
 		}
@@ -674,7 +676,7 @@ func hasTypeProfileSplit(s *db.Schema) bool {
 // dim_date / DimDate both normalize to "dimdate". Its ONE caller left is
 // hasCalendarTable's name vocabulary; the audit-timestamp vocabulary that used
 // to share it moved, with its own copy of this normalization, into
-// db.IsAuditTimestampName, so that the gate and DB-052 answer that question
+// db.IsAuditTimestampColumn, so that the gate and DB-052 answer that question
 // from one definition instead of two.
 //
 // It is only ever used for WHOLE-name EQUALITY comparisons. Using it for a
