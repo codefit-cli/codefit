@@ -58,16 +58,23 @@ func surrogateOnlySchema() *db.Schema {
 // excludedOnlySchema is the motivating shape of the whole inversion, and the
 // exact one ADR 0035 measured on real Sakila: one table named dim_status with
 // fan-in >= 1 sitting in an otherwise purely transactional schema. It fires the
-// two NOISY signals — no_audit_timestamps (these tables spell their stamp
-// last_update) and star_topology (order_items is a depth-1 join table) — and
-// not one deciding signal.
+// two NOISY signals — no_audit_timestamps (not one table stamps its rows) and
+// star_topology (order_items is a depth-1 join table) — and not one deciding
+// signal.
+//
+// These tables used to spell an audit stamp last_update, which the gate did not
+// recognize; the shared vocabulary now does, so keeping it would have quietly
+// turned this into a ONE-signal fixture and stopped proving what the test says
+// it proves. They carry updated_by instead: a real column shape (who changed
+// the row, not when), and one that doubles as an over-match canary — it
+// normalizes to "updatedby" and must NOT read as a stamp.
 func excludedOnlySchema() *db.Schema {
 	return &db.Schema{Tables: []db.Table{
 		refs(provenTable("orders", "id", "customer_id", "status_id", "placed_on"), "customers", "dim_status"),
 		refs(provenTable("order_items", "id", "order_id", "product_id", "quantity", "price"), "orders", "products"),
-		provenTable("customers", "id", "name", "last_update"),
-		provenTable("products", "id", "name", "last_update"),
-		provenTable("dim_status", "id", "label", "last_update"),
+		provenTable("customers", "id", "name", "updated_by"),
+		provenTable("products", "id", "name", "updated_by"),
+		provenTable("dim_status", "id", "label", "updated_by"),
 	}}
 }
 
@@ -308,7 +315,7 @@ func TestDetect_ClosedGate_WithholdsWarehouseRoles(t *testing.T) {
 // deliberately ONE TABLE NAME away from the test above: rename dim_status to
 // dim_date and the schema now declares a calendar, which is real schema-wide
 // warehouse evidence. Everything else — the fan-in, the join table, the
-// last_update stamps — is byte-identical.
+// updated_by columns — is byte-identical.
 //
 // That single-token delta is the point: the gate changes WHOSE evidence decides,
 // not how roles are assigned once the schema qualifies.

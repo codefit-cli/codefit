@@ -187,11 +187,18 @@ func TestSchemaGate_IsWiredIntoDetect(t *testing.T) {
 	}
 }
 
-// TestSchemaGate_MovesDetect is the behavioral half, and it is the stage-1
-// lock's fixture UNCHANGED — one table named dim_status with fan-in >= 1,
-// sitting in an otherwise purely transactional schema, spelling its audit stamp
-// last_update and carrying a depth-1 join table. Two signals fire on it, and
-// real Sakila measures exactly the same two.
+// TestSchemaGate_MovesDetect is the behavioral half, over the stage-1 lock's
+// fixture — one table named dim_status with fan-in >= 1, sitting in an
+// otherwise purely transactional schema that stamps no row at all, and carrying
+// a depth-1 join table. Two signals fire on it.
+//
+// The stamp column is the ONE byte that moved since stage 1: it read
+// last_update, which the gate could not recognize, and the shared audit-stamp
+// vocabulary now can. Real Sakila therefore no longer measures the same two
+// signals — it measures ONE (star_topology), which is the widening working, and
+// internal/providers/sqlddl/schemagate_corpus_test.go records it on the real
+// parse. What this fixture needs is a two-EXCLUDED-signal schema, so it keeps
+// one by carrying updated_by (who changed the row, not when) instead.
 //
 // Stage 1 asserted that Detect did NOT move over this schema: dim_status
 // promoted itself to a dimension and folded the whole thing to "mixed", which is
@@ -205,9 +212,9 @@ func TestSchemaGate_MovesDetect(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{
 		refs(provenTable("orders", "id", "customer_id", "status_id", "placed_on"), "customers", "dim_status"),
 		refs(provenTable("order_items", "id", "order_id", "product_id", "quantity", "price"), "orders", "products"),
-		provenTable("customers", "id", "name", "last_update"),
-		provenTable("products", "id", "name", "last_update"),
-		provenTable("dim_status", "id", "label", "last_update"),
+		provenTable("customers", "id", "name", "updated_by"),
+		provenTable("products", "id", "name", "updated_by"),
+		provenTable("dim_status", "id", "label", "updated_by"),
 	}}
 
 	// The gate sees two signals here, and still refuses: neither votes.

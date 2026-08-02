@@ -32,11 +32,45 @@ import (
 // (Complete=true is what the real sqlddl reducer sets for a table it fully
 // reduced). Absence-based signals abstain on unproven tables, so a fixture that
 // forgot this would silently test the abstention path instead of the signal.
+//
+// A column named for a MOMENT is typed db.TypeDateTime, because that is what
+// the real parser produces for `created_at TIMESTAMP` and because
+// db.IsAuditTimestampColumn now gates on the type as well as the name. A
+// fixture that left these at the zero value would assert nothing about the
+// no_audit_timestamps signal — it would test the type gate's rejection path
+// while claiming to test the vocabulary. The list is explicit rather than
+// derived so this helper cannot silently agree with whatever the rule happens
+// to say: it names the spellings THESE fixtures use, and nothing else.
 func provenTable(name string, cols ...string) db.Table {
 	t := db.Table{Name: name, Complete: true}
 	for _, c := range cols {
-		t.Columns = append(t.Columns, db.Column{Name: c})
+		t.Columns = append(t.Columns, db.Column{Name: c, Type: fixtureColumnType(c)})
 	}
+	return t
+}
+
+// fixtureColumnType types the time-named columns these fixtures use. Everything
+// else keeps the zero value, deliberately: profileOf counts the zero value as
+// UNCLASSIFIED, so typing every column would drag the sixth signal (column type
+// profile) into every test in this file that never meant to exercise it.
+func fixtureColumnType(name string) db.Type {
+	switch name {
+	case "created_at", "createdAt", "CREATED_AT", "updated_at", "updatedAt",
+		"create_date", "creation_date", "creation_time", "creation_ts",
+		"created_ts", "inserted_ts", "added_ts", "added_at",
+		"update_date", "last_update", "ModifiedDate", "timestamp",
+		"dim_update", "update_log", "dv_create_date":
+		return db.TypeDateTime
+	}
+	return ""
+}
+
+// provenTableCols is provenTable for a fixture that must state a column's TYPE
+// itself — the type gate cases, where the name is held fixed and the type is
+// what varies.
+func provenTableCols(name string, cols ...db.Column) db.Table {
+	t := db.Table{Name: name, Complete: true}
+	t.Columns = append(t.Columns, cols...)
 	return t
 }
 
@@ -332,6 +366,93 @@ func TestSignalNoAuditTimestamps_OneStampAnywhereDisqualifies(t *testing.T) {
 		if e.Has(paradigm.SignalNoAuditTimestamps) {
 			t.Errorf("column %q: no-audit-timestamps fired, want no fire", stamp)
 		}
+	}
+}
+
+// TestSignalNoAuditTimestamps_MatchesTheSharedDefinitionExactly is the
+// ANTI-DRIFT lock, and the reason db.IsAuditTimestampColumn exists at all. This
+// signal and dbrules' DB-052 answer the same question about a column, at two
+// different scopes, from two different packages. They used to answer it with
+// two hand-copied two-name lists; the DW-005 / timeDimensionName incident in
+// this repository is what that costs when the lists grow apart.
+//
+// The assertion is an EQUIVALENCE, not a list: for each COLUMN, the signal must
+// fire exactly when the shared definition does not recognize it. Widening one
+// side without the other fails here, whichever side moves — which a list of
+// expected names could not do.
+//
+// The cases are COLUMNS and not names, which is what the verb+type redesign
+// changed here. The definition now gates on the type as well as the name, so a
+// name-only equivalence would leave the type gate un-shared: DB-052 could start
+// admitting a `created_at VARCHAR` while this signal kept rejecting it, and no
+// test would notice. The type cases at the end are that half of the lock.
+func TestSignalNoAuditTimestamps_MatchesTheSharedDefinitionExactly(t *testing.T) {
+	cols := []db.Column{
+		// Recognized (signal must NOT fire) — measured spellings.
+		{Name: "created_at", Type: db.TypeDateTime},
+		{Name: "updated_at", Type: db.TypeDateTime},
+		{Name: "createdAt", Type: db.TypeDateTime},
+		{Name: "last_update", Type: db.TypeDateTime},
+		{Name: "create_date", Type: db.TypeDateTime},
+		{Name: "creation_date", Type: db.TypeDateTime},
+		{Name: "update_date", Type: db.TypeDateTime},
+		{Name: "ModifiedDate", Type: db.TypeDateTime},
+		{Name: "created_ts", Type: db.TypeInt},
+		{Name: "creation_ts", Type: db.TypeInt},
+		{Name: "creation_time", Type: db.TypeInt},
+		{Name: "inserted_ts", Type: db.TypeInt},
+		{Name: "added_ts", Type: db.TypeInt},
+		{Name: "added_at", Type: db.TypeInt},
+		{Name: "timestamp", Type: db.TypeDateTime},
+		// Recognized only since the verb+type redesign: siblings no corpus
+		// happened to show. A name-list gate rejected every one of these.
+		{Name: "created_on", Type: db.TypeDateTime},
+		{Name: "date_created", Type: db.TypeDateTime},
+		{Name: "inserted_at", Type: db.TypeDateTime},
+		{Name: "modified_at", Type: db.TypeDateTime},
+		{Name: "last_modified", Type: db.TypeDateTime},
+		{Name: "updated_ts", Type: db.TypeInt},
+		// NOT recognized (signal must fire): real business columns from the
+		// measured corpora, plus the type spellings.
+		{Name: "street", Type: db.TypeString},
+		{Name: "payment_date", Type: db.TypeDateTime},
+		{Name: "start_date", Type: db.TypeDateTime},
+		{Name: "creator", Type: db.TypeString},
+		{Name: "update_trace_id", Type: db.TypeString},
+		{Name: "commission_created", Type: db.TypeBool},
+		{Name: "dv_create_date", Type: db.TypeDateTime},
+		{Name: "stage_at_time", Type: db.TypeString},
+		{Name: "timestamptz", Type: db.TypeDateTime},
+		// A time affix with no creation verb, and a creation verb with the
+		// wrong kind of suffix: the two halves of the redesign, at gate scope.
+		{Name: "expires_at", Type: db.TypeDateTime},
+		{Name: "started_at", Type: db.TypeDateTime},
+		{Name: "finished_at", Type: db.TypeDateTime},
+		{Name: "last_sync_at", Type: db.TypeDateTime},
+		{Name: "created_by", Type: db.TypeString},
+		// TYPE half of the equivalence: one name, several types. If either
+		// side stops asking the shared function about the type, these fail.
+		{Name: "created_at", Type: db.TypeString},
+		{Name: "created_at", Type: db.TypeText},
+		{Name: "created_at", Type: db.TypeBool},
+		{Name: "created_at", Type: db.TypeInt},
+		{Name: "created_at", Type: db.TypeUnknown},
+		{Name: "created_at", Type: ""},
+	}
+	for _, col := range cols {
+		t.Run(col.Name+"/"+string(col.Type), func(t *testing.T) {
+			s := &db.Schema{Tables: []db.Table{
+				provenTable("orders", "id", "total"),
+				provenTable("customers", "id", "name"),
+				provenTableCols("addresses", db.Column{Name: "id", Type: db.TypeInt}, col),
+			}}
+			got := paradigm.WarehouseSignals(s).Has(paradigm.SignalNoAuditTimestamps)
+			want := !db.IsAuditTimestampColumn(col)
+			if got != want {
+				t.Errorf("no_audit_timestamps fired = %v, want %v — db.IsAuditTimestampColumn(%+v) = %v; "+
+					"the gate and DB-052 must read ONE definition", got, want, col, db.IsAuditTimestampColumn(col))
+			}
+		})
 	}
 }
 

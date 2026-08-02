@@ -22,46 +22,66 @@ import (
 // and the table is uncomfortable in a way a hunch would never have been:
 //
 //	CORPUS                              PARADIGM  SIGNALS THAT FIRED
-//	mysql/sakila_excerpt.sql            OLTP      no_audit_timestamps, star_topology
-//	pagila_excerpt.sql                  OLTP      no_audit_timestamps
-//	tsql/adventureworks_excerpt.sql     OLTP      no_audit_timestamps
+//	mysql/sakila_excerpt.sql            OLTP      star_topology
+//	pagila_excerpt.sql                  OLTP      (none)
+//	tsql/adventureworks_excerpt.sql     OLTP      (none)
 //	tsql/adventureworksdw_real_objects  WAREHOUSE calendar_table, no_audit_timestamps
 //	(every other corpus)                --        none
 //
-// Read the first and fourth rows together. The ONE genuine Kimball warehouse in
-// the repository and a three-table excerpt of Sakila — a rental shop's
-// transactional schema — fire the SAME NUMBER of signals, two each. A naive
-// "count the signals" threshold cannot tell them apart at all, at any cutoff:
-// at >= 2 both are warehouses, at >= 3 neither is. WHICH signals fired is the
-// only thing that separates them.
+// THE FIRST THREE ROWS MOVED when the audit-timestamp vocabulary was widened
+// and shared (db.IsAuditTimestampColumn). They read
 //
-// HOW THIS TABLE WAS READ WHEN THE DECISION WAS MADE, and why it still says the
-// same thing: at stage 1 (ADR 0035) the warehouse fired ONE signal and Sakila
-// TWO, so a >= 2 threshold got both backwards. The T-SQL
-// ALTER TABLE ... ADD CONSTRAINT reducer fix (PR #82) then landed on main and
-// proved the warehouse's three tables, which let no_audit_timestamps stop
-// abstaining and moved this row from one signal to two. The counting argument
-// got no weaker for it — it merely changed from "the threshold ranks them
-// backwards" to "the threshold cannot rank them at all". Both readings are
-// measured, neither is a hunch, and stage 2 selects rather than counts either
-// way.
+//	mysql/sakila_excerpt.sql            OLTP      no_audit_timestamps, star_topology
+//	pagila_excerpt.sql                  OLTP      no_audit_timestamps
+//	tsql/adventureworks_excerpt.sql     OLTP      no_audit_timestamps
+//
+// and the reason they no longer do is cause #2 below, inverted: the signal used
+// to fire on all three because they spell their stamp last_update or
+// ModifiedDate, which the gate did not recognize. It does now, and a
+// transactional schema that DOES stamp its rows stops looking like a warehouse
+// for a reason that was never true. No VERDICT moved — no_audit_timestamps
+// votes on nothing (decidingSignals) — and that was measured over 29 corpora,
+// not assumed.
+//
+// WHAT THAT COSTS THE ARGUMENT BELOW, stated rather than quietly dropped: the
+// old table had Sakila and the reference warehouse firing the SAME NUMBER of
+// signals, two each, which made "count the signals" unrankable at any cutoff.
+// That particular pair no longer says so — Sakila fires one now, the warehouse
+// two, and a >= 2 threshold would separate THESE TWO correctly. The stage-2
+// decision does not rest on this pair; it rests on the 26-corpus measurement in
+// ADR 0036, re-run after the widening: no_audit_timestamps went from 9 W / 5 O
+// to 8 W / 3 O — quieter, still fired by three transactional corpora, and
+// therefore still incapable of being a deciding signal, whose bar is ZERO
+// transactional fires. WHICH signals fired remains the thing that separates a
+// warehouse from a rental shop; the widening made this corpus a weaker
+// ILLUSTRATION of it and a more honest measurement.
+//
+// HOW THIS TABLE WAS READ WHEN THE DECISION WAS MADE, kept because the readings
+// are a record and not a claim about today: at stage 1 (ADR 0035) the warehouse
+// fired ONE signal and Sakila TWO, so a >= 2 threshold got both backwards. The
+// T-SQL ALTER TABLE ... ADD CONSTRAINT reducer fix (PR #82) then landed on main
+// and proved the warehouse's three tables, which let no_audit_timestamps stop
+// abstaining and moved that row from one signal to two — "the threshold cannot
+// rank them at all". The audit-vocabulary widening is the third reading, above.
+// All three are measured, none is a hunch, and stage 2 selects rather than
+// counts under every one of them.
 //
 // STAGE 2 (ADR 0037) decided from that shape, plus the 26-corpus measurement in
 // ADR 0036: the verdict SELECTS the three zero-false-positive signals and
 // requires ANY ONE of them, rather than counting all six. This table is what
-// that decision looks like on real vendored DDL — Sakila's two signals are
-// exactly the two that do NOT vote, so it stays transactional, while
+// that decision looks like on real vendored DDL — Sakila's one remaining signal
+// is one that does NOT vote, so it stays transactional, while
 // AdventureWorksDW's calendar_table opens the gate and the no_audit_timestamps
-// it now shares with Sakila is worth no votes to either. The gateOpen column
-// below records it, corpus by corpus.
+// beside it is worth no votes to anyone. The gateOpen column below records it,
+// corpus by corpus.
 //
 // The three causes behind those numbers, each independently verifiable above:
 //
 //  1. AdventureWorksDW's structure is fully PROVEN as of the reducer fix above:
 //     its three real primary keys and eight real foreign keys are in the model,
 //     so the absence-based signals judge it instead of abstaining. That is why
-//     no_audit_timestamps affirms here (none of its three tables declares
-//     created_at/updated_at) while bulk_load_shape does NOT: eight declared
+//     no_audit_timestamps affirms here (none of its three tables declares any
+//     recognized audit stamp) while bulk_load_shape does NOT: eight declared
 //     foreign keys falsify its no-FKs premise outright, rather than leaving it
 //     unable to conclude. star_topology also stays silent, for a third reason
 //     again — six of those eight foreign keys point at dimension tables this
@@ -69,13 +89,16 @@ import (
 //     shown to be a leaf. Before the fix, ALL of these abstained on unproven
 //     structure, which was correct behavior over a model the parser could not
 //     prove complete and is why ADR 0035 named that fix a stage-2 prerequisite.
-//  2. no_audit_timestamps fires on all three OLTP corpora because they spell
-//     their audit stamp last_update (Sakila, Pagila) or ModifiedDate
-//     (AdventureWorks), and the signal reuses db052's created_at/updated_at
-//     convention rather than inventing a second spelling rule. A real false
-//     positive, measured rather than guessed — and now visibly a signal that
-//     fires on BOTH sides of the question, which is precisely why it does not
-//     vote.
+//  2. no_audit_timestamps fires on NONE of the three OLTP corpora, and used to
+//     fire on all three. They spell their audit stamp last_update (Sakila,
+//     Pagila) or ModifiedDate (AdventureWorks); the signal reuses DB-052's
+//     vocabulary rather than inventing a second spelling rule, and that shared
+//     test is now the shared verb+type rule (db.IsAuditTimestampColumn, ADR 0047), so a schema
+//     that stamps its rows no longer reads as one that does not. What is left
+//     here is the AdventureWorksDW row: a real warehouse whose three tables
+//     genuinely carry no row-level stamp. The signal still fires on both sides
+//     of the question over the full corpus set (8 W / 3 O), which is why it
+//     still does not vote — it is simply no longer wrong about these three.
 //  3. star_topology fires on Sakila because film_actor references actor and
 //     film and neither references anything back — a textbook depth-1 star that
 //     is in fact a join table. This is the architectural premise restated: no
@@ -139,15 +162,24 @@ var gateCorpusExpectations = []gateCorpusCase{
 	{path: "mysql/constructed_non_cascading_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
 		path: "mysql/sakila_excerpt.sql", tables: 3, proven: 3,
-		// A rental shop's OLTP schema firing TWO warehouse signals. film_actor
-		// is a depth-1 star, and last_update is not created_at.
-		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps, paradigm.SignalStarTopology},
+		// A rental shop's OLTP schema firing ONE warehouse signal: film_actor
+		// is a depth-1 star. It fired TWO until the audit-timestamp vocabulary
+		// learned last_update — actor and film_actor carry one (film does not,
+		// which is why DB-052 still speaks about film), and ONE stamped table
+		// is all it takes to falsify "not one table in this schema stamps its
+		// rows". The second signal was measuring a spelling, not a schema.
+		fired:      []paradigm.Signal{paradigm.SignalStarTopology},
 		paradigmIs: paradigm.ParadigmOLTP,
 	},
 	{path: "mysql/sakila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
+		// NO signal fires, where no_audit_timestamps used to: four of these five
+		// tables (actor, customer, address, rental) carry last_update. The fifth,
+		// the payment_p2022_01 partition, does not — which is why DB-052 still
+		// has something to say here while this schema-wide signal does not.
+		// "Not ONE table stamps its rows" is a different claim from "this table
+		// does not".
 		path: "pagila_excerpt.sql", tables: 5, proven: 5,
-		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
 		paradigmIs: paradigm.ParadigmOLTP,
 	},
 	{path: "pagila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
@@ -201,8 +233,9 @@ var gateCorpusExpectations = []gateCorpusCase{
 	},
 	{
 		path: "tsql/adventureworks_excerpt.sql", tables: 3, proven: 3,
-		// ModifiedDate is not created_at/updated_at.
-		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
+		// ModifiedDate IS an audit stamp, and the vocabulary now says so — one
+		// of these three tables (Sales.Customer) carries it, which is all this
+		// schema-wide signal needs to stop affirming.
 		paradigmIs: paradigm.ParadigmOLTP,
 	},
 	{path: "tsql/adventureworks_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},

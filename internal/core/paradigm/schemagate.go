@@ -377,36 +377,42 @@ func hasBulkLoadShape(s *db.Schema) bool {
 // ---------------------------------------------------------------------------
 
 // hasNoAuditTimestamps reports whether NOT ONE table in the schema carries a
-// created_at/updated_at audit stamp. Row-level audit stamps are an OLTP habit;
-// a warehouse timestamps its LOAD, not its rows.
+// row-level audit stamp. Row-level audit stamps are an OLTP habit; a warehouse
+// timestamps its LOAD, not its rows.
 //
-// The per-table notion and its spelling convention are dbrules' db052
-// (internal/core/dbrules/rules_names.go): lowercase, drop separators, compare
-// by EQUALITY to createdat/updatedat. normalizeGateIdent below is that
-// convention, replicated rather than imported — internal/core/paradigm imports
-// ONLY internal/core/db, and a core→core edge to dbrules to reach a four-line
-// string normalizer would be a poor trade. If a third consumer appears, the
-// normalizer should move to a shared home rather than be copied again.
+// What counts as a stamp is ONE shared definition, db.IsAuditTimestampColumn —
+// the same function dbrules' DB-052 asks per table. It used to be a hand-copied
+// two-name convention, with a comment saying the normalizer should move to a
+// shared home if a third consumer appeared. What actually came due first was the
+// vocabulary: two copies of a two-name list drift silently, two copies of a
+// sixteen-name list drift fast, and the equivalence is locked as a test
+// (TestSignalNoAuditTimestamps_MatchesTheSharedDefinitionExactly), over COLUMNS
+// rather than names, so the shared TYPE gate cannot be skipped on one side.
 //
 // Two abstentions keep it from being vacuously true:
 //   - an unproven table (a dropped ADD COLUMN might have declared created_at —
 //     exactly why db052 skips such tables);
 //   - a table with no columns at all, which cannot testify to an absence.
 //
-// DECLARED LIMIT, and the one worth reading before trusting this signal: only
-// the created_at/updated_at spelling counts. Real OLTP corpora frequently use
-// other names — Sakila and Pagila spell it last_update, AdventureWorks spells
-// it ModifiedDate — and this signal fires on all of them. Widening the
-// vocabulary would mean inventing a second spelling rule alongside db052's;
-// measuring first, and deciding with the numbers, is the point of stage 1.
+// WHAT THE SHARED DEFINITION DID TO THIS SIGNAL, measured rather than predicted.
+// The DECLARED LIMIT that used to live here — "Sakila and Pagila spell it
+// last_update, AdventureWorks spells it ModifiedDate, and this signal fires on
+// all of them" — is GONE: all three vendored OLTP corpora stop firing it (see
+// internal/providers/sqlddl/schemagate_corpus_test.go), while the reference
+// warehouse still fires it, moving the signal's measured 9 W / 5 O split to
+// 8 W / 3 O. Re-measured again for the verb+type redesign (ADR 0047): the fired
+// signal sets, the paradigm verdicts and the Deciding sets are byte-identical
+// across all 29 corpora before and after it. This signal remains EXCLUDED from
+// the vote (decidingSignals), so no verdict moves — verified per corpus, not
+// assumed, because "it cannot change the verdict" is exactly the kind of claim
+// this repository requires evidence for.
 func hasNoAuditTimestamps(s *db.Schema) bool {
 	for _, t := range s.Tables {
 		if !t.StructureProven() || len(t.Columns) == 0 {
 			return false
 		}
 		for _, c := range t.Columns {
-			switch normalizeGateIdent(c.Name) {
-			case "createdat", "updatedat":
+			if db.IsAuditTimestampColumn(c) {
 				return false
 			}
 		}
@@ -667,10 +673,11 @@ func hasTypeProfileSplit(s *db.Schema) bool {
 // ---------------------------------------------------------------------------
 
 // normalizeGateIdent lowercases an identifier and drops separators, so
-// createdAt / created_at both normalize to "createdat". This is dbrules'
-// normalizeIdent convention (internal/core/dbrules/rules_names.go, db052),
-// replicated here rather than imported to keep this package's single import
-// (internal/core/db) intact.
+// dim_date / DimDate both normalize to "dimdate". Its ONE caller left is
+// hasCalendarTable's name vocabulary; the audit-timestamp vocabulary that used
+// to share it moved, with its own copy of this normalization, into
+// db.IsAuditTimestampColumn, so that the gate and DB-052 answer that question
+// from one definition instead of two.
 //
 // It is only ever used for WHOLE-name EQUALITY comparisons. Using it for a
 // SUFFIX test would be a bug: dropping the underscore makes "risk", "disk" and
