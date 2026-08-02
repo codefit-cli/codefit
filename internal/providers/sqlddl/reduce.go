@@ -34,6 +34,27 @@ type builder struct {
 	// model to gate) and surfaces only in the per-scan note.
 	withheld []db.Withheld
 
+	// nonTableRelations holds the names of relations this parse READ and that
+	// are NOT tables — today sequences (reCreateSequence) and views/materialized
+	// views (reView). It is reducer-internal ONLY, exactly like partSchemeFunc /
+	// partFuncStrategy below: no model surface is added for it, because knowing
+	// that a name is a sequence declares no column, key or index of any table.
+	//
+	// Its sole purpose is to stop applyAlterTable from MATERIALIZING A TABLE out
+	// of a statement that names one of them (ADR 0044). PostgreSQL's ALTER TABLE
+	// accepts every relation kind for its ownership actions, and pg_dump uses
+	// that: it writes "ALTER TABLE public.<name>_id_seq OWNER TO <role>" for
+	// every sequence and "ALTER TABLE public.<view> OWNER TO <role>" for every
+	// view it dumps. Without this the first such statement was the first time the
+	// name was ever seen as a table, so getTable created a phantom entry with
+	// zero columns, marked ReasonTableNeverDeclared.
+	//
+	// PostgreSQL keeps tables, sequences and views in ONE relation namespace per
+	// schema, so a name that this parse read as a sequence or a view CANNOT also
+	// be a table — the exclusion is sound, not a heuristic. It is keyed by the
+	// same normalizeName form b.tables uses, so the two sets are comparable.
+	nonTableRelations map[string]bool
+
 	// partSchemeFunc and partFuncStrategy hold T-SQL's two-hop partitioning
 	// vocabulary (partition-capture), keyed by LOWERCASED identifier because
 	// T-SQL identifiers are case-insensitive: scheme -> partition function,
@@ -51,11 +72,12 @@ type builder struct {
 
 func newBuilder(dialect *Dialect) *builder {
 	return &builder{
-		tables:           map[string]*db.Table{},
-		seenIndex:        map[string]bool{},
-		dialect:          dialect,
-		partSchemeFunc:   map[string]string{},
-		partFuncStrategy: map[string]string{},
+		tables:            map[string]*db.Table{},
+		seenIndex:         map[string]bool{},
+		dialect:           dialect,
+		nonTableRelations: map[string]bool{},
+		partSchemeFunc:    map[string]string{},
+		partFuncStrategy:  map[string]string{},
 	}
 }
 
@@ -135,6 +157,21 @@ var (
 	//   group 4: the table name
 	reCreateColumnstoreIndex = regexp.MustCompile(`(?is)^create\s+(clustered\s+)?columnstore\s+index\s+` +
 		`(if\s+not\s+exists\s+)?("?[\w"]+"?)\s+on\s+("?[\w".]+"?)\b`)
+	// reCreateSequence recognizes a SEQUENCE declaration (ADR 0044). A sequence
+	// is a relation, but it is not a table: it has no columns, no primary key
+	// and no indexes, and no rule of the DB dimension has anything to say about
+	// one. So this branch adds NO model surface — it only records the NAME, so a
+	// later "ALTER TABLE <sequence> OWNER TO <role>" (which pg_dump writes for
+	// every sequence it dumps) is recognized as being about a sequence instead
+	// of materializing a phantom table.
+	//
+	// TEMP/TEMPORARY and UNLOGGED are admitted because PostgreSQL spells all
+	// three, and because the name is worth knowing either way: the point is
+	// never to model the sequence, only to stop mistaking its name for a
+	// table's. IF NOT EXISTS is skipped rather than captured for the same reason
+	// — nothing downstream distinguishes a first declaration from a repeated one.
+	reCreateSequence = regexp.MustCompile(`(?is)^create\s+(?:temp\s+|temporary\s+|unlogged\s+)?sequence\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
+
 	reView       = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:materialized\s+)?view\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)`)
 	reRoutine    = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+("?[\w".]+"?)`)
 	reTrigger    = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
@@ -379,6 +416,15 @@ func (b *builder) apply(file string, st stmt) bool {
 	case b.dialect.PartitionSchemeOnClause && rePartitionFunction.MatchString(st.text):
 		m := rePartitionFunction.FindStringSubmatch(st.text)
 		b.partFuncStrategy[strings.ToLower(normalizeName(m[1]))] = strings.ToLower(m[2])
+	case reCreateSequence.MatchString(st.text):
+		// A DECLARED, RECOGNIZED skip (ADR 0034 §2.4) that happens to be worth
+		// REMEMBERING: a sequence declares no column, key or index of any
+		// table, so recording it as incompleteness would be a false demotion
+		// and recording it as withheld would report a scoping decision codefit
+		// never had to make. Only its NAME is kept, reducer-internally, so the
+		// ALTER TABLE pg_dump writes for it is not mistaken for a table
+		// (ADR 0044).
+		b.nonTableRelations[normalizeName(reCreateSequence.FindStringSubmatch(st.text)[1])] = true
 	case strings.HasPrefix(head, "alter table"):
 		b.applyAlterTable(file, st)
 	case reCreateIndex.MatchString(st.text):
@@ -386,7 +432,15 @@ func (b *builder) apply(file string, st stmt) bool {
 	case reCreateColumnstoreIndex.MatchString(st.text):
 		b.applyCreateColumnstoreIndex(file, st)
 	case reView.MatchString(st.text):
-		b.views = append(b.views, db.View{Name: normalizeName(reView.FindStringSubmatch(st.text)[1]), Pos: pos, Body: viewBody(st)})
+		name := normalizeName(reView.FindStringSubmatch(st.text)[1])
+		// Same registration as reCreateSequence above, and for the same
+		// statement: pg_dump writes "ALTER TABLE public.<view> OWNER TO <role>"
+		// for every view it dumps. Measured on the vendored Pagila corpus,
+		// where 8 of the 21 phantom tables were views (actor_info,
+		// customer_list, film_list, …) — the same mechanism as the sequences,
+		// at the same call site (ADR 0044).
+		b.nonTableRelations[name] = true
+		b.views = append(b.views, db.View{Name: name, Pos: pos, Body: viewBody(st)})
 	case reRoutine.MatchString(st.text):
 		b.procs = append(b.procs, db.Procedure{Name: routineName(reRoutine.FindStringSubmatch(st.text)[1]), Pos: pos, Body: routineBody(st)})
 	case reTrigger.MatchString(st.text):
@@ -560,6 +614,30 @@ func (b *builder) getTable(name string, pos db.Pos) (*db.Table, bool) {
 		b.order = append(b.order, name)
 	}
 	return t, created
+}
+
+// isKnownNonTable reports whether name is a relation THIS PARSE ALREADY READ
+// that is not a table — a sequence or a (materialized) view — and that no
+// CREATE TABLE has declared (ADR 0044).
+//
+// It is the one predicate guarding every site that can materialize a table from
+// a REFERENCE rather than from a declaration: applyAlterTable, applyCreateIndex,
+// applyCreateColumnstoreIndex and markUnrecognizedIndexShape. All four used to
+// call getTable on a name they had never seen declared, which is correct when
+// the name really is a table nobody declared in the scanned files
+// (ReasonTableNeverDeclared) and a pure fabrication when codefit itself read the
+// CREATE SEQUENCE or CREATE VIEW that name belongs to.
+//
+// The table check comes FIRST and is not redundant: it keeps the guard to
+// "decline to CREATE", never "ignore a table already in the model", which is
+// what makes the rule safe under normalizeName's schema-qualifier stripping (a
+// view public.x and a table other.x collapse to one name; whichever was declared
+// as a TABLE wins, and nothing already modeled is dropped).
+func (b *builder) isKnownNonTable(name string) bool {
+	if _, isTable := b.tables[name]; isTable {
+		return false
+	}
+	return b.nonTableRelations[name]
 }
 
 func (b *builder) dropTable(name string) {
@@ -1511,7 +1589,31 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: db.Pos{File: file, Line: st.line}})
 		return
 	}
-	t, created := b.getTable(normalizeName(m[1]), db.Pos{File: file, Line: st.line})
+	name := normalizeName(m[1])
+	if b.isKnownNonTable(name) {
+		// This ALTER TABLE names a relation this parse ALREADY READ and that is
+		// not a table — a sequence or a view (ADR 0044). PostgreSQL's ALTER
+		// TABLE accepts every relation kind for its ownership actions, and
+		// pg_dump uses that for both. Materializing a table here is the one
+		// thing that must not happen: it produces an entry with zero columns
+		// whose only effect is to ask an absence-based rule whether a SEQUENCE
+		// declares a primary key.
+		//
+		// This is a DECLARED, RECOGNIZED skip, not a silent loss: nothing about
+		// a table's structure was dropped, because the statement is not about a
+		// table at all. The guard is driven by POSITIVE EVIDENCE (codefit read
+		// the CREATE SEQUENCE / CREATE VIEW itself), never by the ACTION being
+		// harmless — "OWNER TO never creates a table" was rejected precisely
+		// because it would also delete a genuinely-declared table whose CREATE
+		// TABLE this scan did not read, which must keep materializing with
+		// ReasonTableNeverDeclared (locked by
+		// TestSQLDDL_UnknownRelationOwnerTo_StillMaterializesNeverDeclared).
+		//
+		// It only ever declines to CREATE an entry: a name already known as a
+		// TABLE takes the ordinary path untouched.
+		return
+	}
+	t, created := b.getTable(name, db.Pos{File: file, Line: st.line})
 	if created {
 		// F4 (4R ledger obs #1282, "the false affirmation survives, path
 		// 2"): this ALTER TABLE is the FIRST time this name was ever seen —
@@ -1705,7 +1807,7 @@ func isConstraintCheckToggle(act string) bool {
 // helper is what keeps that guaranteed rather than merely convenient.
 func (b *builder) markUnrecognizedIndexShape(file string, st stmt) {
 	pos := db.Pos{File: file, Line: st.line}
-	if tm := reIndexShapedTarget.FindStringSubmatch(st.text); tm != nil {
+	if tm := reIndexShapedTarget.FindStringSubmatch(st.text); tm != nil && !b.isKnownNonTable(normalizeName(tm[1])) {
 		t, created := b.getTable(normalizeName(tm[1]), pos)
 		if created {
 			// F4 pattern (4R ledger obs #1282), same disposition as
@@ -1720,9 +1822,14 @@ func (b *builder) markUnrecognizedIndexShape(file string, st stmt) {
 			t.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, pos)
 		}
 	} else {
-		// No attributable table (a wrong attribution is worse than
-		// none, design §2) — recorded at schema level; gates nothing
-		// per-table.
+		// No attributable table — either the ON clause resolved to nothing (a
+		// wrong attribution is worse than none, design §2) or it resolved to a
+		// relation this parse already read that is NOT a table (ADR 0044): an
+		// index form the reducer cannot read, declared over a view. Both are
+		// recorded at schema level, which gates nothing per-table. Silence was
+		// rejected for the second case as well — the statement genuinely was
+		// not read, and the inventory says so without inventing a table to
+		// hang it on.
 		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: pos})
 	}
 }
@@ -1831,6 +1938,15 @@ func (b *builder) applyCreateIndex(file string, st stmt) {
 		b.markUnrecognizedIndexShape(file, st)
 		return
 	}
+	if b.isKnownNonTable(normalizeName(m[5])) {
+		// The index targets a relation this parse already read that is not a
+		// table — PostgreSQL indexes materialized views, and real corpora do
+		// (pagila's rental_category ON rental_by_category). The index is NOT
+		// re-homed: db.View carries no index field, because the DB dimension's
+		// rules are about tables, and materializing a table to hold it would
+		// hand DB-050 a "table" with zero columns (ADR 0044).
+		return
+	}
 	unique := m[1] != ""
 	name := normalizeName(m[4])
 	if name != "" && m[3] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
@@ -1883,6 +1999,9 @@ func (b *builder) applyCreateColumnstoreIndex(file string, st stmt) {
 	m := reCreateColumnstoreIndex.FindStringSubmatch(st.text)
 	if m == nil {
 		return
+	}
+	if b.isKnownNonTable(normalizeName(m[4])) {
+		return // same disposition as applyCreateIndex (ADR 0044)
 	}
 	name := normalizeName(m[3])
 	if m[2] != "" && b.seenIndex[name] { // IF NOT EXISTS + already created
