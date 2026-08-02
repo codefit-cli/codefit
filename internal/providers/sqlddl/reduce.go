@@ -220,6 +220,24 @@ var (
 	// report the strategy word its partition function actually spells.
 	rePartitionFunction = regexp.MustCompile(`(?is)^create\s+partition\s+function\s+("?[\w".]+"?)\s*\([^)]*\)\s*as\s+(\w+)\b`)
 	rePartitionScheme   = regexp.MustCompile(`(?is)^create\s+partition\s+scheme\s+("?[\w".]+"?)\s+as\s+partition\s+("?[\w".]+"?)`)
+
+	// reRunOnStatementHead matches the keyword that begins a NEW statement
+	// inside a CREATE TABLE's tail — the run-on signature (ADR 0041). The set
+	// is deliberately THREE words, not a general statement vocabulary: CREATE,
+	// ALTER and DROP are the only statement kinds that can affect table
+	// structure, and none of the three is legal at the TOP LEVEL of a CREATE
+	// TABLE tail in PostgreSQL, MySQL or T-SQL — every tail clause those
+	// dialects admit there (ENGINE=/DEFAULT CHARSET=/COMMENT=/AUTO_INCREMENT=,
+	// ON <filegroup>/TEXTIMAGE_ON, WITH (...), TABLESPACE, INHERITS (...),
+	// WITHOUT OIDS, PARTITION BY ...) starts with something else. Widening it
+	// (SELECT/INSERT/SET/WITH/IF) was rejected: WITH and SET ARE legal tail
+	// syntax, so admitting them would cut a table's own options off and could
+	// demote a table that is read in full today.
+	//
+	// \b on both sides is load-bearing: it is what keeps CREATEDFILEGROUP,
+	// DROP_EXISTING and AUTO_CREATE from reading as statement heads ('_' is a
+	// word character, so DROP_EXISTING never matches \bdrop\b).
+	reRunOnStatementHead = regexp.MustCompile(`(?is)\b(?:create|alter|drop)\b`)
 )
 
 // isRoutineHead reports whether accumulated statement text is a CREATE
@@ -251,7 +269,13 @@ func isRoutineHead(text string) bool {
 // tracking keeps the whole body as ONE statement, captured by the
 // reRoutine/reTrigger head regex directly, so no body fragment is ever
 // reduced as its own statement in that case.
-func (b *builder) apply(file string, st stmt) {
+// It returns whether the dispatch RECOGNIZED the statement. Every delimited
+// caller ignores that (an unrecognized statement kind is a declared skip, ADR
+// 0034 §2.4); the run-on residual path (applyCreateTable) does not: a statement
+// the reducer had to FIND rather than receive from a delimiter is recorded on
+// Schema.Unreduced when nothing recognizes it, so a recovered run-on can never
+// leave a silent residue behind (ADR 0041).
+func (b *builder) apply(file string, st stmt) bool {
 	pos := db.Pos{File: file, Line: st.line}
 	head := strings.ToLower(strings.TrimSpace(st.text))
 	switch {
@@ -305,7 +329,9 @@ func (b *builder) apply(file string, st stmt) {
 		// table-structure-affecting at all, so recording them would be
 		// noise, not honesty (ADR 0034 SS2.4;
 		// TestSQLDDL_OutOfSubsetStatement_RecordsNothing locks this).
+		return false
 	}
+	return true
 }
 
 // viewBody builds a View's Body. A CREATE VIEW definition is a single SELECT
@@ -444,7 +470,148 @@ func (b *builder) dropTable(name string) {
 	b.order = kept
 }
 
+// applyCreateTable reduces a CREATE TABLE statement, first separating any
+// RUN-ON statement glued to its tail (ADR 0041).
+//
+// Two CREATE TABLE statements written with no ';' and no batch separator
+// between them are valid T-SQL (and accepted by every client that just forwards
+// the batch). split() cannot see the boundary — it is not lexical — so the
+// whole run is one stmt, and before this the reducer read the FIRST table and
+// discarded the rest with no trace at all: no Unreduced entry, no Note, the
+// host still StructureProven. That is the exact blindness-without-trace ADR
+// 0034 exists to prevent, and it is measurable: a public warehouse script
+// declaring 7 tables reduced to 1.
+//
+// The boundary is DERIVED, not guessed: balancedParen already computes where
+// the table's body ends, and firstTopLevelStatementHead then looks for a
+// keyword that cannot legally appear after it. When one is found the statement
+// is CUT there — the host keeps everything before the cut (its own tail
+// options), and the remainder is dispatched as a statement in its own right,
+// recursively, so a run of N tables recovers all N.
 func (b *builder) applyCreateTable(file string, st stmt) {
+	host, residual, isRunOn := cutRunOn(st)
+	b.reduceCreateTable(file, host)
+	if !isRunOn {
+		return
+	}
+	if !b.apply(file, residual) {
+		// The residual IS a statement (it starts with CREATE/ALTER/DROP) but
+		// no dispatch branch reduces it. Unlike a delimited statement of an
+		// out-of-subset KIND, this one was found by a boundary rule, so
+		// silence is not available: it goes to the schema-level abstention
+		// floor verbatim, reaching the agent through the per-scan inventory
+		// (sensors/db.Result.Note). Recording it on the HOST table instead
+		// was rejected — the host's own body was read in full from a balanced
+		// paren, and demoting it would be the false demotion ADR 0034 §2.4
+		// warns about.
+		b.unreduced = append(b.unreduced, db.Unreduced{
+			Text: residual.text,
+			Pos:  db.Pos{File: file, Line: residual.line},
+		})
+	}
+}
+
+// cutRunOn separates a CREATE TABLE statement from a statement run onto its
+// tail. It returns the host statement (truncated at the boundary), the residual
+// statement, and whether a boundary was found at all. When no boundary is
+// found, host is st unchanged — the overwhelmingly common case, and the one
+// every existing fixture and golden exercises.
+//
+// Termination: the boundary always lies strictly after the host's body, so
+// residual is strictly shorter than st.text and the recursion through
+// applyCreateTable cannot loop.
+func cutRunOn(st stmt) (host, residual stmt, ok bool) {
+	loc := reCreateTable.FindStringSubmatchIndex(st.text)
+	if loc == nil {
+		return st, stmt{}, false
+	}
+	inner, innerStart, balanced := balancedParen(st.text, loc[1]-1)
+	if !balanced {
+		// The body itself could not be read, so there is no trustworthy
+		// place to cut. reduceCreateTable records the whole statement under
+		// ReasonMalformedTableBody, which already declares the loss.
+		return st, stmt{}, false
+	}
+	tailStart := innerStart + len(inner) + 1
+	if tailStart >= len(st.text) {
+		return st, stmt{}, false
+	}
+	off := firstTopLevelStatementHead(st.text[tailStart:])
+	if off < 0 {
+		return st, stmt{}, false
+	}
+	cut := tailStart + off
+	host = st
+	host.text = strings.TrimRight(st.text[:cut], " \t\r\n")
+	residual = stmt{
+		text: strings.TrimSpace(st.text[cut:]),
+		// The residual reports ITS OWN line. Newlines are counted over the
+		// TOKENIZED text, exactly as the column-item loop below already does:
+		// a block comment's interior newlines are absent from it, so a
+		// statement preceded by a multi-line block comment INSIDE the same
+		// run can under-report its line. That is the pre-existing convention
+		// of this reducer, not something this cut introduces.
+		line:            st.line + strings.Count(st.text[:cut], "\n"),
+		term:            st.term,
+		quotedBlockSeen: st.quotedBlockSeen,
+	}
+	return host, residual, true
+}
+
+// firstTopLevelStatementHead returns the byte offset of the first
+// reRunOnStatementHead match in tail that sits at paren depth 0, outside a
+// single-quoted string literal AND outside a canonical "..."-quoted identifier
+// — or -1 when there is none.
+//
+// The three exclusions are the FABRICATION guard, and each one is a real shape:
+// MySQL writes table options as COMMENT='...' (a keyword inside a string),
+// T-SQL writes filegroups as ON [name] which split() re-emits as ON "name" (a
+// keyword inside an identifier), and both PostgreSQL and T-SQL write storage
+// options as WITH (...) (a keyword at depth > 0). Cutting at any of those would
+// invent a table the DDL never declares — strictly worse than the silent loss
+// this rule replaces.
+//
+// It is a separate walk from firstTopLevelMatch, not a widening of it:
+// firstTopLevelMatch is consulted by partitioning over text it must read
+// byte-identically to before, and it does not track identifier quoting.
+func firstTopLevelStatementHead(tail string) int {
+	depth := 0
+	inStr, inIdent := false, false
+	topLevel := make([]bool, len(tail))
+	for i := 0; i < len(tail); i++ {
+		c := tail[i]
+		switch {
+		case inStr:
+			if c == '\'' {
+				inStr = false
+			}
+		case inIdent:
+			if c == '"' {
+				inIdent = false
+			}
+		case c == '\'':
+			inStr = true
+		case c == '"':
+			inIdent = true
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		default:
+			topLevel[i] = depth == 0
+		}
+	}
+	for _, m := range reRunOnStatementHead.FindAllStringIndex(tail, -1) {
+		if m[0] < len(topLevel) && topLevel[m[0]] {
+			return m[0]
+		}
+	}
+	return -1
+}
+
+// reduceCreateTable reduces ONE CREATE TABLE statement — the statement
+// applyCreateTable hands it after any run-on residual has been cut away.
+func (b *builder) reduceCreateTable(file string, st stmt) {
 	loc := reCreateTable.FindStringSubmatchIndex(st.text)
 	name := normalizeName(st.text[loc[4]:loc[5]])
 	ifNotExists := loc[2] != -1

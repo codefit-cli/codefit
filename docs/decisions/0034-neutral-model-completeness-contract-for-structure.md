@@ -20,6 +20,17 @@ on declaratively partitioned warehouses. §2.5's dispositions are otherwise unch
 and §2.7 (a declared limit must be machine-visible) is what put ADR 0038's last
 untested limit under a real-parser test.
 
+**Extended (2026-08-02) by
+[ADR 0041](0041-run-on-statement-separation-at-the-create-table-tail.md):**
+§2.4's declared-skip rule did not distinguish a statement the reducer RECEIVED
+from a delimiter from one it had to FIND. 0041 separates run-on `CREATE TABLE`
+statements at the tail boundary and gives the second case its own disposition —
+a found residual that no dispatch branch reduces is recorded on
+`Schema.Unreduced` instead of being skipped — closing the one path through this
+parser that still lost table structure with no trace at all. §2.5's dispositions
+and §2.6's fabrication boundary are unchanged; 0041's own guards are written
+against that boundary rather than assuming it away.
+
 ## Context
 
 `internal/core/db.Body{Text,Complete,Note}` (`db.go:246-259`) already declares

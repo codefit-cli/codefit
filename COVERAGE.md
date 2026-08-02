@@ -481,8 +481,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `Reason*` vocabulary in `core/db` is the type-level control). **Boundary,**
   stated so this contract does not over-promise: `Complete` covers DROPS, not
   FABRICATIONS — a reducer that believes it succeeded while inventing data
-  (Pagila's `film.fulltext` phantom index, and the closed "`ADD  CONSTRAINT`"
-  double-space fabrication, both documented below) reports `Complete=true`
+  (Pagila's `film.fulltext` phantom index, the closed "`ADD  CONSTRAINT`"
+  double-space fabrication, and the missing-comma-before-`PRIMARY KEY` wrong
+  composite key, all documented below) reports `Complete=true`
   regardless; that class needs its own, separate control.
 - **Index access method (`db.Index.Method`, `index-method-capture`).** Every
   index the schema-parsing providers read now carries its **declared** access
@@ -1145,8 +1146,13 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   routine bodies wrapped in `DELIMITER //`...`//` are unaffected. (2) A MySQL client `DELIMITER` directive is
   recognized only when its argument is punctuation (`//`, `$$`); a word-based
   delimiter such as `DELIMITER GO` is **not** recognized. (3) The T-SQL `GO` batch
-  separator is recognized only when a line is exactly `GO`; a column literally
-  named `go` alone on its own line would collide (vanishingly rare, accepted).
+  separator is recognized only when the **whole trimmed line** is the word —
+  **case-insensitively**, so a lowercase `go` line is accepted exactly like `GO`
+  (verified against the regex and against a real warehouse script that separates
+  its batches that way); a column literally named `go` alone on its own line
+  would collide (vanishingly rare, accepted). The whole-line requirement is what
+  keeps `GOTO`, or an identifier named `go`, from cutting a statement in half,
+  and is deliberately **not** relaxed.
   (4) An inline index whose **name** is itself a type keyword (e.g. `KEY int
   (col)`, an index named "int") is read as a column — the KEY/INDEX-vs-column
   discriminator trusts a type-named token as a column (pathological, accepted).
@@ -1281,20 +1287,43 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **No gate verdict changed on any corpus.** No golden file changed, because all
   three golden fixtures write their types **undelimited** — which is exactly why
   this stayed invisible until a real Microsoft script was parsed end to end.
-  (9) **Two `CREATE TABLE` statements
-  with no separator** between them (neither `;` nor a `GO` batch line) reduce to
-  only the **first** table, and the loss is **silent**: the second table simply
-  does not exist in the model, the first is left `StructureProven`, and nothing
-  is recorded in `Schema.Unreduced` or the completeness note. T-SQL makes the
-  statement terminator optional, so this is valid input, not malformed DDL.
-  Like limit (5), this is a case `db.Table.Complete` cannot catch — the reducer
-  never sees the statement it lost. Measured, not inferred; **not fixed** as of
-  `tsql-alter-add-constraint` (a tokenizer change, out of that slice's scope).
+  (9) **Closed** as of `run-on-statement-separation`,
+  2026-08-02 (ADR 0041) — kept rather than deleted, because what it described was
+  the **last silent structural loss** in this parser and what replaced it has a
+  boundary of its own. **Two `CREATE TABLE` statements with no separator**
+  between them (neither `;` nor a `GO` batch line) used to reduce to only the
+  **first** table, **silently**: the second table simply did not exist in the
+  model, the first was left `StructureProven`, and nothing was recorded in
+  `Schema.Unreduced` or the completeness note. T-SQL makes the statement
+  terminator optional, so this is valid input, not malformed DDL. The reducer now
+  **separates** the run: after a table's body is located with balanced
+  parentheses, its **tail** is scanned for a `CREATE`/`ALTER`/`DROP` keyword at
+  paren depth 0 that is outside any string literal and outside any quoted
+  identifier, the statement is cut there, and the remainder is dispatched as a
+  statement in its own right, recursively — so a run of *N* tables recovers all
+  *N*, each with its own source line. Measured through the real parser on a
+  public warehouse script: **1 table becomes 7**, with 41 columns and 7 foreign
+  keys, all structure-proven. The keyword set is exactly those three words
+  **because** none of them is legal at the top level of a `CREATE TABLE` tail in
+  any of the three dialects, while `WITH` and `SET` are (`WITH
+  (autovacuum_enabled = off)`, `WITH (DATA_COMPRESSION = PAGE)`) — so a residual
+  that begins with `SELECT`, `INSERT` or any other word is **still not detected
+  and still lost silently**, unchanged by this fix and stated here rather than
+  implied. What the fix guarantees is the other half: nothing is recovered while
+  anything **detected** is lost in silence — a residual the boundary rule found
+  but no dispatch branch reduces (`CREATE TYPE`, `CREATE SEQUENCE`, `ALTER
+  SCHEMA`, …) is appended **verbatim** to `Schema.Unreduced` and reaches the
+  agent through the per-scan inventory, and the host table is never demoted for
+  it (its own body was read in full, so demoting it would be a false demotion).
+  Blast radius measured across 26 external corpora: exactly **one** corpus
+  changes, the other 25 are identical on tables, structure-proven count, columns,
+  foreign keys, indexes, views, procedures, triggers, paradigm and every emitted
+  item; **no golden was regenerated**.
   (10) **Two `CREATE TABLE` statements whose schema-qualified names differ only
   by schema** (`bronze.orders` and `silver.orders`) **collapse into one table**:
   the reducer keys the model on the **bare** table name, so the second statement
   targets the table the first created and the columns unique to the second never
-  enter the model. **Unlike limit (9), this loss is *not* silent**, and the
+  enter the model. **Unlike the run-on loss limit (9) describes — which was silent until ADR 0041 closed it — this loss is *not* silent**, and the
   difference is the whole point: the colliding statement is recorded in that
   table's `Unreduced` list and the table is marked `Complete=false`, so `DB-050`
   **routes** it to `db-table-structure-unproven` and `DB-001`/`DB-052` plus all
@@ -1341,6 +1370,19 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   a partition scheme, and a corpus-wide sweep asserting no table in any of the 17
   corpora reports partitioning. Locked in
   `internal/providers/sqlddl/partition_capture_test.go`.
+  (12) A `CREATE TABLE` body item **missing its separating comma** before a
+  table-level `PRIMARY KEY` reads that constraint as an **inline** key on the
+  preceding column: `profit INT` / newline / `PRIMARY KEY(car_sid, profit)`
+  yields `PrimaryKey=[profit]` instead of the declared composite, while the table
+  still reports `Complete=true`. Like limit (5) this is a **fabrication, not a
+  drop**, so the completeness contract cannot catch it — the reducer believes it
+  succeeded. It is **delimiter-independent** (reproduced on an ordinary
+  `;`-terminated statement, so it has nothing to do with run-on separation) and
+  was found while measuring ADR 0041, which made it **reachable** on real DDL for
+  the first time: a public warehouse script writes its fact table exactly this
+  way. **Not fixed** — splitting a body item on anything other than a top-level
+  comma is a different, riskier slice. Characterized, with its comma-present
+  control, in `internal/providers/sqlddl/fabrication_test.go`.
 - **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
