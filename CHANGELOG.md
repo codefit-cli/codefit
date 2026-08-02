@@ -14,6 +14,56 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-08-02
+
+**Phase 2.5 complete — RF-03 OLAP closure, and with it the last Phase-2 coverage debt.**
+The pieces below close the phase; the earlier `v0.2.5-alpha.*` entries cover the rest of
+it (paradigm and table-role detection, 3NF-suppression on OLAP tables, the star-schema
+and slowly-changing-dimension family DW-001/002/005/010/011, and the neutral model's
+structural completeness contract). What lands here is the **columnar/analytic index**
+check **DW-021** and the **fact-table partitioning census** **DW-020**, each with the
+parser floor it reads (`db.Index.Method`, `db.Table.Partitioning`) — taking
+`dwrules.All()` to **seven** rules with **no DW-0xx rule left unbuilt**. DW-022
+(materialized views without refresh) stays permanently dropped: refresh cadence lives in
+scheduler state that static DDL does not carry.
+
+**Not in the plan, and the phase's most consequential structural change: the schema
+gate** (ADR **0037**, which inverts ADR 0033). The schema is judged *before* any table is
+given a warehouse role, so one table named `dim_status` can no longer silence its own
+DB-002/DB-003 1NF findings inside an otherwise transactional schema. The verdict is
+**measured, not reasoned**: of six schema-wide signals computed over 26 public corpora,
+the three that measured zero false positives are the three that vote. ADRs **0035–0047**.
+
+**The PRD's Phase-2 acceptance criterion is met.** The PRD asks that `codefit-scan-db`
+produce *verified real findings on a real project*. Measured through the real handler
+over an untouched UTF-16LE `pg_dump` of a production Postgres backend: `measured: true`,
+9 tables, structure proven for 9 of 9, **12 surface items and 0 deterministic findings**,
+paradigm `oltp`. Every one of the 12 was hand-verified against the DDL — **0 false
+positives** — and the run holds a verified *true negative*: the schema declares 11
+foreign keys, the FK rule fires on 10 and stays correctly silent on the eleventh, whose
+column a `UNIQUE` constraint already covers. Before the encoding fix below, that same
+file audited as `measured: true`, **score 100, empty note, 0 tables** — a silent false
+all-clear.
+
+**Read that number honestly** — four caveats, stated rather than smoothed over:
+
+- That project exercises a **narrow slice**: 9 tables, no views, procedures or triggers,
+  nothing analytic, so only **3 of the 21 DB/DW rule families fired at all**. Breadth is
+  evidenced by the 26-corpus survey, not by this one project.
+- Its `score` is **100** *alongside* those 12 items. That is correct by design — surface
+  is a question for the agent, so it is never scored — but it reads as "clean" to anyone
+  who looks at the score first.
+- **PII coverage is partial and an open design question, not a settled exclusion.** A
+  column named `email` does not fire DB-053, because *"is this secret in plaintext?"* is
+  not a question an email address answers — yet `ssn`, `dni` and `creditcard` are already
+  in that same vocabulary, so the boundary is not clean today. A separate personal-data
+  category is a candidate, **not decided and not scheduled**.
+- **⚠️ BREAKING for committed baselines.** Anchoring `CREATE TABLE` body items on their
+  own source line changes the fingerprint of every column-anchored DB item (DB-002,
+  DB-003, DB-051, DB-053), so existing `.codefit-baseline` entries for those categories
+  re-appear as `new` on the first scan after upgrading, until they are re-accepted. See
+  the anchoring entry under *Fixed*.
+
 ### Added
 
 - **DW-020 — this schema's fact tables, censused for declared table partitioning**, the
@@ -688,7 +738,7 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
 - **Role detection matched only a leading snake_case segment, at this release.** PascalCase
   Kimball naming (Microsoft's `FactInternetSales`, `DimCustomer`) classified as
   `unclassified`, so the DW family yielded **no value** on it. Test-locked, not silent.
-  (Superseded after this tag — see the role-vocabulary entry under *Unreleased*.)
+  (Superseded after this tag — see the role-vocabulary entry under `0.2.5`.)
 - **DW-002 fires on a UUID/GUID surrogate** — it types as a string in the neutral model.
   The emitted facts are what the agent needs to dismiss it in one step.
 - **DW-002 also fires when the parser did not reconstruct the primary key's column**
@@ -704,9 +754,9 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
   declared-synthetic schemas (ADR 0028). Microsoft's AdventureWorksDW **is** vendored
   (MIT) and yielded no DW finding, for two independent test-locked reasons at this
   release: its PascalCase names, and a pre-existing T-SQL reducer gap. (**Both halves
-  were closed after this tag, and neither is in a tagged release yet** — the naming one
+  were closed after this tag, and both shipped in `0.2.5`** — the naming one
   by the widened role vocabulary and the reducer one by the `ALTER TABLE … ADD
-  CONSTRAINT` fix; see *Unreleased*.)
+  CONSTRAINT` fix; see `0.2.5`.)
 
 ### Known issues
 
@@ -716,8 +766,8 @@ database and audits its modelling. Two of the eight items in the PRD's OLAP scop
   consequence is that **DB-050 — a deterministic affirmation at certainty 1.0 — reports
   three tables as having no primary key over DDL that plainly declares one for each.**
   Not introduced here and not fixed here; documented in the coverage manifest and locked
-  by tests written to go red once the reducer is fixed. (**Fixed after this tag, still
-  untagged** — see *Unreleased*. Those two limit-locks did go red and were replaced by a
+  by tests written to go red once the reducer is fixed. (**Fixed after this tag, shipped
+  in `0.2.5`** — see that section. Those two limit-locks did go red and were replaced by a
   single positive lock over the real corpus, `TestDW_AdventureWorksDW_StarIsVisible_AsVendored`.)
 
 ### Not yet covered (Phase 2.5 remainder)

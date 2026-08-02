@@ -62,44 +62,54 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **`main`, unreleased — Phase 2.5 is feature-complete and its acceptance criterion is
-  met; no tag has been cut.** The newest tag is still `v0.2.5-alpha.2`; everything below
-  is on `main`, untagged, and every item in this bullet is therefore usable from `main`
-  and from nowhere else. Read the [CHANGELOG's `Unreleased`
-  section](CHANGELOG.md#unreleased) for the itemized list — the summary:
-  - **The DW-0xx family closed.** The SQL-DDL reducer now reads table partitioning into
-    the neutral model (`db.Table.Partitioning`), and **DW-020** censuses a warehouse's
-    fact tables for it — one item per schema, never one per table. That took
-    `dwrules.All()` to **seven** rules (DW-001/002/005/010/011/020/021) with **no DW-0xx
-    rule left unbuilt**, closing RF-03 and with it the last Phase-2 coverage debt.
-  - **The Phase-2 "done" criterion is satisfied.** The PRD asks that `codefit-scan-db`
-    produce verified real findings on a real project. Measured on `main` through the real
-    handler over an untouched UTF-16LE `pg_dump` of a production Postgres backend:
-    `measured: true`, 9 tables, 9 of 9 structurally proven, **12 surface items and 0
-    deterministic findings**, paradigm `oltp` — **0 false positives** on hand-verification
-    of all 12, plus a verified **true negative** (11 FKs declared, the FK rule fires on 10
-    and stays correctly silent on the one a `UNIQUE` constraint already covers). Scoped
-    honestly: that project is a **narrow slice** — 9 tables, no views, procedures or
-    triggers, nothing analytic — so only **3 of the 21 DB/DW rules fired**; the 26-corpus
-    survey, not this project, is what evidences breadth.
-  - **A parser-correctness run, most of it fixing false positives rather than adding
-    coverage.** Run-on `CREATE TABLE` statements are separated at the tail boundary; a
-    missing comma before a table-level key constraint no longer fabricates a
-    single-column key; a delimited type name (`[int]`, backticks, ANSI quotes) resolves
-    instead of falling back to `TypeUnknown`; `CREATE SEQUENCE` and views no longer
-    materialize phantom tables; body items anchor on their own source line; the
-    `CREATE TABLE` family gained an honest-abstention floor, with `UNLOGGED` modeled and
-    session-scoped TEMP forms withheld under a trace; BOM-marked sources are decoded; and
-    a schema source that contributes nothing to the model is now reported rather than
-    silently treated as clean. Across the 26-corpus survey the net effect was **938 → 873
-    items** with **no rule gaining items anywhere**. ADRs **0038–0047**.
-  - **⚠️ BREAKING for committed baselines.** Anchoring body items on their own source
-    line changes the baseline fingerprint of every column-anchored item, so existing
-    `.codefit-baseline` entries for those categories will re-appear as `new` on the first
-    scan after upgrading. Already recorded under `Unreleased` in the CHANGELOG.
-  - **Why no tag yet:** the phase is feature-complete, but cutting `v0.2.5` is a separate,
-    deliberate act — this document does not pre-announce it, per the "no invented
-    releases" rule.
+- **`v0.2.5` — Phase 2.5 complete (RF-03 OLAP closure), and with it the last Phase-2
+  coverage debt.** Usable end-to-end from `main`: the DW-0xx family is closed. **DW-021**
+  (a fact table with no columnar/analytic index) and **DW-020** (a schema-level census of
+  the fact tables' declared partitioning — one item per schema, never one per table) land
+  here together with the parser floors they read, `db.Index.Method` and
+  `db.Table.Partitioning`, taking `dwrules.All()` to **seven** rules
+  (DW-001/002/005/010/011/020/021) with **no DW-0xx rule left unbuilt**; the two alpha
+  entries below carry the rest of the phase. DW-022 stays **permanently** dropped —
+  refresh cadence lives in scheduler state that static DDL does not carry. The phase's
+  largest structural change was not in the original plan: the **schema gate** (ADR
+  **0037**, which inverts ADR 0033) judges the whole schema **before** any table is given
+  a warehouse role, so one table named `dim_status` can no longer silence its own
+  DB-002/DB-003 1NF findings inside an otherwise transactional schema — and the verdict is
+  measured, not reasoned (of six schema-wide signals computed over 26 public corpora, the
+  three that measured zero false positives are the three that vote). Most of the rest was
+  **parser correctness, largely removing false positives rather than adding coverage**:
+  run-on `CREATE TABLE` statements separated at the tail boundary; a missing comma before
+  a table-level key constraint no longer fabricating a single-column key; a delimited type
+  name (`[int]`, backticks, ANSI quotes) resolving instead of falling back to
+  `TypeUnknown`; `CREATE SEQUENCE` and views no longer materializing phantom tables; body
+  items anchored on their own source line; an honest-abstention floor for the
+  `CREATE TABLE` family, with `UNLOGGED` modeled and session-scoped TEMP forms withheld
+  under a trace; BOM-marked sources decoded and a source that contributes nothing to the
+  model reported rather than silently treated as clean; and DB-052 reading a measured
+  verb+affix+type audit-stamp rule instead of a two-name list. Across the 26-corpus survey
+  the net effect was **938 → 873 items** with **no rule gaining items anywhere**. ADRs
+  **0035–0047**. **The Phase-2 "done" criterion is satisfied:** the PRD asks that
+  `codefit-scan-db` produce verified real findings on a real project, and over an
+  untouched UTF-16LE `pg_dump` of a production Postgres backend the real handler reports
+  `measured: true`, 9 tables, 9 of 9 structurally proven, **12 surface items and 0
+  deterministic findings**, paradigm `oltp` — **0 false positives** on hand-verification of
+  all 12, plus a verified **true negative** (11 FKs declared, the FK rule fires on 10 and
+  stays correctly silent on the one a `UNIQUE` constraint already covers); before the
+  encoding fix that same file audited as `measured: true`, score 100, empty note, **0
+  tables**. **Read honestly**, four caveats rather than one number: that project is a
+  **narrow slice** — 9 tables, no views, procedures or triggers, nothing analytic — so
+  only **3 of the 21 DB/DW rule families fired**, and the 26-corpus survey, not this
+  project, is what evidences breadth; its `score` is **100** *alongside* those 12 items,
+  correct by design (surface is a question for the agent, so it is never scored) but it
+  reads as "clean" to anyone who looks at the score first; **PII coverage is partial and an
+  open design question, not a settled exclusion** — a column named `email` does not fire
+  DB-053, while `ssn`/`dni`/`creditcard` already do, so the boundary is not clean today and
+  a separate personal-data category is a candidate, not decided and not scheduled; and
+  **⚠️ BREAKING for committed baselines** — anchoring body items on their own source line
+  changes the fingerprint of every column-anchored DB item (DB-002, DB-003, DB-051,
+  DB-053), so existing `.codefit-baseline` entries for those categories re-appear as `new`
+  on the first scan after upgrading, until they are re-accepted. See the
+  [CHANGELOG](CHANGELOG.md) for the itemized list.
 - **`v0.2.5-alpha.2` — still on the way to Phase 2.5; a correctness fix, not new coverage.**
   The database dimension stops concluding from parser silence. `DB-050` was affirming "no
   primary key" at confidence 1.0 over vendored DDL that declares the keys, because the
@@ -114,14 +124,13 @@ stage" — it does **not** claim `0.1.0` is done.
   `alpha.1` entry below for what each needed. The `feat/olap-columnar-index` draft (PR
   #75) that a full 4R found unsound on every input path was abandoned, not merged: the
   4R traced the unsoundness to the PARSER (it could not read index access methods at
-  all), not the rule, so the fix landed at that layer first, on `main`, past this tag
-  and still untagged as of this writing; a rule-only DW-021 was then rebuilt from
-  scratch and **has since merged to `main`** (still untagged), closing slice S3 and
-  taking `dwrules.All()` to **six** rules. **DW-020 (partitioning) has since been
-  built too** — a schema-level census over the `db.Table.Partitioning` floor,
-  closing slice S4 and taking `dwrules.All()` to **seven** rules, with no DW-0xx
-  rule left unbuilt. Neither DW-021 nor DW-020 has shipped in a *tagged* release
-  yet — this bullet is history, not current status.
+  all), not the rule, so the fix landed at that layer first, past this tag; a
+  rule-only DW-021 was then rebuilt from scratch and **has since merged**, closing
+  slice S3 and taking `dwrules.All()` to **six** rules. **DW-020 (partitioning) has
+  since been built too** — a schema-level census over the `db.Table.Partitioning`
+  floor, closing slice S4 and taking `dwrules.All()` to **seven** rules, with no
+  DW-0xx rule left unbuilt. Both shipped in **`v0.2.5`** — this bullet is history,
+  not current status.
 - **`v0.2.5-alpha.1` — on the way to Phase 2.5 (RF-03 OLAP closure).** codefit tells a data
   warehouse from a transactional database and audits its modelling: paradigm/table-role
   detection as a pure core leaf (prefixes corroborated by real FK fan-out/fan-in, never by a
@@ -135,7 +144,7 @@ stage" — it does **not** claim `0.1.0` is done.
   DW-020 needed the SQL-DDL reducer to start capturing the `PARTITION BY` clauses it
   declared as a limit and skipped, per dialect. Role detection reached only a leading snake_case
   segment at this tag; declared, test-locked, not silent. (Both of that bullet's limits have
-  since moved on `main`, past this tag and still untagged as of this writing: `db.Index.Method`
+  since moved, past this tag and shipped in **`v0.2.5`**: `db.Index.Method`
   landed — see the `alpha.2` entry above — the `PARTITION BY`/`PARTITION OF`/T-SQL
   partition-scheme capture DW-020 was waiting on landed too (`db.Table.Partitioning`),
   **and the DW-020 rule that reads it has since been built as well**, and the role
