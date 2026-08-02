@@ -21,8 +21,9 @@ var _ providers.SchemaParser = (*Provider)(nil)
 // model and enum names; pass two resolves each field against those sets. Without
 // it, an enum column (role Role) would be silently dropped as a relation.
 //
-// Prisma view blocks are out of scope this slice and are skipped without error
-// (Schema.Views stays empty; the SQL-DDL parser of slice 3 fills views).
+// Prisma view blocks are out of scope and are skipped without error
+// (Schema.Views stays empty here; the SQL-DDL parser, which does fill Views, is
+// the path where DB-020 has anything to read).
 func (*Provider) ParseSchema(sources []providers.SourceFile) (*db.Schema, error) {
 	var blocks []prismaBlock
 	for _, s := range sources {

@@ -3,6 +3,8 @@
 // so that both the core context and the language providers can reference its
 // types without creating import cycles.
 //
-// Skeleton: the struct shape mirrors the PRD's .codefit.yaml. Validation,
-// defaulting and merging with the global config are not implemented yet.
+// Status: BUILT. The struct shape mirrors the PRD's .codefit.yaml and Load
+// validates it, reporting errors located to the offending line. There is no
+// global config to merge with, by design: codefit manages no models and no
+// credentials, so .codefit.yaml is the only configuration there is.
 package config

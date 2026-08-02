@@ -1,7 +1,9 @@
 // Package cli wires the codefit command tree with cobra: the root command and
-// its global flags, plus every subcommand (init, scan, bench, review, run,
-// baseline, report, mcp serve, auth, set, status).
+// its global flags, plus its subcommands. codefit is MCP-first — there is no
+// CLI audit mode, so this tree carries only PLUMBING: init, version, status,
+// update, and mcp serve. Auditing is reached exclusively through the MCP tools.
 //
-// Skeleton: commands declare their flags and help text but carry no business
-// logic — every RunE is a stub until the engine is built.
+// Status: BUILT except update. init, version, status and mcp serve run for
+// real; update is a Fase 4 item and is still the notImplemented stub, which
+// says so on stdout rather than pretending to succeed.
 package cli

@@ -364,6 +364,7 @@ de oro: se edita la FUENTE, después se espeja.**
 | `COVERAGE.md` | espejo (ver cadena) | resumen | Espejo 2º nivel, a mano. |
 | `internal/core/dbcoverage/dbcoverage.go` | fuente neutra de la dimensión DB | resumen | Se verifica contra las CUATRO raíces: `dbrules/`, `dwrules/`, `paradigm/`, `crossrules/`. Se edita ANTES que COVERAGE.md. |
 | `internal/providers/<lang>/coverage.go` | espejo-a-mano de las reglas | resumen | Se verifica contra la raíz; se edita ANTES que COVERAGE.md. |
+| `internal/mcp/server.go` (descripciones de las tools) | fuente cara-al-agente | resumen | Es lo ÚNICO que el agente lee antes de elegir una tool: si describe mal una capacidad, el agente le cree. Se verifica contra las reglas/handlers reales en cada cierre. Ya driftó una vez —`codefit-scan-db` decía "(Prisma today)" con el parser SQL-DDL shippeado desde `v0.2.0` y toda la familia DW-0xx sin mencionar. |
 | `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
 | `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
 | `docs/decisions/NNNN-*` | fuente (append-only) | por slice | Un ADR por decisión de arquitectura; no se reescriben. |

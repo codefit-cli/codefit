@@ -10,8 +10,9 @@ import (
 )
 
 // Config is the parsed representation of .codefit.yaml. Fields mirror the PRD
-// schema; this is a skeleton, so zero values are acceptable until the loader
-// and validators are implemented.
+// schema. Zero values are acceptable throughout: .codefit.yaml is optional and
+// every consumer defaults, so an absent key is a real state, not an unfinished
+// one. Load validates what IS present.
 type Config struct {
 	Version  string   `yaml:"version"`
 	Project  Project  `yaml:"project"`
@@ -52,8 +53,9 @@ type Database struct {
 	ORM         string   `yaml:"orm"`
 }
 
-// Sensors toggles and tunes each sensor. Skeleton: only the enable flags and a
-// couple of representative knobs are modeled.
+// Sensors toggles and tunes each sensor. Only the enable flags and a couple of
+// representative knobs are modeled — the tuning surface grows with the sensors
+// that need it, rather than being declared ahead of them.
 type Sensors struct {
 	Security   SensorToggle `yaml:"security"`
 	Review     SensorToggle `yaml:"review"`

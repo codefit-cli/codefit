@@ -9,7 +9,7 @@ import (
 // one [findings.Dimension] and is driven by the orchestrator with a shared
 // [auditctx.AuditContext].
 //
-// Skeleton: no implementation yet.
+// Implemented today by the security and db sensors.
 type Sensor interface {
 	// Name is the sensor's stable identifier (e.g. "security").
 	Name() string
