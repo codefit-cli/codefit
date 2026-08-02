@@ -26,6 +26,14 @@ type builder struct {
 	// per-scan completeness inventory (sensors/db.Result.Note).
 	unreduced []db.Unreduced
 
+	// withheld accumulates declarations the reducer RECOGNIZED and
+	// deliberately did not model — today, temporary tables (ADR 0043). It is
+	// deliberately separate from unreduced: that one means "could not read
+	// this", this one means "read it and it does not belong in the persistent
+	// schema". Like unreduced it gates nothing per-table (nothing entered the
+	// model to gate) and surfaces only in the per-scan note.
+	withheld []db.Withheld
+
 	// partSchemeFunc and partFuncStrategy hold T-SQL's two-hop partitioning
 	// vocabulary (partition-capture), keyed by LOWERCASED identifier because
 	// T-SQL identifiers are case-insensitive: scheme -> partition function,
@@ -52,7 +60,7 @@ func newBuilder(dialect *Dialect) *builder {
 }
 
 func (b *builder) schema() *db.Schema {
-	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs, Unreduced: b.unreduced}
+	s := &db.Schema{Views: b.views, Procedures: b.procs, Triggers: b.trigs, Unreduced: b.unreduced, Withheld: b.withheld}
 	for _, name := range b.order {
 		if t := b.tables[name]; t != nil {
 			s.Tables = append(s.Tables, *t)
@@ -62,7 +70,21 @@ func (b *builder) schema() *db.Schema {
 }
 
 var (
-	reCreateTable = regexp.MustCompile(`(?is)^create\s+table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
+	// reCreateTable recognizes the ordinary CREATE TABLE declaration.
+	//
+	// The UNLOGGED prefix (ADR 0043) is admitted here rather than caught by
+	// the table-shaped-head floor because an UNLOGGED table is genuinely
+	// PERSISTENT storage — PostgreSQL only skips the write-ahead log for it,
+	// the table and its keys are as real as any other's — so it belongs in
+	// the model, not on the abstention floor. It is deliberately NON-capturing:
+	// reduceCreateTable reads loc[2] for IF NOT EXISTS and loc[4]:loc[5] for
+	// the name, so a capturing group here would shift both spans and name every
+	// table out of the wrong bytes.
+	//
+	// The TEMP/TEMPORARY family is NOT admitted here — a session-scoped table
+	// is not part of the persistent schema and is withheld with its own trace
+	// (reSessionScopedTable).
+	reCreateTable = regexp.MustCompile(`(?is)^create\s+(?:unlogged\s+)?table\s+(if\s+not\s+exists\s+)?("?[\w".]+"?)\s*\(`)
 	reAlterTable  = regexp.MustCompile(`(?is)^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?("?[\w".]+"?)\s+(.*)$`)
 	// reCreateIndex recognizes the "ordinary" CREATE INDEX shape — one with an
 	// explicit column list — across all three dialects, and captures the
@@ -184,7 +206,13 @@ var (
 	// before this slice: this form matched NOTHING and the whole child table
 	// vanished). "PARTITION OF" is matched as a two-word unit so it can
 	// never be confused with the parent's "PARTITION BY".
-	reCreateTablePartitionOf = regexp.MustCompile(`(?is)^create\s+table\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)\s+partition\s+of\s+("?[\w".]+"?)`)
+	//
+	// It carries reCreateTable's prefix and therefore takes the same UNLOGGED
+	// widening (ADR 0043): PostgreSQL admits "CREATE UNLOGGED TABLE c
+	// PARTITION OF p". Without it that statement would fall past this branch
+	// into the table-shaped-head floor and the child would stop being modeled
+	// at all — a regression from the partition-capture slice, not a new gap.
+	reCreateTablePartitionOf = regexp.MustCompile(`(?is)^create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)\s+partition\s+of\s+("?[\w".]+"?)`)
 
 	// rePartitionBy matches the parent's "PARTITION BY" keyword pair
 	// (PostgreSQL and MySQL spell it identically). It is deliberately only
@@ -238,6 +266,64 @@ var (
 	// DROP_EXISTING and AUTO_CREATE from reading as statement heads ('_' is a
 	// word character, so DROP_EXISTING never matches \bdrop\b).
 	reRunOnStatementHead = regexp.MustCompile(`(?is)\b(?:create|alter|drop)\b`)
+
+	// reTableShapedHead recognizes a CREATE ... TABLE statement head BROADER
+	// than every table branch combined — the LAST-RESORT net in apply()'s
+	// switch for the TABLE family, the exact structural analogue of
+	// reIndexShapedHead for the INDEX family (ADR 0043). It is checked AFTER
+	// every real table branch, so it only ever sees a statement none of them
+	// could dispatch, and apply()'s default: can then tell "this dispatch
+	// genuinely has no branch for this TABLE form" apart from a statement kind
+	// outside the declared subset entirely (INSERT, GRANT, CREATE TYPE, ...),
+	// which must stay silent (ADR 0034 §2.4).
+	//
+	// Its whole value is that it is written against a SHAPE rather than an
+	// enumeration: the six forms measured as silently lost (UNLOGGED, TEMP,
+	// TEMPORARY, GLOBAL/LOCAL TEMPORARY, and T-SQL's #-prefixed names) are the
+	// ones that were known, and the next dialect keyword nobody has read yet
+	// lands here too instead of evaporating.
+	//
+	// The modifier window is at most TWO words, and that bound is load-bearing
+	// rather than arbitrary: it admits every real one- and two-word form
+	// (UNLOGGED, FOREIGN, EXTERNAL, TRANSIENT, GLOBAL TEMPORARY, LOCAL TEMP,
+	// OR REPLACE, SET/MULTISET) while excluding the three-word shapes that are
+	// NOT table declarations and must keep falling to default:. Each exclusion
+	// is a statement a supported dialect actually writes:
+	//
+	//	CREATE TYPE IdList AS TABLE (...)      T-SQL table TYPE (type x as)
+	//	CREATE STATISTICS s ON table_x (...)   T-SQL/PG statistics (stat x on)
+	//	CREATE SCHEMA s CREATE TABLE a (...)   the SQL-standard element list,
+	//	                                       a separate open gap ADR 0041
+	//	                                       already records (schema s create)
+	//
+	// TABLESPACE is excluded by the word boundary alone ("table" followed by
+	// 's' is not \btable\b), the same guard that does most of the work in
+	// reRunOnStatementHead.
+	reTableShapedHead = regexp.MustCompile(`(?is)^create\s+(?:\w+\s+){0,2}?table\b`)
+
+	// reSessionScopedTable recognizes a TEMPORARY table declared by KEYWORD —
+	// PostgreSQL's and MySQL's TEMP/TEMPORARY, with PostgreSQL's optional
+	// GLOBAL/LOCAL qualifier (ADR 0043). The name is captured because this
+	// branch matches a grammar whose name POSITION it knows: right after
+	// TABLE, past an optional IF NOT EXISTS. It is optional so a form that
+	// puts the name somewhere else yields an empty Name rather than a guess.
+	//
+	// ^-anchored, like every other head regex in this file: a nested CREATE
+	// TEMPORARY TABLE inside a routine body is legitimate body CONTENT (real
+	// Pagila and Sakila procedures contain one), and split() keeps it inside
+	// its enclosing statement, so this never sees it.
+	reSessionScopedTable = regexp.MustCompile(`(?is)^create\s+(?:global\s+|local\s+)?(?:temp|temporary)\s+table\s+(?:if\s+not\s+exists\s+)?("?[\w".]+"?)?`)
+
+	// reHashPrefixedTable recognizes T-SQL's NAME-prefixed temporary table,
+	// "CREATE TABLE #Local (...)" / "##Global (...)". Consulted ONLY when the
+	// dialect datum HashPrefixedTempTables says this dialect spells temporary
+	// tables that way — '#' opens a line comment in MySQL and is a perfectly
+	// legal quoted identifier character in PostgreSQL.
+	//
+	// It is a separate regex rather than a widening of reCreateTable's name
+	// class: widening that class would make '#'-named tables ORDINARY tables in
+	// every dialect, which is the opposite of what T-SQL means by one.
+	reHashPrefixedTable = regexp.MustCompile(`(?is)^create\s+table\s+(?:if\s+not\s+exists\s+)?("?#{1,2}[\w".]*"?)`)
 )
 
 // isRoutineHead reports whether accumulated statement text is a CREATE
@@ -323,6 +409,26 @@ func (b *builder) apply(file string, st stmt) bool {
 		// does not know whether it declares an index, so it must mark the
 		// table unproven instead of vanishing silently.
 		b.markUnrecognizedIndexShape(file, st)
+	case b.sessionScopedTableName(st.text) != nil:
+		// A TEMPORARY table: READ correctly and deliberately NOT modeled (ADR
+		// 0043). It sits before the table-shaped-head floor because it is the
+		// more specific recognition of the two — the floor would otherwise
+		// report a statement codefit understood perfectly as one it could not
+		// reduce.
+		b.withholdSessionScopedTable(file, st)
+	case reTableShapedHead.MatchString(st.text):
+		// A genuinely UNRECOGNIZED CREATE ... TABLE form: it announces itself
+		// as a table declaration but no table branch above has a grammar for
+		// it (PostgreSQL's FOREIGN TABLE, a CREATE TABLE ... AS SELECT, a name
+		// outside the reducer's identifier class, a dialect keyword nobody has
+		// read yet). Per ADR 0034 §2.4 this is NOT a declared skip: the
+		// dispatch does not know whether it declares columns, a key or an
+		// index, so it must be recorded rather than vanish.
+		//
+		// LAST among the table branches on purpose (ADR 0043): it matches a
+		// superset of every one of them, so any earlier placement would swallow
+		// the ordinary form, IF NOT EXISTS, PARTITION OF and UNLOGGED alike.
+		b.declareUnrecognizedTableShape(file, st)
 	default:
 		// out of the declared subset (INSERT/UPDATE/DO/GRANT/COMMENT/CREATE
 		// TYPE/…) — skipped on purpose. These statement KINDS are never
@@ -1619,6 +1725,82 @@ func (b *builder) markUnrecognizedIndexShape(file string, st stmt) {
 		// per-table.
 		b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: pos})
 	}
+}
+
+// sessionScopedTableName reports whether st is a TEMPORARY table declaration
+// in this dialect and, when it is, returns its name submatch — nil when it is
+// not one, so the caller can use it directly as a dispatch predicate.
+//
+// TWO recognitions, because the three supported dialects spell the same concept
+// two structurally different ways: PostgreSQL and MySQL use a KEYWORD
+// (TEMP/TEMPORARY, optionally qualified GLOBAL/LOCAL), while T-SQL uses a NAME
+// PREFIX ('#' session-local, '##' global). The second is gated on the
+// HashPrefixedTempTables datum rather than applied everywhere, because '#' is
+// a line comment in MySQL and an ordinary quoted-identifier character in
+// PostgreSQL: reading it as "temporary" there would silently delete a
+// persistent table from the model.
+func (b *builder) sessionScopedTableName(text string) []string {
+	if m := reSessionScopedTable.FindStringSubmatch(text); m != nil {
+		return m
+	}
+	if b.dialect.HashPrefixedTempTables {
+		if m := reHashPrefixedTable.FindStringSubmatch(text); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+// withholdSessionScopedTable records a temporary table the parser read and
+// deliberately did not model (ADR 0043).
+//
+// A temporary table lives only for the session that created it. Admitting it to
+// db.Schema would put session scratch space in front of every absence-based
+// rule — DB-050 would affirm "table without a primary key" over it at
+// confidence 1.0 — and every DW census would count it as part of the
+// warehouse. Dropping it silently, which is what happened before this slice,
+// hid a whole class of statement from the developer.
+//
+// So it is WITHHELD: recorded on Schema.Withheld with its reason, its name and
+// the verbatim statement, and announced in the per-scan note. Schema.Unreduced
+// was rejected as the carrier — it means "codefit could not read this", and
+// reporting a scoping decision through it would tell the agent the parser
+// failed where it in fact succeeded.
+func (b *builder) withholdSessionScopedTable(file string, st stmt) {
+	name := ""
+	if m := b.sessionScopedTableName(st.text); m != nil && m[1] != "" {
+		name = normalizeName(m[1])
+	}
+	b.withheld = append(b.withheld, db.Withheld{
+		Name:   name,
+		Text:   st.text,
+		Pos:    db.Pos{File: file, Line: st.line},
+		Reason: db.ReasonSessionScopedTable,
+	})
+}
+
+// declareUnrecognizedTableShape records a CREATE ... TABLE statement the
+// dispatch recognized as table-shaped but no branch could reduce (ADR 0043).
+//
+// It DECLARES; it never guesses. Unlike markUnrecognizedIndexShape, which can
+// attribute its drop to a table through the ON clause every CREATE INDEX form
+// shares, there is no table to attribute this one TO: the missing table IS the
+// loss, and the forms that land here are by definition ones whose grammar the
+// reducer does not know, so it does not know where their name sits either
+// (CREATE TABLE x AS SELECT puts it in one position, CREATE FOREIGN TABLE x
+// SERVER s in another, and the next dialect keyword somewhere else again).
+// Registering a table from a guessed span would be the FABRICATION class the
+// completeness contract structurally cannot catch (ADR 0034 §2.6) — strictly
+// worse than the silent loss this replaces.
+//
+// The VERBATIM statement is what carries the name to the agent: the user's own
+// DDL with its file:line, reaching scan output through the per-scan
+// completeness inventory (sensors/db.Result.Note, ADR 0034 §2.8). Schema level
+// rather than any table's MarkUnproven, for the same reason ADR 0041 §2.6 chose
+// it: this is "recognized as table-affecting but not attributable to a specific
+// table", and demoting an unrelated table would be a false demotion.
+func (b *builder) declareUnrecognizedTableShape(file string, st stmt) {
+	b.unreduced = append(b.unreduced, db.Unreduced{Text: st.text, Pos: db.Pos{File: file, Line: st.line}})
 }
 
 func (b *builder) applyCreateIndex(file string, st stmt) {

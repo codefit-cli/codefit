@@ -156,6 +156,24 @@ var gateCorpusExpectations = []gateCorpusCase{
 	{path: "pg_constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{path: "pg_constructed_n2_recognized_skips.sql", tables: 2, proven: 2, paradigmIs: paradigm.ParadigmOLTP},
 	{
+		// The table-shaped-head fixture (ADR 0043). The PARSE FACTS carry this
+		// row: it declares TEN table-shaped statements and exactly THREE of
+		// them are persistent tables (keeper, and the two UNLOGGED ones). If
+		// tables ever returns to 1, the UNLOGGED admission has regressed; if it
+		// climbs above 3, a session-scoped table has been let into the model.
+		//
+		// The signal row is unremarkable on purpose and was measured, not
+		// assumed: no table declares created_at/updated_at, so the excluded
+		// no_audit_timestamps signal fires and nothing else can. bulk_load_shape
+		// needs four key-like columns in ONE table and eight schema-wide (there
+		// is one per table, three in all); calendar_table, surrogate_key_names
+		// and star_topology have no date dimension, no _sk columns and no
+		// foreign keys to read. The gate stays shut and the paradigm reads oltp.
+		path: "pg_constructed_table_shaped_heads.sql", tables: 3, proven: 3,
+		fired:      []paradigm.Signal{paradigm.SignalNoAuditTimestamps},
+		paradigmIs: paradigm.ParadigmOLTP,
+	},
+	{
 		// 7 tables, only 2 proven: five were materialized by CREATE INDEX
 		// statements the reducer could not attribute. Both absence-based
 		// signals abstain, which is the whole point of the proven-structure
@@ -231,6 +249,28 @@ var gateCorpusExpectations = []gateCorpusCase{
 		paradigmIs: paradigm.ParadigmOLAP,
 	},
 	{path: "tsql/constructed_external_call_trigger.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
+	{
+		// The T-SQL temporary-table fixture (ADR 0043): three CREATE TABLE
+		// statements, of which only dbo.Keeper is persistent — #tmpHoliday and
+		// ##GlobalScratch are session-scoped and withheld. tables: 1 is the
+		// assertion that matters, and it is precisely an ADMISSION lock: it
+		// catches scratch space ENTERING the model (mutation-proven by widening
+		// reCreateTable's name class to admit '#', which takes it to 3 and where
+		// DB-050 would then affirm over it). It does NOT catch the withholding
+		// branch being removed — the table-shaped-head floor keeps those
+		// statements out of the model either way, and it is
+		// withheld_table_test.go, not this row, that tells the two apart.
+		//
+		// NO signal fires, and the reason is a real consequence of withholding
+		// worth recording rather than a property of this fixture: the gate
+		// declines to evaluate ANY signal below minJudgeableTables = 3 (no
+		// vacuous truths), and withholding the two temporary tables leaves one
+		// modeled table. That is the correct reading — session scratch space is
+		// not evidence about whether a schema is a warehouse — but it does mean
+		// withholding can move a small schema below the judgeable floor.
+		path: "tsql/constructed_temp_table_names.sql", tables: 1, proven: 1,
+		paradigmIs: paradigm.ParadigmOLTP,
+	},
 	{
 		// The run-on fixture (ADR 0041): four CREATE TABLE statements with no
 		// ';' and no batch separator between them. The PARSE FACTS are the

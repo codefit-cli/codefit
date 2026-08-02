@@ -143,7 +143,7 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	surf = append(surf, dwS...)
 
 	surf, suppressed := suppress3NF(surf, cls, override)
-	note := joinTraces(completenessNote(schema), schemaGateNote(cls, override), suppressed)
+	note := joinTraces(completenessNote(schema), withheldNote(schema), schemaGateNote(cls, override), suppressed)
 
 	stampFingerprints(fs, surf, content)
 
@@ -304,6 +304,63 @@ func completenessNote(s *coredb.Schema) string {
 			"this completeness signal and may still emit surface items over these tables.")
 	}
 
+	return strings.Join(parts, " ")
+}
+
+// withheldNote is the per-scan trace of what codefit RECOGNIZED and
+// deliberately did not model (ADR 0043). It is a SEPARATE trace from
+// completenessNote, and deliberately so: that one reports what codefit could
+// not measure, this one reports a scoping DECISION. Merging them would tell an
+// agent the parser failed where it in fact succeeded — a lie in the opposite
+// direction from the silence this slice removed.
+//
+// It obeys the same three disciplines as the measurement inventory: aggregate
+// by REASON (a migration suite that stages 200 temporary tables is one line,
+// not 200), state the FACT and never a parser diagnosis (the only inputs are
+// the core's closed WithheldReason vocabulary and names read from the user's own
+// DDL), and stay EMPTY when there is nothing to say.
+//
+// Withholding is never silent because the developer decides, not codefit
+// (CLAUDE.md): the consequence — these declarations reached no rule at all —
+// is stated, not implied.
+func withheldNote(s *coredb.Schema) string {
+	if s == nil || len(s.Withheld) == 0 {
+		return ""
+	}
+	byReason := map[coredb.WithheldReason][]string{}
+	var reasonOrder []coredb.WithheldReason
+	for _, w := range s.Withheld {
+		if _, seen := byReason[w.Reason]; !seen {
+			reasonOrder = append(reasonOrder, w.Reason)
+		}
+		// A form whose name the parser cannot read faithfully is identified by
+		// its POSITION instead of by a guessed name (ADR 0043's fabrication
+		// boundary) — the agent can still open the file and read the DDL.
+		label := w.Name
+		if label == "" {
+			label = fmt.Sprintf("%s:%d", w.Pos.File, w.Pos.Line)
+		}
+		byReason[w.Reason] = append(byReason[w.Reason], label)
+	}
+
+	var parts []string
+	for i, reason := range reasonOrder {
+		if i >= completenessInventoryReasonCap {
+			parts = append(parts, fmt.Sprintf("(+%d more reasons)", len(reasonOrder)-i))
+			break
+		}
+		names := byReason[reason]
+		shown, suffix := names, ""
+		if len(names) > completenessInventoryTableCap {
+			shown = names[:completenessInventoryTableCap]
+			suffix = fmt.Sprintf(" (+%d more)", len(names)-completenessInventoryTableCap)
+		}
+		parts = append(parts, fmt.Sprintf(
+			"codefit read %d table declaration(s) and deliberately did NOT model them — %s: %s%s. "+
+				"They are absent from the schema every DB and DW rule reads, so no rule saw them at all.",
+			len(names), reason, strings.Join(shown, ", "), suffix,
+		))
+	}
 	return strings.Join(parts, " ")
 }
 

@@ -109,6 +109,25 @@ type Dialect struct {
 	// It also gates whether CREATE PARTITION FUNCTION / CREATE PARTITION
 	// SCHEME statements are read at all: they exist only in this dialect.
 	PartitionSchemeOnClause bool
+
+	// HashPrefixedTempTables is a per-dialect DATUM (ADR 0043): does this
+	// dialect mark a TEMPORARY table by a '#' NAME PREFIX instead of a
+	// keyword?
+	//
+	// true ONLY for SQLServer. T-SQL has no TEMPORARY keyword at all: it
+	// writes "CREATE TABLE #Scratch (...)" for a session-local temporary table
+	// and "##Scratch" for a global one, so the TEMP/TEMPORARY keyword
+	// recognition that covers PostgreSQL and MySQL does nothing for it and a
+	// separate recognition is needed.
+	//
+	// It is a DATUM rather than an unconditional rule because '#' means
+	// nothing of the sort in the other two dialects: MySQL treats a bare '#'
+	// as a LINE COMMENT (see LineComments above), and a PostgreSQL table can
+	// legitimately be named "#weird" with quoting. Withholding either as
+	// "session-scoped" would be codefit deciding, on a lexical accident, that
+	// a persistent table is not part of the schema — a silent deletion, the
+	// exact failure this slice exists to end.
+	HashPrefixedTempTables bool
 }
 
 // LineComment is one line-comment prefix a dialect recognizes.
@@ -160,6 +179,7 @@ func Postgres() Dialect {
 
 		RoutineBodyEndsAtBatchSeparator: false,
 		PartitionSchemeOnClause:         false,
+		HashPrefixedTempTables:          false,
 	}
 }
 
@@ -189,6 +209,7 @@ func MySQL() Dialect {
 
 		RoutineBodyEndsAtBatchSeparator: false,
 		PartitionSchemeOnClause:         false,
+		HashPrefixedTempTables:          false,
 	}
 }
 
@@ -218,5 +239,6 @@ func SQLServer() Dialect {
 
 		RoutineBodyEndsAtBatchSeparator: true,
 		PartitionSchemeOnClause:         true,
+		HashPrefixedTempTables:          true,
 	}
 }
