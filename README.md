@@ -89,7 +89,7 @@ a linter already catches them and they are **out of scope**. codefit is the
 independent audit layer that validates AI-generated code is secure and correct
 **before** it merges.
 
-## Status — Phase 2 (the database dimension), OLAP still open
+## Status — Phase 2 (the database dimension), OLAP closed
 
 **Works today, on `main`, validated in real use against real backends:**
 
@@ -125,18 +125,32 @@ independent audit layer that validates AI-generated code is secure and correct
   schema it classifies as a
   warehouse it audits the **star-schema and slowly-changing-dimension shape** (a fact
   joining no dimension, a business key where a surrogate belongs, facts with no time
-  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed) plus a
-  **fact table with no columnar/analytic index** — the partitioning check is **not**
-  built yet. One structural fact is
+  dimension, an SCD-2 currency lookup no index serves, SCD-1 and SCD-2 mixed), a
+  **fact table with no columnar/analytic index**, and a **census of its fact tables for
+  declared table partitioning** — seven DW rules in all, with no OLAP rule left unbuilt.
+  One structural fact is
   affirmed (a table with no primary key); everything else is surface the agent reasons.
   Run it standalone with `codefit-scan-db`; it also runs inside `scan-all` as its own
   section with a per-dimension score (the code×schema cross runs in `scan-all` only).
   The rule inventory lives in [COVERAGE.md](COVERAGE.md).
   Dogfooded on real Prisma and SQL-DDL (Postgres/MySQL/T-SQL) backends.
 
-**On the roadmap (not yet in `main`):** the HTTP/SSE transport; the one remaining
-OLAP / data-warehouse rule — a partitioning check (the star-schema,
-slowly-changing-dimension and columnar/analytic-index rules already landed);
+**The Phase-2 acceptance criterion is met.** The PRD asks for `codefit-scan-db` to
+produce *verified real findings on a real project*. Measured on `main` through the
+real handler, over an untouched UTF-16LE `pg_dump` of a production Postgres backend:
+`measured: true`, 9 tables, structure proven for 9 of 9, **12 surface items, 0
+deterministic findings**, paradigm `oltp`. Every one of the 12 was hand-checked
+against the DDL — **0 false positives** — and the run also holds a verified *true
+negative*: the schema declares 11 foreign keys and the FK rule fires on 10, staying
+correctly silent on the eleventh, whose column a `UNIQUE` constraint already covers.
+Read the number honestly, though: that project exercises a **narrow slice** — 9
+tables, no views, procedures or triggers, nothing analytic — so only **3 of the 21
+DB/DW rules fired at all**; breadth is evidenced by the 26-corpus survey, not by this
+one project. And its `score` is **100** *alongside* those 12 items, which is correct
+by design (surface is a question for the agent, so it is never scored) but reads as
+"clean" to anyone who looks at the score first.
+
+**On the roadmap (not yet in `main`):** the HTTP/SSE transport;
 **literal values in the query model** — carrying the WHERE's literals so the
 cross can infer cardinality from usage (a `String` used as an enum, a `DateTime` used
 as a flag) and tell an equality filter from a range, the two field-observed limits of
@@ -413,7 +427,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. The main entry point. |
 | `codefit-scan-endpoint` | Full detail of one file on demand (to follow a `frontier_pending` endpoint). |
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). |
-| `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser. |
+| `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser — and equally when every configured schema source was found but none of them could be read, so an unreadable schema is never reported as a clean one. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
 | `codefit-surface-nplus1` | Enumerate the N+1 surface: query call sites sitting inside a loop, ordered by structural certainty (the cross-function frontier last, never dropped). |
 | `codefit-check-cves` | Check the project's dependencies against OSV.dev (free, no API key). Reads exact versions from lockfiles / `go.mod`; reports the vulnerable deps with id, severity and fixed version. |

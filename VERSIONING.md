@@ -62,6 +62,44 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`main`, unreleased — Phase 2.5 is feature-complete and its acceptance criterion is
+  met; no tag has been cut.** The newest tag is still `v0.2.5-alpha.2`; everything below
+  is on `main`, untagged, and every item in this bullet is therefore usable from `main`
+  and from nowhere else. Read the [CHANGELOG's `Unreleased`
+  section](CHANGELOG.md#unreleased) for the itemized list — the summary:
+  - **The DW-0xx family closed.** The SQL-DDL reducer now reads table partitioning into
+    the neutral model (`db.Table.Partitioning`), and **DW-020** censuses a warehouse's
+    fact tables for it — one item per schema, never one per table. That took
+    `dwrules.All()` to **seven** rules (DW-001/002/005/010/011/020/021) with **no DW-0xx
+    rule left unbuilt**, closing RF-03 and with it the last Phase-2 coverage debt.
+  - **The Phase-2 "done" criterion is satisfied.** The PRD asks that `codefit-scan-db`
+    produce verified real findings on a real project. Measured on `main` through the real
+    handler over an untouched UTF-16LE `pg_dump` of a production Postgres backend:
+    `measured: true`, 9 tables, 9 of 9 structurally proven, **12 surface items and 0
+    deterministic findings**, paradigm `oltp` — **0 false positives** on hand-verification
+    of all 12, plus a verified **true negative** (11 FKs declared, the FK rule fires on 10
+    and stays correctly silent on the one a `UNIQUE` constraint already covers). Scoped
+    honestly: that project is a **narrow slice** — 9 tables, no views, procedures or
+    triggers, nothing analytic — so only **3 of the 21 DB/DW rules fired**; the 26-corpus
+    survey, not this project, is what evidences breadth.
+  - **A parser-correctness run, most of it fixing false positives rather than adding
+    coverage.** Run-on `CREATE TABLE` statements are separated at the tail boundary; a
+    missing comma before a table-level key constraint no longer fabricates a
+    single-column key; a delimited type name (`[int]`, backticks, ANSI quotes) resolves
+    instead of falling back to `TypeUnknown`; `CREATE SEQUENCE` and views no longer
+    materialize phantom tables; body items anchor on their own source line; the
+    `CREATE TABLE` family gained an honest-abstention floor, with `UNLOGGED` modeled and
+    session-scoped TEMP forms withheld under a trace; BOM-marked sources are decoded; and
+    a schema source that contributes nothing to the model is now reported rather than
+    silently treated as clean. Across the 26-corpus survey the net effect was **938 → 873
+    items** with **no rule gaining items anywhere**. ADRs **0038–0047**.
+  - **⚠️ BREAKING for committed baselines.** Anchoring body items on their own source
+    line changes the baseline fingerprint of every column-anchored item, so existing
+    `.codefit-baseline` entries for those categories will re-appear as `new` on the first
+    scan after upgrading. Already recorded under `Unreleased` in the CHANGELOG.
+  - **Why no tag yet:** the phase is feature-complete, but cutting `v0.2.5` is a separate,
+    deliberate act — this document does not pre-announce it, per the "no invented
+    releases" rule.
 - **`v0.2.5-alpha.2` — still on the way to Phase 2.5; a correctness fix, not new coverage.**
   The database dimension stops concluding from parser silence. `DB-050` was affirming "no
   primary key" at confidence 1.0 over vendored DDL that declares the keys, because the
