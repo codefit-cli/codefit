@@ -522,7 +522,7 @@ not merely equivalent — that is the property the implementation is tested agai
 cache that could change the output would be a blind spot, not an optimization. Every file is
 still opened, still counted and still reported; the cache decides only what is **recomputed**.
 
-Three things worth knowing:
+Four things worth knowing:
 
 - **It exists so the full scan stays affordable, not for speed as such.** The full scan is
   the honest one: it is the only scan that can prune the baseline and the only one whose
@@ -531,9 +531,16 @@ Three things worth knowing:
 - **A new codefit binary invalidates everything, on purpose.** An entry is keyed on the
   analyzer's own bytes as well as the file's path and content, so a codefit that ships new
   rules can never serve you a verdict computed under the old ones. The cost of that
-  guarantee: **every new binary orphans the previous generation of entries and nothing
-  evicts them.** `rm -rf .codefit/cache` is always safe — it costs only time, which is
-  exactly what makes it different from the baseline — and you will need it now and then.
+  guarantee is that **every new binary orphans the previous generation of entries** — which
+  is why the store cleans up after itself.
+- **The store bounds itself, and only touches what it wrote.** Entries are grouped by the
+  binary that produced them, and opening the cache keeps the current group plus the two most
+  recently used others, drops entries untouched for 30 days, and clears the layout its
+  predecessor left behind. That is a **retention** bound, not a size limit: codefit does not
+  measure the directory or evict by size. The cleanup only ever recognises the two filename
+  shapes codefit writes itself, so **anything else you keep in `.codefit/cache` is never
+  touched, at any age**, and it is best effort — it can never be the reason a scan fails.
+  `rm -rf .codefit/cache` is still always safe; you just should not need it routinely.
 - **A cache failure is never an audit failure.** A missing, unreadable or corrupt entry just
   means the file gets analysed; a failed write is logged and the scan reports normally.
 

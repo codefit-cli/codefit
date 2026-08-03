@@ -2,6 +2,30 @@
 
 **Status:** Accepted · **Date:** 2026-08-03 · **Phase:** 3, thread H0, slice S2
 
+**Superseded in scope (2026-08-03) by
+[ADR 0051](0051-the-finding-store-is-bounded-by-generation-and-pruned-on-open.md).**
+All eight DECISIONS below are untouched and still hold. What is no longer true is a
+CONSEQUENCE this ADR accepted as the price of decision 2, and this ADR is not rewritten —
+read the following together with 0051:
+
+- **§Consequences "Every dev build orphans a whole generation of entries, and there is no
+  eviction" is FALSE as of slice S3.** Its diagnosis stands word for word — every rebuild
+  still mints a fresh generation for the entire tree, and every edit and every deleted file
+  still orphans an entry inside one. What is no longer true is the second half: **the
+  orphans are now collected.** Entries live under `Dir/<generation>/`, and `Open` keeps the
+  current generation plus the two most recently modified others, drops entries in the
+  current generation unwritten for 30 days, and removes the flat entries this text's layout
+  left behind.
+- **The "No eviction, no size bound" bullet under §"Declared, not forgotten" is spent.**
+  Eviction exists. A *size* bound still does not: 0051 caps what is retained (three
+  generations, 30 days), not how many bytes that comes to, and it says so.
+- **"A bounded store is a later concern, deliberately not smuggled into this slice" came
+  true in the narrowest possible way** — it was the very next slice. The sentence was right
+  to keep it out of S2 and wrong about the horizon.
+- **`rm -rf .codefit/cache` stays safe and stays the escape hatch**, and that is the one
+  line of this consequence that needed no correction at all. What changes is the warning
+  attached to it: it will *not* "be needed more often than 'entries accumulate' suggests".
+
 ## Context
 
 ADR 0048 decided **which files get audited**. This decides **which results get

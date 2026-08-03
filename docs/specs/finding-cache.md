@@ -138,8 +138,10 @@ out for an explicit yes/no rather than buried in a diff.**
 
   > **Update — this limit was LIFTED in slice S3, and "a later concern" turned out to be
   > the next one.** Recorded here rather than deleted, because the point of a written
-  > contract is lost if it is edited to match whatever was built; see ADR 0050 and the R2
-  > note above.
+  > contract is lost if it is edited to match whatever was built; see ADR 0051 (which
+  > supersedes the matching "no eviction" consequence of ADR 0050) and the R2 note above.
+  > What is lifted is EVICTION; a **size** bound is still not claimed — S3 caps what is
+  > retained, not how many bytes that comes to.
   >
   > What made it urgent is the analyzer identity R2 put in the key. Every codefit build
   > mints a fresh GENERATION of entries for the *whole tree* and orphans the previous
@@ -153,7 +155,8 @@ out for an explicit yes/no rather than buried in a diff.**
   > `<gen>` is the first 16 hex chars of the analyzer identity — a *label*, not the boundary
   > that separates two analyzers (the full identity is still inside the key hash). Sixteen
   > rather than 64 keeps `.codefit/cache/<gen>/<key>.json` clear of Windows' MAX_PATH on a
-  > deep project root. On `Open`, once per process: the current generation is kept ALWAYS,
+  > deep project root. On `Open`, once per process **per generation directory**: the current
+  > generation is kept ALWAYS,
   > plus the 2 most recently modified others (3 in all — not 1, because a developer
   > alternating between an installed binary and a dev build would otherwise have each run
   > destroy the other's generation); entry files in the current generation older than 30 days

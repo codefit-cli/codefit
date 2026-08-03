@@ -96,9 +96,17 @@ stage" — it does **not** claim `0.1.0` is done.
   is the **SHA-256 of the running executable** rather than a version string — `version.Version`
   is the constant `"v0.1.0-dev"` for any plain `go build`, so a version key would go stale
   first for the rule author, while the binary's own bytes cover every input that can change a
-  verdict. The accepted price, stated: **every new analyzer binary orphans a whole generation
-  of entries and nothing evicts them**; `rm -rf .codefit/cache` is always safe and will be
-  needed. ADR **0050**; the contract is `docs/specs/finding-cache.md`. Also removed: the
+  verdict. That key has an arithmetic — **every new analyzer binary orphans a whole
+  generation of entries** — so the **store bounds itself**: entries live under a generation
+  directory, and opening the cache keeps the current generation plus the two most recently
+  modified others, drops entries in the current generation unwritten for 30 days, and
+  removes the flat entries of the previous layout. It is a **retention** bound, not a size
+  one: codefit measures no bytes and evicts nothing by size, and the prune only ever touches
+  the two filename shapes it writes itself, so nothing else in `.codefit/cache` is at risk at
+  any age. `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Neither the scope
+  nor the cache has been exercised on a real project — tests and the CI self-audit only —
+  and no speedup has been measured anywhere.** ADRs **0050** and **0051**; the contract is
+  `docs/specs/finding-cache.md`. Also removed: the
   **LLM-era scaffolding**. `internal/core/pipeline`
   was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot
   deleted that layer on the package's second day and all three implemented layers went on to
