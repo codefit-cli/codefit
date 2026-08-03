@@ -46,6 +46,12 @@ codefit-report.html
 # Agent tooling (skill registry, local only)
 .atl/
 
+# Per-machine agent settings (tool permissions, local paths) — never committed.
+# The skill `codefit init` generates is NOT ignored: whether to commit it is an
+# open decision, and it must travel with a test tying it to RenderSkill so the
+# committed file cannot drift from the template that produces it.
+**/.claude/settings.local.json
+
 # Engram project memory: versionada a mano en main (commit de infra), NO por-feature.
 # Ignorada para que `engram sync` no la re-stagee en branches de trabajo (el enredo).
 .engram/
