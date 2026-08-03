@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 )
 
 // secScope is the category set the security sensor owns — the scope of a
@@ -40,7 +41,7 @@ func TestDiff_ForeignItem_SensorDidNotRun_NotGone(t *testing.T) {
 	// Only security ran: it observes its item; scope is security categories only.
 	res := baseline.Diff(prev,
 		[]baseline.Observed{{FP: "secfp", Category: "security", File: "a.ts", Affirms: true}},
-		secScope())
+		secScope(), scope.Full())
 
 	if inGone(res, "dbfp") {
 		t.Error("foreign db item must NOT be gone when its sensor did not run")
@@ -61,9 +62,9 @@ func TestDiff_ForeignItem_SensorRan_IsGone(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{
 		{FP: "dbfp", Category: "db-fk-no-index", File: "schema.prisma"},
 	}}
-	scope := secScope()
-	scope["db-fk-no-index"] = true // the db sensor ran this pass too
-	res := baseline.Diff(prev, nil, scope)
+	catScope := secScope()
+	catScope["db-fk-no-index"] = true // the db sensor ran this pass too
+	res := baseline.Diff(prev, nil, catScope, scope.Full())
 	if !inGone(res, "dbfp") {
 		t.Error("an in-scope item that is not observed IS gone")
 	}
@@ -76,7 +77,7 @@ func TestDiff_EmptyScope_NothingGone(t *testing.T) {
 		{FP: "a", Category: "security", File: "a.ts"},
 		{FP: "b", Category: "overfetch", File: "b.ts"},
 	}}
-	res := baseline.Diff(prev, nil, map[string]bool{})
+	res := baseline.Diff(prev, nil, map[string]bool{}, scope.Full())
 	if res.Counts.Gone != 0 {
 		t.Errorf("empty scope: Gone = %d, want 0", res.Counts.Gone)
 	}
@@ -97,7 +98,7 @@ func TestDiff_SecurityOnly_Unchanged(t *testing.T) {
 			{FP: "known", Category: "overfetch", File: "a.ts"},
 			{FP: "new", Category: "idor", File: "c.ts"},
 		},
-		secScope())
+		secScope(), scope.Full())
 
 	if res.State["known"] != baseline.StateKnown {
 		t.Errorf("known state = %q, want known", res.State["known"])
@@ -120,7 +121,7 @@ func TestDiff_ChangedPairing_WithinScope(t *testing.T) {
 	}}
 	res := baseline.Diff(prev,
 		[]baseline.Observed{{FP: "newfp", Category: "overfetch", File: "a.ts"}},
-		secScope())
+		secScope(), scope.Full())
 	if res.State["newfp"] != baseline.StateChanged {
 		t.Errorf("state = %q, want changed (paired with the gone item at same file+category)", res.State["newfp"])
 	}

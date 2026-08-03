@@ -15,6 +15,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/query"
 	"github.com/codefit-cli/codefit/internal/core/report"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/providers"
@@ -166,7 +167,7 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 			scanned[c] = true
 		}
 	}
-	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned)
+	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned, scope.Full())
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
