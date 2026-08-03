@@ -1,0 +1,26 @@
+# Line endings are part of codefit's contract, not a per-checkout detail.
+#
+# codefit's SQL/Prisma/TypeScript parsers and its golden JSON baselines compare
+# bytes. Without this file, a checkout with core.autocrlf=true materializes every
+# fixture with CRLF and the same commit behaves differently than it does on CI:
+# statement terminators go uncounted, ALTER TABLE statements stop reducing,
+# StructureProven() flips to false, and goldens diff on nothing but the newline.
+# Pinning LF makes every checkout byte-identical to the tree CI tests.
+#
+# The stored blobs are already LF, so this file changes checkout behaviour only —
+# it produces no content diff. An existing checkout does NOT pick it up
+# retroactively; run `git add --renormalize .` (or take a fresh clone) once.
+* text=auto eol=lf
+
+# Fixtures whose exact bytes a parser or a golden depends on. Redundant with the
+# rule above on purpose: it names what breaks if that rule is ever narrowed.
+*.sql    text eol=lf
+*.prisma text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.json   text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+
+# Binary: never rewrite these bytes.
+*.webp binary
