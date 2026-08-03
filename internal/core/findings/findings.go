@@ -140,11 +140,27 @@ type SurfaceItem struct {
 // findings, the surface to be reasoned by the agent, the dimension score, how
 // long it took, and an error string if it failed (kept as a string so partial
 // results survive serialization).
+//
+// AuditableTotal and AuditedFiles are the walk's own account of what it looked
+// at, and they exist so a PARTIAL audit cannot pass itself off as a full one. A
+// sensor that walks the project reports both on every run; under a full audit
+// they agree. A sensor whose inputs are configured rather than walked (the DB
+// dimension) leaves them zero — its "did it run at all" question is answered by
+// its own measured/not-measured flag, not by a file census.
 type SensorResult struct {
-	Sensor     string        `json:"sensor"`
-	Score      int           `json:"score"`
-	Findings   []Finding     `json:"findings"`
-	Surface    []SurfaceItem `json:"surface,omitempty"`
-	DurationMs int64         `json:"duration_ms"`
-	Error      string        `json:"error,omitempty"`
+	Sensor   string        `json:"sensor"`
+	Score    int           `json:"score"`
+	Findings []Finding     `json:"findings"`
+	Surface  []SurfaceItem `json:"surface,omitempty"`
+	// AuditableTotal is how many files the walk COULD have audited — every file
+	// matching the provider's extensions outside a skipped directory, counted
+	// whether or not the scope let it be analysed. Narrowing must not shrink the
+	// denominator, or "3 of 412" becomes "3 of 3" and the narrowing disappears.
+	AuditableTotal int `json:"auditable_total"`
+	// AuditedFiles are the project-relative paths the walk actually ANALYSED,
+	// sorted. It is the difference between "audited and clean" and "never
+	// looked": a requested path missing from here was never examined.
+	AuditedFiles []string `json:"audited_files,omitempty"`
+	DurationMs   int64    `json:"duration_ms"`
+	Error        string   `json:"error,omitempty"`
 }

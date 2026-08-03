@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ export async function listOrders(customerId: string) {
 		if !ok {
 			t.Fatal("the typescript provider no longer implements QueryExtractor — this test would silently measure nothing")
 		}
-		return len(collectQueryFilters(root, p.FileExtensions(), qe))
+		return len(collectQueryFilters(root, p.FileExtensions(), qe, scope.Full()))
 	}
 
 	want := extract("orders.ts", []byte(src))

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,7 +66,7 @@ database:
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, res, ran := runDBForScanAll(root, "typescript", cfg, crossrules.All())
+	_, res, ran := runDBForScanAll(root, "typescript", cfg, crossrules.All(), scope.Full())
 	if !ran {
 		t.Fatal("db did not run")
 	}

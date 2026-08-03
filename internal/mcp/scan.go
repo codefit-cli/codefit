@@ -8,6 +8,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/coverage"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/sensors/security"
 )
@@ -33,7 +34,7 @@ type ScanResponse struct {
 // sensor (the deterministic rules + the surface queries, already wired there),
 // and returns its result — no detection logic lives here.
 func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
-	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language))
+	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language), scope.Full())
 	if err != nil {
 		return ScanResponse{}, err
 	}
@@ -48,7 +49,9 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 // runSecurity resolves the provider (recognizing the project's registered authz
 // helpers) and runs the security sensor over the project root — the shared body of
 // codefit-scan-security, -scan-all, and -scan-endpoint.
-func runSecurity(root, language string, helpers []string) (findings.SensorResult, error) {
+// scp is layer 0: the files this pass may analyse. The walk still counts every
+// auditable file, so the caller can say how much of the project it left out.
+func runSecurity(root, language string, helpers []string, scp scope.Scope) (findings.SensorResult, error) {
 	provider := providerForLanguage(language, helpers)
 	if provider == nil {
 		return findings.SensorResult{}, fmt.Errorf("unsupported language %q", language)
@@ -60,7 +63,7 @@ func runSecurity(root, language string, helpers []string) (findings.SensorResult
 	if err != nil {
 		return findings.SensorResult{}, fmt.Errorf("loading project config: %w", err)
 	}
-	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg, Scope: scp}
 	res, err := security.New(provider).Run(ctx)
 	if err != nil {
 		return findings.SensorResult{}, fmt.Errorf("security scan: %w", err)

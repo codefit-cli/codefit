@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,7 @@ func TestCrossSeam_CollectsFiltersButProducesNothing(t *testing.T) {
 	}
 
 	// The walk + extraction are live: the code's where clause is collected.
-	filters := collectQueryFilters(root, provider.FileExtensions(), ex)
+	filters := collectQueryFilters(root, provider.FileExtensions(), ex, scope.Full())
 	if len(filters) == 0 {
 		t.Fatal("collectQueryFilters found no filter — the walk/extraction seam is not live")
 	}
@@ -47,7 +48,7 @@ func TestCrossSeam_CollectsFiltersButProducesNothing(t *testing.T) {
 	// The seam is a no-op with an empty rule set: a schema that WOULD reconcile still
 	// yields nothing.
 	schema := &db.Schema{Tables: []db.Table{{Name: "User", Columns: []db.Column{{Name: "email"}}}}}
-	f, s := runCross(root, "typescript", schema, nil, nil)
+	f, s := runCross(root, "typescript", schema, nil, nil, scope.Full())
 	if f != nil || s != nil {
 		t.Errorf("runCross with an empty rule set must yield nothing, got findings=%v surface=%v", f, s)
 	}
@@ -55,8 +56,8 @@ func TestCrossSeam_CollectsFiltersButProducesNothing(t *testing.T) {
 
 // TestRunCross_NilSchema — no schema, no cross (a project with no database).
 func TestRunCross_NilSchema(t *testing.T) {
-	if f, s := runCross(t.TempDir(), "typescript", nil, nil, nil); f != nil || s != nil {
-		t.Error("runCross(nil schema) must yield nothing")
+	if f, s := runCross(t.TempDir(), "typescript", nil, nil, nil, scope.Full()); f != nil || s != nil {
+		t.Error("runCross(nil schema, scope.Full()) must yield nothing")
 	}
 }
 
@@ -156,7 +157,7 @@ func TestCrossSeam_DBResultByteIdenticalOverPopulated(t *testing.T) {
 	// The cross must actually RUN over real filters, not skip vacuously.
 	provider := providerForLanguage("typescript", nil)
 	ex, _ := provider.(providers.QueryExtractor)
-	if got := collectQueryFilters(root, provider.FileExtensions(), ex); len(got) == 0 {
+	if got := collectQueryFilters(root, provider.FileExtensions(), ex, scope.Full()); len(got) == 0 {
 		t.Fatal("fixture must exercise the cross: no query filters collected from the code")
 	}
 
@@ -164,7 +165,7 @@ func TestCrossSeam_DBResultByteIdenticalOverPopulated(t *testing.T) {
 	// the MERGE mechanism (appending the runner's output leaves the db result
 	// byte-identical) independently of what crossrules.All() holds — so it survives
 	// DB-010 and every future rule landing in All().
-	_, act, ran := runDBForScanAll(root, "typescript", cfg, nil)
+	_, act, ran := runDBForScanAll(root, "typescript", cfg, nil, scope.Full())
 	if !ran {
 		t.Fatal("runDBForScanAll did not run")
 	}

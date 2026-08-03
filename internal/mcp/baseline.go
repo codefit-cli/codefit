@@ -130,13 +130,13 @@ func observedFrom(results ...findings.SensorResult) []baseline.Observed {
 // unions; each sensor declares its own categories, so a new sensor is scoped
 // automatically without touching this code.
 func scannedCategories(ss ...sensors.Sensor) map[string]bool {
-	scope := map[string]bool{}
+	categories := map[string]bool{}
 	for _, s := range ss {
 		for _, c := range s.OwnedCategories() {
-			scope[c] = true
+			categories[c] = true
 		}
 	}
-	return scope
+	return categories
 }
 
 // recognizedHelpers loads the project's registered authz helpers for a language,
@@ -368,7 +368,10 @@ type BaselinePruneResponse struct {
 func HandleBaselinePrune(req BaselinePruneRequest) (BaselinePruneResponse, error) {
 	// Prune compares fingerprints (category+file+snippet), which do not depend on
 	// the recognized authz helpers — so the built-in set is enough here.
-	res, err := runSecurity(req.Root, req.Language, nil)
+	// The prune re-scan is ALWAYS full: codefit-baseline-prune accepts no scope
+	// (R5 of the change-scope spec). Scanning may be cheap and partial; forgetting
+	// may not — deleting audit memory requires having looked at everything.
+	res, err := runSecurity(req.Root, req.Language, nil, scope.Full())
 	if err != nil {
 		return BaselinePruneResponse{}, err
 	}
