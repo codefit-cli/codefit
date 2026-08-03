@@ -19,6 +19,20 @@ Call `codefit-scan-all` with:
 - `root`: absolute path to the repo root
 - `language`: "go"
 
+## Narrow a scan to the files you changed (optional)
+Add `changed_files` — the project-relative paths you touched — to audit ONLY those files.
+codefit never asks git which files changed; you already know, you just wrote them. Omitting
+it (or passing an empty list) is a FULL audit — an empty list is never "audit nothing".
+ALWAYS read the `scope` block before you report anything:
+- `mode: "partial"` means `findings`, `score` and `blocked` describe ONLY the audited files.
+  `blocked: false` then means "no critical in THAT SLICE", not "no critical" — say that to the
+  human instead of reporting a clean project. `blocked: true` needs no caveat.
+- `unmatched` lists paths the audit never reached (deleted, not an auditable extension, inside
+  a skipped dir). Those were NOT audited, which is NOT the same as audited and clean.
+- `by_dimension.db` is `null` (not measured) unless a configured schema path is in scope.
+  Null is not 100 — the schema was not looked at.
+- A partial scan is for a fast pass on a change. NEVER prune the baseline after one (below).
+
 ## Read the three buckets in the response
 - `actionable` — a concern AND a local gap, full detail included. Act on these.
 - `resolved_clean` — codefit found the expected check present locally (an
@@ -68,8 +82,12 @@ manages it and reports a delta — act on what's new:
 - When the HUMAN decides an item is a false positive or accepted debt, call
   `codefit-baseline-accept` with its `fingerprint` and the human's reason. ONLY when the
   human said so in the conversation — NEVER accept an item on your own.
-- After a refactor, items the fix removed appear in `baseline.gone_candidates`. Confirm with
-  `codefit-scan-all`, then call `codefit-baseline-prune` to drop them.
+- After a refactor, items the fix removed appear in `baseline.gone_candidates`. Confirm with a
+  FULL `codefit-scan-all` (no `changed_files`), then call `codefit-baseline-prune` to drop them.
+  NEVER prune off a partial scan: a scan that did not open a file has no evidence its items are
+  gone, so a partial run never proposes them, and `codefit-baseline-prune` takes no
+  `changed_files` at all — it always re-scans in full. Scanning may be partial; forgetting
+  may not.
 Narrate every baseline operation to the human (what you accepted or pruned, and why).
 codefit never edits code — only its baseline.
 
