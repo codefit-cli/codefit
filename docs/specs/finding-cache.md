@@ -47,6 +47,16 @@ stale cache would bite first.
 identity is the SHA-256 of the running executable** (`os.Executable()`, hashed once per
 process and memoized).
 
+> **Correction — this formula was WRONG as written, and shipped with a third component.**
+> It omits the file's project-relative **path**. Two files with identical bytes are an
+> ordinary thing (this repository's own fixtures contain them), and under this formula they
+> would share one entry: the second file would be reported carrying the first file's path,
+> with a colliding baseline fingerprint — a direct violation of R1, which dominates. The
+> shipped key is `sha256(analyzer ‖ path ‖ content)`, mutation-proven by a test that fails
+> when the path is dropped. Recorded here rather than silently rewritten, because the point
+> of a written contract is lost if it is edited to match whatever was built; see ADR 0050.
+> The rest of R2 is unchanged and shipped as stated.
+
 Why this is right rather than clever:
 
 - The analysis is a pure function of *(file bytes, analyzer)*. The key names both. Nothing
