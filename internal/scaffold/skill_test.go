@@ -143,6 +143,62 @@ func TestSkillTeachesCustomAuthzHelpers(t *testing.T) {
 	}
 }
 
+// The database dimension shipped across v0.2.0–v0.2.5 while the skill still
+// described only endpoint security. The skill must teach scan-db, and it must
+// teach the honest-abstention contract — `measured: false` is codefit saying it
+// could not read the schema, which is the opposite of "clean".
+func TestSkillTeachesDatabaseDimension(t *testing.T) {
+	_, body := renderSkill(t, tsInfo())
+	for _, must := range []string{
+		"codefit-scan-db",
+		"measured",
+		"schema_paths",
+	} {
+		if !strings.Contains(body, must) {
+			t.Errorf("skill must teach the database dimension: missing %q", must)
+		}
+	}
+	low := strings.ToLower(body)
+	if !strings.Contains(low, "never a clean") && !strings.Contains(low, "not \"clean\"") && !strings.Contains(low, "not clean") {
+		t.Errorf("skill must say measured:false is NOT a clean result, got:\n%s", body)
+	}
+}
+
+// The DB section is rendered UNCONDITIONALLY. Detect() only recognizes a database
+// through enrichTypeScript (Prisma/Drizzle/TypeORM) — SQL-DDL/Flyway migrations
+// are not detected at all — so gating the section on detection would hide the
+// dimension on exactly the projects the SQL-DDL parser was built for.
+func TestSkillTeachesDatabaseEvenWhenNoORMDetected(t *testing.T) {
+	_, body := renderSkill(t, scaffold.ProjectInfo{Name: "flyway-app", Language: "go"})
+	if !strings.Contains(body, "codefit-scan-db") {
+		t.Errorf("the DB section must render with no ORM detected (SQL-DDL projects are undetectable today), got:\n%s", body)
+	}
+}
+
+// Progressive disclosure loads the skill from the frontmatter alone. A description
+// that speaks only of endpoints means a database task never loads the skill at
+// all — the agent does not see an incomplete skill, it sees none.
+func TestSkillDescriptionTriggersOnDatabaseWork(t *testing.T) {
+	front, _ := renderSkill(t, tsInfo())
+	desc, _ := front["description"].(string)
+	low := strings.ToLower(desc)
+	if !strings.Contains(low, "database") && !strings.Contains(low, "schema") {
+		t.Errorf("description must also trigger on database/schema work, got %q", desc)
+	}
+}
+
+// Dependency CVEs are unreachable from scan-all (it does not run them), so an
+// agent that only knows scan-all never checks them. The coverage manifest is how
+// the agent learns codefit's declared limits instead of assuming them.
+func TestSkillTeachesCVEsAndCoverage(t *testing.T) {
+	_, body := renderSkill(t, tsInfo())
+	for _, must := range []string{"codefit-check-cves", "codefit-coverage"} {
+		if !strings.Contains(body, must) {
+			t.Errorf("skill must mention %q", must)
+		}
+	}
+}
+
 // RenderSkill is exported and may be called with no detected language; it must
 // still produce valid, exact commands (defaulting the baked language).
 func TestSkillEmptyLanguageDefaults(t *testing.T) {

@@ -14,10 +14,20 @@ import (
 //
 // The frontmatter follows the Anthropic Agent Skills spec: name + description.
 // The description leads with trigger words so progressive disclosure loads the
-// skill only when the task is about auditing endpoints.
+// skill only when the task is one codefit audits — endpoints OR a database
+// schema. The trigger set is part of the contract, not decoration: a description
+// that names only endpoints means a database task never loads the skill at all.
+//
+// This template is an AGENT-FACING SOURCE, like the MCP tool descriptions in
+// internal/mcp/server.go: it is what an agent reads BEFORE choosing a tool, so a
+// capability missing here is a capability the agent never learns exists. It fell
+// two phases behind once — the DB dimension shipped across v0.2.0–v0.2.5 while
+// this template still described only endpoint security. TestSkillNamesEveryRegisteredTool
+// (internal/mcp) is the lock: every tool NewServer registers must be named here
+// or carry a declared reason for staying out.
 var skillTemplate = template.Must(template.New("skill").Parse(`---
 name: ` + SkillName + `
-description: Audit AI-generated code for security flaws agents miss — IDOR, broken authorization, data over-fetching. Use when reviewing API endpoints or route handlers, or before merging AI-written backend code.
+description: Audit AI-generated code for security flaws agents miss — IDOR, broken authorization, data over-fetching — and for database schema risks in a Prisma schema or SQL migrations. Use when reviewing API endpoints or route handlers, auditing a database schema, or before merging AI-written backend code.
 ---
 
 # codefit — audit AI-generated code
@@ -52,6 +62,27 @@ For each ` + "`frontier_pending`" + ` entry, call ` + "`codefit-scan-endpoint`" 
 Then reason over the returned surface to decide if the concern is real. Each surface
 item names WHAT to check (an id→resource lookup, an authz decision, a returned object)
 and WHERE — codefit does not decide if it's a vuln; you do.
+
+## Audit the database schema
+Call ` + "`codefit-scan-db`" + ` with ` + "`{root, language: \"{{.Language}}\"}`" + ` to audit the schema on its
+own. ` + "`codefit-scan-all`" + ` runs it too, but ONLY when ` + "`database.schema_paths`" + ` is set in
+` + "`.codefit.yaml`" + `. It reads a Prisma ` + "`schema.prisma`" + ` OR a directory of SQL-DDL/Flyway
+migrations (PostgreSQL, MySQL, SQL Server), and classifies the schema as transactional or
+a warehouse — on a warehouse it adds the star-schema/SCD, columnar-index and partitioning
+checks.
+- A table with no primary key is deterministic. Everything else — foreign keys with no
+  covering index, duplicate/redundant indexes, sensitive columns in the clear, risks in
+  procedure/trigger bodies — is SURFACE: yours to reason about, exactly like the endpoint
+  surface.
+- ` + "`measured: false`" + ` means codefit could NOT read the schema (none configured, no parser for
+  it, or every source unreadable). That is NOT clean — read the ` + "`note`" + `, fix the config, re-run.
+
+## Dependencies and declared limits
+- ` + "`codefit-check-cves`" + ` ` + "`{root}`" + ` — known CVEs in dependencies via OSV.dev, read from exact
+  lockfile versions. ` + "`codefit-scan-all`" + ` does NOT run it; call it separately.
+- ` + "`codefit-coverage`" + ` ` + "`{language}`" + ` — what codefit audits deterministically, what it maps as
+  surface, and what it does NOT cover. Read it before telling the human something is out
+  of scope; do not assume the boundary.
 
 ## Baseline (don't re-review what's already tracked)
 codefit records the audited surface in ` + "`.codefit-baseline`" + ` (committed). ` + "`codefit-scan-all`" + `
