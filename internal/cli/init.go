@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/scaffold"
@@ -95,7 +96,7 @@ func formatReport(res scaffold.Result) string {
 	if info.ORM != "" {
 		db := info.ORM
 		if len(info.SchemaPaths) > 0 && info.DBType != "" {
-			db = fmt.Sprintf("%s  (%s → %s)", info.ORM, info.SchemaPaths[0], info.DBType)
+			db = fmt.Sprintf("%s  (%s → %s)", info.ORM, reportPath(info.SchemaPaths[0]), info.DBType)
 		}
 		fmt.Fprintf(&b, "  orm         %s\n", db)
 	}
@@ -106,30 +107,45 @@ func formatReport(res scaffold.Result) string {
 	fmt.Fprintln(&b, "\nConfig:")
 	switch res.ConfigAction {
 	case scaffold.ConfigCreated:
-		fmt.Fprintf(&b, "  %s  (project config — commit this)\n", res.ConfigPath)
+		fmt.Fprintf(&b, "  %s  (project config — commit this)\n", reportPath(res.ConfigPath))
 	case scaffold.ConfigOverwritten:
-		fmt.Fprintf(&b, "  %s  (regenerated — commit this)\n", res.ConfigPath)
+		fmt.Fprintf(&b, "  %s  (regenerated — commit this)\n", reportPath(res.ConfigPath))
 	case scaffold.ConfigSkipped:
-		fmt.Fprintf(&b, "  %s already exists; left unchanged (use --force to regenerate)\n", res.ConfigPath)
+		fmt.Fprintf(&b, "  %s already exists; left unchanged (use --force to regenerate)\n", reportPath(res.ConfigPath))
 	}
 
 	if res.UsedFallback {
 		fmt.Fprintln(&b, "\nNo known agents detected. Skill written to the standard location:")
 		for _, s := range res.Skills {
-			fmt.Fprintf(&b, "  %s\n", s.Path)
+			fmt.Fprintf(&b, "  %s\n", reportPath(s.Path))
 		}
 		fmt.Fprintln(&b, "Install it manually for your agent, or with `npx skills`.")
 	} else {
 		fmt.Fprintf(&b, "\nAgents detected: %s\n", strings.Join(agentNames(res.Skills), ", "))
 		fmt.Fprintln(&b, "Skill written to:")
 		for _, s := range res.Skills {
-			fmt.Fprintf(&b, "  %s\n", s.Path)
+			fmt.Fprintf(&b, "  %s\n", reportPath(s.Path))
 		}
 	}
 
 	fmt.Fprintln(&b, "\nNext: connect codefit over MCP (see README → \"Connect codefit\").")
 	return b.String()
 }
+
+// reportPath renders a path the way codefit spells the paths it emits: with
+// forward slashes, on every OS.
+//
+// The scaffold works in host paths — findPrismaSchema returns
+// filepath.FromSlash(...), and the skill writers join with the OS separator — so
+// on Windows these arrive here as "prisma\schema.prisma" and
+// ".claude\skills\codefit\SKILL.md". Printing them that way makes init
+// contradict itself: RenderConfig slash-normalizes the same schema path into the
+// .codefit.yaml written by the same run ("paths are slash-normalized so the
+// committed file is portable across operating systems"), and every path codefit
+// puts in a finding is filepath.ToSlash'd before it reaches the agent. The
+// report is the same product speaking about the same files, so it uses the same
+// spelling — and stays copy-pasteable into the config and into docs.
+func reportPath(p string) string { return filepath.ToSlash(p) }
 
 func agentNames(skills []scaffold.SkillWrite) []string {
 	out := make([]string, len(skills))

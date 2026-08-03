@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -79,9 +80,18 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 }
 
 // buildCodefit builds the codefit binary to a temp path for the e2e test.
+//
+// The .exe suffix is required, not cosmetic. `go build -o <path>` writes exactly
+// <path> and appends nothing, and Windows resolves an executable by extension:
+// without it the build succeeds and the spawn then fails with "executable file
+// not found in %PATH%" for a file that is sitting right there.
 func buildCodefit(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "codefit")
+	name := "codefit"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	out, err := exec.Command("go", "build", "-o", bin, "github.com/codefit-cli/codefit/cmd/codefit").CombinedOutput()
 	if err != nil {
 		t.Fatalf("building codefit: %v\n%s", err, out)

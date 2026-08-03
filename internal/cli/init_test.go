@@ -19,12 +19,23 @@ func TestInitCmdHasFlags(t *testing.T) {
 	}
 }
 
+// TestFormatReportCreatedWithAgents pins that the report spells every path it
+// prints with forward slashes, whatever the host separator is.
+//
+// The scaffold hands formatReport NATIVE paths — findPrismaSchema returns
+// filepath.FromSlash(...) and the skill writers join with the OS separator — so
+// the filepath.FromSlash calls below are what the product really passes on
+// Windows, not a contrivance. Slash is codefit's canonical spelling for a path
+// it emits: RenderConfig slash-normalizes the very same schema path into the
+// .codefit.yaml written in the same run, so a report saying
+// "prisma\schema.prisma" would contradict the config it just generated.
 func TestFormatReportCreatedWithAgents(t *testing.T) {
 	res := scaffold.Result{
 		Info: scaffold.ProjectInfo{
 			Name: "bitacora", Language: "typescript", Framework: "next",
 			ORM: "prisma", DBType: "postgresql",
-			SchemaPaths: []string{"prisma/schema.prisma"}, RouteHandlers: 34,
+			SchemaPaths:   []string{filepath.FromSlash("prisma/schema.prisma")},
+			RouteHandlers: 34,
 		},
 		ConfigPath:   ".codefit.yaml",
 		ConfigAction: scaffold.ConfigCreated,
@@ -38,11 +49,18 @@ func TestFormatReportCreatedWithAgents(t *testing.T) {
 	for _, want := range []string{
 		"typescript", "next", "prisma", "postgresql", "34",
 		".codefit.yaml", "OpenCode", "Claude Code",
+		"prisma/schema.prisma",
 		".opencode/skills/codefit/SKILL.md", ".claude/skills/codefit/SKILL.md",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n---\n%s", want, out)
 		}
+	}
+	// No path the report prints may carry a host separator. Asserting the
+	// absence too keeps the check from passing on a report that happens to
+	// contain both spellings.
+	if strings.Contains(out, `\`) {
+		t.Errorf("report must not print backslash-separated paths\n---\n%s", out)
 	}
 }
 

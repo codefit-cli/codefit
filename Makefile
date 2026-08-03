@@ -14,6 +14,13 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILD_DATE  := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VPKG        := github.com/codefit-cli/codefit/internal/version
+# Host executable suffix: ".exe" on Windows, empty everywhere else. `go build -o`
+# writes exactly the path it is given and appends nothing, and Windows resolves
+# an executable by extension — so without this `make build` on Windows produces a
+# bin/codefit that cannot be run. GOEXE is Go's own answer for this and needs no
+# conditional. cross-compile below does NOT use it: those targets are per-GOOS and
+# already spell their own suffix.
+EXE         := $(shell go env GOEXE)
 LDFLAGS     := -s -w \
 	-X $(VPKG).Version=$(VERSION) \
 	-X $(VPKG).Commit=$(COMMIT) \
@@ -30,7 +37,7 @@ export CGO_ENABLED := 0
 .PHONY: build test lint cross-compile clean
 
 build:
-	go build -tags "$(TAGS)" -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) $(PKG)
+	go build -tags "$(TAGS)" -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)$(EXE) $(PKG)
 
 test:
 	go test ./...

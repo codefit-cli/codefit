@@ -71,6 +71,45 @@ database content, and a skill file already written stays stale until it is regen
   reached. A doc that declares capability and is not in the map falls out of the
   documentation close, which is exactly how this one drifted for two phases.
 
+---
+
+**`go test ./...` did not pass on a Windows checkout.** Eleven tests across `internal/cli`
+and `internal/providers/sqlddl` failed on a clean clone of `main`, while the identical tree
+was green on Linux CI. None of it was a fault in what codefit *audits*: the causes were a
+missing `.gitattributes`, path separators, and a missing `.exe`. Two were test defects and
+are not listed here; the separator one was not, and is the first entry below.
+
+### Fixed
+
+- **`codefit init` now reports paths with forward slashes on every OS.** On Windows the
+  report printed `.claude\skills\codefit\SKILL.md` and `prisma\schema.prisma` while writing
+  `prisma/schema.prisma` into the `.codefit.yaml` it generated **in the same run** — the
+  report and the config disagreed about the spelling of the same file. Slash is codefit's
+  canonical spelling for a path it emits: `RenderConfig` documents that paths are
+  slash-normalized "so the committed file is portable across operating systems", and every
+  path codefit puts in a finding is `filepath.ToSlash`'d before an agent sees it. This was a
+  **product** defect, not a test expectation: the test already fed native separators and
+  already asserted forward slashes, but `filepath.FromSlash` is the identity on Linux, so
+  the contract was written down and never actually exercised.
+- **`make build` produces a runnable binary on Windows.** It wrote `bin/codefit` with no
+  suffix; `go build -o` appends nothing, and Windows resolves executables by extension. The
+  suffix now comes from `go env GOEXE`, so it stays empty on Linux and macOS.
+  `make cross-compile` is unchanged — its targets are per-`GOOS` and already spell their own.
+
+### Added
+
+- **A `.gitattributes` pinning LF.** The repo had none, so on a checkout with
+  `core.autocrlf=true` every tracked text file materialized with CRLF — 485 of 487 files on
+  the machine this was found on — and codefit's fixtures are parsed and compared as **bytes**.
+  Nine `sqlddl` tests failed as a result: statement terminators went uncounted, `ALTER TABLE`
+  statements stopped reducing, and `StructureProven()` flipped to false. `gofmt` also
+  considered all 337 Go files unformatted; after the fix, one (which is behind a build tag
+  and outside the lint run). The stored blobs were already LF, so this changes checkout
+  behaviour only and produced no content diff.
+
+  **This does not repair a checkout that already exists.** Run `git add --renormalize .`
+  once, or take a fresh clone.
+
 ## [0.2.5] — 2026-08-02
 
 **Phase 2.5 complete — RF-03 OLAP closure, and with it the last Phase-2 coverage debt.**
