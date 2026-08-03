@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/codefit-cli/codefit/internal/core/scope"
 )
 
 // Name is the baseline file, committed at the repo root.
@@ -169,14 +171,29 @@ func (b *Baseline) index() map[string]Item {
 // to persist. It never silences a deterministic affirmation that has not been
 // acknowledged.
 //
+// The scope is TWO-DIMENSIONAL, and an item is eligible to be "gone" only when
+// BOTH dimensions admit it:
+//
+//	scanned[item.Category]  AND  files.Includes(item.File)
+//
 // scanned is the set of Item categories owned by the sensors that RAN this pass.
-// "Gone" is scoped to it: a previous item whose category is NOT in scanned (its
-// sensor did not run) is carried forward UNTOUCHED — absent from the delta, never
-// a gone/prune candidate. This distinguishes "not observed because the sensor did
-// not run" from "not observed because it disappeared", so a single-sensor run
-// cannot corrupt another dimension's state (ADR 0019). An empty scanned means
-// nothing is in scope, hence nothing is gone — a conservative fail-safe.
-func Diff(prev *Baseline, observed []Observed, scanned map[string]bool) DiffResult {
+// A previous item whose category is NOT in scanned (its sensor did not run) is
+// carried forward UNTOUCHED — absent from the delta, never a gone/prune
+// candidate. This distinguishes "not observed because the sensor did not run"
+// from "not observed because it disappeared", so a single-sensor run cannot
+// corrupt another dimension's state (ADR 0019).
+//
+// files is the FILE scope of the pass. The category dimension alone does not
+// cover a partial audit: a security finding in a file this pass never opened
+// still belongs to the security category, which DID run, so a category-only
+// guard would see it unobserved-and-in-scope and mark it gone — and
+// codefit-baseline-prune would then delete the audit memory of every file the
+// scan did not look at, silently, in the direction of going blind.
+//
+// Both dimensions fail safe: an empty scanned and the zero-value scope.Scope
+// each include nothing, so a caller that forgets one under-reports and never
+// prunes. Under-report, never corrupt.
+func Diff(prev *Baseline, observed []Observed, scanned map[string]bool, files scope.Scope) DiffResult {
 	prevByFP := prev.index()
 	observedFP := make(map[string]bool, len(observed))
 	for _, o := range observed {
@@ -194,7 +211,11 @@ func Diff(prev *Baseline, observed []Observed, scanned map[string]bool) DiffResu
 	goneByLoc := map[string][]Item{}
 	var gone []Item
 	for _, it := range prev.Items {
-		if !scanned[it.Category] {
+		// Both dimensions must admit the item. Either one alone is a way to go
+		// blind: a category-only guard prunes the files a partial pass never
+		// opened, and a file-only guard prunes the dimensions whose sensor did
+		// not run.
+		if !scanned[it.Category] || !files.Includes(it.File) {
 			res.Next.Items = append(res.Next.Items, it) // out of scope: untouched carry-forward
 			continue
 		}

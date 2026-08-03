@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,12 +65,21 @@ var skipDirs = map[string]bool{
 }
 
 // Run walks the project's source files and returns the security findings.
+//
+// Layer 0 of the pyramid (ctx.Scope) decides which of those files are ANALYSED.
+// The walk itself is not narrowed: every auditable file is still counted, so the
+// result can state "3 of 412" rather than the self-flattering "3 of 3". The gate
+// is Narrows, not Includes — an AuditContext assembled without a scope audits
+// everything (see the field doc); an unset scope must never blank an audit.
 func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	start := time.Now()
 	exts := s.provider.FileExtensions()
+	narrowed := ctx.Scope.Narrows()
 
 	var all []findings.Finding
 	var surface []findings.SurfaceItem
+	var audited []string
+	auditable := 0
 	walkErr := filepath.WalkDir(ctx.ProjectRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -88,6 +98,11 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 			rel = path
 		}
 		rel = filepath.ToSlash(rel)
+		auditable++
+		if narrowed && !ctx.Scope.Includes(rel) {
+			return nil // layer 0: out of scope, never opened
+		}
+		audited = append(audited, rel)
 
 		fileFindings, fileSurface, fileErr := s.scanFile(rel, path)
 		if fileErr != nil {
@@ -101,13 +116,16 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	if walkErr != nil {
 		return findings.SensorResult{Sensor: s.Name(), Error: walkErr.Error()}, walkErr
 	}
+	sort.Strings(audited)
 
 	return findings.SensorResult{
-		Sensor:     s.Name(),
-		Score:      scoring.DimensionScore(all),
-		Findings:   all,
-		Surface:    surface,
-		DurationMs: time.Since(start).Milliseconds(),
+		Sensor:         s.Name(),
+		Score:          scoring.DimensionScore(all),
+		Findings:       all,
+		Surface:        surface,
+		AuditableTotal: auditable,
+		AuditedFiles:   audited,
+		DurationMs:     time.Since(start).Milliseconds(),
 	}, nil
 }
 

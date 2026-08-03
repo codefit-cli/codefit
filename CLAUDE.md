@@ -369,8 +369,10 @@ de oro: se edita la FUENTE, después se espeja.**
 | `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
 | `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
 | `docs/decisions/NNNN-*` | fuente (append-only) | por slice | Un ADR por decisión de arquitectura; no se reescriben. |
+| `docs/specs/<componente>.md` | fuente (contrato de diseño) | por slice | La mini-spec SDD que se escribe ANTES de codear (§ Metodología): qué hace, qué recibe, qué devuelve, qué casos de borde. **No declara estado de entrega** — se enmarca como el PRD: su horizonte va a propósito por delante de `main`, y el cierre documental NO la reescribe para que coincida con lo shippeado. Lo que SÍ se verifica al cerrar es la dirección inversa: que la doc de estado (README/CHANGELOG/skill) documente lo que el código hace, no lo que la spec prometía. |
 
 **Exentos de la regla "reflejá lo de hoy" (diseño/visión, NO estado de entrega):**
+- `docs/specs/*.md` — contrato de diseño previo al código (ver la fila en la tabla).
 - `docs/PRD-codefit-v1.4.md` — fuente de scope/diseño. Su "Estado actual" queda a
   propósito atrás de `main`. El cierre NO lo corrige; a lo sumo flipea markers de la
   tabla de tools.

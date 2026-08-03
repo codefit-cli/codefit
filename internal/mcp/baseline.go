@@ -10,6 +10,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/baseline"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/report"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/sensors"
 )
 
@@ -41,8 +42,11 @@ type GoneItem struct {
 // that did not run never marks another dimension's items gone. Presentation
 // (endpoints for security, a flat section for db) is layered on top of the same
 // diff — the seam declared in ADR 0019, now used by two consumers.
-func diffBaseline(prev *baseline.Baseline, path string, observed []baseline.Observed, scanned map[string]bool) (baseline.DiffResult, BaselineDelta, error) {
-	diff := baseline.Diff(prev, observed, scanned)
+// files is the pass's FILE scope: with a partial scan, a baseline item in a file
+// this pass never opened must not become a gone/prune candidate (R5 of the
+// change-scope spec). A full scan passes scope.Full() and the guard is inert.
+func diffBaseline(prev *baseline.Baseline, path string, observed []baseline.Observed, scanned map[string]bool, files scope.Scope) (baseline.DiffResult, BaselineDelta, error) {
+	diff := baseline.Diff(prev, observed, scanned, files)
 	if err := diff.Next.Save(path); err != nil {
 		return baseline.DiffResult{}, BaselineDelta{}, fmt.Errorf("saving baseline: %w", err)
 	}
@@ -126,13 +130,13 @@ func observedFrom(results ...findings.SensorResult) []baseline.Observed {
 // unions; each sensor declares its own categories, so a new sensor is scoped
 // automatically without touching this code.
 func scannedCategories(ss ...sensors.Sensor) map[string]bool {
-	scope := map[string]bool{}
+	categories := map[string]bool{}
 	for _, s := range ss {
 		for _, c := range s.OwnedCategories() {
-			scope[c] = true
+			categories[c] = true
 		}
 	}
-	return scope
+	return categories
 }
 
 // recognizedHelpers loads the project's registered authz helpers for a language,
@@ -364,7 +368,10 @@ type BaselinePruneResponse struct {
 func HandleBaselinePrune(req BaselinePruneRequest) (BaselinePruneResponse, error) {
 	// Prune compares fingerprints (category+file+snippet), which do not depend on
 	// the recognized authz helpers — so the built-in set is enough here.
-	res, err := runSecurity(req.Root, req.Language, nil)
+	// The prune re-scan is ALWAYS full: codefit-baseline-prune accepts no scope
+	// (R5 of the change-scope spec). Scanning may be cheap and partial; forgetting
+	// may not — deleting audit memory requires having looked at everything.
+	res, err := runSecurity(req.Root, req.Language, nil, scope.Full())
 	if err != nil {
 		return BaselinePruneResponse{}, err
 	}

@@ -104,6 +104,13 @@ independent audit layer that validates AI-generated code is secure and correct
 - **`scan-all` three-bucket synthesis** + on-demand `scan-endpoint` detail.
 - **Baseline** — a committed, content-addressed memory of the audited surface, with
   `baseline-list` / `-accept` / `-prune`, so a re-scan only surfaces what changed.
+- **Scoping a scan to the files you changed** — an optional `changed_files` on
+  `codefit-scan-all` / `codefit-scan-security`, with the narrowing declared in the
+  response so a partial result never reads as a full one (see
+  [Scoping a scan](#scoping-a-scan-to-the-files-you-changed) below). *Unlike every
+  other item on this list, this one is covered by tests and the CI self-audit but has
+  **not** been exercised on a real project yet — the "validated in real use" above does
+  not cover it.*
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
@@ -424,9 +431,9 @@ codefit exposes its capabilities as MCP tools in three roles:
 
 | Tool | What it does |
 | --- | --- |
-| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. The main entry point. |
+| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
 | `codefit-scan-endpoint` | Full detail of one file on demand (to follow a `frontier_pending` endpoint). |
-| `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). |
+| `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). Also takes the optional `changed_files`. |
 | `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser — and equally when every configured schema source was found but none of them could be read, so an unreadable schema is never reported as a clean one. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
 | `codefit-surface-nplus1` | Enumerate the N+1 surface: query call sites sitting inside a loop, ordered by structural certainty (the cross-function frontier last, never dropped). |
@@ -438,7 +445,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | --- | --- |
 | `codefit-baseline-list` | List tracked items (fingerprint, file, category, state) — `filter: known` for what's still pending. |
 | `codefit-baseline-accept` | Record a human's decision to accept an item (false positive / accepted debt) with a reason. |
-| `codefit-baseline-prune` | Drop items a refactor resolved (re-scans to confirm they're gone first). |
+| `codefit-baseline-prune` | Drop items a refactor resolved (re-scans to confirm they're gone first). The re-scan is **always full** — it accepts no `changed_files`. |
 | `codefit-baseline-register-authz-helper` | Register a project-specific authorization helper so later scans recognize it (`known_authz_detected` becomes true where it is called). Clears the **authz** gap only — an IDOR/ownership item stays actionable. Requires a human decision and a reason. |
 | `codefit-baseline-unregister-authz-helper` | Reverse the above: the next scan stops recognizing that helper. |
 
@@ -448,6 +455,47 @@ codefit exposes its capabilities as MCP tools in three roles:
 | --- | --- |
 | `codefit-confirm-surface` | Integrate the agent's verdicts: a confirmed item becomes a probabilistic finding anchored to it. |
 | `codefit-coverage` | The coverage manifest for a language — what codefit audits vs. reasons over vs. does not cover. |
+
+## Scoping a scan to the files you changed
+
+`codefit-scan-all` and `codefit-scan-security` take an optional `changed_files`: a list of
+project-relative paths. Only those files are analysed. **codefit never asks git** which
+files changed — it has no power over your git, and the agent calling it already knows what
+it touched. Omitting `changed_files` (or passing an empty list) is a **full** audit; an
+empty list is never read as "audit nothing".
+
+A partial audit that looks like a full one would be a lying auditor, so the narrowing is
+declared in the response. Every scan — full or partial — carries a `scope` block:
+
+```json
+"scope": {
+  "mode": "partial",
+  "requested": 3,
+  "audited": 2,
+  "auditable_total": 412,
+  "unmatched": ["src/deleted.ts"],
+  "note": "Partial audit: 2 of 412 auditable files were in scope. …"
+}
+```
+
+What a partial scan does **not** claim:
+
+- **`blocked: false` means *no critical in the audited slice*, not *no critical*** — and the
+  same goes for `score` and `by_dimension`. `blocked: true` needs no caveat. The blocking
+  rule itself is unchanged and stays non-configurable.
+- **`unmatched` is not "clean".** A requested path the audit never reached — deleted, not an
+  auditable extension, inside a skipped directory — is listed there. It is the difference
+  between *audited and clean* and *never looked*.
+- **The database dimension reports `null` (not measured), never `100`,** when no configured
+  `database.schema_paths` entry is in scope. When it does run it reads all of them.
+- **A partial scan cannot prune the baseline.** An item is a `gone` candidate only if its
+  category ran **and** its file was in scope, so a narrowed pass never proposes dropping the
+  memory of a file it did not open — and `codefit-baseline-prune` accepts no scope at all.
+  Scanning may be partial; forgetting may not.
+
+This decides **which files get audited**, not which results get reused: codefit reuses no
+analysis results between runs, so re-scanning the same files is not cheaper. A narrowed
+scan is cheaper only because fewer files are opened.
 
 ## The baseline model
 

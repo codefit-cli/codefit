@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 )
 
 func TestRegisterAuthzHelper(t *testing.T) {
@@ -97,7 +98,7 @@ func TestAuthzHelpers_SurviveSaveLoadAndDiff(t *testing.T) {
 	// are not among the observed items.
 	diff := baseline.Diff(loaded, []baseline.Observed{
 		{FP: "abc123", Category: "idor", File: "app/x/route.ts", Snippet: "GET", Affirms: false},
-	}, secScope())
+	}, secScope(), scope.Full())
 	if got := diff.Next.RecognizedAuthzHelpers("typescript"); len(got) != 1 {
 		t.Errorf("Diff dropped the registered helpers from the next baseline, got %v", got)
 	}

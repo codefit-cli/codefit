@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 )
 
 // surf and affirm build observed items: a surface question and a deterministic
@@ -48,7 +49,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 // First scan: no previous baseline → everything is new and shown.
 func TestDiffFirstScanAllNew(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1"}
-	res := baseline.Diff(prev, []baseline.Observed{surf("a", "overfetch", "a.ts"), surf("b", "authz", "b.ts")}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{surf("a", "overfetch", "a.ts"), surf("b", "authz", "b.ts")}, secScope(), scope.Full())
 	if res.Counts.New != 2 || res.Counts.Known != 0 {
 		t.Errorf("first scan must be all new, got %+v", res.Counts)
 	}
@@ -63,7 +64,7 @@ func TestDiffFirstScanAllNew(t *testing.T) {
 // Second scan, no change: surface items are known → SILENCED (the goal).
 func TestDiffKnownSurfaceSilenced(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{{FP: "a", Category: "overfetch", File: "a.ts"}}}
-	res := baseline.Diff(prev, []baseline.Observed{surf("a", "overfetch", "a.ts")}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{surf("a", "overfetch", "a.ts")}, secScope(), scope.Full())
 	if res.Counts.Known != 1 || res.Counts.New != 0 {
 		t.Errorf("unchanged surface must be known, got %+v", res.Counts)
 	}
@@ -76,7 +77,7 @@ func TestDiffKnownSurfaceSilenced(t *testing.T) {
 // acknowledged must STILL be shown on every scan — never auto-silenced.
 func TestDiffKnownDeterministicStillShown(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{{FP: "sec", Category: "security", File: "c.ts"}}}
-	res := baseline.Diff(prev, []baseline.Observed{affirm("sec", "c.ts")}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{affirm("sec", "c.ts")}, secScope(), scope.Full())
 	if !res.Shown["sec"] {
 		t.Errorf("a known, unaccepted deterministic affirmation must still be shown")
 	}
@@ -87,7 +88,7 @@ func TestDiffAcknowledgedDeterministicSilenced(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{
 		{FP: "sec", Category: "security", File: "c.ts", Ack: &baseline.Ack{Reason: "test placeholder", At: "2026-06-26", By: "human"}},
 	}}
-	res := baseline.Diff(prev, []baseline.Observed{affirm("sec", "c.ts")}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{affirm("sec", "c.ts")}, secScope(), scope.Full())
 	if res.Shown["sec"] {
 		t.Errorf("an acknowledged deterministic finding must be silenced")
 	}
@@ -100,7 +101,7 @@ func TestDiffAcknowledgedDeterministicSilenced(t *testing.T) {
 // lingers in the next baseline until pruned.
 func TestDiffGoneLingers(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{{FP: "old", Category: "idor", File: "x.ts"}}}
-	res := baseline.Diff(prev, nil, secScope())
+	res := baseline.Diff(prev, nil, secScope(), scope.Full())
 	if res.Counts.Gone != 1 || len(res.Gone) != 1 || res.Gone[0].FP != "old" {
 		t.Errorf("removed item must be gone, got %+v", res.Counts)
 	}
@@ -113,7 +114,7 @@ func TestDiffGoneLingers(t *testing.T) {
 // the old fp is replaced (not left as an orphan).
 func TestDiffChangedReplacesOld(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{{FP: "old", Category: "overfetch", File: "a.ts"}}}
-	res := baseline.Diff(prev, []baseline.Observed{surf("new", "overfetch", "a.ts")}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{surf("new", "overfetch", "a.ts")}, secScope(), scope.Full())
 	if res.Counts.Changed != 1 || res.Counts.New != 0 || res.Counts.Gone != 0 {
 		t.Errorf("an edited item must be 'changed', got %+v", res.Counts)
 	}
@@ -158,7 +159,7 @@ func TestDiffChangedDropsAck(t *testing.T) {
 	prev := &baseline.Baseline{Version: "1", Items: []baseline.Item{
 		{FP: "old", Category: "security", File: "c.ts", Ack: &baseline.Ack{Reason: "ok", At: "2026-06-26", By: "human"}},
 	}}
-	res := baseline.Diff(prev, []baseline.Observed{{FP: "new", Category: "security", File: "c.ts", Affirms: true}}, secScope())
+	res := baseline.Diff(prev, []baseline.Observed{{FP: "new", Category: "security", File: "c.ts", Affirms: true}}, secScope(), scope.Full())
 	if res.State["new"] != baseline.StateChanged || !res.Shown["new"] {
 		t.Errorf("changed affirmation must be shown, got state=%q shown=%v", res.State["new"], res.Shown["new"])
 	}

@@ -1,0 +1,89 @@
+{
+  "State": {
+    "acked1": "acknowledged",
+    "known1": "known",
+    "new1": "new",
+    "replacedNew": "changed"
+  },
+  "Shown": {
+    "new1": true,
+    "replacedNew": true
+  },
+  "Gone": [
+    {
+      "FP": "goneOld",
+      "Category": "authz",
+      "File": "src/c.ts",
+      "Snippet": "handler",
+      "Ack": null
+    }
+  ],
+  "Counts": {
+    "New": 1,
+    "Changed": 1,
+    "Known": 1,
+    "Acknowledged": 1,
+    "Gone": 1,
+    "AffirmationsShown": 1
+  },
+  "Next": {
+    "Version": "1",
+    "Items": [
+      {
+        "FP": "foreign",
+        "Category": "db-fk-no-index",
+        "File": "prisma/schema.prisma",
+        "Snippet": "userId",
+        "Ack": null
+      },
+      {
+        "FP": "known1",
+        "Category": "overfetch",
+        "File": "src/a.ts",
+        "Snippet": "select *",
+        "Ack": null
+      },
+      {
+        "FP": "acked1",
+        "Category": "idor",
+        "File": "src/b.ts",
+        "Snippet": "findUnique",
+        "Ack": {
+          "Reason": "owner check upstream",
+          "At": "2026-01-02",
+          "By": "human"
+        }
+      },
+      {
+        "FP": "new1",
+        "Category": "security",
+        "File": "src/e.ts",
+        "Snippet": "Possible hardcoded API key",
+        "Ack": null
+      },
+      {
+        "FP": "replacedNew",
+        "Category": "overfetch",
+        "File": "src/d.ts",
+        "Snippet": "new snippet",
+        "Ack": null
+      },
+      {
+        "FP": "goneOld",
+        "Category": "authz",
+        "File": "src/c.ts",
+        "Snippet": "handler",
+        "Ack": null
+      }
+    ],
+    "AuthzHelpers": [
+      {
+        "Name": "requirePermission",
+        "Language": "typescript",
+        "Reason": "project helper",
+        "At": "2026-01-01",
+        "By": "human"
+      }
+    ]
+  }
+}

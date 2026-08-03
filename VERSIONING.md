@@ -62,6 +62,31 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **Unreleased on `main`, heading for `v0.2.7` — a PATCH: no phase closes here.** Phase 3
+  (code review, best practices, tests, regression risk) has **not started**; its dimensions
+  — review, practices, tests — do not exist yet. This is the prerequisite thread (H0) that
+  unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
+  changed*. So the line stays `0.2` and the MINOR ↔ phase table above gains **no row** —
+  that table maps phase *closures*, and this closes none. **No audit rule changed**: for a
+  full scan no finding, surface item or baseline fingerprint moves, and `COVERAGE.md` and
+  the `codefit-coverage` manifest are untouched. What lands is **layer 0 of the filtering
+  pyramid**: an optional `changed_files` on `codefit-scan-security` and `codefit-scan-all`
+  narrows the audit to the paths the agent passes. The scope is an **input**, never derived
+  from git — codefit has no power over the user's git, and the calling agent already knows
+  what it touched; absent or empty means a **full** audit, never "audit nothing". Because a
+  partial audit indistinguishable from a full one is a lying auditor, every response now
+  carries a `scope` block (`mode`/`requested`/`audited`/`auditable_total`/`unmatched`/`note`,
+  the note enforced in the handler in both directions), a partial `blocked: false` is
+  declared as the narrower claim it is (*no critical in the audited slice*), the DB dimension
+  reports **`null` (not measured)** rather than `100` when no configured schema path is in
+  scope, and the baseline's `gone` scope becomes **two-dimensional** (category **and** file)
+  so a partial pass can no longer prune the audit memory of files it never opened —
+  `codefit-baseline-prune` accepts no scope at all. The dead `AuditContext.Since` field, which
+  promised a git-ref `--since` mode and never had a reader or a writer, is **removed**.
+  **This is not caching:** it decides *which files are audited*, not *which results are
+  reused* — `internal/core/cache` and `internal/core/pipeline` remain INERT with zero
+  production importers, so a repeat scan is no cheaper. ADR **0048**; the contract is
+  `docs/specs/change-scope.md`. See the [CHANGELOG](CHANGELOG.md) for the itemized list.
 - **`v0.2.6` — a PATCH: no phase closes here.** Phase 3 (code review, best practices,
   tests, regression risk) has not started, so the line stays `0.2` and the MINOR ↔ phase
   table above gains **no row** — that table maps phase *closures* to versions, and this

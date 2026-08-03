@@ -12,6 +12,130 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [Unreleased]
+
+**Heading for a PATCH: no PRD phase closes here.** Phase 3 (code review, best practices,
+tests, regression risk) has not started — this is the prerequisite thread (H0) that
+unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
+changed*. **No audit rule changed.** Every security, DB and DW rule behaves exactly as it
+did in `v0.2.6`: for a full scan no finding, no surface item and no baseline fingerprint
+moves, and `COVERAGE.md` and the `codefit-coverage` manifest are untouched. What lands is
+**layer 0 of the filtering pyramid** — the agent can now tell codefit *which files it
+changed*, and the audit narrows to them.
+
+**The scope is an INPUT, never derived from git.** codefit does not shell out to git, does
+not read `.git`, does not diff refs and assumes no branch model. Two reasons, both standing
+doctrine: it has **no power over the user's git**, and the MCP caller is an agent that
+already knows which files it touched — it just wrote them. So `changed_files` is an
+optional list of project-relative paths on the request, and **absent or empty means a FULL
+audit** — an empty list is never read as "audit nothing".
+
+**Narrowing is only safe if the narrowing stays visible.** A partial audit indistinguishable
+from a full one is a lying auditor, so every scan response now carries a `scope` block, and
+the two places a partial scan could quietly overstate itself are both closed:
+
+- **`blocked: false` from a partial scan is a narrower claim.** `scoring.IsBlocked` is
+  unchanged and stays non-configurable, but under a partial scope it means *no critical in
+  the audited slice*, not *no critical*. The response says so in prose; `blocked: true`
+  needs no caveat. The same applies to `score` and to `by_dimension`.
+- **A partial scan cannot prune the baseline.** This was a live corruption risk, not a
+  hypothetical: a security finding in a file the pass never opened still belongs to the
+  `security` category, which *did* run, so the existing category-scoped `gone` guard
+  (ADR 0019) would have marked it gone and `codefit-baseline-prune` would have deleted the
+  audit memory of every file the scan did not look at — silently, in the direction of going
+  blind. The baseline scope is now **two-dimensional**, and `codefit-baseline-prune` accepts
+  **no scope at all**: a deliberate asymmetry, because scanning may be cheap and partial but
+  forgetting may not.
+
+**What this is NOT: caching.** It decides *which files get audited*, not *which results get
+reused*. `internal/core/cache` and `internal/core/pipeline` are still INERT with zero
+production importers — the content-hash finding cache is the next slice and is **not built**.
+A repeat scan of the same files is not cheaper; a narrowed scan is cheaper only because
+fewer files are opened.
+
+### Added
+
+- **`changed_files` (optional, a list of project-relative paths) on `codefit-scan-security`
+  and `codefit-scan-all`.** Only those files are analysed. It is deliberately **not** on
+  `codefit-scan-db` (its inputs are the configured `database.schema_paths`, not a repository
+  walk) and **not** on any `codefit-baseline-*` tool. Paths are canonicalized on both
+  construction and lookup, platform-independently, so `src\a.ts`, `./src/a.ts` and
+  `src/a.ts` are the same file on every OS — the separator drift `v0.2.6` paid to remove is
+  not reintroduced by the scope.
+- **A `scope` block on every scan response** — `{mode, requested, audited, auditable_total,
+  unmatched, note}` — present unconditionally, including on a full scan (`mode: "full"`,
+  empty note), so a consumer never has to infer the mode from an absence. `auditable_total`
+  counts the **whole project**, never the scope: narrowing must not shrink the denominator,
+  or "3 of 412" collapses into a self-flattering "3 of 3".
+- **`unmatched` — the requested paths the audit never reached** (deleted, not an auditable
+  extension, outside the project, inside a skipped directory). Without it an agent that
+  passes three wrong paths receives "0 findings" and reads it as clean; `unmatched` is the
+  difference between *audited and clean* and *never looked*.
+- **The `note` is enforced in production, not just asserted in tests.** `ScopeBlock.Validate()`
+  runs in the handler and fails the call in both directions — a `partial` scan with an empty
+  note, and a `full` scan carrying a caveat it has no basis for. An unlabelled partial result
+  is exactly what an agent would read as a full one, so it is a loud error rather than a
+  silent one.
+- **`internal/core/scope`** — a pure leaf (it imports nothing from codefit) holding the file
+  scope, with one exported canonical form (`scope.Canon`) so a caller comparing a path
+  against a scope uses the same rule instead of re-deriving it.
+- **The skill `codefit init` generates now teaches the scope**: how to pass `changed_files`,
+  that a partial `blocked: false` and `score` are narrower claims to be reported as such,
+  that `unmatched` is not "clean", that `by_dimension.db` `null` is not `100`, and that a
+  partial scan must **never** be followed by a baseline prune. **This reaches an existing
+  install only by re-running `codefit init`** — a skill file already on disk stays stale
+  until it is regenerated.
+
+### Changed
+
+- **`baseline.Diff` takes a file scope beside its category scope**, and an item is eligible
+  to be `gone` only when **both** admit it (`scanned[item.Category] && files.Includes(item.File)`).
+  Either dimension alone is a way to go blind, in opposite directions: a category-only guard
+  prunes the files a partial pass never opened, a file-only guard prunes the dimensions whose
+  sensor did not run. Both fail safe — an empty category set and the zero-value scope each
+  include nothing, so a caller that forgets one **under-reports and never prunes**. The
+  no-regression floor is a golden: a full scope produces a delta **byte-identical** to the
+  previous behavior.
+- **The code×schema cross rules (DB-010/DB-013) still RUN under a narrowed scope, but their
+  categories abstain from the gone-scope.** Their items **anchor to the schema** while the
+  evidence for them is **every query filter in the repository**, so a narrowed pass can leave
+  the anchor in scope while the justifying query sits in a file it never opened — the one
+  shape the file dimension cannot protect. Abstaining is the same posture the DW census rules
+  already take: a shrunken census does not get to judge.
+- **The DB dimension is reported as NOT MEASURED (`by_dimension.db: null`) when no configured
+  schema path is in scope** — never `100`. A configured path may name a directory of
+  migrations, so a scoped file inside one counts; the prefix test is on canonical path
+  *segments*, so `db/migrations-old` is not mistaken for `db/migrations`. When the dimension
+  does run it reads **all** its configured schema paths, never a narrowed subset: a schema
+  judged from half its migrations is itself a shrunken census.
+- **`codefit-baseline-prune` always re-scans in full**, and takes no `changed_files`.
+- **`findings.SensorResult` gained `auditable_total` and `audited_files`** — a sensor's own
+  account of what it looked at. A sensor that WALKS reports both (they agree under a full
+  audit); a sensor whose inputs are CONFIGURED rather than walked (the DB dimension) reports
+  the sources it read and leaves `auditable_total` zero, because there is no file census to
+  be a denominator of. Additive for a consumer that ignores unknown fields.
+- The `codefit-scan-all` MCP tool description now documents `changed_files` and what a
+  partial run does and does not claim — it is the only thing an agent reads before choosing
+  a tool.
+
+### Removed
+
+- **The dead `AuditContext.Since` field.** It was a `string` whose comment promised "a git
+  ref for incremental (`--since`) mode" and it had **never had a reader or a writer**. A
+  field naming a capability codefit does not have is the same class of lie as a manifest that
+  over-promises, so it is **replaced** by the real scope rather than kept alongside it.
+
+### Not yet covered (declared)
+
+- **No result reuse between runs.** `internal/core/cache` (the content-hash finding store)
+  and `internal/core/pipeline` stay INERT with zero production importers. Scanning the same
+  file twice re-analyses it twice.
+- **The hazard that wiring already carries, recorded now so it is not rediscovered:** the
+  cache key must include the codefit and rule versions, or an upgrade that adds rules serves
+  stale findings for an unchanged file and reports "clean" under rules it never ran.
+- **codefit still does not know what changed on its own.** If the agent passes nothing, it
+  audits everything — by design.
+
 ## [0.2.6] — 2026-08-03
 
 **A PATCH release, and the smallest kind: no PRD phase closes here.** Phase 3 (code

@@ -16,18 +16,19 @@
 //
 // HOW TO RUN
 //
-//	1. Create dogfood.local.json at the repo root (gitignored — paths are per
-//	   machine, never committed), listing the projects you have locally. "schema" is
-//	   a path relative to "root" — either a single .prisma file OR a DIRECTORY of
-//	   .prisma files (a multi-file Prisma schema):
+//  1. Create dogfood.local.json at the repo root (gitignored — paths are per
+//     machine, never committed), listing the projects you have locally. "schema" is
+//     a path relative to "root" — either a single .prisma file OR a DIRECTORY of
+//     .prisma files (a multi-file Prisma schema):
 //
-//	     [
-//	       {"name":"node-express","root":"/abs/clone","schema":"prisma/schema.prisma"},
-//	       {"name":"papermark","root":"/abs/papermark","schema":"prisma/schema"}
-//	     ]
+//     [
+//     {"name":"node-express","root":"/abs/clone","schema":"prisma/schema.prisma"},
+//     {"name":"papermark","root":"/abs/papermark","schema":"prisma/schema"}
+//     ]
 //
-//	   (override the config path with CODEFIT_DOGFOOD_CONFIG=/some/file.json)
-//	2. go test -tags dogfood -run TestDogfoodCross -v ./internal/mcp/
+//     (override the config path with CODEFIT_DOGFOOD_CONFIG=/some/file.json)
+//
+//  2. go test -tags dogfood -run TestDogfoodCross -v ./internal/mcp/
 //
 // THE PROJECTS the PR #65 table cites (calibration N grows here):
 //   - gothinkster/node-express-prisma-v1-official-app — Prisma RealWorld; git clone it.
@@ -50,8 +51,9 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/crossrules"
-	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/surface"
+	"github.com/codefit-cli/codefit/internal/providers"
 )
 
 // dogfoodProject is one entry of dogfood.local.json.
@@ -129,7 +131,7 @@ func TestDogfoodCross(t *testing.T) {
 			// relation/phantom column, so it is an upper bound on the arity cohort.
 			provider := providerForLanguage("typescript", nil)
 			ex, _ := provider.(providers.QueryExtractor)
-			filters := collectQueryFilters(p.Root, provider.FileExtensions(), ex)
+			filters := collectQueryFilters(p.Root, provider.FileExtensions(), ex, scope.Full())
 			var arity1, arity23, arity4plus int
 			for _, f := range filters {
 				switch n := len(f.Columns); {
@@ -142,7 +144,7 @@ func TestDogfoodCross(t *testing.T) {
 				}
 			}
 
-			_, res, ran := runDBForScanAll(p.Root, "typescript", cfg, crossrules.All())
+			_, res, ran := runDBForScanAll(p.Root, "typescript", cfg, crossrules.All(), scope.Full())
 			if !ran {
 				t.Fatalf("db did not run (schema parse failed?) for %s", p.Name)
 			}

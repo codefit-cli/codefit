@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/baseline"
@@ -15,6 +16,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/query"
 	"github.com/codefit-cli/codefit/internal/core/report"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/providers"
@@ -28,6 +30,15 @@ import (
 type ScanAllRequest struct {
 	Root     string `json:"root"`
 	Language string `json:"language"`
+	// ChangedFiles narrows the audit to these project-relative paths (layer 0 of
+	// the filtering pyramid). codefit does not ask git which files changed — it
+	// has no power over the user's git, and the calling agent already knows what
+	// it touched. Absent or empty means a FULL audit, never "audit nothing".
+	//
+	// A narrowed run declares itself in the response's scope block, cannot mark a
+	// baseline item in an unopened file as gone, and leaves the DB dimension NOT
+	// MEASURED unless a configured schema path is in scope.
+	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 // ScanAllResponse is the agent-first synthesis as an ACTIONABLE summary, not the
@@ -52,6 +63,12 @@ type ScanAllRequest struct {
 // the difference is exactly the "known" surface the baseline is silencing.
 type ScanAllResponse struct {
 	Summary ScanAllSummary `json:"summary"`
+	// Scope declares how much of the project this response describes: mode full or
+	// partial, how many auditable files were in scope, and which requested paths
+	// the audit never reached. It is ALWAYS present, so a consumer never infers
+	// the mode from an absence and never reads a partial `blocked: false` as the
+	// wider claim it is not.
+	Scope ScopeBlock `json:"scope"`
 	// Score is the per-dimension breakdown plus the weighted global (ADR 0021). It
 	// is ALWAYS present: by_dimension carries every weighted dimension, with the
 	// unaudited ones (review/complexity/tests, and db when it did not run) as null —
@@ -118,6 +135,11 @@ type ScanAllSummary struct {
 // there), groups the result by endpoint, and partitions by the local-resolution
 // fact — it adds no detection, only the aggregation and the split.
 func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
+	return handleScanAllScoped(req, scope.Of(req.ChangedFiles))
+}
+
+// handleScanAllScoped is HandleScanAll with layer 0 made explicit.
+func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, error) {
 	// Load the committed baseline ONCE: it provides both the project's registered
 	// authz helpers (recognized during the scan) and the previous items the unified
 	// diff is computed against (diffBaseline reuses this same load — no double read).
@@ -128,7 +150,7 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	}
 
 	// Security ALWAYS runs and is the required core: if it fails, scan-all fails.
-	secRes, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language))
+	secRes, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
@@ -146,11 +168,17 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	if err != nil {
 		return ScanAllResponse{}, fmt.Errorf("loading project config: %w", err)
 	}
+	//
+	// Under a PARTIAL scope the dimension also needs one of its configured schema
+	// paths to be in scope. Otherwise it is NOT MEASURED (R4): running it would
+	// score a schema this pass has no reason to believe changed, and reporting 100
+	// where the honest answer is null is the difference between "audited and
+	// clean" and "never looked".
 	var dbRes findings.SensorResult
 	var dbSection *DBSection
 	dbRan := false
-	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
-		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg, crossrules.All())
+	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 && dbInputsInScope(cfg.Database.SchemaPaths, scp) {
+		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg, crossrules.All(), scp)
 	}
 
 	// One unified baseline diff over both sensors' observations, scoped to the
@@ -162,11 +190,22 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 		for _, c := range dbsensor.New(nil).OwnedCategories() {
 			scanned[c] = true
 		}
-		for _, c := range crossrules.OwnedCategories() {
-			scanned[c] = true
+		// The code x schema cross is a WHOLE-REPO census: its items anchor to the
+		// schema, but the evidence for them is every query filter in the codebase.
+		// A narrowed pass sees a shrunken census, so an item can vanish because the
+		// query that justified it is in a file this pass never opened — and its
+		// schema anchor IS in scope, so the file dimension of the baseline guard
+		// would not catch it. The rules still RUN (their items are real, and fewer
+		// filters can only produce fewer of them), but their categories stay out of
+		// the gone scope, exactly as the DW census rules abstain rather than judge
+		// from a shrunken count.
+		if !scp.Narrows() {
+			for _, c := range crossrules.OwnedCategories() {
+				scanned[c] = true
+			}
 		}
 	}
-	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned)
+	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned, scp)
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
@@ -193,8 +232,18 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 	}
 	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
 
+	// The scope block unions what BOTH dimensions examined: the security walk's
+	// files and, when the db dimension ran, the configured schema sources it read.
+	// Without the union a requested schema path would be reported unmatched even
+	// though the audit read it — the security walk does not open .prisma files.
+	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), secRes.AuditableTotal)
+	if err := block.Validate(); err != nil {
+		return ScanAllResponse{}, err
+	}
+
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
+		Scope: block,
 		Summary: ScanAllSummary{
 			Endpoints:             len(endpoints),
 			DeterministicFindings: len(secRes.Findings),
@@ -282,7 +331,7 @@ type ScanEndpointResponse struct {
 // analysis is cheap, and re-running the same pipeline guarantees the detail here is
 // identical to what scan-all would have shown for that endpoint (ADR 0008).
 func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
-	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language))
+	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language), scope.Full())
 	if err != nil {
 		return ScanEndpointResponse{}, err
 	}
@@ -323,12 +372,16 @@ func providerForLanguage(lang string, authzHelpers []string) providers.LanguageP
 // actually measured. Every not-measured/failure path is SOFT: it returns a
 // Measured=false section with a note and ran=false — never an error, so a db
 // misconfiguration can never blank the security audit (ADR 0020).
-func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrules.Rule) (*DBSection, findings.SensorResult, bool) {
+func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrules.Rule, scp scope.Scope) (*DBSection, findings.SensorResult, bool) {
 	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
 	if parser == nil {
 		return &DBSection{Measured: false, Note: note}, findings.SensorResult{}, false
 	}
-	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg}
+	// The DB sensor reads the CONFIGURED schema paths in full, never a narrowed
+	// subset: a schema judged from half its migrations is a shrunken census, and
+	// the caller has already decided (dbInputsInScope) whether the dimension runs
+	// at all this pass. So its context carries a full scope, deliberately.
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: language, Config: cfg, Scope: scope.Full()}
 	r, err := dbsensor.New(parser).Audit(ctx)
 	if err != nil {
 		return &DBSection{Measured: false, Note: "db audit failed: " + err.Error()}, findings.SensorResult{}, false
@@ -343,7 +396,7 @@ func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrul
 	// (schema, filters), merging its output into the db result. With crossrules.All()
 	// empty this slice, this is a proven no-op — the seam, never an output change.
 	res := r.Res
-	crossF, crossS := runCross(root, language, r.Schema, r.SchemaContent, rules)
+	crossF, crossS := runCross(root, language, r.Schema, r.SchemaContent, rules, scp)
 	res.Findings = append(res.Findings, crossF...)
 	res.Surface = append(res.Surface, crossS...)
 
@@ -363,7 +416,7 @@ func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrul
 // when the schema is nil or the provider has no extractor. The cross is SOFT: a
 // read/parse hiccup never blanks the db result (ADR 0020) — the walk swallows
 // per-file errors, mirroring the security walk's resilience.
-func runCross(root, language string, schema *db.Schema, content map[string][]byte, rules []crossrules.Rule) ([]findings.Finding, []findings.SurfaceItem) {
+func runCross(root, language string, schema *db.Schema, content map[string][]byte, rules []crossrules.Rule, scp scope.Scope) ([]findings.Finding, []findings.SurfaceItem) {
 	if schema == nil {
 		return nil, nil
 	}
@@ -372,10 +425,38 @@ func runCross(root, language string, schema *db.Schema, content map[string][]byt
 	if !ok {
 		return nil, nil
 	}
-	filters := collectQueryFilters(root, provider.FileExtensions(), extractor)
+	filters := collectQueryFilters(root, provider.FileExtensions(), extractor, scp)
 	fs, surf := crossrules.RunWith(schema, filters, rules)
 	dbsensor.StampSurface(surf, content)
 	return fs, surf
+}
+
+// dbInputsInScope reports whether a pass narrowed to scp has any reason to audit
+// the database dimension: whether at least one CONFIGURED schema path is in
+// scope. The DB dimension reads database.schema_paths, not a repository walk
+// (ADR 0014), so this is the whole of R4's question — a "no" leaves by_dimension
+// db null (not measured) through the machinery that already exists, rather than
+// scoring an untouched schema 100.
+//
+// A configured path may name a DIRECTORY of migrations, so a scoped file INSIDE
+// one counts. The prefix test is on canonical path SEGMENTS ("db/migrations/"),
+// never raw text, so db/migrations-old is not mistaken for db/migrations.
+func dbInputsInScope(schemaPaths []string, scp scope.Scope) bool {
+	if !scp.Narrows() {
+		return true
+	}
+	for _, p := range schemaPaths {
+		configured := scope.Canon(p)
+		if scp.Includes(configured) {
+			return true
+		}
+		for _, f := range scp.Files() {
+			if strings.HasPrefix(f, configured+"/") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // crossSkipDirs are directories never walked for query extraction — the same set
@@ -389,7 +470,12 @@ var crossSkipDirs = map[string]bool{
 // and unions the query filters each yields. Per-file read/extract errors are
 // swallowed (the cross is soft, never fatal to the db result); the file path is
 // made project-relative, matching the anchors the security surface uses.
-func collectQueryFilters(root string, exts []string, ex providers.QueryExtractor) []query.QueryFilter {
+// scp is layer 0, the same narrowing the security walk applies: a partial pass
+// extracts filters only from the files in scope. The gate is Narrows, not
+// Includes, so an unset scope collects everything (a zero-value Scope includes
+// nothing, and reading it as a filter here would silently empty the cross).
+func collectQueryFilters(root string, exts []string, ex providers.QueryExtractor, scp scope.Scope) []query.QueryFilter {
+	narrowed := scp.Narrows()
 	var out []query.QueryFilter
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -403,6 +489,15 @@ func collectQueryFilters(root string, exts []string, ex providers.QueryExtractor
 		}
 		if !slices.Contains(exts, filepath.Ext(path)) {
 			return nil
+		}
+		if narrowed {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
+			if !scp.Includes(filepath.ToSlash(rel)) {
+				return nil // layer 0: out of scope, never opened
+			}
 		}
 		raw, rerr := os.ReadFile(path)
 		if rerr != nil {
