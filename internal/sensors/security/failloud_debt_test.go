@@ -44,7 +44,7 @@ func TestSecurity_OneInvalidGoFile_AbortsWholeWalk(t *testing.T) {
 	write("broken.go", "package main\n\nfunc broken() {\n")
 
 	cfg := &config.Config{Project: config.Project{Language: "go"}}
-	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "go", Config: cfg, NoLLM: true}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "go", Config: cfg}
 
 	res, err := security.New(golang.New()).Run(ctx)
 	if err == nil {
