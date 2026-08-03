@@ -30,12 +30,4 @@ type AuditContext struct {
 	// writer. A field naming a capability codefit does not have is the same class
 	// of lie as a manifest that over-promises.
 	Scope scope.Scope
-	// NoLLM disables every sensor layer that would require an LLM call.
-	NoLLM bool
-	// FailOn is the severity at or above which the run should fail (and the
-	// pipeline may early-exit before the LLM layer). One of critical|high|medium.
-	FailOn string
-	// Interactive records whether stdout is an interactive terminal (resolved
-	// once via TTY detection), so renderers and prompts can adapt.
-	Interactive bool
 }

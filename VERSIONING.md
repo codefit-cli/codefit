@@ -84,9 +84,14 @@ stage" — it does **not** claim `0.1.0` is done.
   `codefit-baseline-prune` accepts no scope at all. The dead `AuditContext.Since` field, which
   promised a git-ref `--since` mode and never had a reader or a writer, is **removed**.
   **This is not caching:** it decides *which files are audited*, not *which results are
-  reused* — `internal/core/cache` and `internal/core/pipeline` remain INERT with zero
-  production importers, so a repeat scan is no cheaper. ADR **0048**; the contract is
-  `docs/specs/change-scope.md`. See the [CHANGELOG](CHANGELOG.md) for the itemized list.
+  reused* — `internal/core/cache` remains INERT with zero production importers, so a repeat
+  scan is no cheaper. Also removed: the **LLM-era scaffolding**. `internal/core/pipeline`
+  was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot
+  deleted that layer on the package's second day and all three implemented layers went on to
+  bypass it, so it goes, along with the `NoLLM`, `FailOn` and `Interactive` fields of
+  `AuditContext` from the same extinction (ADR **0049**). The pyramid itself is doctrine and
+  stays. ADR **0048**; the contract is `docs/specs/change-scope.md`. See the
+  [CHANGELOG](CHANGELOG.md) for the itemized list.
 - **`v0.2.6` — a PATCH: no phase closes here.** Phase 3 (code review, best practices,
   tests, regression risk) has not started, so the line stays `0.2` and the MINOR ↔ phase
   table above gains **no row** — that table maps phase *closures* to versions, and this

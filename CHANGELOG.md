@@ -48,10 +48,9 @@ the two places a partial scan could quietly overstate itself are both closed:
   forgetting may not.
 
 **What this is NOT: caching.** It decides *which files get audited*, not *which results get
-reused*. `internal/core/cache` and `internal/core/pipeline` are still INERT with zero
-production importers — the content-hash finding cache is the next slice and is **not built**.
-A repeat scan of the same files is not cheaper; a narrowed scan is cheaper only because
-fewer files are opened.
+reused*. `internal/core/cache` is still INERT with zero production importers — the
+content-hash finding cache is the next slice and is **not built**. A repeat scan of the same
+files is not cheaper; a narrowed scan is cheaper only because fewer files are opened.
 
 ### Added
 
@@ -124,15 +123,29 @@ fewer files are opened.
   ref for incremental (`--since`) mode" and it had **never had a reader or a writer**. A
   field naming a capability codefit does not have is the same class of lie as a manifest that
   over-promises, so it is **replaced** by the real scope rather than kept alongside it.
+- **`internal/core/pipeline`, and the `NoLLM` / `FailOn` / `Interactive` fields of
+  `AuditContext` — the LLM-era scaffolding.** This is not an unfinished wiring task being
+  abandoned; the package was **correctly designed for a codefit that no longer exists**. As
+  born it held one real decision — early-exit before a *paid* layer-3 LLM call
+  (`if layer.Layer() == LayerLLM && meetsFailOn(all, ctx.FailOn) { break }`) — which earns a
+  pipeline object when the expensive tier costs money. The MCP-first pivot deleted that layer
+  on the package's **second day** (`3999505`, "drop the LLM layer"), leaving a `for` loop
+  with no decision in it, and all three layers of the pyramid were then implemented without
+  it: regex and AST inside `scanFile`, and layer 0 wired straight into the walk. `FailOn`'s
+  own comment still named the extinct machinery. **The pyramid itself is doctrine and stays**
+  — what goes is one expression of it the code never adopted (ADR **0049**).
 
 ### Not yet covered (declared)
 
 - **No result reuse between runs.** `internal/core/cache` (the content-hash finding store)
-  and `internal/core/pipeline` stay INERT with zero production importers. Scanning the same
-  file twice re-analyses it twice.
+  stays INERT with zero production importers. Scanning the same file twice re-analyses it
+  twice. It is deliberately **not** deleted alongside the pipeline: it is about to be wired,
+  and inert and obsolete are different states.
 - **The hazard that wiring already carries, recorded now so it is not rediscovered:** the
-  cache key must include the codefit and rule versions, or an upgrade that adds rules serves
-  stale findings for an unchanged file and reports "clean" under rules it never ran.
+  cache key must cover every input that can change a verdict. A version string is **not**
+  enough — `version.Version` is the constant `"v0.1.0-dev"` for any plain `go build`, so
+  during rule development every build would present the same key and the rule author is the
+  first person the stale cache bites.
 - **codefit still does not know what changed on its own.** If the agent passes nothing, it
   audits everything — by design.
 

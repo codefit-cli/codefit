@@ -37,7 +37,7 @@ func runSensor(t *testing.T, root string) findings.SensorResult {
 			Example:    []string{"examples/**"},
 		},
 	}}
-	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "go", Config: cfg, NoLLM: true}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "go", Config: cfg}
 	res, err := security.New(golang.New()).Run(ctx)
 	if err != nil {
 		t.Fatalf("sensor Run: %v", err)
@@ -67,7 +67,7 @@ func runSensorProvider(t *testing.T, root, lang, prodGlob string, p providers.La
 			Example:    []string{"examples/**"},
 		},
 	}}
-	ctx := auditctx.AuditContext{ProjectRoot: root, Language: lang, Config: cfg, NoLLM: true}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: lang, Config: cfg}
 	res, err := security.New(p).Run(ctx)
 	if err != nil {
 		t.Fatalf("sensor Run (%s): %v", lang, err)
