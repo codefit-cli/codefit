@@ -35,3 +35,11 @@ func forgetIdentity() {
 	identityOnce = sync.Once{}
 	identityID, identityErr = "", nil
 }
+
+// Prune runs the cache's own directory maintenance directly, without the
+// once-per-process guard [Open] applies, so a test can plant a fixture and watch
+// exactly one prune act on it.
+func Prune(c *Cache) { c.prune() }
+
+// GenerationDir is the directory this cache's entries live in.
+func GenerationDir(c *Cache) string { return c.genDir() }

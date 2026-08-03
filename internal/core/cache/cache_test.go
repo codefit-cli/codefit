@@ -93,15 +93,19 @@ func TestGetMiss(t *testing.T) {
 }
 
 // R4 — a corrupt entry is a MISS, never an error.
+//
+// The corrupt file is planted at the path the READER actually reads — inside the
+// generation directory. Writing it flat in Dir would make this test pass by
+// finding nothing at all, which is a different behaviour wearing this one's name.
 func TestGetCorruptEntry(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "cache")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+	gen := cache.GenerationDir(c)
+	if err := os.MkdirAll(gen, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(gen, "bad.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := newCache(t, dir, "analyzer-a")
 	if _, ok := c.Get("bad"); ok {
 		t.Error("Get on a corrupt entry should return ok=false")
 	}
@@ -205,8 +209,9 @@ func TestFailedSetLeavesNoTempFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "cache")
 	c := &cache.Cache{Dir: dir, Analyzer: "analyzer-x"}
 	key := c.Key("src/a.ts", []byte("x"))
+	gen := cache.GenerationDir(c)
 
-	if err := os.MkdirAll(filepath.Join(dir, key+".json"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(gen, key+".json"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +219,7 @@ func TestFailedSetLeavesNoTempFile(t *testing.T) {
 		t.Fatal("Set should fail when the entry path is a directory")
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(gen)
 	if err != nil {
 		t.Fatal(err)
 	}

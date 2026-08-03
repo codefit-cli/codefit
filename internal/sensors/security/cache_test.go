@@ -2,6 +2,7 @@ package security
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -419,15 +420,14 @@ func TestCache_EmptyDirDefaultsToDotCodefitCache(t *testing.T) {
 	root := tsProject(t)
 	cfg := cacheConfig("") // dir deliberately unset
 
-	run(t, root, counting(), cfg)
+	cold := run(t, root, counting(), cfg)
 
 	dir := filepath.Join(root, ".codefit", "cache")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("reading %q: %v — an unset cache.dir must default to .codefit/cache", dir, err)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("stat %q: %v — an unset cache.dir must default to .codefit/cache", dir, err)
 	}
-	if len(entries) == 0 {
-		t.Errorf("%q is empty, want one entry per analysed file", dir)
+	if n := len(entryFiles(t, dir)); n != len(cold.AuditedFiles) {
+		t.Errorf("%q holds %d entries, want one per analysed file (%d)", dir, n, len(cold.AuditedFiles))
 	}
 	// And the cache directory must not become part of what the walk audits.
 	warm := counting()
@@ -494,17 +494,35 @@ func failOpen(t *testing.T) {
 	t.Cleanup(func() { openCache = prev })
 }
 
+// entryFiles are the cache's entry files, wherever under dir the layout puts
+// them: they live in a per-generation subdirectory, so a listing of dir alone
+// would find directories and no entries at all.
+func entryFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(p, ".json") {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the cache dir %q: %v", dir, err)
+	}
+	return out
+}
+
 func corruptEveryEntry(t *testing.T, dir string) {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("reading the cache dir: %v", err)
-	}
+	entries := entryFiles(t, dir)
 	if len(entries) == 0 {
-		t.Fatal("the cache dir is empty — nothing to corrupt, the test proves nothing")
+		t.Fatal("the cache dir holds no entries — nothing to corrupt, the test proves nothing")
 	}
-	for _, e := range entries {
-		if err := os.WriteFile(filepath.Join(dir, e.Name()), []byte("}{ not json"), 0o600); err != nil {
+	for _, p := range entries {
+		if err := os.WriteFile(p, []byte("}{ not json"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -45,12 +45,21 @@ type Cache struct {
 // Open builds a cache under dir bound to the RUNNING analyzer's identity. It
 // fails when that identity cannot be resolved, which is the caller's signal to
 // scan without a cache for this run rather than key on the file alone.
+//
+// Opening also PRUNES, once per process per generation: superseded generations,
+// stale entries and the flat entries of the pre-generation layout are collected
+// here. The prune is best effort and reports nothing — see [Cache.prune]. It is
+// done on Open rather than on a schedule because the store only ever grows
+// between runs, and Open is the moment codefit knows which generation is the one
+// in use.
 func Open(dir string) (*Cache, error) {
 	id, err := Identity()
 	if err != nil {
 		return nil, fmt.Errorf("resolving analyzer identity: %w", err)
 	}
-	return &Cache{Dir: dir, Analyzer: id}, nil
+	c := &Cache{Dir: dir, Analyzer: id}
+	c.pruneOnce()
+	return c, nil
 }
 
 // Key is the entry key for a file: the SHA-256 of the analyzer identity, the
@@ -93,7 +102,11 @@ func (c *Cache) Get(key string) (Entry, bool) {
 	if key == "" {
 		return Entry{}, false
 	}
-	data, err := os.ReadFile(c.entryPath(key))
+	path := c.entryPath(key)
+	if path == "" {
+		return Entry{}, false
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Entry{}, false
 	}
@@ -118,14 +131,18 @@ func (c *Cache) Set(key string, e Entry) error {
 	if key == "" {
 		return fmt.Errorf("refusing to store a cache entry without a key")
 	}
-	if err := os.MkdirAll(c.Dir, 0o755); err != nil {
+	dir := c.genDir()
+	if dir == "" {
+		return fmt.Errorf("refusing to store a cache entry without an analyzer identity")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating cache dir: %w", err)
 	}
 	data, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("encoding cache entry: %w", err)
 	}
-	tmp, err := os.CreateTemp(c.Dir, ".entry-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".entry-*.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp cache entry: %w", err)
 	}
@@ -144,6 +161,13 @@ func (c *Cache) Set(key string, e Entry) error {
 	return nil
 }
 
+// entryPath is where the entry for key lives: under this cache's generation
+// directory, never flat in Dir. It is "" when the cache has no analyzer
+// identity, which every caller treats as "no entry".
 func (c *Cache) entryPath(key string) string {
-	return filepath.Join(c.Dir, key+".json")
+	dir := c.genDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, key+".json")
 }

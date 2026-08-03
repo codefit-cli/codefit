@@ -19,6 +19,21 @@
 //   - The cache is never the reason an audit does not happen. A missing,
 //     unreadable or corrupt entry is a miss; a failed write is a note.
 //
+// Entries are stored by GENERATION — Dir/<generation>/<key>.json, where the
+// generation labels the analyzer that wrote them. That is what makes the store
+// collectable: because the analyzer identity is part of every key, each codefit
+// build orphans the whole previous generation at once, so the unit that has to
+// be droppable is a generation and not an entry. [Open] prunes, once per
+// process: the current generation always survives, along with the two most
+// recently modified others, and entries in the current generation that have not
+// been written in 30 days are collected.
+//
+// The prune DELETES FILES, so it only ever recognises the two shapes this
+// package writes itself — a generation directory of 16 hex characters and an
+// entry file of a 64-hex key. Anything else under Dir belongs to whoever put it
+// there and is never touched at any age. It is also best effort and reports
+// nothing: a cache that cannot clean itself still has to work.
+//
 // It is wired into the security sensor's walk, consulted per file, and OPT-IN:
 // a project with no cache: section in .codefit.yaml has it off. The database
 // dimension is deliberately not cached — its inputs are configured schema paths
