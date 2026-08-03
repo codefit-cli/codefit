@@ -28,7 +28,7 @@ func TestPagila_GoldenSchema(t *testing.T) {
 // 1/3) — PK, FK, an index, an ENUM/SET column, backtick identifiers, and an
 // UNSIGNED/AUTO_INCREMENT column.
 func TestSakila_GoldenSchema(t *testing.T) {
-	assertGolden(t, filepath.Join("mysql", "sakila_excerpt.sql"), filepath.Join("mysql", "sakila_excerpt.schema.golden.json"), sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))
+	assertGolden(t, "mysql/sakila_excerpt.sql", "mysql/sakila_excerpt.schema.golden.json", sqlddl.New(sqlddl.WithDialect(sqlddl.MySQL())))
 }
 
 // TestAdventureWorks_GoldenSchema locks the neutral db.Schema produced by
@@ -37,9 +37,24 @@ func TestSakila_GoldenSchema(t *testing.T) {
 // names, IDENTITY, a single-column and a composite PK, a schema-qualified
 // FOREIGN KEY, an index, and a spread of T-SQL types.
 func TestAdventureWorks_GoldenSchema(t *testing.T) {
-	assertGolden(t, filepath.Join("tsql", "adventureworks_excerpt.sql"), filepath.Join("tsql", "adventureworks_excerpt.schema.golden.json"), sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())))
+	assertGolden(t, "tsql/adventureworks_excerpt.sql", "tsql/adventureworks_excerpt.schema.golden.json", sqlddl.New(sqlddl.WithDialect(sqlddl.SQLServer())))
 }
 
+// assertGolden parses a testdata fixture and compares the neutral db.Schema
+// against its golden.
+//
+// sqlFile and goldenFile are slash-separated on every OS, and the separation is
+// load-bearing rather than cosmetic. They play two different roles: locating the
+// bytes on disk, where filepath.Join produces the host's native spelling, and
+// naming the source inside the model, where the string is copied verbatim into
+// every db.Pos.File the golden pins.
+//
+// SourceFile.Path is a logical identifier, not a host path. Every production
+// producer of one derives it with filepath.ToSlash before handing it to a parser
+// (internal/sensors/security/security.go, internal/sensors/db/sources.go,
+// internal/mcp/scanall.go), so a Path holding a backslash is a value codefit
+// cannot emit. Building it with filepath.Join here manufactured exactly that on
+// Windows and made the golden diff on nothing but the separator.
 func assertGolden(t *testing.T, sqlFile, goldenFile string, p *sqlddl.Parser) {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join("testdata", sqlFile))
