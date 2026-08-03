@@ -158,12 +158,24 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 
 	stampFingerprints(fs, surf, content)
 
+	// The sources this dimension actually READ are its audited files. Its inputs
+	// are CONFIGURED (database.schema_paths), not a repository walk, so there is
+	// no auditable-file census to be a denominator of — but a caller narrowing a
+	// scan to a schema path still needs to be told the schema was audited rather
+	// than reported as a path the audit never reached.
+	auditedFiles := make([]string, 0, len(content))
+	for rel := range content {
+		auditedFiles = append(auditedFiles, rel)
+	}
+	sort.Strings(auditedFiles)
+
 	return Result{Measured: true, Note: note, Schema: schema, SchemaContent: content, Res: findings.SensorResult{
-		Sensor:     "db",
-		Score:      scoring.DimensionScore(fs),
-		Findings:   fs,
-		Surface:    surf,
-		DurationMs: time.Since(start).Milliseconds(),
+		Sensor:       "db",
+		Score:        scoring.DimensionScore(fs),
+		Findings:     fs,
+		Surface:      surf,
+		AuditedFiles: auditedFiles,
+		DurationMs:   time.Since(start).Milliseconds(),
 	}}, nil
 }
 

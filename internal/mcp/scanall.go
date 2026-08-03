@@ -30,6 +30,15 @@ import (
 type ScanAllRequest struct {
 	Root     string `json:"root"`
 	Language string `json:"language"`
+	// ChangedFiles narrows the audit to these project-relative paths (layer 0 of
+	// the filtering pyramid). codefit does not ask git which files changed — it
+	// has no power over the user's git, and the calling agent already knows what
+	// it touched. Absent or empty means a FULL audit, never "audit nothing".
+	//
+	// A narrowed run declares itself in the response's scope block, cannot mark a
+	// baseline item in an unopened file as gone, and leaves the DB dimension NOT
+	// MEASURED unless a configured schema path is in scope.
+	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 // ScanAllResponse is the agent-first synthesis as an ACTIONABLE summary, not the
@@ -54,6 +63,12 @@ type ScanAllRequest struct {
 // the difference is exactly the "known" surface the baseline is silencing.
 type ScanAllResponse struct {
 	Summary ScanAllSummary `json:"summary"`
+	// Scope declares how much of the project this response describes: mode full or
+	// partial, how many auditable files were in scope, and which requested paths
+	// the audit never reached. It is ALWAYS present, so a consumer never infers
+	// the mode from an absence and never reads a partial `blocked: false` as the
+	// wider claim it is not.
+	Scope ScopeBlock `json:"scope"`
 	// Score is the per-dimension breakdown plus the weighted global (ADR 0021). It
 	// is ALWAYS present: by_dimension carries every weighted dimension, with the
 	// unaudited ones (review/complexity/tests, and db when it did not run) as null —
@@ -120,11 +135,10 @@ type ScanAllSummary struct {
 // there), groups the result by endpoint, and partitions by the local-resolution
 // fact — it adds no detection, only the aggregation and the split.
 func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
-	return handleScanAllScoped(req, scope.Full())
+	return handleScanAllScoped(req, scope.Of(req.ChangedFiles))
 }
 
-// handleScanAllScoped is HandleScanAll with layer 0 made explicit. The exported
-// entry point audits everything; the scope becomes an INPUT in the next slice.
+// handleScanAllScoped is HandleScanAll with layer 0 made explicit.
 func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, error) {
 	// Load the committed baseline ONCE: it provides both the project's registered
 	// authz helpers (recognized during the scan) and the previous items the unified
@@ -218,8 +232,18 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 	}
 	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
 
+	// The scope block unions what BOTH dimensions examined: the security walk's
+	// files and, when the db dimension ran, the configured schema sources it read.
+	// Without the union a requested schema path would be reported unmatched even
+	// though the audit read it — the security walk does not open .prisma files.
+	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), secRes.AuditableTotal)
+	if err := block.Validate(); err != nil {
+		return ScanAllResponse{}, err
+	}
+
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
+		Scope: block,
 		Summary: ScanAllSummary{
 			Endpoints:             len(endpoints),
 			DeterministicFindings: len(secRes.Findings),

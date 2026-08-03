@@ -141,12 +141,13 @@ type SurfaceItem struct {
 // long it took, and an error string if it failed (kept as a string so partial
 // results survive serialization).
 //
-// AuditableTotal and AuditedFiles are the walk's own account of what it looked
+// AuditableTotal and AuditedFiles are the sensor's own account of what it looked
 // at, and they exist so a PARTIAL audit cannot pass itself off as a full one. A
-// sensor that walks the project reports both on every run; under a full audit
-// they agree. A sensor whose inputs are configured rather than walked (the DB
-// dimension) leaves them zero — its "did it run at all" question is answered by
-// its own measured/not-measured flag, not by a file census.
+// sensor that WALKS the project reports both; under a full audit they agree. A
+// sensor whose inputs are CONFIGURED rather than walked (the DB dimension)
+// reports the sources it read in AuditedFiles and leaves AuditableTotal zero:
+// there is no file census to be a denominator of, and whether that dimension ran
+// at all is answered by its own measured/not-measured flag.
 type SensorResult struct {
 	Sensor   string        `json:"sensor"`
 	Score    int           `json:"score"`

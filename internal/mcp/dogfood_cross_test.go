@@ -43,7 +43,6 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/codefit-cli/codefit/internal/core/scope"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,6 +51,7 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/crossrules"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 )

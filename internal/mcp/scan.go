@@ -13,20 +13,30 @@ import (
 	"github.com/codefit-cli/codefit/internal/sensors/security"
 )
 
-// ScanRequest is the input to codefit-scan-security: a project root and language.
+// ScanRequest is the input to codefit-scan-security: a project root, a language,
+// and optionally the files to narrow the audit to.
 type ScanRequest struct {
 	Root     string `json:"root"`
 	Language string `json:"language"`
+	// ChangedFiles narrows the audit to these project-relative paths (layer 0 of
+	// the filtering pyramid). codefit does not ask git which files changed — it
+	// has no power over the user's git, and the calling agent already knows what
+	// it touched. Absent or empty means a FULL audit, never "audit nothing", and
+	// a narrowed run declares itself in the response's scope block.
+	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 // ScanResponse is the deterministic + surface result over the project (the §11
 // contract): flat findings and surface, the dimension score, and whether the
 // project is blocked (an unconsented critical security finding).
+// Scope declares how much of the project this result describes. It is ALWAYS
+// present, so `blocked: false` is never read as a wider claim than it is.
 type ScanResponse struct {
 	Findings []findings.Finding     `json:"findings"`
 	Surface  []findings.SurfaceItem `json:"surface"`
 	Score    int                    `json:"score"`
 	Blocked  bool                   `json:"blocked"`
+	Scope    ScopeBlock             `json:"scope"`
 }
 
 // HandleScanSecurity runs the security sensor over the project and returns the
@@ -34,8 +44,13 @@ type ScanResponse struct {
 // sensor (the deterministic rules + the surface queries, already wired there),
 // and returns its result — no detection logic lives here.
 func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
-	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language), scope.Full())
+	scp := scope.Of(req.ChangedFiles)
+	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language), scp)
 	if err != nil {
+		return ScanResponse{}, err
+	}
+	block := scopeBlockFor(scp, res.AuditedFiles, res.AuditableTotal)
+	if err := block.Validate(); err != nil {
 		return ScanResponse{}, err
 	}
 	return ScanResponse{
@@ -43,6 +58,7 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 		Surface:  res.Surface,
 		Score:    res.Score,
 		Blocked:  scoring.IsBlocked(res.Findings),
+		Scope:    block,
 	}, nil
 }
 

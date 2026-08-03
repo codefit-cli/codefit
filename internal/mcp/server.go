@@ -23,7 +23,10 @@ func NewServer() *mcpsdk.Server {
 		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language}. Returns findings + surface + score + blocked.",
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
-		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language}.",
+		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language, changed_files?}. "+
+			"Pass changed_files (project-relative paths) to audit ONLY the files you touched — codefit never asks git, you already know what you changed; omit it (or pass an empty list) for a full audit. "+
+			"A partial run declares itself in the `scope` block (mode/audited/auditable_total/unmatched, and findings, score and `blocked` then describe only those files), never proposes pruning a baseline "+
+			"item in a file it did not open, and leaves the db dimension NOT MEASURED (by_dimension.db null) unless a configured schema path is in scope.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing. Use it to get the detail of a frontier_pending endpoint from codefit-scan-all. Input: {root, language, file}.",
