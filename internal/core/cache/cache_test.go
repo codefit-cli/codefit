@@ -9,76 +9,150 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 )
 
-func TestHashFileIsStableSHA256(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "a.go")
-	if err := os.WriteFile(p, []byte("package main\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c := &cache.Cache{Dir: filepath.Join(dir, "cache")}
-	h1, err := c.HashFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(h1) != 64 {
-		t.Errorf("hash length = %d, want 64 hex chars", len(h1))
-	}
-	h2, _ := c.HashFile(p)
-	if h1 != h2 {
-		t.Errorf("hash not stable: %s vs %s", h1, h2)
-	}
-	// Different content -> different hash.
-	if err := os.WriteFile(p, []byte("package other\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	h3, _ := c.HashFile(p)
-	if h3 == h1 {
-		t.Error("hash should change when content changes")
+// entry is the raw output of one file's analysis: findings AND surface. The
+// cache that stored only findings would silently drop the surface and make a
+// warm scan differ from a cold one (spec R1/R3).
+func entry() cache.Entry {
+	return cache.Entry{
+		Findings: []findings.Finding{{
+			ID: "SEC-001", Dimension: findings.DimensionSecurity,
+			Severity: findings.SeverityCritical, File: "a.ts", Line: 3,
+			Title: "Possible hardcoded API key", Confidence: 1.0,
+			RequiresConsent: true, Fingerprint: "abc123def456",
+		}},
+		Surface: []findings.SurfaceItem{{
+			ID: "idor:a.ts:3", Category: "idor", File: "a.ts", Line: 3,
+			Snippet:           "params.id",
+			StructuralSignals: []string{"reads params.id"},
+			StructuralFacts:   map[string]bool{"local_access_detected": true},
+			ReasonToReview:    "Is this resource scoped to the caller?",
+			Fingerprint:       "fed654cba321",
+		}},
 	}
 }
 
-func TestCacheSetGetRoundTrip(t *testing.T) {
-	c := &cache.Cache{Dir: filepath.Join(t.TempDir(), "cache")}
-	want := []findings.Finding{
-		{ID: "SEC-001", Dimension: findings.DimensionSecurity, Severity: findings.SeverityCritical, Title: "x"},
-	}
-	if err := c.Set("abc123", want); err != nil {
+func newCache(t *testing.T, dir, analyzer string) *cache.Cache {
+	t.Helper()
+	return &cache.Cache{Dir: dir, Analyzer: analyzer}
+}
+
+// R3 — the entry holds BOTH halves of scanFile's output, and both survive the
+// JSON round trip unchanged.
+func TestEntryRoundTripCarriesFindingsAndSurface(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+	want := entry()
+
+	if err := c.Set("k1", want); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	got, ok := c.Get("abc123")
+	got, ok := c.Get("k1")
 	if !ok {
 		t.Fatal("Get returned not-found after Set")
 	}
-	if len(got) != 1 || got[0].ID != "SEC-001" {
-		t.Errorf("Get = %+v, want the stored finding", got)
+	if len(got.Findings) != 1 || got.Findings[0].ID != "SEC-001" {
+		t.Errorf("Findings = %+v, want the stored finding", got.Findings)
+	}
+	if len(got.Surface) != 1 {
+		t.Fatalf("Surface = %+v, want the stored surface item — a cache that drops "+
+			"surface makes a warm scan differ from a cold one (R1)", got.Surface)
+	}
+	s := got.Surface[0]
+	if s.ID != "idor:a.ts:3" || s.Category != "idor" || s.Fingerprint != "fed654cba321" {
+		t.Errorf("surface item = %+v, want the stored one intact", s)
+	}
+	if !s.StructuralFacts["local_access_detected"] {
+		t.Errorf("StructuralFacts = %v, want the stored fact to survive the round trip", s.StructuralFacts)
 	}
 }
 
-func TestCacheGetMiss(t *testing.T) {
-	c := &cache.Cache{Dir: filepath.Join(t.TempDir(), "cache")}
+// Contract item 8 — a file that produced NOTHING caches that empty result and is
+// found again. Otherwise the clean files (the majority) never benefit and the
+// cache quietly does nothing on a healthy repository.
+func TestEmptyResultIsCachedAndFound(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+
+	if err := c.Set("empty", cache.Entry{}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, ok := c.Get("empty")
+	if !ok {
+		t.Fatal("an empty result must be a HIT, not a miss — otherwise clean files are re-analysed forever")
+	}
+	if len(got.Findings) != 0 || len(got.Surface) != 0 {
+		t.Errorf("Get = %+v, want an empty entry", got)
+	}
+}
+
+func TestGetMiss(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
 	if _, ok := c.Get("nonexistent"); ok {
-		t.Error("Get on a missing hash should return ok=false")
+		t.Error("Get on a missing key should return ok=false")
 	}
 }
 
-func TestHashFileMissing(t *testing.T) {
-	c := &cache.Cache{Dir: t.TempDir()}
-	if _, err := c.HashFile(filepath.Join(t.TempDir(), "nope.go")); err == nil {
-		t.Error("HashFile on a missing file should error")
-	}
-}
-
-func TestCacheGetCorruptEntry(t *testing.T) {
+// R4 — a corrupt entry is a MISS, never an error.
+func TestGetCorruptEntry(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "cache")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A non-JSON entry must be treated as a miss, not a crash.
 	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := &cache.Cache{Dir: dir}
+	c := newCache(t, dir, "analyzer-a")
 	if _, ok := c.Get("bad"); ok {
 		t.Error("Get on a corrupt entry should return ok=false")
+	}
+}
+
+// R2 — the key names the ANALYZER as well as the file. Same file, same bytes, a
+// different analyzer: a different key, so a rules upgrade cannot serve a verdict
+// it never computed.
+func TestKeyIncludesAnalyzerIdentity(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("const x = 1;\n")
+
+	a := newCache(t, dir, "analyzer-a").Key("src/a.ts", content)
+	b := newCache(t, dir, "analyzer-b").Key("src/a.ts", content)
+
+	if a == "" || b == "" {
+		t.Fatalf("Key returned empty for a cache WITH an analyzer identity: a=%q b=%q", a, b)
+	}
+	if a == b {
+		t.Error("two analyzers produced the SAME key for the same file — a codefit upgrade " +
+			"would serve findings computed under the old rules (R2)")
+	}
+}
+
+// R2 — the key names the FILE, path included. Two files with identical bytes at
+// different paths must not share an entry: every finding and surface item carries
+// its File and a fingerprint derived from it, so sharing would report the wrong
+// path on a warm scan and break R1.
+func TestKeyIncludesFilePath(t *testing.T) {
+	c := newCache(t, t.TempDir(), "analyzer-a")
+	content := []byte("const key = \"sk-ant-abcdefgh12345678\";\n")
+
+	if c.Key("src/a.ts", content) == c.Key("src/b.ts", content) {
+		t.Error("two paths with identical bytes shared a key — a warm scan would report " +
+			"the first file's path for the second file")
+	}
+}
+
+// R2 — the key names the file's CONTENT: changed bytes are a miss.
+func TestKeyIncludesContent(t *testing.T) {
+	c := newCache(t, t.TempDir(), "analyzer-a")
+
+	if c.Key("a.ts", []byte("one")) == c.Key("a.ts", []byte("two")) {
+		t.Error("changed bytes produced the same key")
+	}
+}
+
+// R2, fail closed — without an analyzer identity there is no key, so nothing is
+// ever read or written. Unknown key inputs mean do not reuse.
+func TestKeyIsEmptyWithoutAnalyzerIdentity(t *testing.T) {
+	c := newCache(t, t.TempDir(), "")
+	if k := c.Key("a.ts", []byte("x")); k != "" {
+		t.Errorf("Key = %q with no analyzer identity, want \"\" — an identity-less key "+
+			"would key on file content alone, exactly what R2 forbids", k)
 	}
 }

@@ -1,12 +1,23 @@
-// Package cache defines the content-hash finding cache (PRD section 15,
-// optimization 2). Each file (and optionally each function) is hashed; if the
-// hash is unchanged since the last run, its findings are reused instead of
-// recomputed, so a recurring full scan costs about the same as an incremental.
+// Package cache is the content-hash finding cache (PRD §19, optimization 2).
+// Each analysed file's RAW output — findings and mapped surface, before path
+// criticality is applied — is stored under a key naming the analyzer, the file's
+// path and the file's bytes. A hit means the same analyzer already analysed
+// exactly those bytes at exactly that path, so a recurring full scan costs about
+// as much as an incremental one.
 //
-// [Cache] hashes file content with SHA-256 and stores the findings for each
-// hash as a JSON file under its directory, so unchanged files reuse their
-// findings instead of being recomputed.
+// That affordability is the point, not speed for its own sake: the full scan is
+// the honest one — the only scan that can prune the baseline, and the only one
+// whose "not blocked" means what it appears to mean. If the full scan were
+// expensive and the narrowed one cheap, every caller would narrow, and codefit
+// would degrade into a tool that permanently looks through a slit.
 //
-// Status: INERT. Built and tested, but not yet wired to any consumer. The MCP
-// orchestrator will use it in Fase 1; kept in the core per PRD section 15.
+// Two invariants govern everything here:
+//
+//   - A warm scan and a cold scan are IDENTICAL, not merely equivalent. That is
+//     why an [Entry] carries the surface as well as the findings, and why the key
+//     names the file's path as well as its bytes.
+//   - The cache is never the reason an audit does not happen. A missing,
+//     unreadable or corrupt entry is a miss; a failed write is a note.
+//
+// Status: INERT. Built and tested; wired to no consumer yet.
 package cache
