@@ -106,6 +106,14 @@ func (c *Cache) Get(key string) (Entry, bool) {
 
 // Set stores an entry as a JSON file under key. The error is returned rather than
 // swallowed so the caller can report it; it is never a reason to fail a scan.
+//
+// The write is ATOMIC — a temp file in the same directory, then a rename, the
+// same shape the committed baseline uses. codefit is an MCP server, so two tools
+// over one project (an agent firing scan-security and scan-all together) can
+// reach the same entry path at once, and os.WriteFile truncates before it writes.
+// A torn entry degrades safely on read (invalid JSON is a miss), but it degrades
+// into re-analysing the file the cache exists to skip, and a crash mid-write
+// would leave that behind permanently.
 func (c *Cache) Set(key string, e Entry) error {
 	if key == "" {
 		return fmt.Errorf("refusing to store a cache entry without a key")
@@ -117,8 +125,21 @@ func (c *Cache) Set(key string, e Entry) error {
 	if err != nil {
 		return fmt.Errorf("encoding cache entry: %w", err)
 	}
-	if err := os.WriteFile(c.entryPath(key), data, 0o644); err != nil {
-		return fmt.Errorf("writing cache entry: %w", err)
+	tmp, err := os.CreateTemp(c.Dir, ".entry-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp cache entry: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("writing temp cache entry: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing temp cache entry: %w", err)
+	}
+	if err := os.Rename(tmpName, c.entryPath(key)); err != nil {
+		return fmt.Errorf("replacing cache entry %q: %w", key, err)
 	}
 	return nil
 }

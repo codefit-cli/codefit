@@ -3,6 +3,8 @@ package cache_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/cache"
@@ -154,5 +156,71 @@ func TestKeyIsEmptyWithoutAnalyzerIdentity(t *testing.T) {
 	if k := c.Key("a.ts", []byte("x")); k != "" {
 		t.Errorf("Key = %q with no analyzer identity, want \"\" — an identity-less key "+
 			"would key on file content alone, exactly what R2 forbids", k)
+	}
+}
+
+// Concurrent writers must never leave a reader holding a torn entry. codefit is
+// an MCP server: an agent can fire scan-security and scan-all over one project
+// at once, and both reach the same entry path.
+//
+// This is a HAMMER guard, not a red-green proof. The property is probabilistic
+// in the failing direction — os.WriteFile's truncate-then-write does not tear on
+// every interleaving — so a passing run does not prove atomicity the way the
+// mutation proofs elsewhere in this package do. It is here to catch a regression
+// to a non-atomic write under -race, and it is honest about being that.
+func TestSetIsSafeUnderConcurrentWriters(t *testing.T) {
+	c := &cache.Cache{Dir: filepath.Join(t.TempDir(), "cache"), Analyzer: "analyzer-x"}
+	key := c.Key("src/a.ts", []byte("const a = 1;\n"))
+	want := cache.Entry{Findings: []findings.Finding{{ID: "SEC-001", Title: "x"}}}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = c.Set(key, want)
+			c.Get(key) // a reader racing the writers must never panic
+		}()
+	}
+	wg.Wait()
+
+	got, ok := c.Get(key)
+	if !ok {
+		t.Fatal("entry unreadable after concurrent writers — a torn write survived")
+	}
+	if len(got.Findings) != 1 || got.Findings[0].ID != "SEC-001" {
+		t.Errorf("entry corrupt after concurrent writers: %+v", got)
+	}
+}
+
+// A Set that FAILS must not leave its temp file behind. The success path proves
+// nothing here — the rename consumes the temp either way, so a test over a
+// successful Set passes even with the cleanup deleted (measured, not assumed).
+// The failure path is where the cleanup is the only thing standing between a
+// long-lived cache directory and an unbounded pile of .tmp litter.
+//
+// The rename is forced to fail portably by putting a DIRECTORY where the entry
+// file belongs: os.Rename refuses to replace it on both Windows and Linux.
+func TestFailedSetLeavesNoTempFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	c := &cache.Cache{Dir: dir, Analyzer: "analyzer-x"}
+	key := c.Key("src/a.ts", []byte("x"))
+
+	if err := os.MkdirAll(filepath.Join(dir, key+".json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Set(key, cache.Entry{}); err == nil {
+		t.Fatal("Set should fail when the entry path is a directory")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file survived a FAILED Set: %s", e.Name())
+		}
 	}
 }
