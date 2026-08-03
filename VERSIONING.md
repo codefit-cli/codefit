@@ -62,6 +62,32 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.6` — a PATCH: no phase closes here.** Phase 3 (code review, best practices,
+  tests, regression risk) has not started, so the line stays `0.2` and the MINOR ↔ phase
+  table above gains **no row** — that table maps phase *closures* to versions, and this
+  release closes none. **No audit rule changed**: every security, DB and DW rule behaves
+  exactly as it did in `v0.2.5`, and no finding, surface item or baseline fingerprint
+  moves. Two things land. First, an **agent-facing correction**: the skill `codefit init`
+  generates had fallen two phases behind the MCP server — it described only endpoint
+  security while the database dimension shipped across `v0.2.0`–`v0.2.5`, and its
+  frontmatter `description` **gates progressive disclosure**, so an agent starting a
+  database task never loaded the skill at all. It now names `codefit-scan-db`,
+  `codefit-coverage` and `codefit-check-cves`, teaches the DB dimension and its
+  honest-abstention contract, and is held by a drift lock against the live MCP session
+  (`TestSkillNamesEveryRegisteredTool`) plus a committed copy at
+  `.claude/skills/codefit/SKILL.md` locked byte-for-byte to `RenderSkill`
+  (`TestCommittedSkillMatchesRenderedSkill`). **This reaches an existing install only by
+  re-running `codefit init`** — a skill file already on disk stays stale until it is
+  regenerated. Second, **Windows checkout portability**: `go test ./...` failed eleven
+  tests on a clean Windows clone of a tree that was green on Linux CI. The causes were a
+  missing `.gitattributes` (now pinning LF repo-wide — an existing checkout needs
+  `git add --renormalize .` once, since it does not apply retroactively), `codefit init`
+  printing native separators while writing forward slashes into the `.codefit.yaml` of the
+  same run, and `make build` writing a suffix-less `bin/codefit` that Windows will not
+  resolve as an executable. **Declared, not fixed:** under a *native* Windows `make`
+  driving `cmd.exe`, the `date` and `git rev-parse` shell-outs still misbehave, so
+  `Commit` and `BuildDate` can be injected as garbage; building from Git Bash is
+  unaffected. See the [CHANGELOG](CHANGELOG.md) for the itemized list.
 - **`v0.2.5` — Phase 2.5 complete (RF-03 OLAP closure), and with it the last Phase-2
   coverage debt.** Usable end-to-end from `main`: the DW-0xx family is closed. **DW-021**
   (a fact table with no columnar/analytic index) and **DW-020** (a schema-level census of

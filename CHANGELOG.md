@@ -12,7 +12,16 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
-## [Unreleased]
+## [0.2.6] — 2026-08-03
+
+**A PATCH release, and the smallest kind: no PRD phase closes here.** Phase 3 (code
+review, best practices, tests, regression risk) has not started, so this stays on the
+`0.2` line — see [VERSIONING.md](VERSIONING.md). **No audit rule changed.** Every
+security, DB and DW rule behaves exactly as it did in `v0.2.5`: no finding, no surface
+item and no baseline fingerprint moves. What lands is one **agent-facing** correction —
+the skill `codefit init` generates was teaching a codefit two phases old — and the
+portability work that makes `go test ./...` pass on a Windows checkout of this
+repository.
 
 **The skill `codefit init` generates had fallen two phases behind the MCP server.** It
 described only endpoint security — the Phase-1 scope — while the database dimension
@@ -23,6 +32,21 @@ handlers", an agent starting a database task never loaded the skill at all — i
 read an incomplete skill, it read none. **This reaches an existing install only by
 re-running `codefit init`**: after upgrading, `init` regenerates the skill with the
 database content, and a skill file already written stays stale until it is regenerated.
+
+**`go test ./...` did not pass on a Windows checkout.** Eleven tests across `internal/cli`
+and `internal/providers/sqlddl` failed on a clean clone of `main`, while the identical tree
+was green on Linux CI. None of it was a fault in what codefit *audits*: the causes were a
+missing `.gitattributes`, path separators, and a missing `.exe`. Two were test defects and
+are not listed below; the separator one was not, and is the first `Fixed` entry.
+
+**Three things to do after upgrading**, each with its own entry below:
+
+1. **Re-run `codefit init`.** It is the only way the skill fix reaches an existing
+   install — a skill file already on disk stays stale until it is regenerated.
+2. **In an existing checkout of this repository, run `git add --renormalize .` once**
+   (or take a fresh clone). `.gitattributes` does not apply retroactively.
+3. **Rebuild if you built with `make build` on Windows.** It wrote `bin/codefit` with no
+   suffix — a file Windows will not resolve as an executable.
 
 ### Fixed
 
@@ -49,38 +73,6 @@ database content, and a skill file already written stays stale until it is regen
   knew only `scan-all` had no path to it. `codefit-coverage` is how the agent learns what
   codefit does and does not audit before telling a human something is out of scope, instead
   of assuming the boundary.
-
-### Added
-
-- **A drift lock between the two agent-facing sources** — `TestSkillNamesEveryRegisteredTool`
-  (`internal/mcp/skill_tools_test.go`) reads the tool names from a **live** MCP session
-  rather than from the constant block (the constants already declare Phase-3 names
-  `NewServer` does not register), and fails unless every registered tool is either named in
-  the rendered skill or carries a declared reason in the `deliberatelyNotInSkill` allowlist.
-  The skill is deliberately thin, so omitting a tool stays a legitimate choice — it just has
-  to be a **declared** one. `TestSkillOmissionAllowlistHasNoGhosts` guards the reverse
-  direction: an entry for a tool the server no longer registers would silently excuse a
-  future tool that reuses the name. The lock forces the **decision**, not the content — what
-  the skill teaches still has to be verified true. Both tests were mutation-proven.
-
-### Changed
-
-- **`internal/scaffold/skill.go` is now registered in the `CLAUDE.md` documentation map** as
-  an agent-facing source, alongside `internal/mcp/server.go` — and as the *first* thing an
-  agent reads, since its `description` decides whether the tool descriptions are ever
-  reached. A doc that declares capability and is not in the map falls out of the
-  documentation close, which is exactly how this one drifted for two phases.
-
----
-
-**`go test ./...` did not pass on a Windows checkout.** Eleven tests across `internal/cli`
-and `internal/providers/sqlddl` failed on a clean clone of `main`, while the identical tree
-was green on Linux CI. None of it was a fault in what codefit *audits*: the causes were a
-missing `.gitattributes`, path separators, and a missing `.exe`. Two were test defects and
-are not listed here; the separator one was not, and is the first entry below.
-
-### Fixed
-
 - **`codefit init` now reports paths with forward slashes on every OS.** On Windows the
   report printed `.claude\skills\codefit\SKILL.md` and `prisma\schema.prisma` while writing
   `prisma/schema.prisma` into the `.codefit.yaml` it generated **in the same run** — the
@@ -95,9 +87,43 @@ are not listed here; the separator one was not, and is the first entry below.
   suffix; `go build -o` appends nothing, and Windows resolves executables by extension. The
   suffix now comes from `go env GOEXE`, so it stays empty on Linux and macOS.
   `make cross-compile` is unchanged — its targets are per-`GOOS` and already spell their own.
+  **Declared, not fixed:** under a *native* Windows `make` driving `cmd.exe`, the
+  `$(shell date -u …)` and `$(shell git rev-parse … 2>/dev/null)` recipes still misbehave,
+  so `Commit` and `BuildDate` can be injected as garbage. Which `make` and which shell a
+  developer has is not observable from here, and rewriting those recipes blind would be an
+  unverifiable change; building from Git Bash — where this was verified — is unaffected.
 
 ### Added
 
+- **A drift lock between the two agent-facing sources** — `TestSkillNamesEveryRegisteredTool`
+  (`internal/mcp/skill_tools_test.go`) reads the tool names from a **live** MCP session
+  rather than from the constant block (the constants already declare Phase-3 names
+  `NewServer` does not register), and fails unless every registered tool is either named in
+  the rendered skill or carries a declared reason in the `deliberatelyNotInSkill` allowlist.
+  The skill is deliberately thin, so omitting a tool stays a legitimate choice — it just has
+  to be a **declared** one. `TestSkillOmissionAllowlistHasNoGhosts` guards the reverse
+  direction: an entry for a tool the server no longer registers would silently excuse a
+  future tool that reuses the name. The lock forces the **decision**, not the content — what
+  the skill teaches still has to be verified true. Both tests were mutation-proven.
+
+- **The skill `codefit init` generates is now committed** at
+  `.claude/skills/codefit/SKILL.md` — so the copy in git is a promise about what the
+  generator produces *today* — and it lands **with its lock, never before it**.
+  `TestCommittedSkillMatchesRenderedSkill` (`internal/scaffold/skill_committed_test.go`)
+  renders through the **real** pipeline (`Detect()` on the repository root, then
+  `RenderSkill()`) and asserts the committed bytes are identical to the render; a second
+  test asserts the committed path is still where `PlacementTargets` says `init` writes it.
+  A missing file **fails** rather than skipping, because a skipped test protects nothing.
+  Without that lock a committed generated artifact is one more mirror free to drift from
+  its source — which is precisely what the skill drift above *was*. Mutation-proven: a
+  stray appended line, and a template edit left unregenerated, each turn it red.
+- **The repository's own `.gitignore` now covers `**/.claude/settings.local.json`.** That
+  file holds per-machine agent settings — tool permissions, absolute local paths — and was
+  never tracked, but the only thing keeping it out was a rule in the developer's
+  **personal** global gitignore; on any other machine `git add .claude/` would have
+  committed it. Verified with the global excludes file disabled. The generated skill beside
+  it is deliberately **not** ignored, and the rule's comment now records that as settled
+  rather than describing it as an open question.
 - **A `.gitattributes` pinning LF.** The repo had none, so on a checkout with
   `core.autocrlf=true` every tracked text file materialized with CRLF — 485 of 487 files on
   the machine this was found on — and codefit's fixtures are parsed and compared as **bytes**.
@@ -109,6 +135,14 @@ are not listed here; the separator one was not, and is the first entry below.
 
   **This does not repair a checkout that already exists.** Run `git add --renormalize .`
   once, or take a fresh clone.
+
+### Changed
+
+- **`internal/scaffold/skill.go` is now registered in the `CLAUDE.md` documentation map** as
+  an agent-facing source, alongside `internal/mcp/server.go` — and as the *first* thing an
+  agent reads, since its `description` decides whether the tool descriptions are ever
+  reached. A doc that declares capability and is not in the map falls out of the
+  documentation close, which is exactly how this one drifted for two phases.
 
 ## [0.2.5] — 2026-08-02
 

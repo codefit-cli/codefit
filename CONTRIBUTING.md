@@ -14,7 +14,7 @@ sensor needs it). No C toolchain is required — codefit builds with
 ```bash
 git clone https://github.com/codefit-cli/codefit
 cd codefit
-make build        # builds ./bin/codefit
+make build        # builds ./bin/codefit (./bin/codefit.exe on Windows — the suffix comes from `go env GOEXE`)
 make test         # go test ./...
 make lint         # golangci-lint run
 ```
