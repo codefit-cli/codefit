@@ -107,7 +107,10 @@ independent audit layer that validates AI-generated code is secure and correct
 - **Scoping a scan to the files you changed** — an optional `changed_files` on
   `codefit-scan-all` / `codefit-scan-security`, with the narrowing declared in the
   response so a partial result never reads as a full one (see
-  [Scoping a scan](#scoping-a-scan-to-the-files-you-changed) below).
+  [Scoping a scan](#scoping-a-scan-to-the-files-you-changed) below). *Unlike every
+  other item on this list, this one is covered by tests and the CI self-audit but has
+  **not** been exercised on a real project yet — the "validated in real use" above does
+  not cover it.*
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.

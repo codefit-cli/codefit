@@ -20,7 +20,7 @@ func NewServer() *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "codefit", Version: version.Version}, nil)
 
 	addTool(s, string(ToolScanSecurity),
-		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language}. Returns findings + surface + score + blocked.",
+		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language, changed_files?}. Pass changed_files to audit only those paths; the response's scope block then declares the narrowing, and score/blocked describe only the audited slice. Returns findings + surface + score + blocked + scope.",
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
 		"The actionable summary per endpoint: deterministic findings and the endpoints codefit resolved locally, each with all its concerns together and three certainty levels, ordered by actionable gap. Frontier-only endpoints (the data left the handler body) are named in frontier_pending, not detailed — fetch any with codefit-scan-endpoint. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language, changed_files?}. "+
