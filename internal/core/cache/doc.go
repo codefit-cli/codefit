@@ -19,5 +19,9 @@
 //   - The cache is never the reason an audit does not happen. A missing,
 //     unreadable or corrupt entry is a miss; a failed write is a note.
 //
-// Status: INERT. Built and tested; wired to no consumer yet.
+// It is wired into the security sensor's walk, consulted per file, and OPT-IN:
+// a project with no cache: section in .codefit.yaml has it off. The database
+// dimension is deliberately not cached — its inputs are configured schema paths
+// rather than a walk, and a schema reconstructed from an ordered set of
+// migrations does not obviously invalidate per file.
 package cache

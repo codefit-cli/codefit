@@ -8,6 +8,7 @@ package security
 
 import (
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/codefit-cli/codefit/internal/config"
+	"github.com/codefit-cli/codefit/internal/core/cache"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
@@ -58,6 +60,14 @@ func (*Sensor) OwnedCategories() []string {
 	}
 }
 
+// openCache opens the run's finding cache, bound to the running analyzer's
+// identity. It is a package variable, and the only reason is that two states the
+// cache must handle correctly — a DIFFERENT analyzer binary, and an analyzer
+// identity that cannot be resolved at all — cannot be produced from a test any
+// other way, and both are correctness requirements rather than conveniences.
+// Production never reassigns it.
+var openCache = cache.Open
+
 // skipDirs are directories never walked.
 var skipDirs = map[string]bool{
 	".git": true, "vendor": true, "node_modules": true,
@@ -75,6 +85,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	start := time.Now()
 	exts := s.provider.FileExtensions()
 	narrowed := ctx.Scope.Narrows()
+	fileCache := cacheFor(ctx)
 
 	var all []findings.Finding
 	var surface []findings.SurfaceItem
@@ -104,10 +115,32 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		}
 		audited = append(audited, rel)
 
-		fileFindings, fileSurface, fileErr := s.scanFile(rel, path)
-		if fileErr != nil {
-			return fileErr
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
 		}
+		// The cache is consulted here, on the RAW bytes, before anything is
+		// parsed. A hit reuses the whole analysis; a miss, a corrupt entry or no
+		// cache at all simply analyses the file. The file is still opened, still
+		// counted and still reported either way — the cache decides what is
+		// RECOMPUTED, never what is audited.
+		key := ""
+		if fileCache != nil {
+			key = fileCache.Key(rel, raw)
+		}
+		fileFindings, fileSurface, hit := cached(fileCache, key)
+		if !hit {
+			var fileErr error
+			fileFindings, fileSurface, fileErr = s.scanFile(rel, raw)
+			if fileErr != nil {
+				return fileErr
+			}
+			store(fileCache, key, rel, fileFindings, fileSurface)
+		}
+		// Criticality is applied HERE, on the way out, to a cached entry exactly
+		// as to a fresh one: what is cached is the analysis, not its weighting.
+		// An edit to path_criticality therefore re-weights the next scan without
+		// invalidating a single entry.
 		applyCriticality(ctx.Config, rel, fileFindings)
 		all = append(all, fileFindings...)
 		surface = append(surface, fileSurface...)
@@ -129,14 +162,77 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	}, nil
 }
 
-// scanFile runs the pyramid layers over a single file: deterministic findings
-// (regex + provider AST) and the mapped surface for the agent to reason about.
-// codefit never runs a layer-3 LLM — the surface is returned to the agent.
-func (s *Sensor) scanFile(rel, abs string) ([]findings.Finding, []findings.SurfaceItem, error) {
-	raw, err := os.ReadFile(abs)
-	if err != nil {
-		return nil, nil, err
+// cacheFor resolves the run's finding cache, or nil when there is to be none.
+//
+// It is nil in three cases, and the third is the one that matters: the project
+// did not opt in (config.Cache.Enabled has no default, so a project with no
+// cache: section has it off), there is no config at all, or the running
+// analyzer's identity could not be resolved. An unknown analyzer identity means
+// an unknown key input, and an unknown key input means DO NOT REUSE — codefit
+// scans the whole project rather than guess which binary produced an entry.
+//
+// An empty cache.dir defaults to .codefit/cache inside the project: already
+// gitignored, and already skipped by the walk.
+func cacheFor(ctx auditctx.AuditContext) *cache.Cache {
+	if ctx.Config == nil || !ctx.Config.Cache.Enabled {
+		return nil
 	}
+	dir := ctx.Config.Cache.Dir
+	if dir == "" {
+		dir = filepath.Join(".codefit", "cache")
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(ctx.ProjectRoot, dir)
+	}
+	c, err := openCache(dir)
+	if err != nil {
+		slog.Warn("finding cache disabled for this run: the analyzer identity is unknown, "+
+			"so no cached entry can be trusted; every file will be analysed",
+			"dir", dir, "error", err)
+		return nil
+	}
+	return c
+}
+
+// cached returns a file's stored analysis and whether it was found. No cache and
+// no key are both plain misses, and so is an unreadable or corrupt entry: the
+// cache may never be the reason a file is not analysed.
+func cached(c *cache.Cache, key string) ([]findings.Finding, []findings.SurfaceItem, bool) {
+	if c == nil || key == "" {
+		return nil, nil, false
+	}
+	e, ok := c.Get(key)
+	if !ok {
+		return nil, nil, false
+	}
+	return e.Findings, e.Surface, true
+}
+
+// store records a file's analysis. An EMPTY result is stored like any other: a
+// file with no findings and no surface is the ordinary case in a healthy
+// repository, and re-analysing those forever would leave the cache doing nothing
+// exactly where most of the work is.
+//
+// A failed write is a note, never a failed scan. The audit already happened; all
+// that is lost is the saving on the next run.
+func store(c *cache.Cache, key, rel string, fs []findings.Finding, surface []findings.SurfaceItem) {
+	if c == nil || key == "" {
+		return
+	}
+	if err := c.Set(key, cache.Entry{Findings: fs, Surface: surface}); err != nil {
+		slog.Warn("finding cache write failed; the file was audited and reported normally, "+
+			"only the saving on the next scan is lost", "file", rel, "error", err)
+	}
+}
+
+// scanFile runs the pyramid layers over a single file's raw bytes: deterministic
+// findings (regex + provider AST) and the mapped surface for the agent to reason
+// about. codefit never runs a layer-3 LLM — the surface is returned to the agent.
+//
+// The bytes are read by the caller because the cache is keyed on them: reading
+// the file twice to answer the same question is the kind of cost the cache exists
+// to remove, not to add.
+func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []findings.SurfaceItem, error) {
 	// Bytes become TEXT before any layer sees them. A source file carrying a
 	// byte-order mark — an ordinary thing in a repository a Windows tool has
 	// touched — used to reach layer 1's regexes and the provider's AST as
