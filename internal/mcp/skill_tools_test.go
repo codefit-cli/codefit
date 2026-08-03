@@ -1,0 +1,99 @@
+package mcp_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/codefit-cli/codefit/internal/mcp"
+	"github.com/codefit-cli/codefit/internal/scaffold"
+)
+
+// deliberatelyNotInSkill records, per registered tool the skill does NOT name, the
+// reason it stays out. The skill is deliberately thin (density over prose), so
+// omitting a tool is a legitimate choice — but it must be a DECLARED one. An
+// undeclared omission is how the skill silently fell two phases behind the server:
+// the DB dimension shipped across v0.2.0–v0.2.5 while the skill still described
+// only endpoint security, so an agent reading it never learned scan-db existed.
+var deliberatelyNotInSkill = map[string]string{
+	"codefit-scan-security":     "subsumed by codefit-scan-all, which the skill makes the mandatory entry point",
+	"codefit-surface-idor":      "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
+	"codefit-surface-authz":     "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
+	"codefit-surface-nplus1":    "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
+	"codefit-surface-overfetch": "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
+	"codefit-confirm-surface":   "the agent-verdict closing protocol is Phase 3; the skill teaches it when it lands",
+}
+
+// registeredTools returns the tool names the MCP server actually exposes, read
+// from a live session rather than from the constant block — the constants declare
+// more tools than NewServer registers (Phase 3 names exist already).
+func registeredTools(t *testing.T) []string {
+	t.Helper()
+	ctx := context.Background()
+	st, ct := mcpsdk.NewInMemoryTransports()
+	srv := mcp.NewServer()
+	go func() { _ = srv.Run(ctx, st) }()
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "skill-drift-check"}, nil)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	lt, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(lt.Tools))
+	for _, tool := range lt.Tools {
+		names = append(names, tool.Name)
+	}
+	if len(names) == 0 {
+		t.Fatal("no tools registered — the probe itself is broken")
+	}
+	return names
+}
+
+// TestSkillNamesEveryRegisteredTool is the drift lock between the two agent-facing
+// sources: the tools the server registers and the skill that teaches them. Every
+// registered tool must either be named in the skill or carry a declared reason for
+// staying out.
+func TestSkillNamesEveryRegisteredTool(t *testing.T) {
+	skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: "typescript"})
+	if err != nil {
+		t.Fatalf("RenderSkill: %v", err)
+	}
+	body := string(skill)
+
+	for _, name := range registeredTools(t) {
+		named := strings.Contains(body, name)
+		reason, declared := deliberatelyNotInSkill[name]
+
+		switch {
+		case named && declared:
+			t.Errorf("%s is named in the skill but still listed as deliberately omitted — drop the stale allowlist entry", name)
+		case !named && !declared:
+			t.Errorf("%s is registered by the MCP server but the skill never names it, and no reason is declared:\n"+
+				"    teach it in internal/scaffold/skill.go, or declare why it stays out in deliberatelyNotInSkill", name)
+		case !named && strings.TrimSpace(reason) == "":
+			t.Errorf("%s is omitted from the skill with an empty reason — declare why", name)
+		}
+	}
+}
+
+// TestSkillOmissionAllowlistHasNoGhosts keeps the allowlist honest in the other
+// direction: an entry for a tool the server no longer registers would silently
+// excuse a future tool that reuses the name.
+func TestSkillOmissionAllowlistHasNoGhosts(t *testing.T) {
+	registered := make(map[string]bool)
+	for _, name := range registeredTools(t) {
+		registered[name] = true
+	}
+	for name := range deliberatelyNotInSkill {
+		if !registered[name] {
+			t.Errorf("deliberatelyNotInSkill names %q, which the server does not register — remove the stale entry", name)
+		}
+	}
+}

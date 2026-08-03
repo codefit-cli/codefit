@@ -14,6 +14,63 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+**The skill `codefit init` generates had fallen two phases behind the MCP server.** It
+described only endpoint security — the Phase-1 scope — while the database dimension
+shipped across `v0.2.0`–`v0.2.5`, so it never named `codefit-scan-db`, `codefit-coverage`
+or `codefit-check-cves`. The consequential half was the frontmatter `description`, which
+**gates progressive disclosure**: with trigger words naming only "API endpoints or route
+handlers", an agent starting a database task never loaded the skill at all — it did not
+read an incomplete skill, it read none. **This reaches an existing install only by
+re-running `codefit init`**: after upgrading, `init` regenerates the skill with the
+database content, and a skill file already written stays stale until it is regenerated.
+
+### Fixed
+
+- **The skill's frontmatter `description` now triggers on database and schema work too**,
+  not only on endpoints and route handlers. The trigger set is part of the contract, not
+  decoration — it decides whether the skill is loaded at all — so it is locked by its own
+  test rather than left to prose.
+- **A new "Audit the database schema" section teaches `codefit-scan-db`**: that it reads a
+  Prisma `schema.prisma` **or** a directory of SQL-DDL/Flyway migrations (PostgreSQL,
+  MySQL, SQL Server), that it classifies the schema as transactional or warehouse and adds
+  the star-schema/SCD, columnar-index and partitioning checks on a warehouse, and that
+  `codefit-scan-all` runs it **only** when `database.schema_paths` is set in `.codefit.yaml`.
+  It states the honest-abstention contract in the agent's own terms: a table with no primary
+  key is deterministic, **everything else is surface** (foreign keys with no covering index,
+  duplicate/redundant indexes, sensitive columns in the clear, risks in procedure/trigger
+  bodies), and **`measured: false` is NOT a clean result** — it is codefit saying it could
+  not read the schema. The section renders **unconditionally**, which is a decision and not
+  an oversight: `Detect()` recognizes a database only through `enrichTypeScript`
+  (Prisma/Drizzle/TypeORM) and does not detect SQL-DDL/Flyway at all, so gating the section
+  on detection would hide the dimension on exactly the projects the SQL-DDL parser was
+  built for.
+- **A new "Dependencies and declared limits" section teaches `codefit-check-cves` and
+  `codefit-coverage`.** `codefit-scan-all` does **not** run the CVE check, so an agent that
+  knew only `scan-all` had no path to it. `codefit-coverage` is how the agent learns what
+  codefit does and does not audit before telling a human something is out of scope, instead
+  of assuming the boundary.
+
+### Added
+
+- **A drift lock between the two agent-facing sources** — `TestSkillNamesEveryRegisteredTool`
+  (`internal/mcp/skill_tools_test.go`) reads the tool names from a **live** MCP session
+  rather than from the constant block (the constants already declare Phase-3 names
+  `NewServer` does not register), and fails unless every registered tool is either named in
+  the rendered skill or carries a declared reason in the `deliberatelyNotInSkill` allowlist.
+  The skill is deliberately thin, so omitting a tool stays a legitimate choice — it just has
+  to be a **declared** one. `TestSkillOmissionAllowlistHasNoGhosts` guards the reverse
+  direction: an entry for a tool the server no longer registers would silently excuse a
+  future tool that reuses the name. The lock forces the **decision**, not the content — what
+  the skill teaches still has to be verified true. Both tests were mutation-proven.
+
+### Changed
+
+- **`internal/scaffold/skill.go` is now registered in the `CLAUDE.md` documentation map** as
+  an agent-facing source, alongside `internal/mcp/server.go` — and as the *first* thing an
+  agent reads, since its `description` decides whether the tool descriptions are ever
+  reached. A doc that declares capability and is not in the map falls out of the
+  documentation close, which is exactly how this one drifted for two phases.
+
 ## [0.2.5] — 2026-08-02
 
 **Phase 2.5 complete — RF-03 OLAP closure, and with it the last Phase-2 coverage debt.**
