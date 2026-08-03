@@ -69,8 +69,10 @@ stage" — it does **not** claim `0.1.0` is done.
   changed*. So the line stays `0.2` and the MINOR ↔ phase table above gains **no row** —
   that table maps phase *closures*, and this closes none. **No audit rule changed**: for a
   full scan no finding, surface item or baseline fingerprint moves, and `COVERAGE.md` and
-  the `codefit-coverage` manifest are untouched. What lands is **layer 0 of the filtering
-  pyramid**: an optional `changed_files` on `codefit-scan-security` and `codefit-scan-all`
+  the `codefit-coverage` manifest are untouched. What lands are the **two cheap layers of the
+  filtering pyramid that were still missing** — layer 0 (which files get audited) and the
+  content-hash finding cache (which results get recomputed). First, **layer 0**: an optional
+  `changed_files` on `codefit-scan-security` and `codefit-scan-all`
   narrows the audit to the paths the agent passes. The scope is an **input**, never derived
   from git — codefit has no power over the user's git, and the calling agent already knows
   what it touched; absent or empty means a **full** audit, never "audit nothing". Because a
@@ -83,9 +85,21 @@ stage" — it does **not** claim `0.1.0` is done.
   so a partial pass can no longer prune the audit memory of files it never opened —
   `codefit-baseline-prune` accepts no scope at all. The dead `AuditContext.Since` field, which
   promised a git-ref `--since` mode and never had a reader or a writer, is **removed**.
-  **This is not caching:** it decides *which files are audited*, not *which results are
-  reused* — `internal/core/cache` remains INERT with zero production importers, so a repeat
-  scan is no cheaper. Also removed: the **LLM-era scaffolding**. `internal/core/pipeline`
+  Second, the **content-hash finding cache is wired** into the security sensor and consulted
+  per file inside the walk: the same analyzer, over the same bytes at the same path, no
+  longer re-analyses them. It is **opt-in** (a project with no `cache:` section in
+  `.codefit.yaml` has it off) and it exists so the **honest** full scan stays affordable —
+  if the full scan were expensive and the narrowed one cheap, every caller would narrow and
+  codefit could never prune the baseline again. **A warm scan and a cold scan are
+  byte-identical**, and every cache failure is a miss, never a failed audit. The key is
+  `sha256(analyzer identity ‖ project-relative path ‖ content)`, where the analyzer identity
+  is the **SHA-256 of the running executable** rather than a version string — `version.Version`
+  is the constant `"v0.1.0-dev"` for any plain `go build`, so a version key would go stale
+  first for the rule author, while the binary's own bytes cover every input that can change a
+  verdict. The accepted price, stated: **every new analyzer binary orphans a whole generation
+  of entries and nothing evicts them**; `rm -rf .codefit/cache` is always safe and will be
+  needed. ADR **0050**; the contract is `docs/specs/finding-cache.md`. Also removed: the
+  **LLM-era scaffolding**. `internal/core/pipeline`
   was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot
   deleted that layer on the package's second day and all three implemented layers went on to
   bypass it, so it goes, along with the `NoLLM`, `FailOn` and `Interactive` fields of

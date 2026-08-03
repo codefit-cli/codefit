@@ -111,6 +111,12 @@ independent audit layer that validates AI-generated code is secure and correct
   other item on this list, this one is covered by tests and the CI self-audit but has
   **not** been exercised on a real project yet — the "validated in real use" above does
   not cover it.*
+- **An opt-in content-hash finding cache** — the same codefit binary, over the same file
+  bytes at the same path, reuses the analysis instead of recomputing it, so a recurring full
+  scan costs about what an incremental one does. Off unless a project enables it, and a warm
+  scan is byte-identical to a cold one (see [The finding cache](#the-finding-cache-opt-in)
+  below). *Like `changed_files`, this is covered by tests and the CI self-audit but has
+  **not** been exercised on a real project yet.*
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
@@ -493,9 +499,47 @@ What a partial scan does **not** claim:
   memory of a file it did not open — and `codefit-baseline-prune` accepts no scope at all.
   Scanning may be partial; forgetting may not.
 
-This decides **which files get audited**, not which results get reused: codefit reuses no
-analysis results between runs, so re-scanning the same files is not cheaper. A narrowed
-scan is cheaper only because fewer files are opened.
+This decides **which files get audited**, not which results get reused — that is the
+[finding cache](#the-finding-cache-opt-in) below, and the two are independent.
+
+## The finding cache (opt-in)
+
+codefit can remember what it computed for a file and skip re-analysing it when nothing that
+matters has changed. **It is off unless you ask for it** — a project with no `cache:` section
+in `.codefit.yaml` has no cache, and `codefit init` does not write one. To turn it on:
+
+```yaml
+cache:
+  enabled: true
+  # dir: .codefit/cache   # the default; a relative dir resolves against the project root
+```
+
+`.codefit/cache` is gitignored and skipped by the scan — the cache is local scratch, never
+shared knowledge like `.codefit.yaml` or the baseline.
+
+**It never changes what codefit reports.** A warm scan and a cold scan are *byte-identical*,
+not merely equivalent — that is the property the implementation is tested against, and a
+cache that could change the output would be a blind spot, not an optimization. Every file is
+still opened, still counted and still reported; the cache decides only what is **recomputed**.
+
+Three things worth knowing:
+
+- **It exists so the full scan stays affordable, not for speed as such.** The full scan is
+  the honest one: it is the only scan that can prune the baseline and the only one whose
+  `blocked: false` means what it appears to mean. If the full scan were expensive and the
+  narrowed one cheap, everyone would narrow forever.
+- **A new codefit binary invalidates everything, on purpose.** An entry is keyed on the
+  analyzer's own bytes as well as the file's path and content, so a codefit that ships new
+  rules can never serve you a verdict computed under the old ones. The cost of that
+  guarantee: **every new binary orphans the previous generation of entries and nothing
+  evicts them.** `rm -rf .codefit/cache` is always safe — it costs only time, which is
+  exactly what makes it different from the baseline — and you will need it now and then.
+- **A cache failure is never an audit failure.** A missing, unreadable or corrupt entry just
+  means the file gets analysed; a failed write is logged and the scan reports normally.
+
+Not cached: the database dimension. Its inputs are the configured `database.schema_paths`
+rather than a repository walk, and a schema reconstructed from an ordered set of migrations
+does not obviously invalidate per file.
 
 ## The baseline model
 
