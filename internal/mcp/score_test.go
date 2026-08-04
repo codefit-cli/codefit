@@ -60,8 +60,13 @@ func TestScanAll_Score_ByDimensionShape(t *testing.T) {
 	if len(resp.Score.ByDimension) != len(scoring.DefaultWeights()) {
 		t.Errorf("by_dimension has %d keys, want %d", len(resp.Score.ByDimension), len(scoring.DefaultWeights()))
 	}
-	// review/complexity/tests are declared not-audited → null.
-	for _, d := range []findings.Dimension{findings.DimensionReview, findings.DimensionComplexity, findings.DimensionTests} {
+	// review/complexity/practices/tests are declared not-audited → null. practices
+	// carries a weight since ADR 0055 but has no sensor yet, so it must be null and
+	// never a fake 100.
+	for _, d := range []findings.Dimension{
+		findings.DimensionReview, findings.DimensionComplexity,
+		findings.DimensionPractices, findings.DimensionTests,
+	} {
 		if resp.Score.ByDimension[d] != nil {
 			t.Errorf("by_dimension.%s must be null (not audited)", d)
 		}

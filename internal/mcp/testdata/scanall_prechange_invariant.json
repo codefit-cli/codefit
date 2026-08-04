@@ -17,6 +17,7 @@
     "by_dimension": {
       "complexity": null,
       "db": null,
+      "practices": null,
       "review": null,
       "security": 90,
       "tests": null

@@ -2,6 +2,32 @@
 
 **Status:** Accepted · **Date:** 2026-07-05 · **Phase:** 2 (DB dimension — close: per-dimension scoring)
 
+**Superseded in scope (2026-08-04) by
+[ADR 0055](0055-practices-is-its-own-dimension-and-carries-the-smallest-weight.md).**
+Every DECISION below is untouched and still holds — Compute in scan-all, the
+always-present score, `null` for a dimension that is not audited, affirmations-only
+scoring, the `measured ⊆ weights` guard, and the raw-findings (non-baseline-aware)
+score. What is no longer true is one ILLUSTRATION of the guard, and this ADR is not
+rewritten — read the following together with 0055:
+
+- **"the guard protects a future dimension (e.g. practices, absent from
+  DefaultWeights)" is FALSE.** `practices` now has a weight (5, taken from
+  `complexity`), and every dimension `core/findings` declares is weighted. The guard
+  itself is unchanged and still protects the next dimension declared without one;
+  only the example is spent.
+- **`by_dimension` carries SIX keys, not five.** The "review / complexity / tests
+  null" sentence is now "review / complexity / practices / tests null". The shape
+  rule it states is exactly the one 0055 follows: weighted-but-unmeasured is `null`,
+  never a fake `100`.
+- **The test that proved the guard was rewritten.**
+  `TestMissingWeights_DetectsUnweightedMeasured` used `practices` as its unweighted
+  fixture and inverted the moment `practices` gained a weight. It now runs against a
+  dimension name that genuinely has none — see 0055 §Consequences.
+
+The no-value-regression consequence — "security-only global equals today's flat
+security score exactly (secScore*35/35)" — still holds: `security` weighs 35 before
+and after, and 0055 verifies the whole re-balance moves no score.
+
 ## Context
 
 `scoring.Compute` (per-dimension scores plus a weighted global) has existed since

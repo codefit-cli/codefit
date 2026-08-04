@@ -23,15 +23,28 @@ var severityPenalty = map[findings.Severity]int{
 	findings.SeverityInfo:     0,
 }
 
-// DefaultWeights are the per-dimension score weights from the PRD (RF-07); they
-// sum to 100.
+// DefaultWeights are the per-dimension score weights (PRD RF-07, re-balanced by
+// ADR 0055); they sum to 100, and every dimension core/findings declares has an
+// entry — Compute iterates this map, so an unweighted dimension would be
+// silently dropped the moment a sensor measured it.
+//
+// practices is a dimension of its own and carries the smallest weight: codefit
+// audits what the developer never sees, and `any` / `console.log` / a missing
+// catch are the most visible defects there are — a linter flags them in the
+// editor. Its 5 points come from complexity, which is never measured (post-v1.0),
+// so the re-balance moves no score codefit produces today.
+//
+// The PRD's defaults line still reads complexity 15; it is exempt from
+// reflect-today and is not corrected. `cfg.Report.ScoreWeights` is validated but
+// never read — this map is hardcoded at both call sites (declared limit, ADR 0055).
 func DefaultWeights() map[findings.Dimension]int {
 	return map[findings.Dimension]int{
 		findings.DimensionSecurity:   35,
 		findings.DimensionReview:     20,
 		findings.DimensionDB:         20,
-		findings.DimensionComplexity: 15,
+		findings.DimensionComplexity: 10,
 		findings.DimensionTests:      10,
+		findings.DimensionPractices:  5,
 	}
 }
 
