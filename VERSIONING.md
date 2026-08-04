@@ -107,7 +107,16 @@ stage" — it does **not** claim `0.1.0` is done.
   generation is not entry-shaped either, so it waits for that generation to be superseded.
   `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Neither the scope
   nor the cache has been exercised on a real project — tests and the CI self-audit only —
-  and no speedup has been measured anywhere.** ADRs **0050** and **0051**; the contract is
+  and no speedup has been measured anywhere.** Fixed before release, and the reason this
+  PATCH is not cosmetic: the reader treated **any valid JSON at an entry's path as a hit**,
+  so a stray `{}` or a backup artifact in `.codefit/cache` unmarshalled into an empty entry
+  and was served as *analysed, nothing found* — a false all-clear (reproduced: score 100 and
+  no SEC-001 on a file leaking a credential). The entry is now **self-describing**: `Set`
+  stamps its key and `Get` verifies it, so anything that cannot prove it belongs to the key
+  being read is a miss. Two limits are declared rather than fixed — the cache barely warms
+  under concurrent tool calls on **Windows** (`os.Rename` cannot replace a file another
+  reader holds open; the failure is safe but noisy), and a separate, unproven **empty-read**
+  hole. ADRs **0050**, **0051** and **0053**; the contract is
   `docs/specs/finding-cache.md`. Also removed: the
   **LLM-era scaffolding**. `internal/core/pipeline`
   was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot
