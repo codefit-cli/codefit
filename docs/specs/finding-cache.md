@@ -47,6 +47,16 @@ stale cache would bite first.
 identity is the SHA-256 of the running executable** (`os.Executable()`, hashed once per
 process and memoized).
 
+> **Correction — this formula was WRONG as written, and shipped with a third component.**
+> It omits the file's project-relative **path**. Two files with identical bytes are an
+> ordinary thing (this repository's own fixtures contain them), and under this formula they
+> would share one entry: the second file would be reported carrying the first file's path,
+> with a colliding baseline fingerprint — a direct violation of R1, which dominates. The
+> shipped key is `sha256(analyzer ‖ path ‖ content)`, mutation-proven by a test that fails
+> when the path is dropped. Recorded here rather than silently rewritten, because the point
+> of a written contract is lost if it is edited to match whatever was built; see ADR 0050.
+> The rest of R2 is unchanged and shipped as stated.
+
 Why this is right rather than clever:
 
 - The analysis is a pure function of *(file bytes, analyzer)*. The key names both. Nothing
@@ -126,6 +136,41 @@ out for an explicit yes/no rather than buried in a diff.**
   store is a later concern; `rm -rf .codefit/cache` is always safe and costs only time,
   which is precisely what distinguishes the cache from the committed baseline.
 
+  > **Update — this limit was LIFTED in slice S3, and "a later concern" turned out to be
+  > the next one.** Recorded here rather than deleted, because the point of a written
+  > contract is lost if it is edited to match whatever was built; see ADR 0051 (which
+  > supersedes the matching "no eviction" consequence of ADR 0050) and the R2 note above.
+  > What is lifted is EVICTION; a **size** bound is still not claimed — S3 caps what is
+  > retained, not how many bytes that comes to.
+  >
+  > What made it urgent is the analyzer identity R2 put in the key. Every codefit build
+  > mints a fresh GENERATION of entries for the *whole tree* and orphans the previous
+  > generation entirely — on a branch where the binary changes several times an hour, the
+  > store grows by a full copy of the project's entries per build and nothing ever
+  > collected them. Two smaller growths ride along inside one generation: every edit to a
+  > file mints a new key and orphans the old entry, and a file deleted from the project
+  > leaves its entry behind permanently.
+  >
+  > **Shipped policy.** Entries move from `Dir/<key>.json` to `Dir/<gen>/<key>.json`, where
+  > `<gen>` is the first 16 hex chars of the analyzer identity — a *label*, not the boundary
+  > that separates two analyzers (the full identity is still inside the key hash). Sixteen
+  > rather than 64 keeps `.codefit/cache/<gen>/<key>.json` clear of Windows' MAX_PATH on a
+  > deep project root. On `Open`, once per process **per generation directory**: the current
+  > generation is kept ALWAYS,
+  > plus the 2 most recently modified others (3 in all — not 1, because a developer
+  > alternating between an installed binary and a dev build would otherwise have each run
+  > destroy the other's generation); entry files in the current generation older than 30 days
+  > are removed; and entries left flat in `Dir` by this layout's predecessor are removed once
+  > as a migration. A hit does not rewrite its entry, so a live entry ages out too — that
+  > costs one re-analysis, which is the safe direction.
+  >
+  > **This code deletes files, so it only ever recognises the two shapes it wrote itself:**
+  > a generation directory matching `^[0-9a-f]{16}$` and an entry file matching
+  > `^[0-9a-f]{64}\.json$`. Anything else under `Dir` — a user's note, another tool's file,
+  > a directory nobody here created — is never touched at any age, and the prune is best
+  > effort: every failure it can meet is swallowed, because a cache that cannot clean itself
+  > still has to work. `rm -rf .codefit/cache` stays safe and stays the escape hatch.
+
 ## Test contract
 
 Each proven by **mutation**: break the exact behavior, watch it fail, restore, watch it
@@ -145,3 +190,27 @@ pass — both runs recorded in the commit or PR.
 8. A file that produces zero findings and zero surface caches that empty result and is not
    re-analysed. (Otherwise the clean files — the majority — never benefit, and the cache
    quietly does nothing on a healthy repository.)
+
+## Test contract added by S3 (generations and pruning)
+
+Each mutation-proven like the ones above, and each asserting in BOTH directions in the
+same run — what was removed AND what survived — because a prune test whose fixture has
+nothing to delete passes trivially.
+
+9. Entries live under `Dir/<gen>/`, and the generation name is always well shaped and
+   always directly under `Dir` (an identity that is not 64-hex is hashed into the shape
+   rather than truncated as-is: a name like `../../x` would address a directory outside
+   `Dir`, and a name the prune cannot recognise is a generation nothing will ever collect).
+10. The current generation plus the 2 most recently modified others survive; the rest are
+    collected.
+11. The current generation is never collected, **however old it is** — planted as the
+    oldest directory of all and still standing after the prune.
+12. A `README.md`, a `notes/` directory and a `keep-me.json` in the cache directory all
+    survive a prune that really deletes a generation around them.
+13. An entry older than 30 days is collected; one at 29 days is not; a file that is not
+    entry-shaped is not, at any age.
+14. Flat entries from the pre-generation layout are removed; `keep-me.json` and
+    `deadbeef.json` are not.
+15. A missing cache directory, a cache directory that is a *file*, and a cache with no
+    analyzer identity all prune without failing and without deleting anything.
+16. `Open` prunes, and prunes once per process per generation directory.

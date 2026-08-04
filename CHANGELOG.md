@@ -19,9 +19,12 @@ tests, regression risk) has not started — this is the prerequisite thread (H0)
 unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
 changed*. **No audit rule changed.** Every security, DB and DW rule behaves exactly as it
 did in `v0.2.6`: for a full scan no finding, no surface item and no baseline fingerprint
-moves, and `COVERAGE.md` and the `codefit-coverage` manifest are untouched. What lands is
-**layer 0 of the filtering pyramid** — the agent can now tell codefit *which files it
-changed*, and the audit narrows to them.
+moves, and `COVERAGE.md` and the `codefit-coverage` manifest are untouched. What lands are
+the **two cheap layers of the filtering pyramid that were still missing**: **layer 0**
+(the agent can now tell codefit *which files it changed*, and the audit narrows to them)
+and the **content-hash finding cache** (the same analyzer, over the same bytes at the same
+path, no longer re-analyses them). They are orthogonal — the first decides *which files get
+audited*, the second decides *which results get recomputed*.
 
 **The scope is an INPUT, never derived from git.** codefit does not shell out to git, does
 not read `.git`, does not diff refs and assumes no branch model. Two reasons, both standing
@@ -47,10 +50,20 @@ the two places a partial scan could quietly overstate itself are both closed:
   **no scope at all**: a deliberate asymmetry, because scanning may be cheap and partial but
   forgetting may not.
 
-**What this is NOT: caching.** It decides *which files get audited*, not *which results get
-reused*. `internal/core/cache` is still INERT with zero production importers — the
-content-hash finding cache is the next slice and is **not built**. A repeat scan of the same
-files is not cheaper; a narrowed scan is cheaper only because fewer files are opened.
+**The cache exists so that the HONEST scan stays affordable.** That is its justification,
+not speed for its own sake. A full scan is the only one that can prune the baseline and the
+only one whose `blocked: false` means what it appears to mean; if the full scan is expensive
+and the narrowed scan cheap, every caller narrows and codefit degrades into a tool that
+permanently looks through a slit and can never forget anything. **A warm scan and a cold
+scan are byte-identical** — not equivalent, identical: a cache that can change the output is
+not a cache, it is a blind spot. The cache is **off unless a project asks for it**, and
+every cache failure is a miss, never a failed audit. **The store also bounds itself**:
+entries are grouped by the analyzer generation that wrote them, and opening the cache
+collects the generations this build superseded, so a rule author rebuilding several times an
+hour no longer accumulates a full copy of the project's entries per build. ADRs
+[**0050**](docs/decisions/0050-the-cache-key-is-the-analyzers-own-bytes.md) and
+[**0051**](docs/decisions/0051-the-finding-store-is-bounded-by-generation-and-pruned-on-open.md);
+the contract is `docs/specs/finding-cache.md`.
 
 ### Added
 
@@ -84,6 +97,98 @@ files is not cheaper; a narrowed scan is cheaper only because fewer files are op
   partial scan must **never** be followed by a baseline prune. **This reaches an existing
   install only by re-running `codefit init`** — a skill file already on disk stays stale
   until it is regenerated.
+
+- **The content-hash finding cache is WIRED into the security sensor**, consulted per file
+  inside the walk, on the raw bytes, before anything is parsed. A hit reuses the whole
+  analysis; the file is still opened, still counted and still reported either way — the
+  cache decides what is **recomputed**, never what is audited. It is **opt-in**:
+  `config.Cache.Enabled` has no default, so a project with no `cache:` section has it off,
+  and `codefit init` does not write one. Turn it on by adding to `.codefit.yaml`:
+
+  ```yaml
+  cache:
+    enabled: true
+    # dir: .codefit/cache   # the default; a relative dir resolves against the project root
+  ```
+
+  An empty `dir` defaults to `.codefit/cache`, which is already gitignored and already
+  skipped by the walk.
+- **The key is `sha256(analyzer identity ‖ project-relative path ‖ content)`, and the
+  analyzer identity is the SHA-256 of the running executable** (`os.Executable()`, hashed
+  once per process and memoized). Keying on file content alone — what the inert package did
+  — would make codefit lie in a specific way: you upgrade, the new binary ships new rules,
+  the file did not change, so codefit returns findings computed under the OLD rules and
+  reports "clean" under rules it never ran. **A version string is not the fix, and fails
+  exactly where it matters most:** `version.Version` is the constant `"v0.1.0-dev"` for any
+  plain `go build`, `go run` or `go test`, so during rule development every build would
+  present the same key and the rule author is the first person the stale cache bites.
+  Hashing the binary's own bytes covers **every** input that can change a verdict — the YAML
+  rules, the Go-coded detectors, the parser, the surface queries — because all of them are
+  in the binary, and under `go run` / `go test` a fresh temporary build changes the identity
+  automatically. Two builds of identical source miss: wasted work, never a stale verdict.
+- **The PATH is in the key** — a defect in `docs/specs/finding-cache.md` R2, which named only
+  analyzer + content, found and corrected while implementing. Two files with identical bytes
+  are ordinary (this repository's own fixtures contain them), and under an analyzer+content
+  key they would share one entry, so the second file would be reported carrying the *first*
+  file's path in every finding and surface item, and therefore a colliding baseline
+  fingerprint. Locked by a test.
+- **An unresolvable analyzer identity DISABLES the cache for that run** — the scan completes,
+  fully, analysing everything, and says so through `slog`. An unknown key input means do not
+  reuse; falling back to a content-only key would be the stale verdict above.
+- **An entry holds the findings AND the mapped surface, stored BEFORE path criticality is
+  applied.** Both halves, because an entry with only the findings would serve a warm scan
+  that silently lost the surface. Pre-criticality, because criticality is applied on the way
+  out to a cached entry exactly as to a fresh one — so **editing `path_criticality` in
+  `.codefit.yaml` re-weights severities on the very next scan without invalidating a single
+  entry.** Caching the adjusted findings would serve stale severities after every config
+  edit. Locked in both directions.
+- **A file that produces zero findings and zero surface is cached as an empty entry and is
+  not re-analysed.** Clean files are the majority in a healthy repository; treating "nothing
+  found" as "not cached" would leave the cache doing nothing exactly where most of the work
+  is, while appearing to work.
+- **Every cache failure degrades to a MISS, and the write is ATOMIC.** A missing, unreadable
+  or corrupt entry is a miss and the file is analysed normally; a failed write is reported
+  through `slog` and never appears in the JSON, because the audit already happened and all
+  that is lost is the saving on the next run. The write is a temp file plus a rename — the
+  same shape the committed baseline uses — because codefit is an MCP server and two tools
+  over one project (an agent firing `scan-security` and `scan-all` together) can reach the
+  same entry path at once, while `os.WriteFile` truncates before it writes.
+- **The cache store is BOUNDED: entries live under a generation directory, and `Open` prunes
+  it.** Keying on the analyzer's own bytes has an arithmetic: **every codefit build mints a
+  fresh generation of entries for the whole tree and orphans the previous one entirely** —
+  one generation per upgrade for a user on release binaries, one per `go build` for anyone
+  developing rules, several times an hour. Two smaller growths ride along inside a single
+  generation and do not stop even for someone who never rebuilds: every edit to a file mints
+  a new key and orphans the old entry, and a file deleted from the project leaves its entry
+  behind forever. Stored flat, nothing collected any of it — the store grew for the life of
+  the project and only `rm -rf` ever shrank it. So entries move from `Dir/<key>.json` to
+  `Dir/<gen>/<key>.json`, and a superseded build becomes **one directory to drop** rather
+  than a set of files to identify one by one (the key is a hash, so nothing in an entry's
+  name says which analyzer wrote it). `<gen>` is 16 hex chars of the analyzer identity — a
+  *label*, not the boundary that separates two analyzers, since the full identity is still
+  inside the key hash; 16 rather than 64 keeps the entry path clear of Windows' `MAX_PATH` on
+  a deep project root. An identity that is not the expected 64-hex SHA-256 is **hashed** into
+  that shape rather than truncated as-is: the label is a path element, and `../../x` would
+  otherwise address a directory outside the cache. On `Open`, once per process per generation
+  directory: the **current generation is kept ALWAYS**, plus the **2 most recently modified**
+  others — three in all, not one, because a developer alternating between an installed
+  codefit and a dev build would otherwise have each run destroy the other's generation and
+  never see a hit again; entries in the current generation **not written in 30 days** are
+  removed; and the flat entries the previous layout left behind are removed once, as a
+  migration. A hit does not rewrite its entry, so a live entry ages out too — that costs one
+  re-analysis, the safe direction. ADR
+  [**0051**](docs/decisions/0051-the-finding-store-is-bounded-by-generation-and-pruned-on-open.md),
+  which supersedes the "no eviction" consequence of ADR 0050.
+- **The prune only ever recognises the two shapes codefit writes itself.** This code deletes
+  files from a directory the user can also write to, so a generation directory must match
+  `^[0-9a-f]{16}$` and an entry file `^[0-9a-f]{64}\.json$`. **Anything else under the cache
+  directory is never touched, at any age** — another tool's file, a note, a directory nobody
+  here created — and it is test-locked over a fixture holding a `README.md`, a `notes/`
+  directory and a `keep-me.json`, all of which must survive a prune that really deletes
+  generations around them. The prune is **best effort** and reports nothing: an unreadable
+  directory, a file it may not remove, a race with a second codefit process are all
+  swallowed, because a cache that cannot clean itself still has to work. Maintenance is never
+  the reason an audit does not happen.
 
 ### Changed
 
@@ -137,15 +242,34 @@ files is not cheaper; a narrowed scan is cheaper only because fewer files are op
 
 ### Not yet covered (declared)
 
-- **No result reuse between runs.** `internal/core/cache` (the content-hash finding store)
-  stays INERT with zero production importers. Scanning the same file twice re-analyses it
-  twice. It is deliberately **not** deleted alongside the pipeline: it is about to be wired,
-  and inert and obsolete are different states.
-- **The hazard that wiring already carries, recorded now so it is not rediscovered:** the
-  cache key must cover every input that can change a verdict. A version string is **not**
-  enough — `version.Version` is the constant `"v0.1.0-dev"` for any plain `go build`, so
-  during rule development every build would present the same key and the rule author is the
-  first person the stale cache bites.
+- **The cache is bounded by RETENTION, not by SIZE.** It keeps three generations and thirty
+  days (see the Added entry above); it does not measure the directory, enforce a byte
+  ceiling, or evict by size or least-recent-use. One generation of a very large project is
+  still a full copy of that project's entries, and three of them is three. `rm -rf
+  .codefit/cache` stays safe and stays the escape hatch — it costs only time, which is
+  exactly what distinguishes the cache from the committed baseline.
+- **Neither the scope nor the cache has been exercised on a real project**, and **no speedup
+  has been measured anywhere.** Both are covered by tests and by the CI self-audit, and that
+  is all — the "validated in real use" that the security and DB dimensions earned does not
+  extend to either. The cache's justification is the cost model (a recurring full scan must
+  not be the expensive option), argued rather than benchmarked: there is no number here, and
+  none is claimed.
+- **The 30-day age is the one sweep that can remove a LIVE entry.** A hit does not rewrite
+  its entry, so a file untouched for a month is re-analysed once and re-cached. Self-healing
+  and in the safe direction, but a threshold rather than a proof, and the first thing to
+  re-tune once anyone measures a real project.
+- **One residue survives the prune by design: a stray `.entry-*.tmp` in the CURRENT
+  generation.** The atomic write creates its temp file inside the generation directory and
+  removes it on every path a running process can take, so this is only what a crash or a kill
+  leaves behind. It is not entry-shaped, and the prune refuses to delete anything that is not
+  one of the two shapes it writes — the rule that protects a user's own files protects this
+  too. It is collected when that generation is superseded and the whole directory goes, so it
+  is bounded by the same three-generation window rather than permanent; it is stated here
+  because the alternative is someone finding an unexplained file in their cache.
+- **The DB dimension is not cached** — neither the DB sensor nor the code×schema cross.
+  Their inputs are the configured `database.schema_paths`, not a repository walk, and a
+  schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not
+  obviously the right unit. Declared, not forgotten.
 - **codefit still does not know what changed on its own.** If the agent passes nothing, it
   audits everything — by design.
 
