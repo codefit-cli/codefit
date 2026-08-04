@@ -103,7 +103,9 @@ stage" — it does **not** claim `0.1.0` is done.
   removes the flat entries of the previous layout. It is a **retention** bound, not a size
   one: codefit measures no bytes and evicts nothing by size, and the prune only ever touches
   the two filename shapes it writes itself, so nothing else in `.codefit/cache` is at risk at
-  any age. `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Neither the scope
+  any age — the flip side being that a `.entry-*.tmp` a crashed write leaves in the *current*
+  generation is not entry-shaped either, so it waits for that generation to be superseded.
+  `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Neither the scope
   nor the cache has been exercised on a real project — tests and the CI self-audit only —
   and no speedup has been measured anywhere.** ADRs **0050** and **0051**; the contract is
   `docs/specs/finding-cache.md`. Also removed: the

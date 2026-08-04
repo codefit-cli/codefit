@@ -258,6 +258,14 @@ the contract is `docs/specs/finding-cache.md`.
   its entry, so a file untouched for a month is re-analysed once and re-cached. Self-healing
   and in the safe direction, but a threshold rather than a proof, and the first thing to
   re-tune once anyone measures a real project.
+- **One residue survives the prune by design: a stray `.entry-*.tmp` in the CURRENT
+  generation.** The atomic write creates its temp file inside the generation directory and
+  removes it on every path a running process can take, so this is only what a crash or a kill
+  leaves behind. It is not entry-shaped, and the prune refuses to delete anything that is not
+  one of the two shapes it writes — the rule that protects a user's own files protects this
+  too. It is collected when that generation is superseded and the whole directory goes, so it
+  is bounded by the same three-generation window rather than permanent; it is stated here
+  because the alternative is someone finding an unexplained file in their cache.
 - **The DB dimension is not cached** — neither the DB sensor nor the code×schema cross.
   Their inputs are the configured `database.schema_paths`, not a repository walk, and a
   schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not

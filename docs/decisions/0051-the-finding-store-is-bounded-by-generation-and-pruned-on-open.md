@@ -128,6 +128,29 @@ and three of them is three. codefit does not measure the directory, does not enf
 ceiling, and does not evict by size or by least-recent-use. A project big enough for that to
 matter is a real possibility and it is **not** addressed here.
 
+### The shape rule leaves one residue, and it is named rather than left to be found
+
+Decision 4 is a refusal to delete anything that is not one of the two shapes codefit writes,
+and that refusal has a price paid in exactly one place. `Set` writes atomically through a
+temp file created *inside* the generation directory as `.entry-*.tmp` (ADR 0050 §Decision 7,
+"the write is atomic"). That name is not entry-shaped, so `pruneStaleEntries` will not collect
+it **at any age** — the same rule that protects a user's `README.md` protects a crash's
+leftovers. Test-locked at 400 days old, alongside the foreign files, in
+`TestPruneRemovesStaleEntriesFromTheCurrentGeneration`.
+
+The residue is narrow and bounded, not permanent: `Set` removes the temp file on every path a
+running process can take (the `defer` is a no-op only after a successful rename), so one
+survives only a crash or a kill mid-write; and when that generation is superseded it goes with
+the directory, since a generation is dropped with `RemoveAll` rather than swept file by file.
+So the exposure is "a stray temp file inside the CURRENT generation, until that generation is
+superseded" — inside the three-generation window, not outside it.
+
+Teaching the prune to also collect `.entry-*.tmp` would close it, and that is deliberately not
+done here: it widens the one rule that makes this code safe to run in a directory the user
+also owns — a third pattern, matched against files codefit did not necessarily write, to
+reclaim bytes a generation change already reclaims. The residue is recorded so it is read as
+the known cost of decision 4 rather than discovered later as a bug.
+
 ### The 30-day age is the one number that costs correct work
 
 Every other part of this prune collects entries nothing can hit. The age sweep is the one
