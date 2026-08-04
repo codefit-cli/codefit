@@ -24,7 +24,20 @@ import (
 // so a cached entry survives an edit to .codefit.yaml's path_criticality and the
 // next scan re-weights severities without invalidating a single entry. Caching
 // the adjusted findings would serve stale severities after every config edit.
+//
+// The entry is SELF-DESCRIBING: Key names the key it was stored under, stamped
+// by [Cache.Set] and verified by [Cache.Get]. It is not a second addressing
+// scheme — nothing reads a path out of an entry — it is the entry's proof of
+// provenance, because VALID JSON IS NOT ONE (ADR 0053).
 type Entry struct {
+	// Key is the key this entry is the answer to. Written by Set, verified by
+	// Get, which returns a miss when it does not match the key it was asked
+	// for. Without it, any syntactically valid JSON that simply lacks these
+	// fields — null, {}, {"unrelated":1} — unmarshals into a zero Entry and is
+	// served as a HIT, and a hit with no findings and no surface asserts that
+	// this analyzer analysed exactly these bytes and found nothing. That is the
+	// cache manufacturing a clean verdict for a file nothing ever read.
+	Key      string                 `json:"key"`
 	Findings []findings.Finding     `json:"findings"`
 	Surface  []findings.SurfaceItem `json:"surface"`
 }
@@ -97,7 +110,16 @@ func (c *Cache) Key(file string, content []byte) string {
 //
 // An entry that was stored EMPTY is a hit. A file that produced no findings and
 // no surface is the ordinary case in a healthy repository, and re-analysing it
-// forever would make the cache do nothing where it matters most.
+// forever would make the cache do nothing where it matters most. That is
+// precisely why an entry has to PROVE it is one: parsing is not provenance, and
+// an unproven empty hit is a clean verdict codefit never computed (ADR 0053).
+//
+// So the payload must name this key. Anything else — a stray {} an editor or a
+// sync tool left in .codefit/cache, a half-restored backup, a well-formed entry
+// sitting at another key's path, an entry written before the stamp existed — is
+// a miss, and a miss is just an ordinary analysis. The check does not enumerate
+// the shapes that can go wrong; it rejects everything that cannot answer for
+// itself, which is the only version of that question with a complete answer.
 func (c *Cache) Get(key string) (Entry, bool) {
 	if key == "" {
 		return Entry{}, false
@@ -114,6 +136,9 @@ func (c *Cache) Get(key string) (Entry, bool) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return Entry{}, false
 	}
+	if e.Key != key {
+		return Entry{}, false
+	}
 	return e, true
 }
 
@@ -127,6 +152,11 @@ func (c *Cache) Get(key string) (Entry, bool) {
 // A torn entry degrades safely on read (invalid JSON is a miss), but it degrades
 // into re-analysing the file the cache exists to skip, and a crash mid-write
 // would leave that behind permanently.
+//
+// Set STAMPS the key into the entry before marshalling, so what it writes can
+// prove to a later reader whose answer it is. The caller's e.Key is overwritten
+// rather than trusted: the key an entry claims is the key it was stored under,
+// never a value the caller supplied alongside a different one.
 func (c *Cache) Set(key string, e Entry) error {
 	if key == "" {
 		return fmt.Errorf("refusing to store a cache entry without a key")
@@ -138,6 +168,7 @@ func (c *Cache) Set(key string, e Entry) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating cache dir: %w", err)
 	}
+	e.Key = key
 	data, err := json.Marshal(e)
 	if err != nil {
 		return fmt.Errorf("encoding cache entry: %w", err)
