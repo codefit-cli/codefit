@@ -62,14 +62,18 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **Unreleased on `main`, heading for `v0.2.7` — a PATCH: no phase closes here.** Phase 3
+- **`v0.2.7` — a PATCH: no phase closes here.** Phase 3
   (code review, best practices, tests, regression risk) has **not started**; its dimensions
   — review, practices, tests — do not exist yet. This is the prerequisite thread (H0) that
   unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
   changed*. So the line stays `0.2` and the MINOR ↔ phase table above gains **no row** —
   that table maps phase *closures*, and this closes none. **No audit rule changed**: for a
   full scan no finding, surface item or baseline fingerprint moves, and `COVERAGE.md` and
-  the `codefit-coverage` manifest are untouched. What lands are the **two cheap layers of the
+  the `codefit-coverage` manifest are untouched — so, unlike `v0.2.5`, this release is
+  **not breaking for a committed baseline** and needs no re-accepting. **⚠️ It IS breaking
+  for a consumer that parses the `codefit-scan-all` response**, and that is the one
+  user-visible contract change in this PATCH: `actionable` no longer carries per-concern
+  detail (see the ADR 0054 paragraph below). What lands are the **two cheap layers of the
   filtering pyramid that were still missing** — layer 0 (which files get audited) and the
   content-hash finding cache (which results get recomputed). First, **layer 0**: an optional
   `changed_files` on `codefit-scan-security` and `codefit-scan-all`
