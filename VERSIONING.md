@@ -119,7 +119,17 @@ stage" — it does **not** claim `0.1.0` is done.
   the warm figures were stable, **two of the four projects produce zero findings and zero
   surface** (a Vite SPA and a project whose only route handler is a static healthz — ADR 0005's
   frontier is right to emit nothing), and four projects one person had clones of are no
-  representative sample. ADRs **0050**, **0051** and **0052**; the contract is
+  representative sample. ADRs **0050**, **0051** and **0052**.
+  **And a false all-clear was fixed before release, which is why this PATCH is not
+  cosmetic:** the reader treated **any valid JSON at an entry's path as a hit**, so a stray
+  `{}` or a backup artifact in `.codefit/cache` unmarshalled into an empty entry and was
+  served as *analysed, nothing found* (reproduced: score 100 and no SEC-001 on a file leaking
+  a credential). The entry is now **self-describing** — `Set` stamps its key and `Get`
+  verifies it — so anything that cannot prove it belongs to the key being read is a miss.
+  Two limits are declared rather than fixed: the cache barely warms under concurrent tool
+  calls on **Windows** (`os.Rename` cannot replace a file another reader holds open; the
+  failure is safe but noisy), and a separate, unproven **empty-read** hole. ADR **0053**.
+  The contract is
   `docs/specs/finding-cache.md`. Also removed: the
   **LLM-era scaffolding**. `internal/core/pipeline`
   was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot

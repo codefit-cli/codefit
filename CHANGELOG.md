@@ -299,6 +299,43 @@ of codefit, and read the corpus's honest limits with them (ADR
   own comment still named the extinct machinery. **The pyramid itself is doctrine and stays**
   — what goes is one expression of it the code never adopted (ADR **0049**).
 
+### Fixed
+
+- **The finding cache could serve a FALSE ALL-CLEAR: any valid JSON at an entry's path was
+  read as "analysed, nothing found".** `(*cache.Cache).Get` tested corruption by asking
+  whether `json.Unmarshal` returned an error, and `null`, `{}`, `{"unrelated":1}` and
+  `{"findings":[],"surface":null}` all parse. Each unmarshals into a **zero entry**, which
+  under the cache's own rules does not mean "nothing was stored" — it means *this analyzer
+  analysed exactly these bytes at this path and found nothing*. Reproduced on all four
+  payloads: **codefit reported score 100 and no SEC-001 for a file that leaks a credential.**
+  That is the exact failure the cache's contract (`docs/specs/finding-cache.md` R1) and ADR
+  0050 exist to prevent, arriving through the component built to keep the honest full scan
+  affordable.
+
+  **Scope, stated at its real size.** The cache is **opt-in** — `config.Cache.Enabled` has no
+  default and `codefit init` writes no `cache:` section — so a project that never turned it on
+  was never exposed. But `.codefit/cache` is an ordinary directory inside the user's project,
+  and anything that leaves valid JSON at `<generation>/<key>.json` is enough: a stray `{}`, an
+  editor or sync or backup artifact, a half-restored backup, another tool. There is no race to
+  win and no exotic precondition, and the result is **permanent and silent** — nothing
+  re-analyses that file until its bytes or the codefit binary change.
+
+  **The fix:** the entry is now **self-describing**. `Set` stamps the key into the entry and
+  `Get` verifies it, so every payload that cannot prove it belongs to the key being read — the
+  four above, any shape nobody enumerated, and a *well-formed* entry sitting at another key's
+  path (a copied or restored file) — is a **miss**, which is just an ordinary analysis. This
+  deliberately does not try to enumerate the malformed shapes: that approach only ever closes
+  the cases someone thought of. **Entries written by an earlier build have no stamp, so each
+  costs one extra analysis and is then rewritten** — no migration code, and the generation
+  prune collects the rest. ADR
+  [**0053**](docs/decisions/0053-a-cache-entry-names-its-own-key-and-a-hit-must-prove-it.md).
+
+  **No audit rule changed.** The fix can only turn a hit into a miss, and a miss is a real
+  analysis producing the real verdict. `rules/`, every provider `coverage.go`,
+  `internal/core/dbcoverage`, `dbrules`, `dwrules`, `paradigm` and `crossrules` are untouched,
+  no MCP tool gained a parameter, no response field changed, and the skill `codefit init`
+  generates needs no change.
+
 ### Not yet covered (declared)
 
 - **The cache is bounded by RETENTION, not by SIZE.** It keeps three generations and thirty
@@ -329,6 +366,23 @@ of codefit, and read the corpus's honest limits with them (ADR
   too. It is collected when that generation is superseded and the whole directory goes, so it
   is bounded by the same three-generation window rather than permanent; it is stated here
   because the alternative is someone finding an unexplained file in their cache.
+- **The cache effectively stops warming under concurrent tool calls on WINDOWS**, and this was
+  proven, not theorised. Go opens files with `FILE_SHARE_READ|FILE_SHARE_WRITE` and **not**
+  `FILE_SHARE_DELETE`, so `os.Rename` over an entry file another reader is holding open fails
+  with access denied — which is exactly the case the atomic write exists for: two MCP tools
+  over one project. `Set` then fails repeatedly and logs a warning per file. **The direction
+  is safe** — a failed write is a miss, nothing stale or wrong is ever served, and the audit
+  is unaffected — but "degrades gracefully" would understate it: on Windows under concurrency
+  the cache does not fill. It is a platform file-sharing question rather than a correctness
+  one, and it is not addressed here.
+- **A separate, unfixed hole in the same neighbourhood: the empty read.** `os.ReadFile`
+  returns `([]byte{}, nil)` when the first read reports EOF, so a source file ever *observed*
+  as zero-length — an editor's truncate-then-write, a sync tool mid-copy — would be analysed
+  as empty, produce nothing, and have that nothing cached under the key for empty content at
+  that path, reporting score 100 for it. **This is not proven to occur.** It is a different
+  defect with a different cause (what the walk accepts as a file's content, not what the cache
+  accepts as an entry), it wants its own reproduction before it gets its own fix, and it is
+  written down here so it is met as a known item rather than rediscovered. See ADR 0053.
 - **The DB dimension is not cached** — neither the DB sensor nor the code×schema cross.
   Their inputs are the configured `database.schema_paths`, not a repository walk, and a
   schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not

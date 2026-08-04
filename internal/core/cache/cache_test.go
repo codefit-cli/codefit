@@ -111,6 +111,98 @@ func TestGetCorruptEntry(t *testing.T) {
 	}
 }
 
+// R1/R4 — VALID JSON IS NOT PROOF OF PROVENANCE.
+//
+// Every payload below parses cleanly and unmarshals into a zero Entry, so a Get
+// that tests only json.Unmarshal's error serves each one as a HIT — and a hit
+// with no findings and no surface means "this exact analyzer analysed exactly
+// these bytes and found nothing". That is a false all-clear produced by the
+// cache for a file it never analysed: codefit reports score 100 on a file that
+// leaks a credential.
+//
+// .codefit/cache is an ordinary directory inside the user's project. A stray
+// {}, an editor or sync artifact, a half-restored backup or another tool
+// leaving valid JSON at <gen>/<64hex>.json is enough. Nothing re-analyses the
+// file afterwards: the entry is permanent until its bytes or the analyzer
+// binary change.
+//
+// The guard is that the entry NAMES ITS OWN KEY and Get verifies it, which
+// turns the whole class "a payload that does not prove it belongs to this key"
+// into a miss without having to enumerate the shapes it can take.
+func TestGetRejectsAnEntryThatDoesNotNameItsKey(t *testing.T) {
+	payloads := map[string]string{
+		"json null":           `null`,
+		"empty object":        `{}`,
+		"unrelated object":    `{"unrelated":1}`,
+		"shape without a key": `{"findings":[],"surface":null}`,
+	}
+	for name, payload := range payloads {
+		t.Run(name, func(t *testing.T) {
+			c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+			key := c.Key("src/leaky.ts", []byte("const key = \"sk-ant-abcdefgh12345678\";\n"))
+			gen := cache.GenerationDir(c)
+			if err := os.MkdirAll(gen, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(gen, key+".json"), []byte(payload), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			got, ok := c.Get(key)
+			if ok {
+				t.Errorf("Get served %s as a HIT (%+v) — a payload that never proves it belongs "+
+					"to this key was reported as 'analysed, nothing found'. That is the cache "+
+					"manufacturing a clean verdict for a file no analyzer ever read.", payload, got)
+			}
+		})
+	}
+}
+
+// R1 — an entry that belongs to ANOTHER key is a miss, even though it is a
+// perfectly well-formed entry this very cache wrote.
+//
+// This is the same class as the payloads above arriving by the likeliest real
+// route: a file copied, restored or synced into the wrong entry path. Without
+// the stamp the reader cannot tell, and it serves file A's verdict for file B.
+func TestGetRejectsAWellFormedEntryStoredUnderAnotherKey(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+	clean := c.Key("src/clean.ts", []byte("export const a = 1;\n"))
+	leaky := c.Key("src/leaky.ts", []byte("const key = \"sk-ant-abcdefgh12345678\";\n"))
+
+	if err := c.Set(clean, cache.Entry{}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	gen := cache.GenerationDir(c)
+	data, err := os.ReadFile(filepath.Join(gen, clean+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gen, leaky+".json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := c.Get(leaky); ok {
+		t.Errorf("Get served another key's entry as a HIT (%+v) — the clean file's empty "+
+			"verdict was reported for the file that leaks a credential", got)
+	}
+}
+
+// The stamp is written by Set, not merely checked by Get: an entry this cache
+// stored must still be a HIT on the very next read. A guard that rejected
+// everything would pass the two tests above and make the cache inert.
+func TestSetStampsTheKeySoItsOwnEntriesStillHit(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+	key := c.Key("src/a.ts", []byte("const x = 1;\n"))
+
+	if err := c.Set(key, cache.Entry{}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, ok := c.Get(key); !ok {
+		t.Fatal("an entry written by Set must be a HIT — the provenance guard must reject " +
+			"foreign payloads, not this cache's own writes")
+	}
+}
+
 // R2 — the key names the ANALYZER as well as the file. Same file, same bytes, a
 // different analyzer: a different key, so a rules upgrade cannot serve a verdict
 // it never computed.

@@ -552,6 +552,18 @@ Four things worth knowing:
   need it routinely.
 - **A cache failure is never an audit failure.** A missing, unreadable or corrupt entry just
   means the file gets analysed; a failed write is logged and the scan reports normally.
+- **An entry has to prove it is the answer to the key that was asked for.** Each entry
+  records its own key, and a read that does not match it is a miss. This matters because
+  `.codefit/cache` is an ordinary directory in your project: valid JSON that simply is not a
+  codefit entry — a stray `{}`, an editor or sync artifact, a half-restored backup, another
+  tool's file at an entry's path — would otherwise parse into an *empty* entry and be served
+  as "analysed, nothing found". Entries written before codefit started stamping the key are
+  re-analysed once and rewritten.
+- **The cache barely warms under concurrent tool calls on Windows.** Windows will not let the
+  atomic write replace an entry file another reader is holding open, so with two codefit
+  tools running over one project at once the write fails and logs a warning per file. The
+  direction is safe — a failed write is just a miss and the audit is unaffected — but the
+  cache does not fill up the way it does elsewhere. Not yet addressed.
 
 Not cached: the database dimension. Its inputs are the configured `database.schema_paths`
 rather than a repository walk, and a schema reconstructed from an ordered set of migrations
