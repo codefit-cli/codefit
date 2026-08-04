@@ -15,12 +15,47 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 **Nothing here is a release yet.** Phase 3 (code review, best practices, tests, regression
-risk) has started but no dimension of it exists: there is still **no practices sensor, no
-practices rule and no `codefit-check-practices` tool**. What landed is the one part of the
-practices thread that touches a number every consumer already reads — its score weight —
-taken first and alone.
+risk) has started but no dimension of it exists: there is still **no practices sensor and
+no `codefit-check-practices` tool**, and **nothing a user runs reaches a practices rule** —
+`providerForLanguage` maps only TypeScript, and the TypeScript `AnalyzePractices` is still
+a stub. What landed so far is the score weight (below) and an audit of the Go provider's
+own best-practice rules, which no product path currently calls.
 
 ### Changed
+
+- **The Go practices rules now say only what they check, and one of them was deleted for
+  not doing so.** All five emitted at `Confidence: 1.0` with no `Probabilistic` flag —
+  affirmations — while three of them claimed more than their code established
+  ([ADR 0056](docs/decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)).
+  - **`PRAC-004` is removed.** It said a goroutine was started "without a visible WaitGroup
+    or channel to synchronize it" while checking only that a `go` statement existed — no
+    synchronization detection existed anywhere in the file. It was **dropped rather than
+    taught**: with `go/ast` alone and no `go/types`, and with synchronization free to live
+    in a callee, a struct field, the caller or an `errgroup`, a sound affirmation is not
+    reachable, and the practices dimension has no surface channel to demote a guess into.
+    **Permanently not covered**, on the same footing as `DB-012` and `DW-022`.
+  - **`PRAC-001` is retitled** `Possibly ignored error` → **`Discarded return value`**. It
+    has no type information and never established the discarded value was an `error`, and
+    "possibly" is a hedge at certainty 1.0. Its check is unchanged.
+  - **`PRAC-003` no longer fires where `any` is unavoidable** — a generic type-parameter
+    constraint (`func F[T any]`, `type S[T any]`) or a variadic parameter (`...any`,
+    `...interface{}`). It still fires on an ordinary variable, field, non-variadic
+    parameter, result, slice element or map value. It also now recognises the **`any`
+    spelling**, which parses as an identifier rather than an `interface{}` node and which
+    the rule had therefore never actually matched, despite its message naming it.
+  - **`PRAC-005` fires only in a package that is not `main`**, which is the only
+    library/command distinction the AST can make and the one its "library code should
+    return errors instead" message rests on; retitled `panic in production code` →
+    **`panic in library code`** to match. Its `strings.HasSuffix(path, "_test.go")`
+    hardcode is **removed**: no rule carries its own notion of a test file — that is
+    `config.PathCriticality`, applied by the sensor on the way out, as the security sensor
+    already does.
+  - **`PRAC-002` is unchanged** and gains a fixture that fails if its logic breaks.
+  - **No user-visible detection changes.** No `scan-all`, `scan-security` or `check-db`
+    response moves and no baseline fingerprint moves, because no product path reaches these
+    rules: `providerForLanguage` returns `nil` for `go`, and the only caller of the Go
+    `AnalyzePractices` in the repository is its own test file. The change is to the rules'
+    honesty, not to what any user sees.
 
 - **`practices` is a dimension of its own and carries the smallest weight.**
   `scoring.DefaultWeights()` is now security 35 · review 20 · db 20 · **complexity 10** ·
