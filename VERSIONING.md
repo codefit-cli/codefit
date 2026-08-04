@@ -62,9 +62,24 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **`v0.2.7` — a PATCH: no phase closes here.** Phase 3
-  (code review, best practices, tests, regression risk) has **not started**; its dimensions
-  — review, practices, tests — do not exist yet. This is the prerequisite thread (H0) that
+- **In flight: the `0.3.0` line. Phase 3 has started.** The next tag is a
+  **`v0.3.0-alpha.N`**, not a `v0.2.8` — per the Pre-releases rule above, work *toward* a
+  MINOR carries the pre-release suffix on the **target** version, and `0.3.0` is Phase 3's
+  target in the table. `v0.2.7` was the last tag on the `0.2` line: it shipped Phase 3's
+  prerequisite thread (**H0**) as a PATCH because it closed no phase, changed no audit rule
+  and fixed live defects in already-released code — defensible under the PATCH rule, and it
+  is history now, not a precedent. From **H1 onward the work is new capability**, so it goes
+  on `0.3.0-alpha.N`. What is on `main` and unreleased today: `practices` is a weighted
+  dimension in `scoring.DefaultWeights()` (5 points, funded by `complexity`; ADR 0055) — and
+  **that is all of it**. There is still no practices sensor, no practices rule and no
+  `codefit-check-practices` tool, so `by_dimension.practices` is `null` on every response.
+  The MINOR ↔ phase table gains its `0.3.0` row only when Phase 3 is **complete and usable
+  end-to-end from `main`** — review, practices, tests and regression risk, not one of them.
+  See the [CHANGELOG](CHANGELOG.md) `[Unreleased]` section for the itemized list.
+- **`v0.2.7` — a PATCH: no phase closes here.** *As of that tag*, Phase 3
+  (code review, best practices, tests, regression risk) had **not started**; its dimensions
+  — review, practices, tests — did not exist yet. (Superseded by the bullet above: Phase 3
+  has since started on `main`.) This is the prerequisite thread (H0) that
   unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
   changed*. So the line stays `0.2` and the MINOR ↔ phase table above gains **no row** —
   that table maps phase *closures*, and this closes none. **No audit rule changed**: for a
