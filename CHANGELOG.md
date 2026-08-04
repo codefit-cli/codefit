@@ -65,6 +65,14 @@ hour no longer accumulates a full copy of the project's entries per build. ADRs
 [**0051**](docs/decisions/0051-the-finding-store-is-bounded-by-generation-and-pruned-on-open.md);
 the contract is `docs/specs/finding-cache.md`.
 
+**Both are now exercised on real projects, not on fixtures alone.** A committed, build-tagged
+dogfood harness runs the scope and the cache over four real TypeScript projects, read-only,
+and it is what lifts the "covered by tests and the CI self-audit but never exercised on a real
+project" limit both of them shipped with. It also produces codefit's **first measured
+milliseconds** for the cache — read them as a measurement on one machine and not as a property
+of codefit, and read the corpus's honest limits with them (ADR
+[**0052**](docs/decisions/0052-optimizations-are-validated-by-a-committed-dogfood-harness-over-real-projects.md)).
+
 ### Added
 
 - **`changed_files` (optional, a list of project-relative paths) on `codefit-scan-security`
@@ -190,6 +198,57 @@ the contract is `docs/specs/finding-cache.md`.
   swallowed, because a cache that cannot clean itself still has to work. Maintenance is never
   the reason an audit does not happen.
 
+- **A committed dogfood harness that runs the scope and the cache over REAL projects**
+  (`internal/mcp/dogfood_cache_test.go`, `//go:build dogfood`). Fixtures prove a contract;
+  they cannot show that the contract survives 300 files of somebody's real TypeScript, and
+  they cannot produce a single measured millisecond. `TestDogfoodCache` runs the **real**
+  security sensor cold and then warm over each project and asserts the two `SensorResult`s
+  are **byte-identical** (wall-clock zeroed, since a working cache necessarily changes it).
+  `TestDogfoodChangeScope` drives layer 0 over the same projects, with the requested paths
+  spelled **non-canonically** — a `./` prefix plus OS separators, which is how an agent hands
+  over a git diff on Windows — so "nothing went unmatched" exercises `scope.Canon` instead of
+  being a tautology, and it asserts that the denominator stays the whole project (5 of 317,
+  never 5 of 5) and that the narrowed pass reaches the same verdict on those files as the full
+  pass did. Every number is guarded against passing by vacuum: 0 audited files, a provider
+  never called, a cache holding fewer entries than files audited, or a warm run that
+  re-analysed anything all fail loudly.
+- **The harness is read-only over the clones, and costs a contributor who has none nothing.**
+  Nothing is written inside a dogfood project: the config is synthesized **in memory** and the
+  cache directory is an absolute `t.TempDir()` — which is exactly why these tests drive the
+  sensor rather than the MCP handler, since `runSecurity` loads `.codefit.yaml` *from the
+  project root*. It is behind the `dogfood` build tag, so the normal gate never compiles it,
+  and it **skips clean** when `dogfood.local.json` is absent. That file is **per-machine and
+  gitignored**: reproducing any of this requires your own clones and your own config, listing
+  their absolute paths (the format is in `dogfood_cross_test.go`'s header). ADR
+  [**0052**](docs/decisions/0052-optimizations-are-validated-by-a-committed-dogfood-harness-over-real-projects.md).
+- **The first measured numbers for the finding cache.** Measured on **one Windows machine, on
+  these four projects, at these file counts, on 2026-08-03** — a measurement of one run on one
+  desk, never a speed codefit promises:
+
+  | project | files audited | findings | surface | cold | warm |
+  |---|---|---|---|---|---|
+  | salonpro | 317 | 1 | 386 | 5989 ms | 514 ms |
+  | bitacoras | 147 | 0 | 102 | 2473 ms | 168 ms |
+  | plantalinda | 309 | 0 | 0 | 5023 ms | 265 ms |
+  | metricasbatch | 14 | 0 | 0 | 465 ms | 11 ms |
+
+  The warm runs re-analysed **0 files** and the cold and warm results were **byte-identical**
+  on all four. **The cold column is the unstable one:** repeats varied by roughly **±2x**
+  (salonpro ran 5989–11627 ms) because of the operating system's own filesystem caching — the
+  warm figures were stable. Divide the two columns if you like, but the quotient is an
+  observation about this machine, not a property of the tool.
+- **Two of the four projects produced ZERO findings and ZERO surface** — stated here rather
+  than buried under the wins, because it also bounds what the numbers above are worth.
+  metricasbatch is a Vite React SPA with no route handlers, and plantalinda's only Next.js
+  route handler returns a static `new Response("ok")`; **ADR 0005's frontier is correct to
+  emit nothing** for either, and the harness author checked that rather than relaxing the
+  guard. Those subtests still prove the walk, the store and the warm hit over hundreds of real
+  files — and because they cannot prove the *payload* survives the round trip, the harness
+  asserts "a warm cache preserved findings" and "a warm cache preserved surface" across the
+  **corpus** after the loop instead of faking either per project. Read the whole table with
+  that in mind: half this corpus exercises almost nothing. Four real projects the author
+  happened to have on disk are **not** a representative sample of anything.
+
 ### Changed
 
 - **`baseline.Diff` takes a file scope beside its category scope**, and an item is eligible
@@ -248,16 +307,20 @@ the contract is `docs/specs/finding-cache.md`.
   still a full copy of that project's entries, and three of them is three. `rm -rf
   .codefit/cache` stays safe and stays the escape hatch — it costs only time, which is
   exactly what distinguishes the cache from the committed baseline.
-- **Neither the scope nor the cache has been exercised on a real project**, and **no speedup
-  has been measured anywhere.** Both are covered by tests and by the CI self-audit, and that
-  is all — the "validated in real use" that the security and DB dimensions earned does not
-  extend to either. The cache's justification is the cost model (a recurring full scan must
-  not be the expensive option), argued rather than benchmarked: there is no number here, and
-  none is claimed.
+- **What the dogfood measurement does NOT cover.** It ran on **one** machine (Windows), under
+  **one** provider (TypeScript), over **four** projects one person happens to have clones of,
+  and it drives the **security sensor** directly rather than the MCP handler — that is the
+  price of staying read-only inside somebody's working clone, and it means the handler layer
+  around the cache is still covered by tests only. Two of the four projects produce no
+  findings and no surface at all. Nobody else can re-run it without their own clones and their
+  own `dogfood.local.json`, which is gitignored by design. It is evidence that both features
+  survive real code and it is a real number for the cache; it is **not** a benchmark, a
+  representative sample, or a performance guarantee.
 - **The 30-day age is the one sweep that can remove a LIVE entry.** A hit does not rewrite
   its entry, so a file untouched for a month is re-analysed once and re-cached. Self-healing
-  and in the safe direction, but a threshold rather than a proof, and the first thing to
-  re-tune once anyone measures a real project.
+  and in the safe direction, but still a threshold rather than a proof, and **still untuned**:
+  the dogfood harness measures a cold run against a warm one inside a single session and says
+  nothing about how long an entry should live.
 - **One residue survives the prune by design: a stray `.entry-*.tmp` in the CURRENT
   generation.** The atomic write creates its temp file inside the generation directory and
   removes it on every path a running process can take, so this is only what a crash or a kill
