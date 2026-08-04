@@ -30,19 +30,32 @@ export async function GET(req: Request) {
 		t.Fatal(err)
 	}
 	// A locally-resolved endpoint (deterministic SQL finding + local prisma access)
-	// is actionable and carries ALL its concerns together.
-	if len(resp.Actionable) != 1 {
-		t.Fatalf("the resolved handler must be ONE actionable endpoint, got %d", len(resp.Actionable))
+	// is ONE actionable endpoint, NAMED with the count of all its concerns together
+	// and carrying its deterministic finding in full (ADR 0054).
+	if resp.Actionable.Count != 1 || len(resp.Actionable.Endpoints) != 1 {
+		t.Fatalf("the resolved handler must be ONE actionable endpoint, got count=%d rendered=%d",
+			resp.Actionable.Count, len(resp.Actionable.Endpoints))
 	}
-	ep := resp.Actionable[0]
-	if len(ep.Concerns) < 2 {
-		t.Fatalf("actionable endpoint should carry the deterministic finding AND surface concerns, got %d", len(ep.Concerns))
+	ep := resp.Actionable.Endpoints[0]
+	if ep.Concerns < 2 {
+		t.Fatalf("the named endpoint should count the deterministic finding AND the surface concerns, got %d", ep.Concerns)
 	}
-	if ep.Concerns[0].Certainty != report.Deterministic || !ep.Concerns[0].Affirms {
-		t.Errorf("first concern must be the affirmed deterministic finding, got %+v", ep.Concerns[0])
+	if ep.HighestCertainty != report.Deterministic || !ep.HasAffirmation {
+		t.Errorf("the summary must say codefit AFFIRMS something here, got %+v", ep)
 	}
-	if ep.Concerns[0].Confidence != 1.0 {
-		t.Errorf("deterministic concern must have confidence 1.0, got %v", ep.Concerns[0].Confidence)
+	if len(ep.Deterministic) != 1 {
+		t.Fatalf("the deterministic finding must be carried in full, got %d", len(ep.Deterministic))
+	}
+	if ep.Deterministic[0].Certainty != report.Deterministic || !ep.Deterministic[0].Affirms {
+		t.Errorf("first concern must be the affirmed deterministic finding, got %+v", ep.Deterministic[0])
+	}
+	if ep.Deterministic[0].Confidence != 1.0 {
+		t.Errorf("deterministic concern must have confidence 1.0, got %v", ep.Deterministic[0].Confidence)
+	}
+	// ...and the surface detail it does NOT carry is one call away, exactly as the
+	// note promises.
+	if len(fetchConcerns(t, root, ep.File, ep.Line)) != ep.Concerns {
+		t.Errorf("codefit-scan-endpoint must return the %d concern(s) the summary counted", ep.Concerns)
 	}
 	if resp.Summary.Endpoints != 1 || resp.Summary.DeterministicFindings < 1 {
 		t.Errorf("summary should count the endpoint and the deterministic finding, got %+v", resp.Summary)
@@ -71,7 +84,7 @@ export async function POST(req: Request) {
 		t.Fatal(err)
 	}
 
-	if len(resp.Actionable) != 1 || !strings.Contains(resp.Actionable[0].File, "app/tasks/") {
+	if len(resp.Actionable.Endpoints) != 1 || !strings.Contains(resp.Actionable.Endpoints[0].File, "app/tasks/") {
 		t.Fatalf("the resolved tasks endpoint must be the only actionable one, got %+v", resp.Actionable)
 	}
 	if resp.FrontierPending.Count != 1 || len(resp.FrontierPending.Endpoints) != 1 {
@@ -117,7 +130,7 @@ export async function GET() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Actionable) != 0 {
+	if resp.Actionable.Count != 0 {
 		t.Fatalf("a fully-checked endpoint must not be actionable, got %+v", resp.Actionable)
 	}
 	if resp.FrontierPending.Count != 0 {
@@ -161,8 +174,8 @@ export async function POST(req: Request) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Actionable) != 0 {
-		t.Fatalf("an all-frontier project must have no actionable endpoints, got %d", len(resp.Actionable))
+	if resp.Actionable.Count != 0 {
+		t.Fatalf("an all-frontier project must have no actionable endpoints, got %d", resp.Actionable.Count)
 	}
 	if resp.FrontierPending.Count != 2 {
 		t.Fatalf("both endpoints must be named as pending, got %d", resp.FrontierPending.Count)
@@ -230,6 +243,29 @@ export async function GET() {
 	if resp.Found || len(resp.Endpoints) != 0 {
 		t.Errorf("a file with no auditable concerns must report found=false, got %+v", resp)
 	}
+}
+
+// fetchConcerns is the round trip scan-all's actionable bucket now asks an agent
+// to make: the response NAMES an endpoint, and codefit-scan-endpoint re-runs the
+// same stateless analysis to return its full concerns (ADR 0008/0054). Tests that
+// used to read the concerns straight out of scan-all go through here, so they
+// keep protecting the concern content AND exercise the promise the note makes.
+func fetchConcerns(t *testing.T, root, file string, line int) []report.Concern {
+	t.Helper()
+	resp, err := mcp.HandleScanEndpoint(mcp.ScanEndpointRequest{Root: root, Language: "typescript", File: file})
+	if err != nil {
+		t.Fatalf("scan-endpoint %s: %v", file, err)
+	}
+	if !resp.Found {
+		t.Fatalf("scan-all named %q as actionable but scan-endpoint cannot find it", file)
+	}
+	for _, ep := range resp.Endpoints {
+		if ep.Line == line {
+			return ep.Concerns
+		}
+	}
+	t.Fatalf("scan-all named %s:%d but scan-endpoint returned no endpoint at that line: %+v", file, line, resp.Endpoints)
+	return nil
 }
 
 func mustWrite(t *testing.T, root, rel, content string) {

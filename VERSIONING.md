@@ -136,7 +136,24 @@ stage" — it does **not** claim `0.1.0` is done.
   deleted that layer on the package's second day and all three implemented layers went on to
   bypass it, so it goes, along with the `NoLLM`, `FailOn` and `Interactive` fields of
   `AuditContext` from the same extinction (ADR **0049**). The pyramid itself is doctrine and
-  stays. ADR **0048**; the contract is `docs/specs/change-scope.md`. See the
+  stays. ADR **0048**; the contract is `docs/specs/change-scope.md`.
+  **Also fixed before release, and the reason this PATCH is blocking rather than optional:
+  `codefit-scan-all` did not RETURN on a mid-sized real project.** Over a 317-file TypeScript
+  repository it produced **313 368 bytes** and exceeded the MCP client's output limit — the
+  tool codefit's own skill tells an agent to call first. 99.3 % of it was one section:
+  `actionable` inlined 367 concerns at ~794 bytes each while `frontier_pending` named its
+  endpoints in ~122 bytes apiece — an old decision (ADRs 0006/0008, PRD §21) applied to half
+  the response. `actionable` now **names** its endpoints with what it takes to rank them and
+  the concern text is fetched on demand with `codefit-scan-endpoint`; deterministic findings
+  stay in full, because a fact codefit already concluded must not depend on the agent choosing
+  to look. Measured through the dogfood harness: **salonpro 313 368 → 42 012 bytes** with all
+  160 actionable endpoints still named. Naming is a constant factor and not a bound, so every
+  response now declares a byte `budget` and, when the lists do not fit, states how many
+  endpoints it withheld and what ordering they are a prefix of — never a silent cut. **Only
+  the rendering narrows**: `score`, the baseline delta, the summary and the `scope` block are
+  still computed over the complete analysis, locked against a pre-change golden and by
+  comparing two runs at different budgets. ADR **0054**; the contract is
+  `docs/specs/scan-all-response-budget.md`. See the
   [CHANGELOG](CHANGELOG.md) for the itemized list.
 - **`v0.2.6` — a PATCH: no phase closes here.** Phase 3 (code review, best practices,
   tests, regression risk) has not started, so the line stays `0.2` and the MINOR ↔ phase

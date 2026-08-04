@@ -301,6 +301,57 @@ of codefit, and read the corpus's honest limits with them (ADR
 
 ### Fixed
 
+- **`codefit-scan-all` did not RETURN on a mid-sized real project.** Over a 317-file
+  TypeScript repository it produced **313 368 bytes** and exceeded the MCP client's output
+  limit — the tool codefit's own skill tells an agent to call FIRST. **99.3 % of it was one
+  section**: `actionable` inlined 367 concerns across 160 endpoints at ~794 bytes each,
+  while `frontier_pending` named its 14 endpoints in ~122 bytes apiece. This was not a new
+  problem, it was an old decision applied to half the response: `scan-all` returns a
+  three-bucket synthesis precisely *because* the canonical dump truncated in MCP clients
+  (PRD §21, ADRs 0006/0008), and `actionable` never adopted it.
+
+  **`actionable` now names its endpoints like the other two buckets do.** Each entry carries
+  what it takes to RANK and choose — `file`, `line`, `method`, how many concerns and of which
+  `categories`, how many are actionable and of which `gaps` (hardest kind first),
+  `highest_certainty`, `has_affirmation` — and the per-concern `signals` / `reason_to_review`
+  text is fetched on demand with `codefit-scan-endpoint`, which is stateless and re-runs the
+  same analysis, so what comes back is exactly what was left out. **Deterministic findings are
+  the exception and stay in full** (`deterministic_concerns`): a finding at certainty 1.0 is a
+  fact codefit already concluded, and hiding it behind a second call would make a scan's
+  headline result depend on the agent choosing to look.
+
+  **Measured on real projects** through the committed dogfood harness (ADR 0052), read-only:
+  **salonpro 313 368 → 42 012 bytes** with all 160 actionable endpoints still named and
+  nothing withheld; bitacoras 40 282 → 9 903. The harness fails if no project in the corpus
+  would have exceeded the budget under the old shape, so the measurement cannot quietly
+  become a claim about small projects.
+
+  **Naming is a constant factor, not a bound, so the response declares its own budget.** Every
+  `scan-all` response now carries a `budget` block (60 000 bytes; MCP clients cap tool output
+  and this JSON runs ~3 bytes/token). When the endpoint lists do not fit, whole buckets are
+  withheld lowest-priority first — `resolved_clean`, then `frontier_pending`, then
+  `actionable` — lowest-ranked entries first, and the response states how many endpoints are
+  missing and what ordering they are a prefix of. Each bucket keeps declaring the **complete**
+  `count` it classified, with `withheld` accounting for the difference. `withheld: 0` still
+  carries a note: "no mention of truncation" and "nothing was truncated" must not be the same
+  bytes on the wire. An endpoint carrying a deterministic finding is never withheld, and a
+  response that is still over budget after withholding everything says so instead of being
+  clipped.
+
+  **Only the rendering narrows — nothing codefit concluded moves.** `score`, `by_dimension`,
+  the baseline delta, the summary and the `scope` block are computed over the COMPLETE
+  analysis, exactly as before; the set of endpoints named in `actionable` is exactly the set
+  that used to be detailed there. Locked from both sides: against a golden captured from the
+  pre-change tree, and by running the same project at two wildly different budgets and
+  requiring those four to agree field-for-field. **No audit rule changed** — no finding,
+  surface item or baseline fingerprint moves, and `COVERAGE.md`, `internal/core/dbcoverage/`
+  and the per-language `coverage.go` manifests are untouched. The `codefit-scan-all` /
+  `codefit-scan-endpoint` tool descriptions and the generated skill teach the new shape in the
+  same change, because they are the only thing an agent reads before choosing a tool — **an
+  existing install only sees it after re-running `codefit init`**. ADR
+  [**0054**](docs/decisions/0054-actionable-endpoints-are-named-and-the-response-declares-its-budget.md);
+  the contract is `docs/specs/scan-all-response-budget.md`.
+
 - **The finding cache could serve a FALSE ALL-CLEAR: any valid JSON at an entry's path was
   read as "analysed, nothing found".** `(*cache.Cache).Get` tested corruption by asking
   whether `json.Unmarshal` returned an error, and `null`, `{}`, `{"unrelated":1}` and

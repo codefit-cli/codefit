@@ -91,8 +91,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(respA.Actionable) != 2 {
-		t.Fatalf("without registration both endpoints must be actionable, got %d: %+v", len(respA.Actionable), respA.Actionable)
+	if respA.Actionable.Count != 2 || len(respA.Actionable.Endpoints) != 2 {
+		t.Fatalf("without registration both endpoints must be actionable, got count=%d rendered=%d: %+v",
+			respA.Actionable.Count, len(respA.Actionable.Endpoints), respA.Actionable)
 	}
 
 	// WITH registration (fresh root, helper registered BEFORE the first scan so
@@ -111,17 +112,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
 	if !hasCleanFile(respB.ResolvedClean.Endpoints, "app/admin/route.ts") {
 		t.Errorf("the authz-only endpoint must be resolved_clean after registering its helper; clean=%+v actionable=%+v",
-			respB.ResolvedClean.Endpoints, filesOf(respB.Actionable))
+			respB.ResolvedClean.Endpoints, filesOf(respB.Actionable.Endpoints))
 	}
-	if !hasActionableFile(respB.Actionable, "app/orders/[id]/route.ts") {
+	if !hasActionableFile(respB.Actionable.Endpoints, "app/orders/[id]/route.ts") {
 		t.Errorf("the IDOR endpoint must STAY actionable after registering the helper (ownership unverified); got actionable=%+v",
-			filesOf(respB.Actionable))
+			filesOf(respB.Actionable.Endpoints))
 	}
 	// Honesty: the IDOR endpoint's authz signal labels the helper as registered.
-	for _, ep := range respB.Actionable {
+	// scan-all NAMES its actionable endpoints now, so the signals are read where an
+	// agent reads them — from codefit-scan-endpoint, which re-runs the same analysis
+	// (ADR 0054). If the naming ever dropped an endpoint, this fetch finds nothing.
+	for _, ep := range respB.Actionable.Endpoints {
 		if ep.File == "app/orders/[id]/route.ts" {
 			joined := ""
-			for _, c := range ep.Concerns {
+			for _, c := range fetchConcerns(t, rootB, ep.File, ep.Line) {
 				joined += strings.Join(c.Signals, " | ")
 			}
 			if !strings.Contains(strings.ToLower(joined), "registered for this project") {
@@ -140,7 +144,7 @@ func hasCleanFile(eps []report.ResolvedCleanEndpoint, file string) bool {
 	return false
 }
 
-func hasActionableFile(eps []report.EndpointReport, file string) bool {
+func hasActionableFile(eps []report.ActionableEndpoint, file string) bool {
 	for _, e := range eps {
 		if e.File == file {
 			return true
@@ -149,7 +153,7 @@ func hasActionableFile(eps []report.EndpointReport, file string) bool {
 	return false
 }
 
-func filesOf(eps []report.EndpointReport) []string {
+func filesOf(eps []report.ActionableEndpoint) []string {
 	out := make([]string, 0, len(eps))
 	for _, e := range eps {
 		out = append(out, e.File)

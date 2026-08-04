@@ -323,8 +323,10 @@ codefit init
 #    "audit the endpoints in this project for IDOR and broken authorization"
 ```
 
-The agent loads codefit's skill, calls `codefit-scan-all`, reads the three buckets,
-reasons the surface with your project's context, and reports back. When you decide
+The agent loads codefit's skill, calls `codefit-scan-all`, reads the three buckets
+(every endpoint named with what it takes to rank it), pulls the full concerns of the
+ones worth pursuing with `codefit-scan-endpoint`, reasons the surface with your
+project's context, and reports back. When you decide
 an item is a false positive it calls `codefit-baseline-accept` with your reason;
 after a fix it calls `codefit-baseline-prune`. You never leave the agent, and
 codefit never touches your code.
@@ -440,8 +442,8 @@ codefit exposes its capabilities as MCP tools in three roles:
 
 | Tool | What it does |
 | --- | --- |
-| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
-| `codefit-scan-endpoint` | Full detail of one file on demand (to follow a `frontier_pending` endpoint). |
+| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. Every bucket **names** its endpoints with what it takes to rank them; the concern text is fetched on demand (deterministic findings come back in full). Carries a declared byte `budget` and says how many endpoints it withheld, if any. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
+| `codefit-scan-endpoint` | Full detail of one file on demand — the concerns `scan-all` named but did not spell out, for **any** bucket. |
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). Also takes the optional `changed_files`. |
 | `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser — and equally when every configured schema source was found but none of them could be read, so an unreadable schema is never reported as a clean one. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |

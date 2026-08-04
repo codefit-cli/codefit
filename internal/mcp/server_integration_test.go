@@ -76,7 +76,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if out.Summary.Endpoints == 0 || out.Summary.SurfaceItems == 0 {
 		t.Errorf("expected a per-endpoint report with surface, got %+v", out.Summary)
 	}
-	if len(out.Actionable) == 0 || len(out.Actionable[0].Concerns) == 0 {
-		t.Errorf("expected at least one actionable endpoint with concerns, got %+v", out.Actionable)
+	// Named, not inlined: the endpoint arrives with what it takes to rank it, and
+	// its concern detail is a codefit-scan-endpoint call away (ADR 0054).
+	if len(out.Actionable.Endpoints) == 0 || out.Actionable.Endpoints[0].Concerns == 0 {
+		t.Errorf("expected at least one actionable endpoint carrying a concern count, got %+v", out.Actionable)
+	}
+	if out.Budget.Bytes != mcp.ResponseBudgetBytes || out.Budget.Note == "" {
+		t.Errorf("the response an agent receives over the wire must declare its budget, got %+v", out.Budget)
 	}
 }
