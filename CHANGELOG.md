@@ -483,13 +483,16 @@ of codefit, and read the corpus's honest limits with them (ADR
   by neither. The **change scope** is not in the same position: `changed_files` has
   handler-level tests (`internal/mcp/changedfiles_test.go`, `filescope_test.go`) driving both
   handlers, including a Windows-spelled request and a partial scan that must not prune.
-- **The 60 000-byte `scan-all` budget is a chosen number, not a measured ceiling.** The
-  largest response ever *proven* to arrive is salonpro's **42 012 bytes**, so the declared
-  budget sits about **43 %** above it — headroom picked from how MCP clients cap tool output
-  (Claude Code's default is 25 000 tokens against this JSON's ~3 bytes/token), not from a
-  response that was observed near it. Nothing has been measured between 42 012 and 60 000,
-  and no dogfood project is recorded as having withheld an endpoint (salonpro withheld 0),
-  so the withholding path itself is proven only by tests at synthetic budgets. **The budget also
+- **The 60 000-byte `scan-all` budget is a chosen number, not a measured ceiling.** Two
+  different things are easy to confuse here, so both are named. What was *observed through a
+  real MCP client*: a **312 692**-character response was **rejected**, and a **40 282**-byte one
+  **arrived** — that is the whole of the evidence, and the client's actual cap was never seen,
+  only bracketed. What was *computed by a test*: salonpro serializes to **42 012 bytes** under
+  the new shape; that response has never been sent through a client. So the declared budget sits
+  about **49 %** above the largest response known to arrive, nothing has been measured between
+  40 282 and 60 000, and no dogfood project is recorded as having withheld an endpoint (salonpro
+  withheld 0), so the withholding path itself is proven only by tests at synthetic budgets.
+  **The budget also
   governs only the endpoint lists:** a pathological `db` section could exceed it alone, and
   that path emits the explicit over-budget warning rather than narrowing — narrowing `db` is
   a separate decision, deliberately not made here.
