@@ -155,6 +155,10 @@ func namedActionable(resp ScanAllResponse) map[string]bool {
 //   - against the PRE-CHANGE golden (captured from 79e34b0, before a line of this
 //     change existed): the fix must not have shifted the score, the baseline delta,
 //     the summary or the scope block by so much as a field.
+//     The golden has been hand-edited exactly once since that capture: ADR 0055 gave
+//     `practices` a weight, so `by_dimension` grew a sixth key. Only the key
+//     `"practices": null` was added — every value in the file, including the global
+//     and every other dimension, is the byte the capture produced.
 //   - between two runs at wildly different budgets: this is the one that catches
 //     the bug the spec is most afraid of. If any of those four were computed over
 //     the RENDERED subset instead of the complete analysis, a run that withholds

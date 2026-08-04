@@ -12,6 +12,57 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
+## [Unreleased]
+
+**Nothing here is a release yet.** Phase 3 (code review, best practices, tests, regression
+risk) has started but no dimension of it exists: there is still **no practices sensor, no
+practices rule and no `codefit-check-practices` tool**. What landed is the one part of the
+practices thread that touches a number every consumer already reads — its score weight —
+taken first and alone.
+
+### Changed
+
+- **`practices` is a dimension of its own and carries the smallest weight.**
+  `scoring.DefaultWeights()` is now security 35 · review 20 · db 20 · **complexity 10** ·
+  tests 10 · **practices 5**, still summing to 100
+  ([ADR 0055](docs/decisions/0055-practices-is-its-own-dimension-and-carries-the-smallest-weight.md)).
+  It is the smallest weight by doctrine: codefit audits what the developer never sees, and
+  `any` / `console.log` / a missing `catch` are the *most* visible defects there are — a
+  linter underlines them in the editor. The dimension belongs in the score; it does not
+  belong weighing like `db`.
+- **No score moves. Not the global, not any dimension, on any project.** The 5 points come
+  from `complexity` specifically, because it is post-v1.0 with no sensor, and `Compute`
+  accumulates `totalWeight` over the **measured** dimensions only — a weight that is never
+  in the denominator cannot change a quotient. Verified, not asserted: the pre-change
+  golden captured at `79e34b0` still matches a live `scan-all` in **every** field, and a
+  test freezes the pre-re-balance map as a literal and compares the whole `ScoreSummary`
+  over every measured set `scan-all` can produce.
+- **⚠️ `by_dimension` gains a sixth key — a response-shape change.** Every `scan-all`
+  response now carries `"practices": null` beside the existing five. Nothing a consumer
+  already read changed value, but anything that enumerates `by_dimension`, counts its keys
+  or round-trips it through a strict schema will see the new entry. `null` is the honest
+  value and follows [ADR 0021](docs/decisions/0021-by-dimension-scoring-wired-into-scan-all.md):
+  the dimension is weighted but has no sensor, so it is *not measured* — never a fake `100`.
+- **No rule changed.** No finding, surface item or baseline fingerprint moves; no baseline
+  action is needed. `rules/`, `dbrules/`, `dwrules/`, `paradigm/`, `crossrules/`,
+  `internal/core/dbcoverage/`, the per-language `coverage.go` manifests, `COVERAGE.md`, the
+  MCP tool descriptions and the generated skill are all untouched. This change is one map
+  of integers.
+
+### Declared limits — stated, not hidden
+
+- **`report.score_weights` in `.codefit.yaml` does nothing, and did nothing before this
+  change either.** The key is parsed, and `config.Validate` rejects it when it does not sum
+  to 100 — and **nothing ever reads it**. `scoring.DefaultWeights()` is hardcoded at both
+  call sites in `internal/mcp/scanall.go`, and the field has no reference anywhere in the
+  repository beyond its declaration and that validation. A user who re-weights their audit
+  today gets their map validated and then ignored. Pre-existing, not introduced here, and
+  deliberately **not fixed here**: making it real means deciding what a partial user map
+  means and how it interacts with the `measured ⊆ weights` guard. Declared so it stops
+  being a silent one.
+- **The PRD still reads `complexity: 15`** in its defaults line and its `.codefit.yaml`
+  sketch. The PRD is exempt from the reflect-today rule, so this is recorded, not corrected.
+
 ## [0.2.7] — 2026-08-04
 
 **A PATCH release: no PRD phase closes here.** Phase 3 (code review, best practices,
