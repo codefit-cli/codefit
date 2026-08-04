@@ -12,12 +12,15 @@ All notable changes to codefit are documented here. The format is based on
 > Ahead: the HTTP/SSE transport and Phases 2–4 (DB, code review, knowledge packs) —
 > see [VERSIONING.md](VERSIONING.md) and the [PRD](docs/PRD-codefit-v1.4.md) §25.
 
-## [Unreleased]
+## [0.2.7] — 2026-08-04
 
-**Heading for a PATCH: no PRD phase closes here.** Phase 3 (code review, best practices,
-tests, regression risk) has not started — this is the prerequisite thread (H0) that
-unblocks the regression-risk half of RF-06, which cannot exist without a notion of *what
-changed*. **No audit rule changed.** Every security, DB and DW rule behaves exactly as it
+**A PATCH release: no PRD phase closes here.** Phase 3 (code review, best practices,
+tests, regression risk) has **not started** — its dimensions do not exist — so this stays
+on the `0.2` line and the MINOR ↔ phase table in [VERSIONING.md](VERSIONING.md) gains
+**no row**, exactly as `v0.2.6` did: that table maps phase *closures*, and this release
+closes none. What lands is the prerequisite thread (**H0**) that unblocks the
+regression-risk half of RF-06, which cannot exist without a notion of *what changed*.
+**No audit rule changed.** Every security, DB and DW rule behaves exactly as it
 did in `v0.2.6`: for a full scan no finding, no surface item and no baseline fingerprint
 moves, and `COVERAGE.md` and the `codefit-coverage` manifest are untouched. What lands are
 the **two cheap layers of the filtering pyramid that were still missing**: **layer 0**
@@ -25,6 +28,41 @@ the **two cheap layers of the filtering pyramid that were still missing**: **lay
 and the **content-hash finding cache** (the same analyzer, over the same bytes at the same
 path, no longer re-analyses them). They are orthogonal — the first decides *which files get
 audited*, the second decides *which results get recomputed*.
+
+**⚠️ NOT breaking for a committed baseline.** Stated because the last release that *was*
+carries the same marker: `v0.2.5` moved the fingerprint of every column-anchored DB item
+and existing `.codefit-baseline` entries re-appeared as `new` until re-accepted. Nothing
+here does that. `findings.Fingerprint(category, file, content)` is byte-for-byte the
+function `v0.2.6` shipped, no sensor's `OwnedCategories()` changed, `baseline.Item` and the
+committed file's shape are untouched, and `rules/`, `dbrules/`, `dwrules/`, `paradigm/`
+and `crossrules/` have no diff at all against `v0.2.6`. **No baseline action is needed on
+upgrade.** What *did* change around the baseline is a guard, not a fingerprint:
+`baseline.Diff` now takes a file scope beside its category scope, so a partial pass can no
+longer prune files it never opened — and it fails in the under-reporting direction.
+
+**⚠️ BREAKING for a consumer that parses the `codefit-scan-all` response.** This is a
+user-visible contract change inside a PATCH, and it belongs at the top rather than in a
+footnote. **`actionable` no longer carries per-concern detail.** Each entry now *names* its
+endpoint with what it takes to rank it — `file`, `line`, `method`, how many concerns and
+of which `categories`, `highest_certainty`, `has_affirmation` — and the per-concern
+`signals` / `reason_to_review` text is fetched on demand with `codefit-scan-endpoint`.
+Deterministic findings are the exception and still come back in full. Every response also
+gains two new blocks, `scope` and `budget`. Anything that read `actionable[].concerns[]`
+must now make a second call for the endpoints it pursues. What justifies a shape change on
+a `0.x` PATCH is that this is what made `scan-all` **return at all** on a mid-sized real
+project — see the first `Fixed` entry. Nothing codefit *concluded* moved: `score`,
+`by_dimension`, the baseline delta, the summary and `scope` are still computed over the
+complete analysis.
+
+**Two defects were found and fixed INSIDE this release cycle; neither ever reached a
+tagged version.** They are the two entries most worth reading before upgrading — a cache
+that could serve a **false all-clear**, and a `scan-all` that **did not return** — and
+both are recorded at full size below. But they are not emergency fixes to shipped code:
+`v0.2.6` predates the cache and the scope entirely. At that tag nothing outside
+`internal/core/cache` imported the package (it was inert, wired for the first time here)
+and `internal/core/scope` did not exist, so **no released version of codefit was ever
+exposed to either.** Recorded plainly in both directions: neither buried, nor dressed up
+as a field incident.
 
 **The scope is an INPUT, never derived from git.** codefit does not shell out to git, does
 not read `.git`, does not diff refs and assumes no branch model. Two reasons, both standing
@@ -398,8 +436,7 @@ of codefit, and read the corpus's honest limits with them (ADR
 - **What the dogfood measurement does NOT cover.** It ran on **one** machine (Windows), under
   **one** provider (TypeScript), over **four** projects one person happens to have clones of,
   and it drives the **security sensor** directly rather than the MCP handler — that is the
-  price of staying read-only inside somebody's working clone, and it means the handler layer
-  around the cache is still covered by tests only. Two of the four projects produce no
+  price of staying read-only inside somebody's working clone. Two of the four projects produce no
   findings and no surface at all. Nobody else can re-run it without their own clones and their
   own `dogfood.local.json`, which is gitignored by design. It is evidence that both features
   survive real code and it is a real number for the cache; it is **not** a benchmark, a
@@ -438,6 +475,24 @@ of codefit, and read the corpus's honest limits with them (ADR
   Their inputs are the configured `database.schema_paths`, not a repository walk, and a
   schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not
   obviously the right unit. Declared, not forgotten.
+- **The finding cache has NO test at the MCP-handler level.** It is exercised at the sensor
+  (`internal/sensors/security/cache_test.go`) and by the build-tagged dogfood harness, which
+  drives the sensor too; nothing under `internal/mcp` turns the cache on — no non-dogfood
+  test there so much as mentions it. So the path a real agent takes, `HandleScanAll` /
+  `HandleScanSecurity` → `.codefit.yaml` with `cache: enabled: true` → the sensor, is covered
+  by neither. The **change scope** is not in the same position: `changed_files` has
+  handler-level tests (`internal/mcp/changedfiles_test.go`, `filescope_test.go`) driving both
+  handlers, including a Windows-spelled request and a partial scan that must not prune.
+- **The 60 000-byte `scan-all` budget is a chosen number, not a measured ceiling.** The
+  largest response ever *proven* to arrive is salonpro's **42 012 bytes**, so the declared
+  budget sits about **43 %** above it — headroom picked from how MCP clients cap tool output
+  (Claude Code's default is 25 000 tokens against this JSON's ~3 bytes/token), not from a
+  response that was observed near it. Nothing has been measured between 42 012 and 60 000,
+  and no dogfood project is recorded as having withheld an endpoint (salonpro withheld 0),
+  so the withholding path itself is proven only by tests at synthetic budgets. **The budget also
+  governs only the endpoint lists:** a pathological `db` section could exceed it alone, and
+  that path emits the explicit over-budget warning rather than narrowing — narrowing `db` is
+  a separate decision, deliberately not made here.
 - **codefit still does not know what changed on its own.** If the agent passes nothing, it
   audits everything — by design.
 
