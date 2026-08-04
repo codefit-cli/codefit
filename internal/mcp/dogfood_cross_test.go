@@ -41,7 +41,6 @@
 package mcp
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,23 +94,9 @@ func resolveSchemaPaths(root, schema string) []string {
 }
 
 func TestDogfoodCross(t *testing.T) {
-	path := dogfoodConfigPath()
-	if !filepath.IsAbs(path) {
-		path = filepath.Join("..", "..", path) // test cwd is the package dir; config is at repo root
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Skipf("no dogfood config (skip-if-absent): %v — see this file's header to create one", err)
-	}
-	var projects []dogfoodProject
-	if err := json.Unmarshal(raw, &projects); err != nil {
-		t.Fatalf("parsing dogfood config %s: %v", path, err)
-	}
-	if len(projects) == 0 {
-		t.Skip("dogfood config is empty")
-	}
-
-	for _, p := range projects {
+	// The loader lives in dogfood_cache_test.go so both harnesses read the same
+	// config and agree on what an absent one means.
+	for _, p := range loadDogfoodProjects(t) {
 		t.Run(p.Name, func(t *testing.T) {
 			if _, err := os.Stat(p.Root); err != nil {
 				t.Skipf("root absent (skip-if-absent): %s", p.Root)

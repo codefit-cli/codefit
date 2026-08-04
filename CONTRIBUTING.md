@@ -66,10 +66,20 @@ git ls-files --others --ignored --exclude-standard | grep '\.go$' && \
 ## Running the test suite
 
 ```bash
-go test ./...                 # everything
+go test ./...                 # everything the gate compiles
 go test -race ./...           # with the race detector (as CI does)
 go test -cover ./internal/... # with coverage
 ```
+
+**One suite those commands do not compile: the dogfood harnesses.** The files under
+`internal/mcp/dogfood_*_test.go` are behind `//go:build dogfood` and measure the real
+sensors over **real projects you have cloned locally** — the code↔schema cross, and the
+change scope and finding cache. They are the only real-project evidence in the repository
+for those features, so if you change one of them, run the matching harness. They read a
+gitignored, per-machine `dogfood.local.json` and **skip clean** when it is absent: whoever
+has the clones measures, whoever does not breaks nothing. The config format and the exact
+`go test -tags dogfood …` invocation live in each file's header comment — deliberately not
+copied here, so the instructions cannot drift away from the harness they describe.
 
 ## Architecture in one minute
 

@@ -107,16 +107,19 @@ independent audit layer that validates AI-generated code is secure and correct
 - **Scoping a scan to the files you changed** — an optional `changed_files` on
   `codefit-scan-all` / `codefit-scan-security`, with the narrowing declared in the
   response so a partial result never reads as a full one (see
-  [Scoping a scan](#scoping-a-scan-to-the-files-you-changed) below). *Unlike every
-  other item on this list, this one is covered by tests and the CI self-audit but has
-  **not** been exercised on a real project yet — the "validated in real use" above does
-  not cover it.*
+  [Scoping a scan](#scoping-a-scan-to-the-files-you-changed) below). Exercised over four
+  real TypeScript projects by a committed dogfood harness — the narrowing kept its whole-project
+  denominator, left nothing unmatched, and reached the same verdict on those files as a full
+  pass — though through the security sensor rather than the MCP handler; see
+  [What has actually been measured](#what-has-actually-been-measured).
 - **An opt-in content-hash finding cache** — the same codefit binary, over the same file
   bytes at the same path, reuses the analysis instead of recomputing it, so a recurring full
   scan costs about what an incremental one does. Off unless a project enables it, and a warm
   scan is byte-identical to a cold one (see [The finding cache](#the-finding-cache-opt-in)
-  below). *Like `changed_files`, this is covered by tests and the CI self-audit but has
-  **not** been exercised on a real project yet.*
+  below). Exercised over the same four real projects: warm scans re-analysed **0 files** and
+  came out byte-identical to cold. The timings that came with it are a measurement on one
+  machine, not a speed codefit promises — read them, with their limits, under
+  [What has actually been measured](#what-has-actually-been-measured).
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
   codefit's own thin skill for each detected agent.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
@@ -565,6 +568,51 @@ Four things worth knowing:
 Not cached: the database dimension. Its inputs are the configured `database.schema_paths`
 rather than a repository walk, and a schema reconstructed from an ordered set of migrations
 does not obviously invalidate per file.
+
+## What has actually been measured
+
+The scope and the cache are exercised over **real projects**, not fixtures alone, by a
+harness that lives in the repository (`internal/mcp/dogfood_cache_test.go`). It is behind
+the `dogfood` build tag, so the ordinary `go test ./...` never compiles it, and it **skips
+clean** when `dogfood.local.json` — a **per-machine, gitignored** file listing the absolute
+paths of your own clones — is absent. Whoever has the clones measures; whoever does not
+breaks nothing. Reproducing the numbers below therefore means using **your** projects, not
+these.
+
+It runs the real security sensor cold and then warm over each project and requires the two
+results to be **byte-identical**, and it drives `changed_files` over the same projects with
+the paths spelled the way an agent actually hands over a git diff on Windows. It is
+**read-only** over the clones: the configuration is synthesized in memory and the cache lives
+in a temporary directory, which is why it drives the sensor rather than the MCP handler —
+the handler reads `.codefit.yaml` from the project root, and turning the cache on through it
+would mean writing inside somebody's working tree.
+
+**One Windows machine, four projects, 2026-08-03:**
+
+| project | files audited | findings | surface | cold | warm |
+|---|---|---|---|---|---|
+| salonpro | 317 | 1 | 386 | 5989 ms | 514 ms |
+| bitacoras | 147 | 0 | 102 | 2473 ms | 168 ms |
+| plantalinda | 309 | 0 | 0 | 5023 ms | 265 ms |
+| metricasbatch | 14 | 0 | 0 | 465 ms | 11 ms |
+
+The warm runs re-analysed **0 files** and matched the cold runs byte for byte on all four.
+Read the milliseconds as what they are:
+
+- **The cold column is not stable.** Repeats varied by roughly **±2x** — salonpro ran
+  anywhere from 5989 to 11627 ms — because the operating system caches the filesystem
+  underneath. The warm column was stable. Any ratio you compute from this table describes
+  this machine on this day, not a speed codefit offers you.
+- **Two of the four projects produced zero findings and zero surface,** and that is checked,
+  not glossed over: metricasbatch is a Vite React SPA with no route handlers, and
+  plantalinda's only Next.js route handler returns a static `new Response("ok")` — codefit's
+  [declared frontier](#the-differentiator-surface-mapping) is correct to say nothing about
+  either. They still exercise the walk, the store and the warm hit over hundreds of real
+  files, and the harness requires *some* project in the corpus to carry findings and *some*
+  project to carry surface, so an empty corpus cannot pass. But half of this corpus exercises
+  almost nothing, and the table should be read knowing that.
+- **Four projects one person happened to have clones of are not a representative sample**,
+  and this is not a benchmark. It is evidence that both features survive real code.
 
 ## The baseline model
 

@@ -105,18 +105,31 @@ stage" — it does **not** claim `0.1.0` is done.
   the two filename shapes it writes itself, so nothing else in `.codefit/cache` is at risk at
   any age — the flip side being that a `.entry-*.tmp` a crashed write leaves in the *current*
   generation is not entry-shaped either, so it waits for that generation to be superseded.
-  `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Neither the scope
-  nor the cache has been exercised on a real project — tests and the CI self-audit only —
-  and no speedup has been measured anywhere.** Fixed before release, and the reason this
-  PATCH is not cosmetic: the reader treated **any valid JSON at an entry's path as a hit**,
-  so a stray `{}` or a backup artifact in `.codefit/cache` unmarshalled into an empty entry
-  and was served as *analysed, nothing found* — a false all-clear (reproduced: score 100 and
-  no SEC-001 on a file leaking a credential). The entry is now **self-describing**: `Set`
-  stamps its key and `Get` verifies it, so anything that cannot prove it belongs to the key
-  being read is a miss. Two limits are declared rather than fixed — the cache barely warms
-  under concurrent tool calls on **Windows** (`os.Rename` cannot replace a file another
-  reader holds open; the failure is safe but noisy), and a separate, unproven **empty-read**
-  hole. ADRs **0050**, **0051** and **0053**; the contract is
+  `rm -rf .codefit/cache` stays safe and stays the escape hatch. **Both are now exercised on
+  real projects rather than on fixtures alone**: a committed, build-tagged dogfood harness
+  (`internal/mcp/dogfood_cache_test.go`, excluded from the gate, skipping clean without a
+  gitignored per-machine `dogfood.local.json`) runs the real security sensor cold and warm over
+  four real TypeScript projects, read-only, and drives layer 0 over the same corpus with
+  non-canonically spelled paths. Cold and warm came out **byte-identical**, the warm runs
+  re-analysed **0 files**, and the narrowing kept its denominator whole with nothing unmatched.
+  It also produced codefit's **first measured milliseconds** — 317/147/309/14 files audited,
+  cold 5989/2473/5023/465 ms against warm 514/168/265/11 ms, on **one Windows machine on
+  2026-08-03**. Read that as a measurement and not as a property: cold runs varied about **±2x**
+  across repeats (5989–11627 ms on the largest project) through the OS's own filesystem caching,
+  the warm figures were stable, **two of the four projects produce zero findings and zero
+  surface** (a Vite SPA and a project whose only route handler is a static healthz — ADR 0005's
+  frontier is right to emit nothing), and four projects one person had clones of are no
+  representative sample. ADRs **0050**, **0051** and **0052**.
+  **And a false all-clear was fixed before release, which is why this PATCH is not
+  cosmetic:** the reader treated **any valid JSON at an entry's path as a hit**, so a stray
+  `{}` or a backup artifact in `.codefit/cache` unmarshalled into an empty entry and was
+  served as *analysed, nothing found* (reproduced: score 100 and no SEC-001 on a file leaking
+  a credential). The entry is now **self-describing** — `Set` stamps its key and `Get`
+  verifies it — so anything that cannot prove it belongs to the key being read is a miss.
+  Two limits are declared rather than fixed: the cache barely warms under concurrent tool
+  calls on **Windows** (`os.Rename` cannot replace a file another reader holds open; the
+  failure is safe but noisy), and a separate, unproven **empty-read** hole. ADR **0053**.
+  The contract is
   `docs/specs/finding-cache.md`. Also removed: the
   **LLM-era scaffolding**. `internal/core/pipeline`
   was designed around an early exit before a paid layer-3 LLM call; the MCP-first pivot
