@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/mcp"
@@ -29,12 +30,21 @@ export async function GET() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Actionable) != 1 {
-		t.Fatalf("the N+1 handler must be one actionable endpoint, got %d: %+v", len(resp.Actionable), resp)
+	if resp.Actionable.Count != 1 || len(resp.Actionable.Endpoints) != 1 {
+		t.Fatalf("the N+1 handler must be one actionable endpoint, got count=%d rendered=%d: %+v",
+			resp.Actionable.Count, len(resp.Actionable.Endpoints), resp)
 	}
-	ep := resp.Actionable[0]
+	ep := resp.Actionable.Endpoints[0]
+	// The named summary must NAME the nplus1 category and its gap kind — an agent
+	// that cannot see the category in the summary cannot decide to fetch it.
+	if !slices.Contains(ep.Categories, "nplus1") {
+		t.Errorf("the named endpoint must list the nplus1 category, got %+v", ep.Categories)
+	}
+	if len(ep.Gaps) == 0 {
+		t.Errorf("the named endpoint must carry the KIND of gap it has, got %+v", ep)
+	}
 	var sawNPlus1 bool
-	for _, c := range ep.Concerns {
+	for _, c := range fetchConcerns(t, root, ep.File, ep.Line) {
 		if c.Category == "nplus1" {
 			sawNPlus1 = true
 			if c.Gap == "" {
@@ -43,7 +53,7 @@ export async function GET() {
 		}
 	}
 	if !sawNPlus1 {
-		t.Fatalf("scan-all must reach the nplus1 concern with no new scan-all-level plumbing, got %+v", ep.Concerns)
+		t.Fatalf("scan-all must reach the nplus1 concern with no new scan-all-level plumbing, got %+v", ep)
 	}
 	if resp.ResolvedClean.Count != 0 {
 		t.Errorf("an endpoint carrying an N+1 gap must never be resolved_clean, got %+v", resp.ResolvedClean)
@@ -127,11 +137,9 @@ export async function GET() {
 	// The N+1 item is confirmed present in the endpoint buckets (not silently
 	// dropped) — the OTHER half of the "endpoint buckets only" contract.
 	var sawInActionable bool
-	for _, ep := range resp.Actionable {
-		for _, c := range ep.Concerns {
-			if c.Category == "nplus1" {
-				sawInActionable = true
-			}
+	for _, ep := range resp.Actionable.Endpoints {
+		if slices.Contains(ep.Categories, "nplus1") {
+			sawInActionable = true
 		}
 	}
 	if !sawInActionable {

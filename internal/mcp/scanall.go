@@ -24,6 +24,30 @@ import (
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
+// ResponseBudgetBytes is the byte budget codefit-scan-all declares for its own
+// serialized response.
+//
+// What is MEASURED, against a real MCP client (Claude Code, 2026-08-04): a
+// 312 692-character response was REJECTED, and a 40 282-byte one was ACCEPTED.
+// That is the whole of the evidence — the client's actual cap was never
+// observed, only bracketed.
+//
+// What is DERIVED: MCP clients cap tool output (Claude Code's default is 25 000
+// tokens) and this dense JSON runs around 3 bytes per token, which puts the cap
+// near 75 KB. 60 KB sits under that and inside the measured bracket.
+//
+// The two are not the same kind of statement, and the gap is real: 60 KB is
+// still 49% above the largest response proven to arrive. It is the number to
+// revisit the first time a response is rejected under it — and because the
+// budget is declared rather than silently applied, that rejection would be
+// visible rather than a quiet half-answer.
+//
+// The budget is DECLARED in the response (see BudgetBlock) and enforced by
+// withholding the lowest-ranked endpoints, never by truncating the payload: a
+// clipped response that reads like a complete one is the one outcome forbidden
+// (ADR 0054, same principle as ADR 0048).
+const ResponseBudgetBytes = 60_000
+
 // ScanAllRequest is the input to codefit-scan-all: a project root and language.
 // codefit walks the project, runs the deterministic sensor and the surface
 // queries, and returns the complete per-endpoint picture.
@@ -74,11 +98,16 @@ type ScanAllResponse struct {
 	// unaudited ones (review/complexity/tests, and db when it did not run) as null —
 	// an honest statement that the dimension exists but was not measured. The score
 	// reflects deterministic AFFIRMATIONS only, not mapped surface.
-	Score           scoring.ScoreSummary    `json:"score"`
-	Baseline        BaselineDelta           `json:"baseline"`
-	Actionable      []report.EndpointReport `json:"actionable"`
-	ResolvedClean   ResolvedClean           `json:"resolved_clean"`
-	FrontierPending FrontierPending         `json:"frontier_pending"`
+	Score    scoring.ScoreSummary `json:"score"`
+	Baseline BaselineDelta        `json:"baseline"`
+	// Budget declares the response's own byte budget and whether anything was
+	// withheld to meet it. ALWAYS present, including when nothing was withheld: an
+	// agent must be able to tell a complete list from a cut one by reading the
+	// response, never by guessing (ADR 0054).
+	Budget          BudgetBlock       `json:"budget"`
+	Actionable      ActionableSection `json:"actionable"`
+	ResolvedClean   ResolvedClean     `json:"resolved_clean"`
+	FrontierPending FrontierPending   `json:"frontier_pending"`
 	// DB is the parallel database-structure section — the db dimension's findings
 	// and surface, baseline-filtered. It is NON-endpoint (a table has no route), so
 	// it is its own section, not one of the three endpoint buckets. Nil when the
@@ -100,12 +129,48 @@ type DBSection struct {
 	Score    int                    `json:"score"`
 }
 
+// BudgetBlock is scan-all's account of its own size. codefit's primary tool has
+// to RETURN: a response an MCP client refuses is worth less than a smaller one
+// that arrives. So the response declares the budget it is written to, and when
+// the endpoint list does not fit it says exactly how many endpoints it is not
+// showing and on what ordering it kept the ones it shows.
+//
+// Withheld=0 still carries a Note, on purpose. "No mention of truncation" and
+// "nothing was truncated" must not be the same bytes on the wire: that ambiguity
+// is how a clipped response comes to read like a complete one (ADR 0048).
+type BudgetBlock struct {
+	Bytes    int    `json:"bytes"`
+	Withheld int    `json:"withheld"`
+	Ordering string `json:"ordering"`
+	Note     string `json:"note"`
+}
+
+// ActionableSection declares the endpoints codefit resolved locally AND found a
+// gap in — the ones the agent acts on. They are NAMED with what it takes to rank
+// them (counts, categories, gap kinds, best certainty, whether an affirmation is
+// present) and their deterministic concerns in full; the surface question and
+// signals text is one codefit-scan-endpoint call away.
+//
+// Count is the COMPLETE number codefit classified as actionable and never the
+// number rendered — Withheld accounts for the difference. Reading Count off
+// len(Endpoints) is exactly the bug this section's shape exists to make
+// impossible.
+type ActionableSection struct {
+	Count    int    `json:"count"`
+	Withheld int    `json:"withheld"`
+	Note     string `json:"note,omitempty"`
+	// Endpoints is the rendered prefix of the ranked list: hardest gap kind first
+	// (affirmed → access → exposure → efficiency), then by certain-concern count.
+	Endpoints []report.ActionableEndpoint `json:"endpoints,omitempty"`
+}
+
 // ResolvedClean declares the endpoints codefit resolved locally and found clean
 // (controls present, no gap). They are NAMED with a verification fact, not
 // detailed. This is an affirmation — codefit looked and it is clean — not a
 // generic "not detailed" bucket; that is why it is separate from FrontierPending.
 type ResolvedClean struct {
 	Count     int                            `json:"count"`
+	Withheld  int                            `json:"withheld"`
 	Note      string                         `json:"note,omitempty"`
 	Endpoints []report.ResolvedCleanEndpoint `json:"endpoints,omitempty"`
 }
@@ -117,6 +182,7 @@ type ResolvedClean struct {
 // prioritising while declaring the rest.
 type FrontierPending struct {
 	Count     int                       `json:"count"`
+	Withheld  int                       `json:"withheld"`
 	Note      string                    `json:"note,omitempty"`
 	Endpoints []report.FrontierEndpoint `json:"endpoints,omitempty"`
 }
@@ -140,19 +206,55 @@ func HandleScanAll(req ScanAllRequest) (ScanAllResponse, error) {
 
 // handleScanAllScoped is HandleScanAll with layer 0 made explicit.
 func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, error) {
+	return handleScanAllBudgeted(req, scp, filepath.Join(req.Root, baseline.Name), ResponseBudgetBytes)
+}
+
+// handleScanAllBudgeted is handleScanAllScoped with its two collaborators made
+// arguments instead of constants. Both are SEAMS, not options: production has
+// exactly one caller and it passes the project's committed baseline path and the
+// declared ResponseBudgetBytes.
+//
+//   - baselinePath: where the previous baseline is read from and the next one is
+//     written to. Parameterised so the dogfood harness can measure a REAL project
+//     without writing a byte inside somebody's working clone — and so it measures
+//     the first-scan state (nothing tracked yet), which is the state that produced
+//     the 313 KB response this budget exists to prevent.
+//   - budget: the byte budget the rendered response must fit. Parameterised so a
+//     test can drive the withholding path over a real response instead of having
+//     to synthesise a project with thousands of endpoints.
+func handleScanAllBudgeted(req ScanAllRequest, scp scope.Scope, baselinePath string, budget int) (ScanAllResponse, error) {
+	resp, actionable, err := buildScanAll(req, scp, baselinePath)
+	if err != nil {
+		return ScanAllResponse{}, err
+	}
+	return withNamedActionable(resp, actionable, budget), nil
+}
+
+// buildScanAll runs the audit and returns the COMPLETE analysis: the response
+// with every conclusion already computed — the score, the baseline delta, the
+// summary, the scope block, the bucket counts, the DB section — plus the complete
+// per-endpoint detail of the actionable bucket, which the caller renders.
+//
+// The split is the point of this whole change (R4). Everything codefit CONCLUDES
+// is decided here, over the whole audit; the rendering that follows can only
+// narrow how much of it is spelled out. Nothing downstream of this function may
+// be read back into a conclusion — a count taken from the rendered list, a score
+// recomputed over what fit, and the response would be lying about a project it
+// analysed in full.
+func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (ScanAllResponse, []report.EndpointReport, error) {
 	// Load the committed baseline ONCE: it provides both the project's registered
 	// authz helpers (recognized during the scan) and the previous items the unified
 	// diff is computed against (diffBaseline reuses this same load — no double read).
-	path := filepath.Join(req.Root, baseline.Name)
+	path := baselinePath
 	prev, err := baseline.Load(path)
 	if err != nil {
-		return ScanAllResponse{}, fmt.Errorf("loading baseline: %w", err)
+		return ScanAllResponse{}, nil, fmt.Errorf("loading baseline: %w", err)
 	}
 
 	// Security ALWAYS runs and is the required core: if it fails, scan-all fails.
 	secRes, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
 	if err != nil {
-		return ScanAllResponse{}, err
+		return ScanAllResponse{}, nil, err
 	}
 	endpoints := report.AggregateEndpoints(secRes.Findings, secRes.Surface)
 	certain := 0
@@ -166,7 +268,7 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 	// before db was wired.
 	cfg, err := config.LoadOptional(filepath.Join(req.Root, ".codefit.yaml"))
 	if err != nil {
-		return ScanAllResponse{}, fmt.Errorf("loading project config: %w", err)
+		return ScanAllResponse{}, nil, fmt.Errorf("loading project config: %w", err)
 	}
 	//
 	// Under a PARTIAL scope the dimension also needs one of its configured schema
@@ -207,7 +309,7 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 	}
 	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned, scp)
 	if err != nil {
-		return ScanAllResponse{}, err
+		return ScanAllResponse{}, nil, err
 	}
 
 	// Two presentations of the same diff: endpoints for security, a flat section for db.
@@ -228,7 +330,7 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 		scored = append(scored, dbRes.Findings...)
 	}
 	if missing := scoring.MissingWeights(measured, scoring.DefaultWeights()); len(missing) > 0 {
-		return ScanAllResponse{}, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
+		return ScanAllResponse{}, nil, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
 	}
 	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
 
@@ -238,9 +340,11 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 	// though the audit read it — the security walk does not open .prisma files.
 	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), secRes.AuditableTotal)
 	if err := block.Validate(); err != nil {
-		return ScanAllResponse{}, err
+		return ScanAllResponse{}, nil, err
 	}
 
+	// Every count below is taken from the COMPLETE classification, never from what
+	// the rendering will end up showing (R4).
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Scope: block,
@@ -250,9 +354,14 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 			SurfaceItems:          len(secRes.Surface),
 			CertainConcerns:       certain,
 		},
-		Score:      score,
-		Baseline:   delta,
-		Actionable: actionable,
+		Score:    score,
+		Baseline: delta,
+		Actionable: ActionableSection{
+			Count: len(actionable),
+			Note:  actionableNote(len(actionable)),
+			// Endpoints is filled by the rendering step (withNamedActionable), from
+			// the complete list returned alongside this response.
+		},
 		ResolvedClean: ResolvedClean{
 			Count:     len(clean),
 			Note:      resolvedCleanNote(len(clean)),
@@ -264,7 +373,36 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 			Endpoints: frontier,
 		},
 		DB: dbSection,
-	}, nil
+	}, actionable, nil
+}
+
+// endpointOrdering is the one sentence the response uses to state HOW its
+// endpoint lists are ranked and, when something had to be withheld, what the
+// agent is therefore holding. It is a description of behaviour that already
+// exists (AggregateEndpoints' sort and the bucket priority), written once so the
+// response and the code cannot drift apart.
+const endpointOrdering = "endpoints are ranked hardest gap kind first (affirmed → access → exposure → efficiency), " +
+	"then by certain-concern count, then by file and line; when the budget forces a cut, whole buckets are " +
+	"withheld lowest-priority first (resolved_clean, then frontier_pending, then actionable) and each bucket " +
+	"loses its lowest-ranked entries, so what you are holding is always a PREFIX of that order"
+
+// actionableNote phrases the actionable bucket: these are the endpoints codefit
+// resolved locally and found a gap in, NAMED with what it takes to rank them.
+// It has to say two things the agent cannot infer: that the concern detail is
+// deliberately not here and how to get it, and that the deterministic findings
+// that ARE here are complete — otherwise an agent reasonably assumes it is
+// looking at a truncated finding too and re-fetches a fact it already has.
+func actionableNote(count int) string {
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d endpoint(s) codefit resolved locally and found a gap in — act on these. They are "+
+		"NAMED with what it takes to rank them (how many concerns and of which categories, which kinds of gap, "+
+		"the highest certainty reached, whether an affirmation is present); the surface question and signals "+
+		"text is NOT here. Request %s with an endpoint's file for its full concerns — it re-runs the same "+
+		"analysis, so what it returns is exactly what is missing here. Deterministic findings are the "+
+		"exception: they are facts codefit already concluded, so they are carried IN FULL in "+
+		"deterministic_concerns and never need a second call.", count, ToolScanEndpoint)
 }
 
 // resolvedCleanNote phrases the resolved-clean bucket as the affirmation it is:

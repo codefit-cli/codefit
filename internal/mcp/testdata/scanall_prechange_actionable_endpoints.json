@@ -1,0 +1,7 @@
+[
+  "app/config/route.ts:0",
+  "app/config/route.ts:3",
+  "app/invoices/[id]/route.ts:2",
+  "app/orders/[id]/route.ts:2",
+  "app/users/[id]/route.ts:2"
+]

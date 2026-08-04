@@ -183,6 +183,99 @@ func AggregateEndpoints(fs []findings.Finding, surface []findings.SurfaceItem) [
 	return out
 }
 
+// ActionableEndpoint NAMES an endpoint that codefit resolved locally and found a
+// gap in. It is the same discipline FrontierEndpoint has always followed, finally
+// applied to the bucket that carries 99% of the payload: the endpoint is named
+// with enough for the agent to RANK and CHOOSE, and the ~800-byte-per-concern
+// question/signals text is fetched on demand with codefit-scan-endpoint, which is
+// stateless and recomputes the identical analysis (ADR 0008, ADR 0054).
+//
+// "Enough to rank" is the whole contract of this type, and every field earns its
+// place against it: how many concerns and of which categories, how many are
+// actionable gaps and of which KIND (hardest first), the best certainty codefit
+// reached, and whether a deterministic affirmation is in there.
+//
+// Deterministic is the ONE exception to naming, and it is not a compromise: a
+// deterministic finding is a fact codefit already concluded, not a question it is
+// handing over. Hiding it behind a second call would make a scan's headline result
+// depend on the agent choosing to look. Those concerns stay here IN FULL — they
+// are rare by construction and are not what makes the payload big.
+type ActionableEndpoint struct {
+	File   string `json:"file"`
+	Line   int    `json:"line,omitempty"`
+	Method string `json:"method,omitempty"`
+	// Concerns is how many concerns the endpoint has in total; Actionable how many
+	// of them are a missing/broken control; CertainConcerns how many codefit
+	// resolved locally (deterministic + surface_confirmed).
+	Concerns        int      `json:"concerns"`
+	Actionable      int      `json:"actionable"`
+	CertainConcerns int      `json:"certain_concerns"`
+	Categories      []string `json:"categories"`
+	// Gaps names the KINDS of missing control present, hardest first — the same
+	// order the endpoint list is ranked by, so an agent can see WHY an endpoint is
+	// where it is without fetching it.
+	Gaps []string `json:"gaps,omitempty"`
+	// HighestCertainty is the best certainty codefit reached on this endpoint.
+	HighestCertainty CertaintyLevel `json:"highest_certainty"`
+	// HasAffirmation is true when at least one concern is something codefit
+	// AFFIRMS rather than asks. An agent must not have to fetch a file to learn a
+	// fact exists.
+	HasAffirmation bool `json:"has_affirmation"`
+	// Deterministic carries the endpoint's deterministic concerns in full (see the
+	// type comment). Empty on the ordinary endpoint, whose concerns are all surface.
+	Deterministic []Concern `json:"deterministic_concerns,omitempty"`
+}
+
+// gapOrder is the gap kinds hardest first — the same ranking AggregateEndpoints
+// sorts endpoints by, so ActionableEndpoint.Gaps reads in the order that decides
+// the endpoint's place in the list.
+var gapOrder = []string{gapAffirmed, gapAccess, gapExposure, gapEfficiency}
+
+// NameActionable turns the complete per-endpoint reports into their named
+// summaries, in the same order. It is a pure RENDERING narrowing: it reads the
+// endpoints, it computes nothing new and it drops no endpoint — the set it
+// returns is exactly the set it was given. Anything derived from the audit (the
+// score, the baseline delta, the counts) is computed before this and never from
+// its output.
+func NameActionable(eps []EndpointReport) []ActionableEndpoint {
+	out := make([]ActionableEndpoint, 0, len(eps))
+	for _, ep := range eps {
+		n := ActionableEndpoint{
+			File:            ep.File,
+			Line:            ep.Line,
+			Method:          ep.Method,
+			Concerns:        len(ep.Concerns),
+			Actionable:      ep.Actionable,
+			CertainConcerns: ep.CertainConcerns,
+			Categories:      categoriesOf(ep),
+		}
+		// Concerns are already sorted deterministic → confirmed → frontier, so the
+		// first one carries the best certainty codefit reached here.
+		if len(ep.Concerns) > 0 {
+			n.HighestCertainty = ep.Concerns[0].Certainty
+		}
+		present := map[string]bool{}
+		for _, c := range ep.Concerns {
+			if c.Affirms {
+				n.HasAffirmation = true
+			}
+			if c.Certainty == Deterministic {
+				n.Deterministic = append(n.Deterministic, c)
+			}
+			if c.Gap != "" {
+				present[c.Gap] = true
+			}
+		}
+		for _, g := range gapOrder {
+			if present[g] {
+				n.Gaps = append(n.Gaps, g)
+			}
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 // FrontierEndpoint names a frontier-only endpoint — every one of its concerns is
 // surface_frontier (the data left the handler body, local_access_detected=false),
 // so codefit concluded nothing locally about it. It is NAMED, not detailed: the

@@ -41,9 +41,18 @@ func loadBaseline(t *testing.T, root string) *baseline.Baseline {
 
 // surfaceFP returns the fingerprint of the first actionable surface concern; det
 // returns the first deterministic (affirmed) concern's fingerprint.
-func anyActionableFP(resp mcp.ScanAllResponse, affirmedOnly bool) string {
-	for _, ep := range resp.Actionable {
-		for _, c := range ep.Concerns {
+func anyActionableFP(t *testing.T, root string, resp mcp.ScanAllResponse, affirmedOnly bool) string {
+	t.Helper()
+	for _, ep := range resp.Actionable.Endpoints {
+		// scan-all names its actionable endpoints; the concern fingerprints live in
+		// the detail, which is fetched on demand (ADR 0054) — the same round trip an
+		// agent makes. An affirmed concern is carried inline, so it is read from the
+		// summary directly and never costs a call.
+		concerns := ep.Deterministic
+		if !affirmedOnly {
+			concerns = fetchConcerns(t, root, ep.File, ep.Line)
+		}
+		for _, c := range concerns {
 			if c.Fingerprint == "" {
 				continue
 			}
@@ -88,8 +97,8 @@ func TestBaselineSecondScanSilencesKnownSurface(t *testing.T) {
 	if resp.Baseline.Known == 0 {
 		t.Errorf("second scan must count known items")
 	}
-	if len(resp.Actionable) != 0 {
-		t.Errorf("known surface must be silenced from actionable, got %d endpoints", len(resp.Actionable))
+	if resp.Actionable.Count != 0 {
+		t.Errorf("known surface must be silenced from actionable, got %d endpoints", resp.Actionable.Count)
 	}
 }
 
@@ -103,7 +112,7 @@ func TestBaselineNewItemAppears(t *testing.T) {
 		t.Errorf("a newly added endpoint must show as new, got %+v", resp.Baseline)
 	}
 	found := false
-	for _, ep := range resp.Actionable {
+	for _, ep := range resp.Actionable.Endpoints {
 		if filepath.Base(filepath.Dir(ep.File)) == "orders" {
 			found = true
 		}
@@ -116,7 +125,7 @@ func TestBaselineNewItemAppears(t *testing.T) {
 func TestBaselineAcceptSilencesSurface(t *testing.T) {
 	root := copyFixture(t)
 	first := scanAll(t, root)
-	fp := anyActionableFP(first, false)
+	fp := anyActionableFP(t, root, first, false)
 	if fp == "" {
 		t.Fatal("expected at least one actionable surface concern with a fingerprint")
 	}
@@ -126,8 +135,8 @@ func TestBaselineAcceptSilencesSurface(t *testing.T) {
 		t.Fatalf("accept: %v", err)
 	}
 	resp := scanAll(t, root)
-	for _, ep := range resp.Actionable {
-		for _, c := range ep.Concerns {
+	for _, ep := range resp.Actionable.Endpoints {
+		for _, c := range fetchConcerns(t, root, ep.File, ep.Line) {
 			if c.Fingerprint == fp {
 				t.Errorf("accepted item must no longer be actionable")
 			}
@@ -160,7 +169,7 @@ func TestBaselineDeterministicShownUntilAccepted(t *testing.T) {
 
 	scanAll(t, root) // 1st: the secret is new
 	second := scanAll(t, root)
-	fp := anyActionableFP(second, true)
+	fp := anyActionableFP(t, root, second, true)
 	if fp == "" {
 		t.Fatal("a known but unaccepted deterministic finding must still be actionable on re-scan")
 	}
@@ -174,7 +183,7 @@ func TestBaselineDeterministicShownUntilAccepted(t *testing.T) {
 		t.Fatalf("accept: %v", err)
 	}
 	third := scanAll(t, root)
-	if anyActionableFP(third, true) == fp {
+	if anyActionableFP(t, root, third, true) == fp {
 		t.Errorf("an accepted deterministic finding must be silenced")
 	}
 
@@ -204,7 +213,7 @@ func TestBaselineListNoFileIsEmptyNote(t *testing.T) {
 func TestBaselineListFiltersKnownAndAcknowledged(t *testing.T) {
 	root := copyFixture(t)
 	first := scanAll(t, root) // creates baseline, everything new→stored as known
-	fp := anyActionableFP(first, false)
+	fp := anyActionableFP(t, root, first, false)
 	if fp == "" {
 		t.Fatal("need an actionable surface fingerprint")
 	}

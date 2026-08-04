@@ -48,7 +48,7 @@ func buckets(t *testing.T, root string) (actionable, clean, frontier []string) {
 	if err != nil {
 		t.Fatalf("HandleScanAll(%s): %v", root, err)
 	}
-	for _, e := range resp.Actionable {
+	for _, e := range resp.Actionable.Endpoints {
 		actionable = append(actionable, e.File)
 	}
 	for _, e := range resp.ResolvedClean.Endpoints {

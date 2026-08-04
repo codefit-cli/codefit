@@ -61,21 +61,42 @@ ALWAYS read the ` + "`scope`" + ` block before you report anything:
 - A partial scan is for a fast pass on a change. NEVER prune the baseline after one (below).
 
 ## Read the three buckets in the response
-- ` + "`actionable`" + ` — a concern AND a local gap, full detail included. Act on these.
+Every bucket NAMES its endpoints; none of them inlines the concern text. That is on
+purpose — inlining it made ` + "`codefit-scan-all`" + ` too big to return on a real project.
+- ` + "`actionable`" + ` — a concern AND a local gap. Act on these. Each entry carries what you
+  need to RANK it without fetching: ` + "`concerns`" + `, ` + "`categories`" + `, ` + "`gaps`" + ` (hardest kind
+  first), ` + "`highest_certainty`" + `, ` + "`has_affirmation`" + `.
 - ` + "`resolved_clean`" + ` — codefit found the expected check present locally (an
   authorization check / field selection) — no gap here, but it did NOT verify the check
-  is sufficient. Named only; no immediate action.
+  is sufficient. No immediate action.
 - ` + "`frontier_pending`" + ` — codefit could NOT conclude locally (the check crosses
-  files it does not follow). Named only. THESE NEED YOU. Not concluded is not clean —
+  files it does not follow). THESE NEED YOU. Not concluded is not clean —
   never discard them.
 
-## Follow a frontier endpoint
-For each ` + "`frontier_pending`" + ` entry, call ` + "`codefit-scan-endpoint`" + ` with:
+` + "`deterministic_concerns`" + ` is the ONE thing that comes back in full, on the ` + "`actionable`" + `
+entry that has it: a deterministic finding is a fact codefit already concluded, not a
+question. Never spend a second call to re-read one.
+
+## Fetch an endpoint's full concerns
+Pick the endpoints worth pursuing from the summaries, then for each call
+` + "`codefit-scan-endpoint`" + ` with:
 - ` + "`root`" + `, ` + "`language`" + `: "{{.Language}}"
 - ` + "`file`" + `: the endpoint's file path
-Then reason over the returned surface to decide if the concern is real. Each surface
-item names WHAT to check (an id→resource lookup, an authz decision, a returned object)
-and WHERE — codefit does not decide if it's a vuln; you do.
+It re-runs the same stateless analysis, so what you get back is exactly the signals and
+` + "`reason_to_review`" + ` that ` + "`codefit-scan-all`" + ` left out. Then reason over that surface to
+decide if the concern is real. Each surface item names WHAT to check (an id→resource
+lookup, an authz decision, a returned object) and WHERE — codefit does not decide if
+it's a vuln; you do.
+
+## Check the response's ` + "`budget`" + ` block
+` + "`codefit-scan-all`" + ` writes to a declared byte budget so it always RETURNS. Read
+` + "`budget`" + ` before you conclude anything about the project:
+- ` + "`withheld: 0`" + ` — you have every endpoint codefit classified.
+- ` + "`withheld: N`" + ` — N endpoints are NOT in the lists. Each bucket's ` + "`count`" + ` is still
+  the complete number and its ` + "`withheld`" + ` says how many are missing, so what you have
+  is a PREFIX of ` + "`budget.ordering`" + `, not the whole audit. Say so to the human, and
+  re-run narrowed with ` + "`changed_files`" + ` to reach the rest. Never report a withheld
+  endpoint as clean — it was not shown, which is not the same as audited and fine.
 
 ## Audit the database schema
 Call ` + "`codefit-scan-db`" + ` with ` + "`{root, language: \"{{.Language}}\"}`" + ` to audit the schema on its
