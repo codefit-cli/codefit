@@ -27,6 +27,25 @@ no `Probabilistic` flag — every one an affirmation:
 PRAC-004 asserts a fact it never established. ADR 0017 forbids exactly this. Shipping it
 would make codefit an auditor that does the thing it audits for.
 
+> **Correction (S2, measured against the real parser — this table's PRAC-003 row was wrong).**
+> The row above says the rule fires on "generic constraints and variadic sinks where `any` is
+> idiomatic". It did not. **`any` is a predeclared identifier, not a keyword**, so it parses
+> as an `*ast.Ident` and never as an `*ast.InterfaceType` — and `*ast.InterfaceType` was the
+> only case the rule matched. Before S2 the rule **never fired on the `any` spelling at all**,
+> in any position; only the `interface{}` spellings fired.
+>
+> This inverts the diagnosis for that one rule. The defect was not only over-firing on
+> idiomatic positions — the message "interface{}/any discards type information" was also
+> claiming a coverage the code did not have, which is the same R1 violation pointing the
+> other way. So S2 did both: it excluded the idiomatic positions **and** taught the rule to
+> recognise `any` in a type position, guarded by a file-scoped check that the file has not
+> redeclared `any`. PRAC-003 is therefore the one rule in this thread that ends up firing
+> **more** than before, which is not what "the rules audit" sounds like and is why it is
+> written down here rather than left to the ADR. Details and declared limits: ADR 0056.
+>
+> The rest of the table held up against the parser. Left uncorrected above so the original
+> reasoning stays legible.
+
 ## R1 — A practices rule affirms only what it checked
 
 The dimension stays **deterministic**, as RF-05 and the PRD tool table declare — no
