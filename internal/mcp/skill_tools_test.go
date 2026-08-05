@@ -56,6 +56,57 @@ func registeredTools(t *testing.T) []string {
 	return names
 }
 
+// toolDescription returns the registered description for name, read from a
+// live session (mirrors registeredTools' approach) so this test tracks what
+// the server actually SERVES an agent, not a copy of the string.
+func toolDescription(t *testing.T, name string) string {
+	t.Helper()
+	ctx := context.Background()
+	st, ct := mcpsdk.NewInMemoryTransports()
+	srv := mcp.NewServer()
+	go func() { _ = srv.Run(ctx, st) }()
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "doc-lock-check"}, nil)
+	session, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+
+	lt, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range lt.Tools {
+		if tool.Name == name {
+			return tool.Description
+		}
+	}
+	t.Fatalf("tool %q is not registered — the probe itself is broken", name)
+	return ""
+}
+
+// TestScanAllDescriptionDocumentsSecurityNotMeasured is the D3b agent-facing
+// doc lock: codefit-scan-all's description AND the generated skill must each
+// tell the agent that by_dimension.security can be null, parallel to the
+// existing by_dimension.db sentence — otherwise an agent reading either
+// source has no way to know a null security score is a documented state
+// (no provider for the language), not a codefit wiring bug.
+func TestScanAllDescriptionDocumentsSecurityNotMeasured(t *testing.T) {
+	desc := toolDescription(t, string(mcp.ToolScanAll))
+	if !strings.Contains(desc, "by_dimension.security") {
+		t.Errorf("codefit-scan-all's description must mention by_dimension.security, got:\n%s", desc)
+	}
+
+	skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: "typescript"})
+	if err != nil {
+		t.Fatalf("RenderSkill: %v", err)
+	}
+	body := string(skill)
+	if !strings.Contains(body, "by_dimension.security") {
+		t.Errorf("the generated skill must mention by_dimension.security, got:\n%s", body)
+	}
+}
+
 // TestSkillNamesEveryRegisteredTool is the drift lock between the two agent-facing
 // sources: the tools the server registers and the skill that teaches them. Every
 // registered tool must either be named in the skill or carry a declared reason for
