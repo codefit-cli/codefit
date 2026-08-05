@@ -52,6 +52,30 @@ Note the related, already-handled case: the PRD's `DB-011` became `DB-011a` and 
 when it shipped. That one is answered because the manifest prose happens to carry the parent
 token. `DB-201` has no such luck — nothing in the manifest ever spells it.
 
+> **Correction (implementation, measured — that last clause is false).** The **composed**
+> manifest an agent actually receives has named `DB-201` since `v0.2.2`:
+> `internal/providers/typescript/coverage.go:44` spells it in the N+1 reasoning entry, and so
+> do `COVERAGE.md` and `README.md`.
+>
+> What is true, and narrower: **`internal/core/dbcoverage/` does not** — and `dbcoverage` is
+> the DB/DW namespace owner and the only source Controls A, B and D read. So the defect is not
+> "the agent is never told"; it is that **an agent asking the DB dimension for `DB-201` finds
+> nothing**, while the same identifier is answered one composition level up.
+>
+> **The fix is unchanged and the third bucket is still required**, for the reason R3 gives:
+> the control reads `dbcoverage`, and `NotCovered()` there would be a lie about a capability
+> that ships. What changes is the severity — this one was less dangerous than the spec framed
+> it, and the five genuinely-absent ids are the sharp end of P0-1.
+>
+> **Second correction, on the count.** The "seven" holds under *substring* matching, which is
+> what the implemented control uses. Under the *whole-token* matching Controls A and B use it
+> would be **eight**: `DB-011` is answered only because `DB-011a`/`DB-011b` contain it — the
+> very leniency the paragraph above depends on. The choice is deliberate and its cost is
+> declared in the test: a promised id that is a strict prefix of a longer one would be falsely
+> answered. No id in the PRD or in the rule set has that shape today.
+>
+> Left uncorrected above so the original reasoning stays legible.
+
 ### Class 2 — decided, not built (`DB-022`)
 
 Materialized view without a refresh. Its analytic twin `DW-022` is currently recorded as
