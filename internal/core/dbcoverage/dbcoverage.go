@@ -38,6 +38,22 @@ func Reasoning() []string {
 	}
 }
 
+// DeliveredElsewhere returns the DB dimension's THIRD answer: a rule ID the PRD
+// promises whose capability codefit DOES deliver — but under a different
+// identifier, not as a DB/DW rule carrying that ID.
+//
+// It exists because the other two answers are both wrong for such an ID. Leaving
+// it out of the manifest is silence, and silence is exactly what the agent
+// cannot see. Naming it in NotCovered() is a lie, because the capability ships.
+// So it gets a bucket of its own, carrying BOTH names — the promised identifier
+// and the thing that actually delivers it — plus enough prose to follow the
+// mapping (spec docs/specs/coverage-manifest-completeness.md, R1 and R3).
+//
+// EMPTY TODAY: no capability is recorded here yet.
+func DeliveredElsewhere() []string {
+	return nil
+}
+
 // NotCovered returns the DB dimension's explicit gaps: what codefit does not
 // audit for this dimension, stated plainly rather than left silent.
 func NotCovered() []string {
