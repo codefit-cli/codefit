@@ -624,8 +624,12 @@ var languageProviders = map[string]func(authzHelpers []string) providers.Languag
 	"typescript": func(authzHelpers []string) providers.LanguageProvider {
 		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
 	},
-	"ts":  func(authzHelpers []string) providers.LanguageProvider { return typescript.New(typescript.WithAuthzHelpers(authzHelpers)) },
-	"tsx": func(authzHelpers []string) providers.LanguageProvider { return typescript.New(typescript.WithAuthzHelpers(authzHelpers)) },
+	"ts": func(authzHelpers []string) providers.LanguageProvider {
+		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
+	},
+	"tsx": func(authzHelpers []string) providers.LanguageProvider {
+		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
+	},
 }
 
 // providerForLanguage resolves a provider by language name — the MCP adapter is

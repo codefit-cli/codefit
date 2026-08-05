@@ -217,8 +217,8 @@ func TestHandleScanAll_GoProjectWithSchema_BucketNotesNonEmpty(t *testing.T) {
 			resp.Actionable, resp.ResolvedClean, resp.FrontierPending)
 	}
 	for name, note := range map[string]string{
-		"actionable":      resp.Actionable.Note,
-		"resolved_clean":  resp.ResolvedClean.Note,
+		"actionable":       resp.Actionable.Note,
+		"resolved_clean":   resp.ResolvedClean.Note,
 		"frontier_pending": resp.FrontierPending.Note,
 	} {
 		if note == "" {

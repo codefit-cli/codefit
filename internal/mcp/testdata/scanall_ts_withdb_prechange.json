@@ -1,0 +1,93 @@
+{
+  "summary": {
+    "endpoints": 0,
+    "deterministic_findings": 0,
+    "surface_items": 0,
+    "certain_concerns": 0
+  },
+  "scope": {
+    "mode": "full",
+    "requested": 0,
+    "audited": 1,
+    "auditable_total": 1,
+    "note": ""
+  },
+  "score": {
+    "global": 98,
+    "by_dimension": {
+      "complexity": null,
+      "db": 95,
+      "practices": null,
+      "review": null,
+      "security": 100,
+      "tests": null
+    }
+  },
+  "baseline": {
+    "new": 2,
+    "changed": 0,
+    "known": 0,
+    "acknowledged": 0,
+    "gone": 0,
+    "affirmations_shown": 1,
+    "note": "2 new, 0 changed, 0 known, 0 acknowledged, 0 gone; 1 deterministic affirmation(s) shown until accepted"
+  },
+  "budget": {
+    "bytes": 60000,
+    "withheld": 0,
+    "ordering": "endpoints are ranked hardest gap kind first (affirmed → access → exposure → efficiency), then by certain-concern count, then by file and line; when the budget forces a cut, whole buckets are withheld lowest-priority first (resolved_clean, then frontier_pending, then actionable) and each bucket loses its lowest-ranked entries, so what you are holding is always a PREFIX of that order",
+    "note": "the complete endpoint list fit within this response's 60000-byte budget: NOTHING was withheld, every endpoint codefit classified is named here."
+  },
+  "actionable": {
+    "count": 0,
+    "withheld": 0
+  },
+  "resolved_clean": {
+    "count": 0,
+    "withheld": 0
+  },
+  "frontier_pending": {
+    "count": 0,
+    "withheld": 0
+  },
+  "db": {
+    "measured": true,
+    "findings": [
+      {
+        "id": "DB-050",
+        "dimension": "db",
+        "severity": "medium",
+        "file": "prisma/schema.prisma",
+        "line": 6,
+        "title": "Table without a primary key",
+        "description": "Table NoKey has no primary key.",
+        "suggestion": "Add a primary key so every row is uniquely addressable (required for reliable updates, replication, and indexing).",
+        "confidence": 1,
+        "probabilistic": false,
+        "requires_consent": false,
+        "fingerprint": "607199141967"
+      }
+    ],
+    "surface": [
+      {
+        "id": "fe21eaf1dd65",
+        "category": "db-no-timestamps",
+        "file": "prisma/schema.prisma",
+        "line": 6,
+        "snippet": "model NoKey {",
+        "structural_signals": [
+          "table: NoKey",
+          "columns: name"
+        ],
+        "structural_facts": {
+          "has_created_at": false,
+          "has_updated_at": false,
+          "looks_like_join_table": false
+        },
+        "reason_to_review": "This table has no audit timestamp: not one column named for when the row was created, changed or recorded. Should it track one, or is it a link/config table where the absence is intentional? (The name vocabulary is measured, not exhaustive — if a stamp IS in the columns: list under an unusual spelling, that is what happened.)",
+        "fingerprint": "1de311d79b38"
+      }
+    ],
+    "score": 95
+  }
+}
