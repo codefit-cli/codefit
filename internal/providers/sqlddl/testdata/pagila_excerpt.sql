@@ -113,27 +113,60 @@ CREATE TABLE public.customer (
     active integer
 );
 
--- public.film is DELIBERATELY NOT VENDORED here (whole table omitted, not
--- just trimmed): its real trailing column, "fulltext tsvector NOT NULL",
--- collides with a separate, confirmed cross-dialect parser bug —
--- discovery/sqlddl-postgres-parser-gaps (obs #1062), HALLAZGO 2. A real PG
--- column literally named "fulltext" with an unmapped type (tsvector is not
--- in postgresTypeMap) trips codefit's sqlddl parser's MySQL-inline-index-
--- shorthand discriminator (isInlineKeyIndexForm, reduce.go): it treats the
--- leading token FULLTEXT as the "FULLTEXT KEY/INDEX" shorthand keyword
--- whenever the following type is unmapped, silently dropping the column and
--- fabricating a phantom zero-column index instead. Vendoring film with that
--- column omitted (as an earlier pass did) made the fixture non-verbatim
--- without saying so; omitting the whole table is honest about the dodge.
--- This is a KNOWN, SEPARATE bug — not fixed in this change (db-debt-views-
--- and-nplus1, v0.2.2). The film_fulltext_trigger below (part of the
--- original, pre-index-extension excerpt) still references "public.film" in
--- its ON clause; that is fine — Trigger.Table is parsed from the ON clause
--- text and does not require the target table to exist in the schema.
--- idx_title (an upstream index on film.title) is likewise not vendored,
--- since vendoring it without the film table would auto-vivify a phantom
--- zero-column "film" table via CREATE INDEX's getTable — the same shape of
--- bug this note is dodging, from the other direction.
+-- public.film RESTORED here (sql-ddl-phantom-index): this table used to be
+-- omitted entirely (whole table, not just trimmed) because its real
+-- trailing column, "fulltext tsvector NOT NULL", collided with a
+-- confirmed cross-dialect parser bug — discovery/sqlddl-postgres-parser-
+-- gaps (obs #1062), HALLAZGO 2. A real PG column literally named
+-- "fulltext" with an unmapped type (tsvector is not in postgresTypeMap)
+-- used to trip codefit's sqlddl parser's MySQL-inline-index-shorthand
+-- discriminator (isInlineKeyIndexForm, reduce.go): it treated the leading
+-- token FULLTEXT as the "FULLTEXT KEY/INDEX" shorthand keyword whenever
+-- the following type was unmapped and had no parenthesized column list,
+-- silently dropping the column (abstaining, per the FABRICATION GUARD
+-- landed 2026-07-31 — not fabricating a phantom index; see
+-- dbcoverage.go's limit (5) history for the exact sequence).
+--
+-- Fixed in sql-ddl-phantom-index (D2 branch, isInlineKeyIndexForm,
+-- reduce.go): a bare "<kw> <unmapped-type> [modifiers]" with no
+-- parenthesized column list is now read as a COLUMN, never routed to the
+-- index-shorthand dispatch. Vendoring film with the column omitted (as an
+-- earlier pass did) made the fixture non-verbatim without saying so;
+-- restoring the whole table verbatim closes that dodge — see
+-- pagila_test.go for the assertion that film now parses with all 14
+-- columns, including fulltext, and Complete()==true.
+--
+-- Restored VERBATIM from upstream Pagila (same source/commit as the rest
+-- of this file, 5ba5a57, fetched directly — not hand-typed, not from
+-- memory). The film_fulltext_trigger above (part of the original,
+-- pre-index-extension excerpt) already references "public.film" in its ON
+-- clause; that was always fine — Trigger.Table is parsed from the ON
+-- clause text and does not require the target table to exist in the
+-- schema.
+--
+-- idx_title (an upstream index on film.title) STAYS unvendored: out of
+-- scope for this pass, not a parser limit. Vendoring it alone — without
+-- also vendoring film's other real indexes/constraints upstream declares
+-- separately — would be an arbitrary partial vendor, not a closure of
+-- anything; it is not needed to prove the column-drop fix, which this
+-- table's OWN body already demonstrates.
+
+CREATE TABLE public.film (
+    film_id integer DEFAULT nextval('public.film_film_id_seq'::regclass) NOT NULL,
+    title text NOT NULL,
+    description text,
+    release_year public.year,
+    language_id integer NOT NULL,
+    original_language_id integer,
+    rental_duration smallint DEFAULT 3 NOT NULL,
+    rental_rate numeric(4,2) DEFAULT 4.99 NOT NULL,
+    length smallint,
+    replacement_cost numeric(5,2) DEFAULT 19.99 NOT NULL,
+    rating public.mpaa_rating DEFAULT 'G'::public.mpaa_rating,
+    last_update timestamp with time zone DEFAULT now() NOT NULL,
+    special_features text[],
+    fulltext tsvector NOT NULL
+);
 
 CREATE TABLE public.address (
     address_id integer DEFAULT nextval('public.address_address_id_seq'::regclass) NOT NULL,
