@@ -293,6 +293,31 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg, crossrules.All(), scp)
 	}
 
+	// Per-dimension scoring input (ADR 0021): security measured only when it ran,
+	// db only when it ran. HOISTED here, above the baseline diff (which SAVES the
+	// next baseline), so the nothing-measurable guard right below can refuse
+	// BEFORE any write (D5) — not after.
+	measured := []findings.Dimension{}
+	scored := []findings.Finding{}
+	if secRan {
+		measured = append(measured, findings.DimensionSecurity)
+		scored = append(scored, secRes.Findings...)
+	}
+	if dbRan {
+		measured = append(measured, findings.DimensionDB)
+		scored = append(scored, dbRes.Findings...)
+	}
+
+	// Nothing measurable: no security provider resolved AND the DB dimension did
+	// not run. A response with every dimension null is indistinguishable from an
+	// impeccable project to an agent skimming it — the exact defect this change
+	// fixes, mirrored at the score level. Refuse instead of scoring an empty
+	// `measured` set (scoring.Compute would return Global:0, a false "worst
+	// possible" reading — proven unreachable by this guard, see D5).
+	if len(measured) == 0 {
+		return ScanAllResponse{}, nil, nothingMeasurableError(req.Language, dbSection)
+	}
+
 	// One unified baseline diff over both sensors' observations, scoped to the
 	// categories of the sensors that ran (ADR 0019), persisted once. scanned
 	// starts EMPTY and is only ever added to inside the "if <dim>Ran" block of the
@@ -337,21 +362,11 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		dbSection.Findings, dbSection.Surface = filterDBByBaseline(dbRes, diff)
 	}
 
-	// Per-dimension scoring (ADR 0021): security measured only when it ran, db
-	// only when it ran. Over RAW findings (not baseline-filtered) so the global
+	// Scoring (ADR 0021), over RAW findings (not baseline-filtered) so the global
 	// equals the flat security score exactly when db is absent — no value
-	// regression. The guard fails loudly if a measured dimension has no weight (a
-	// wiring bug), never a silently incomplete score.
-	measured := []findings.Dimension{}
-	scored := []findings.Finding{}
-	if secRan {
-		measured = append(measured, findings.DimensionSecurity)
-		scored = append(scored, secRes.Findings...)
-	}
-	if dbRan {
-		measured = append(measured, findings.DimensionDB)
-		scored = append(scored, dbRes.Findings...)
-	}
+	// regression. measured/scored were HOISTED above (see the nothing-measurable
+	// guard). The guard below fails loudly if a measured dimension has no weight
+	// (a wiring bug), never a silently incomplete score.
 	if missing := scoring.MissingWeights(measured, scoring.DefaultWeights()); len(missing) > 0 {
 		return ScanAllResponse{}, nil, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
 	}
@@ -526,6 +541,27 @@ func providerForLanguage(lang string, authzHelpers []string) providers.LanguageP
 	default:
 		return nil
 	}
+}
+
+// nothingMeasurableError names BOTH reasons codefit-scan-all has nothing to
+// audit (D5): no security provider resolved for the language, AND the DB
+// dimension did not run. Naming only one would leave the agent guessing which
+// of two independent gaps to fix. When the DB dimension was ATTEMPTED but not
+// measured (a configured schema that failed to parse/read, or was narrowed
+// out of scope), dbSection carries the specific reason in its Note — that
+// text is used verbatim instead of the generic "not configured" clause, so
+// the error never claims "nothing configured" over a schema that IS
+// configured but could not be read.
+func nothingMeasurableError(language string, dbSection *DBSection) error {
+	dbReason := "the database dimension did not run (no database.schema_paths configured in .codefit.yaml)"
+	if dbSection != nil && dbSection.Note != "" {
+		dbReason = dbSection.Note
+	}
+	// TODO(Phase 4, D4): read the supported set from the single source
+	// (SupportedLanguageNames) instead of this literal — updated in the same
+	// change once providerForLanguage becomes a table.
+	return fmt.Errorf("nothing to audit: no security provider for language %q (supported: %s), and %s",
+		language, "typescript", dbReason)
 }
 
 // runDBForScanAll resolves the schema parser by input and runs the DB sensor,

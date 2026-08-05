@@ -1,7 +1,9 @@
 package mcp_test
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
@@ -141,5 +143,36 @@ func TestHandleScanAll_SecuritySkipped_DoesNotPruneSecurityBaseline(t *testing.T
 	}
 	if !found {
 		t.Error("codefit-baseline-prune must leave the security item in the file")
+	}
+}
+
+// TestHandleScanAll_NothingMeasurable_Errors is the D5 lock: when NEITHER a
+// security provider resolves NOR the DB dimension runs, codefit-scan-all must
+// return an error naming both missing inputs (plus the supported language
+// set), not a 200-shaped response with every dimension null. The guard must
+// fire BEFORE any baseline write.
+func TestHandleScanAll_NothingMeasurable_Errors(t *testing.T) {
+	root := writeProj(t, map[string]string{
+		".codefit.yaml": goYAMLNoSchema, // language: go, no database section at all
+		"main.go":       "package main\n\nfunc main() {}\n",
+		"go.mod":        "module example.com/t\n\ngo 1.25\n",
+	})
+
+	_, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "go"})
+	if err == nil {
+		t.Fatal("HandleScanAll over a project with no resolvable provider and no schema must return an error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"go"`) {
+		t.Errorf("error must name the unresolved language, got %q", msg)
+	}
+	if !strings.Contains(msg, "database.schema_paths") {
+		t.Errorf("error must name the missing database.schema_paths, got %q", msg)
+	}
+	if !strings.Contains(msg, "typescript") {
+		t.Errorf("error must name the supported language set, got %q", msg)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, baseline.Name)); !os.IsNotExist(statErr) {
+		t.Errorf("the nothing-measurable guard must fire BEFORE any baseline write, but %s exists", baseline.Name)
 	}
 }
