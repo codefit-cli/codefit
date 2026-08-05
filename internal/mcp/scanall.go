@@ -251,10 +251,20 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		return ScanAllResponse{}, nil, fmt.Errorf("loading baseline: %w", err)
 	}
 
-	// Security ALWAYS runs and is the required core: if it fails, scan-all fails.
-	secRes, err := runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
-	if err != nil {
-		return ScanAllResponse{}, nil, err
+	// Security runs only when a language provider resolves for req.Language — the
+	// DB dimension does not need one (its schema parser is picked from the
+	// configured schema paths, not the language). secRan is a PREDICATE: the
+	// provider itself is discarded here, resolved again inside runSecurity. A nil
+	// provider is the only thing made non-fatal; a config-load or sensor error
+	// inside runSecurity stays a hard error (D1).
+	secRan := providerForLanguage(req.Language, nil) != nil
+	var secRes findings.SensorResult
+	if secRan {
+		var err error
+		secRes, err = runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
+		if err != nil {
+			return ScanAllResponse{}, nil, err
+		}
 	}
 	endpoints := report.AggregateEndpoints(secRes.Findings, secRes.Surface)
 	certain := 0
@@ -318,13 +328,17 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		dbSection.Findings, dbSection.Surface = filterDBByBaseline(dbRes, diff)
 	}
 
-	// Per-dimension scoring (ADR 0021): security always measured, db only when it
-	// ran. Over RAW findings (not baseline-filtered) so the global equals the flat
-	// security score exactly when db is absent — no value regression. The guard
-	// fails loudly if a measured dimension has no weight (a wiring bug), never a
-	// silently incomplete score.
-	measured := []findings.Dimension{findings.DimensionSecurity}
-	scored := append([]findings.Finding{}, secRes.Findings...)
+	// Per-dimension scoring (ADR 0021): security measured only when it ran, db
+	// only when it ran. Over RAW findings (not baseline-filtered) so the global
+	// equals the flat security score exactly when db is absent — no value
+	// regression. The guard fails loudly if a measured dimension has no weight (a
+	// wiring bug), never a silently incomplete score.
+	measured := []findings.Dimension{}
+	scored := []findings.Finding{}
+	if secRan {
+		measured = append(measured, findings.DimensionSecurity)
+		scored = append(scored, secRes.Findings...)
+	}
 	if dbRan {
 		measured = append(measured, findings.DimensionDB)
 		scored = append(scored, dbRes.Findings...)
