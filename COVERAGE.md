@@ -541,7 +541,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `Reason*` vocabulary in `core/db` is the type-level control). **Boundary,**
   stated so this contract does not over-promise: `Complete` covers DROPS, not
   FABRICATIONS — a reducer that believes it succeeded while inventing data
-  (Pagila's `film.fulltext` phantom index, the closed "`ADD  CONSTRAINT`"
+  (the residual `<kw> <unmapped-type>(args)` inline-index-shorthand
+  fabrication — e.g. `fulltext tsvector(10)` — the closed "`ADD  CONSTRAINT`"
   double-space fabrication, and the missing-comma-before-`PRIMARY KEY` wrong
   composite key, all documented below) reports `Complete=true`
   regardless; that class needs its own, separate control.
@@ -793,13 +794,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     Deliberate and test-locked, and the **opposite** choice from DB-051, which
     does **not** fire on an unresolvable reference: DB-051 compares two types
     and has nothing to compare, while DW-002 asks whether a surrogate is
-    *proven*, and an unread column proves nothing. Reachable, not hypothetical:
-    SQL-DDL known limit (5) drops a column whose name is an index keyword and
-    whose type is outside the dialect's vocabulary (real Pagila's
-    `film.fulltext`) while a table-level `PRIMARY KEY (fulltext)` naming it
-    survives into the model. A dimension with **no** primary key at all
-    **abstains** — DB-050 already affirms that case, and two IDs for one defect
-    is noise.
+    *proven*, and an unread column proves nothing. **Corrected as of
+    `sql-ddl-phantom-index` (see ADR 0058):** this was previously claimed
+    "reachable, not hypothetical" against SQL-DDL known limit (5) — that claim
+    was wrong when written and was never actually measured. DW-002 abstains on
+    an unproven table **before** it ever reaches the composite/integer
+    surrogate test, and the same drop limit (5) used to describe **also**
+    demoted the table itself to unproven — so this state never actually fired
+    pre-fix (measured directly, in a `git worktree` of the pre-fix tip: it did
+    not). Post-fix (limit (5) narrowed), the identical shape — a dimension
+    whose `PRIMARY KEY (fulltext)` names a `tsvector`-typed column — becomes
+    newly reachable and **correctly** fires: the table is provable again, and a
+    `tsvector` primary key genuinely is not a provable integer surrogate.
+    Closing limit (5) therefore did not just stop a drop; for this shape it
+    also restored the table's visibility to DW-002 at all. A dimension with
+    **no** primary key at all **abstains** — DB-050 already affirms that case,
+    and two IDs for one defect is noise.
   - **DW-005, facts present but no time dimension.** Schema-level, at most
     **one** item, anchored on the first fact table. A time dimension is
     recognized by **either** the **name** or the structural grain. The name
@@ -1350,17 +1360,31 @@ exists to prevent — so they get their own answer
   (4) An inline index whose **name** is itself a type keyword (e.g. `KEY int
   (col)`, an index named "int") is read as a column — the KEY/INDEX-vs-column
   discriminator trusts a type-named token as a column (pathological, accepted).
-  (5) A column named exactly `key`, `index`, `fulltext`, or `spatial` whose type
-  is **not** in the dialect's recognized type vocabulary (e.g. PostgreSQL's
-  `tsvector`, as in real Pagila's `film.fulltext` column) collides with the
-  **same** inline-index-shorthand heuristic from a different direction: the
-  column is silently dropped and a phantom zero-column index is fabricated in
-  its place instead. Confirmed against real vendored Pagila DDL; **not yet
-  fixed**. This is a **fabrication, not a silent drop**, so `db.Table.Complete`
-  (ADR 0034) cannot catch it — the reducer believes it succeeded; the
+  (5) **Narrowed** as of `sql-ddl-phantom-index`, 2026-08-05 (see ADR 0058).
+  Previously: a column named exactly `key`, `index`, `fulltext`, or `spatial`
+  whose type was **not** in the dialect's recognized type vocabulary (e.g.
+  PostgreSQL's `tsvector`, as in real Pagila's `film.fulltext` column)
+  collided with the **same** inline-index-shorthand heuristic from a different
+  direction and was silently **dropped** (`Complete=false`) — not the
+  fabricated zero-column index an earlier, already-stale version of this entry
+  claimed: the `tsql-alter-add-constraint` FABRICATION GUARD (2026-07-31) had
+  already closed that specific fabrication as a side effect, four days before
+  this manifest was updated to say so. **Now:** the bare, no-parens shape
+  (`fulltext tsvector NOT NULL`) is read as a COLUMN of that unmapped type,
+  exactly as Pagila's own `film.fulltext` declares it — captured, not dropped,
+  `Complete=true`. **What remains, deliberately not closed:** the same
+  unmapped-type token **with** a parenthesized argument list after it (e.g.
+  `fulltext tsvector(10)`, `spatial geometry(Point,4326)`) is structurally
+  identical to a named inline index (`KEY idx(a)`) and stays undecidable
+  without reserved-word knowledge, which this discriminator deliberately does
+  not add. It still misreads as the index form and **fabricates** an index
+  from the type's own arguments — `Complete` stays `true`, so
+  `db.Table.Complete` (ADR 0034) cannot catch this residual either; the
   completeness contract's own doc comment states this boundary explicitly
   ("`Complete` covers DROPS, not FABRICATIONS") rather than over-promising a
-  guarantee this mechanism does not provide. (6) **Closed** as of
+  guarantee this mechanism does not provide. Locked as a characterization
+  test: `internal/providers/sqlddl/limits_test.go`'s
+  `TestResidualParenType_StillFabricatesAnIndex_DeclaredLimit`. (6) **Closed** as of
   `tsql-alter-add-constraint`, 2026-07-31 — kept, not deleted, because it names
   what the reducer now **does** and these shapes were previously declared
   unparsed here. The reducer **reads** all three T-SQL

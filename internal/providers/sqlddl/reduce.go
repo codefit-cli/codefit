@@ -1412,9 +1412,37 @@ var reservedHeadContinuation = map[string]bool{
 // is insufficient (re-judge fix). Instead, inspect the token immediately
 // after the leading keyword: if its type-base (paren-stripped via typeBase)
 // is a known type in the dialect's own TypeMap, this is a column of that
-// type; otherwise (an index name, or '(' directly — the unnamed KEY (cols)
-// form) it is the inline index FORM. Consults TypeMap DATA only — no
-// dialect-name branch.
+// type. Consults TypeMap DATA only — no dialect-name branch.
+//
+// D2 (sql-ddl-phantom-index): an UNMAPPED type-like token is NOT, by itself,
+// proof of the index form — a real column whose type is simply outside the
+// dialect's vocabulary (Pagila's own "fulltext tsvector NOT NULL": tsvector
+// is absent from every TypeMap this package declares) used to be misread as
+// the index shorthand and its column silently dropped. The positive test is
+// "does the remainder, past the type expression's trailing modifiers, read
+// as a BARE type-only token with no further column-list marker": split off
+// the modifier tail (splitTypeAndMods, the same split a column definition
+// itself uses) and ask whether exactly one token remains with no '(' in it.
+//
+// Two rules were tried and rejected here, both wrong in a different
+// direction (see design sql-ddl-phantom-index §2, D2):
+//   - no '(' anywhere in item implies column regresses T-SQL's paren-less
+//     inline index (`INDEX ix CLUSTERED COLUMNSTORE`) from honest abstention
+//     into a fabricated column literally named "index".
+//   - a plain re-check of typeBase's OWN first token (ignoring modifiers)
+//     misreads a column whose DEFAULT/GENERATED tail carries parens
+//     (`fulltext tsvector NOT NULL DEFAULT to_tsvector(EMPTY_STRING)`) as
+//     the index form, because typeBase alone cannot see past the modifier
+//     boundary splitTypeAndMods exists to find.
+//
+// The '('-in-token clause is still load-bearing after splitting off
+// modifiers: without it, MySQL's legal UNSPACED `KEY idx(a)` collapses to
+// one token (`idx(a)`) with no further tail, and would be misread as a
+// column. Residual, deliberately NOT closed: `<kw> <unmapped-type>(args)`
+// (`fulltext tsvector(10)`, `spatial geometry(Point,4326)`) is structurally
+// identical to `KEY idx(a)` and stays the index form — undecidable without
+// reserved-word knowledge, which the "grammar shape, not vocabulary" design
+// choice (D1) deliberately does not add.
 func (b *builder) isInlineKeyIndexForm(item string) bool {
 	kw := leadingKeyword(item)
 	rest := strings.TrimSpace(item[len(kw):])
@@ -1423,8 +1451,15 @@ func (b *builder) isInlineKeyIndexForm(item string) bool {
 	if base == "" {
 		return true // e.g. "KEY (cols)" — no type-like token at all
 	}
-	_, isType := b.dialect.TypeMap[strings.ToLower(base)]
-	return !isType
+	if _, isType := b.dialect.TypeMap[strings.ToLower(base)]; isType {
+		return false // a known type — a column of that type, not an index
+	}
+	typeExpr, _ := splitTypeAndMods(rest, b.dialect.Modifiers)
+	tok2, tail := firstToken(typeExpr)
+	if tail == "" && !strings.ContainsRune(tok2, '(') {
+		return false // "<kw> <bare-unmapped-type> [modifiers]" — a COLUMN
+	}
+	return true // everything else stays the index form (and its abstention floor)
 }
 
 // stripConstraintName removes the "CONSTRAINT <name>" preamble from a named

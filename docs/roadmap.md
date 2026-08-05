@@ -70,15 +70,27 @@ these six got through, and adding six lines without closing it just resets the c
 
 This is the **only** debt in the entire inventory that was not self-declared somewhere.
 
-### P0-2 — The SQL-DDL parser fabricates an index that does not exist
+### P0-2 — CLOSED (`sql-ddl-phantom-index`) — the SQL-DDL parser dropped a real column
 
 A column named exactly `key`/`index`/`fulltext`/`spatial` whose type is outside the
-vocabulary — the real `film.fulltext` column in Pagila — is dropped, **and a phantom
-zero-column index is fabricated in its place**. `COVERAGE.md` records it as "not yet fixed",
-and notes that `db.Table.Complete` structurally cannot catch it.
+vocabulary — the real `film.fulltext` column in Pagila — used to be misread as MySQL's
+inline secondary-index shorthand.
 
-This is worse than a false negative. A missed finding leaves the user where they started;
-**invented structure sends them somewhere false.**
+The claim above ("a phantom zero-column index is fabricated") was already stale by the time
+it was investigated: the `tsql-alter-add-constraint` FABRICATION GUARD (2026-07-31) had
+closed that specific fabrication as a side effect four days before anyone re-verified this
+entry. What remained was a silent **drop** (`Complete=false`, an honest abstention, not an
+invented structure) — still a real defect, since Pagila's fixture had been shrunk to omit
+`film` entirely to dodge it, making the corpus unable to measure its own known limit.
+
+Fixed: the classifier now reads `<kw> <unmapped-type> [modifiers]` with no parenthesized
+column list as a COLUMN. `film` is restored to the Pagila fixture and parses with all 14
+columns, `Complete()==true`. A narrower residual remains and is declared, not hidden: `<kw>
+<unmapped-type>(args)` (e.g. `fulltext tsvector(10)`) is structurally identical to a named
+inline index and still fabricates one — locked as a characterization test. See
+[ADR 0058](decisions/0058-a-declared-limit-can-go-stale-and-nobody-re-verifies-it.md) for the
+full history, including the lesson this leaves behind: a declared limit needs its own
+re-verification, or it goes stale exactly like an undeclared one.
 
 ### P0-3 — Prove or disprove the empty-read false all-clear
 

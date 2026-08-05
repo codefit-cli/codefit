@@ -233,6 +233,61 @@ func TestCreateType_TSQL_SkippedNoCrash(t *testing.T) {
 	}
 }
 
+// --- I10 (sql-ddl-phantom-index, D2 residual, M5): "<kw> <unmapped-type>
+// (args)" is structurally IDENTICAL to a named inline index ("KEY idx(a)")
+// and stays undecidable without reserved-word knowledge, which D1
+// deliberately does not add (design §2). A REAL column whose type happens to
+// be both unmapped AND parameterized (Postgres' own "tsvector" carries no
+// parameters in practice, but this shape covers any dialect-unmapped
+// type-with-args spelling) still misreads as the index form and fabricates a
+// garbage index from its own type arguments — measured, not assumed: this
+// characterization test locks TODAY's exact behaviour so a future change
+// cannot silently make it worse (a WORSE regression here would be Complete
+// staying true while ALSO not recording the fabricated index in a
+// discoverable way — today it is at least visible as an index whose
+// "columns" are obviously not real column names). ---
+
+func TestResidualParenType_StillFabricatesAnIndex_DeclaredLimit(t *testing.T) {
+	cases := []struct {
+		name      string
+		src       string
+		wantIndex []string
+	}{
+		{
+			name:      "fulltext_tsvector_with_args",
+			src:       "CREATE TABLE t (\n id int NOT NULL,\n fulltext tsvector(10) NOT NULL\n);",
+			wantIndex: []string{"10"},
+		},
+		{
+			name:      "spatial_geometry_with_args",
+			src:       "CREATE TABLE t (\n id int NOT NULL,\n spatial geometry(Point,4326) NOT NULL\n);",
+			wantIndex: []string{"Point", "4326"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srcs := []providers.SourceFile{{Path: "m5.sql", Content: []byte(c.src)}}
+			s, err := sqlddl.New().ParseSchema(srcs)
+			if err != nil {
+				t.Fatalf("ParseSchema must not error: %v", err)
+			}
+			tb := table(t, s, "t")
+			if !tb.Complete {
+				t.Errorf("Complete = false, want true (this residual FABRICATES rather than abstains — a declared limit, not a crash); note=%q", tb.Note)
+			}
+			if hasCol(tb, "fulltext") || hasCol(tb, "spatial") {
+				t.Errorf("the residual shape must still NOT capture a column here (locking today's known-wrong behaviour, not endorsing it); columns = %v", colNames(tb))
+			}
+			if len(tb.Indexes) != 1 {
+				t.Fatalf("got %d indexes, want exactly 1 (the fabricated one)", len(tb.Indexes))
+			}
+			if !eqStr(tb.Indexes[0].Columns, c.wantIndex) {
+				t.Errorf("fabricated index columns = %v, want %v (the type's own arguments, misread as column names)", tb.Indexes[0].Columns, c.wantIndex)
+			}
+		})
+	}
+}
+
 // --- I9: one-dialect-per-project — PostgreSQL syntax parsed under the mysql
 // dialect must be a documented best-effort limit, never a crash, never
 // silently claimed as fully correct ---

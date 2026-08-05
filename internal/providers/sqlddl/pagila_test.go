@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
@@ -34,11 +35,13 @@ func TestPagila_ViewsProcsTriggersPopulated(t *testing.T) {
 	// actor, plus the real index-bearing tables appended for the DB-011a/
 	// DB-011b/Unit E fixture extension (architecture/pagila-fixture-real-indexes):
 	// customer, address, rental, and the real payment_p2022_01 partition-child
-	// table (the DB-011a positive-fire proof). film is deliberately NOT
-	// vendored (discovery/sqlddl-postgres-parser-gaps, obs #1062, HALLAZGO 2 —
-	// see the inline note in pagila_excerpt.sql). All parsed cleanly alongside
-	// the dollar-quoted objects (splitting held).
-	wantTables := []string{"actor", "customer", "address", "rental", "payment_p2022_01"}
+	// table (the DB-011a positive-fire proof). film is RESTORED here
+	// (sql-ddl-phantom-index, formerly omitted for discovery/sqlddl-postgres-
+	// parser-gaps obs #1062, HALLAZGO 2 — see the inline note in
+	// pagila_excerpt.sql for the fix and TestPagila_Film_FulltextColumnCaptured
+	// below for its dedicated assertion). All parsed cleanly alongside the
+	// dollar-quoted objects (splitting held).
+	wantTables := []string{"actor", "customer", "film", "address", "rental", "payment_p2022_01"}
 	gotTables := tableNames(s)
 	if len(gotTables) != len(wantTables) {
 		t.Fatalf("tables = %v, want %v", gotTables, wantTables)
@@ -64,5 +67,53 @@ func TestPagila_ViewsProcsTriggersPopulated(t *testing.T) {
 	// View names are populated (bodies are not captured — no field for them).
 	if s.Views[0].Name != "actor_info" {
 		t.Errorf("view name = %q, want actor_info", s.Views[0].Name)
+	}
+}
+
+// TestPagila_Film_FulltextColumnCaptured is the load-bearing regression
+// fixture for sql-ddl-phantom-index (spec "public.film MUST be vendored
+// verbatim in the Pagila fixture"): on REAL, unmodified upstream Pagila DDL —
+// not a constructed shape — the fulltext column must be captured, not
+// dropped, and the table must prove structurally complete. Before the D2
+// fix this failed: 13 of 14 columns (no fulltext) and StructureProven()
+// false, because the fixture used to omit film entirely to dodge exactly
+// this defect (see pagila_excerpt.sql's restoration note).
+func TestPagila_Film_FulltextColumnCaptured(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("testdata", "pagila_excerpt.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlddl.New().ParseSchema([]providers.SourceFile{{Path: "pagila.sql", Content: content}})
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	var got *db.Table
+	for i := range s.Tables {
+		if s.Tables[i].Name == "film" {
+			got = &s.Tables[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("no table named %q in parsed schema (tables: %v)", "film", tableNames(s))
+	}
+	wantCols := []string{
+		"film_id", "title", "description", "release_year", "language_id",
+		"original_language_id", "rental_duration", "rental_rate", "length",
+		"replacement_cost", "rating", "last_update", "special_features", "fulltext",
+	}
+	if len(got.Columns) != len(wantCols) {
+		t.Fatalf("film columns = %d %v, want %d %v", len(got.Columns), colNames(*got), len(wantCols), wantCols)
+	}
+	for i, want := range wantCols {
+		if got.Columns[i].Name != want {
+			t.Errorf("film column[%d] = %q, want %q (full: %v)", i, got.Columns[i].Name, want, colNames(*got))
+		}
+	}
+	if !hasColumn(*got, "fulltext") {
+		t.Errorf("film has no fulltext column; columns = %v", colNames(*got))
+	}
+	if !got.StructureProven() {
+		t.Errorf("film.StructureProven() = false, want true; note=%q unreduced=%+v", got.Note, got.Unreduced)
 	}
 }
