@@ -131,6 +131,36 @@ file's content, not what the *cache* accepts as an entry) and it wants its own r
 before it gets its own fix. It is written down so it is met as a known open item rather than
 rediscovered as a surprise.
 
+> **Update (2026-08-05) — reproduced, and the CACHE half above is disproved (`docs/roadmap.md`
+> P0-3, SDD change `empty-read-hole`, Engram `sdd/empty-read-hole/reproduction`).** The
+> reproduction this section asked for was run against the real sensor and the real cache on
+> unmodified `main` @ `ac91109`:
+> ```
+> PROBE pass1 (file empty)   findings=0  audited=1     <- "nothing" gets cached
+> PROBE pass2 (real content) findings=1  SEC-001 high leak.ts:1
+> PROBE control (no cache)   findings=1
+> *** NOT REPRODUCED: pass2 matches the uncached control ***
+> ```
+> **The cache half is disproved structurally, not empirically.** The key is
+> `sha256(analyzer identity ‖ path ‖ content)` (decision above, unchanged). Empty content and
+> real content at the same path hash to two different keys, so the pass over real content is
+> always a MISS and analyses for real — an entry cached from an empty read can **never** be
+> served for non-empty content at that path. Not "was not observed to happen": cannot happen,
+> by construction of the key this ADR already specifies. Locked so it cannot regress silently:
+> `TestCache_EmptyReadNeverPoisonsLaterRealContentAtSamePath`
+> (`internal/sensors/security/cache_test.go`), driving the real sensor and the real cache
+> end-to-end, with an uncached control run in the assertion, and mutation-proved — the guard
+> fails exactly as this section predicted when the key is edited to ignore content.
+>
+> **What stays true is the WALK half, exactly as this section already said, and it is not a
+> cache defect.** `os.ReadFile` reporting `([]byte{}, nil)` on a file mid-write is a real
+> property of the read, present with or without the cache: codefit reports what it read. It is
+> also **transient** — the next scan reads the real bytes and finds them, unlike a cache
+> poisoning, which would be permanent and silent. There is no sound fix: codefit cannot
+> distinguish a file legitimately empty (common) from one mid-write, so no heuristic closes
+> this without a new false-positive class. No production code changed for this update — see
+> the CHANGELOG `[Unreleased]` entry and `docs/roadmap.md` P0-3.
+
 ### A declared limit, proven during the investigation: the cache stops warming under concurrency on Windows
 
 Go's `syscall.Open` opens files with `FILE_SHARE_READ|FILE_SHARE_WRITE` and **not**

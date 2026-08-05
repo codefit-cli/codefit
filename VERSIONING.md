@@ -148,6 +148,8 @@ stage" — it does **not** claim `0.1.0` is done.
   Two limits are declared rather than fixed: the cache barely warms under concurrent tool
   calls on **Windows** (`os.Rename` cannot replace a file another reader holds open; the
   failure is safe but noisy), and a separate, unproven **empty-read** hole. ADR **0053**.
+  (**Narrowed after this tag** — the empty-read hole's cache half was reproduced and disproved,
+  not left unproven; see ADR 0053's superseding note and `docs/roadmap.md` P0-3.)
   The contract is
   `docs/specs/finding-cache.md`. Also removed: the
   **LLM-era scaffolding**. `internal/core/pipeline`

@@ -442,6 +442,56 @@ func TestCache_EmptyDirDefaultsToDotCodefitCache(t *testing.T) {
 	}
 }
 
+// P0-3 (ADR 0053, "A hole this fix does NOT close: the empty read") reproduced
+// and disproved the cache half of that declared limit: os.ReadFile CAN observe
+// a file as empty (a truncate-then-write race), but the cache key is
+// sha256(analyzer ‖ path ‖ CONTENT), so an entry cached from empty content and
+// an entry for real content at the SAME path are two different keys. A pass
+// over the real content is therefore always a MISS, never a served hit from
+// the empty read. This locks that structural property so it cannot regress
+// silently, and proves it against the REAL sensor and the REAL cache — not a
+// hand-built Entry — with an uncached control run in the assertion so the test
+// proves EQUIVALENCE to no cache, not merely "found something".
+func TestCache_EmptyReadNeverPoisonsLaterRealContentAtSamePath(t *testing.T) {
+	root := t.TempDir()
+	const rel = "src/race.ts"
+	const leaking = "const apiKey = \"sk-ant-api03-AbCdEf1234567890\";\n"
+	cfg := cacheConfig(filepath.Join(t.TempDir(), "cache"))
+
+	// pass1: the file is observed EMPTY — the truncate-then-write race ADR 0053
+	// describes. That "nothing" gets cached under the key for empty content at
+	// this path.
+	writeSrc(t, root, rel, "")
+	pass1 := run(t, root, counting(), cfg)
+	if hasFinding(pass1.Findings, rel, "SEC-001") {
+		t.Fatalf("the fixture is wrong: pass1 must observe the file as empty, got %+v", pass1.Findings)
+	}
+
+	// pass2: the SAME path now holds real, leaking content — the write finished.
+	writeSrc(t, root, rel, leaking)
+	pass2 := counting()
+	pass2Res := run(t, root, pass2, cfg)
+
+	// control: the identical real content, scanned with NO cache at all. If the
+	// cache is innocent, pass2 must match this exactly — not just "have a
+	// finding", but be byte-identical to what an uncached scan produces.
+	controlRoot := t.TempDir()
+	writeSrc(t, controlRoot, rel, leaking)
+	controlRes := run(t, controlRoot, counting(), &config.Config{Project: cfg.Project})
+
+	if pass2.securityCalls == 0 {
+		t.Error("pass2 was served from the cache (0 AnalyzeSecurity calls) — the empty-content entry " +
+			"was reused for real content at the same path, which is exactly the poisoning ADR 0053 warned about")
+	}
+	if !hasFinding(pass2Res.Findings, rel, "SEC-001") {
+		t.Errorf("pass2 never reported the real leaking content: %+v", pass2Res.Findings)
+	}
+	if got, want := wire(t, pass2Res), wire(t, controlRes); got != want {
+		t.Errorf("pass2 (cached) differs from the uncached control — the cache changed the verdict.\n"+
+			"cached:      %s\nuncached: %s", got, want)
+	}
+}
+
 // --- helpers -------------------------------------------------------------
 
 func hasFinding(fs []findings.Finding, file, id string) bool {
