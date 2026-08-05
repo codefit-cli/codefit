@@ -31,6 +31,9 @@ ALWAYS read the `scope` block before you report anything:
   a skipped dir). Those were NOT audited, which is NOT the same as audited and clean.
 - `by_dimension.db` is `null` (not measured) unless a configured schema path is in scope.
   Null is not 100 — the schema was not looked at.
+- `by_dimension.security` is `null` (not measured) when no security provider resolves
+  for `language` — the `security` section's `note` explains why (the db
+  dimension may still be measured on its own). Null is not 100 — the code was not looked at.
 - A partial scan is for a fast pass on a change. NEVER prune the baseline after one (below).
 
 ## Read the three buckets in the response

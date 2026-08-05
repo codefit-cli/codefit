@@ -27,7 +27,8 @@ nothing. An undeclared one costs them their trust.
 
 **What works, from `main`, right now:**
 
-- MCP stdio server; TypeScript projects only.
+- MCP stdio server. **Per dimension, not per project:** security and its surface mapping are
+  TypeScript-only; the database dimension audits **any** language that declares a schema.
 - Security: deterministic rules + surface mapping (IDOR, authz, over-fetching, N+1).
 - Database: schema-only OLTP rules across Prisma and SQL-DDL (PostgreSQL, MySQL, T-SQL),
   the DW-0xx analytic family, and the code×schema cross (`scan-all` only).
@@ -35,21 +36,30 @@ nothing. An undeclared one costs them their trust.
   `codefit-coverage`, `codefit init`.
 - Layer 0 (`changed_files`) and the content-hash finding cache.
 
-**What it correctly refuses:** a **security** audit of a non-TypeScript project.
-`providerForLanguage` (`internal/mcp/scanall.go:499`) maps only `typescript`/`ts`/`tsx`;
-`HandleScanSecurity` returns `unsupported language %q` and `HandleCoverage` returns
-`no coverage manifest for language %q`. **codefit does not produce a false all-clear on a
-language it cannot audit** — it errors. For the security dimension, which genuinely needs a
-language provider, that is right.
+**What it correctly refuses:** `codefit-scan-security`, `codefit-scan-endpoint` and
+`codefit-coverage` on a non-TypeScript project. `providerForLanguage`
+(`internal/mcp/scanall.go`, now a table, `languageProviders`) resolves only
+`typescript`/`ts`/`tsx`; `HandleScanSecurity` returns `unsupported language %q` and
+`HandleCoverage` returns `no coverage manifest for language %q` for anything else.
+**codefit does not produce a false all-clear on a language it cannot audit** — it
+errors. That is the intended behaviour and it is already right for those three tools.
 
-> **Correction (2026-08-05, measured).** An earlier version of this section said the refusal
-> "is the intended behaviour and it is already right", full stop. That was **too broad**, and
-> the architect caught it. The database dimension needs no language provider at all —
-> `HandleScanDB` resolves its parser by the **input's shape** (`.prisma` / `.sql`), never by
-> the app language, exactly as ADR 0018 specifies. Measured on a Go project with a Postgres
-> schema: `codefit-scan-db` returns `measured=true`, score 90, 2 findings, 2 surface items —
-> while `codefit-scan-all` on the same project errors with `unsupported language "go"`. The
-> capability works and the front door refuses it. See **P0-5**.
+`codefit-scan-all` is narrower than that since P0-5: it audits the DB dimension
+(schema-only) for **any** language when `database.schema_paths` is configured,
+because the DB dimension's schema parser never depended on the language provider —
+and refuses only when **neither** a security provider resolves **nor** the DB
+dimension runs, naming both missing inputs. `by_dimension.security` is honestly
+`null` on that path, not a false all-clear.
+
+> **How this section got here (2026-08-05) — kept because the mistake is the lesson.**
+> It used to say codefit refuses "a non-TypeScript project", and that the refusal "is the
+> intended behaviour and it is already right", full stop. **Too broad, and the architect
+> caught it.** The database dimension never needed a language provider: `HandleScanDB`
+> resolves its parser by the **input's shape** (`.prisma` / `.sql`), exactly as ADR 0018
+> specifies. Measured at the time on a Go project with a Postgres schema, `codefit-scan-db`
+> returned `measured=true`, score 90, 2 findings, 2 surface items — while `codefit-scan-all`
+> on the *same* project errored `unsupported language "go"`. The capability worked and the
+> front door refused it. P0-5 closed that; the paragraphs above describe today.
 
 **What does not exist:** the review, tests, complexity and practices sensors. Phase 3 is
 started, not half-done — see P2.
@@ -129,16 +139,31 @@ never seen, only bracketed, and nothing was measured between 40 282 and 60 000.
 If the real ceiling sits below 60 000, `scan-all` fails today for users on mid-sized
 projects — the exact defect `v0.2.7` was cut to fix.
 
-### P0-5 — `scan-all` refuses the database dimension over a language it does not need
+### P0-5 — CLOSED (`scan-all-db-without-language`) — scan-all refused the DB dimension over a language it did not need
 
-Found by the architect, 2026-08-05, and measured before it was written down.
+`codefit-scan-all` hard-errored `unsupported language %q` for any project whose
+language had no security provider — including a Go project with a fully configured
+`database.schema_paths`, which the DB dimension's schema parser could measure without
+ever consulting `req.Language`. The security sensor's unconditional hard error sat
+~30 lines before the DB section ever ran.
 
-The database dimension is **language-neutral by design**: `HandleScanDB`
-(`internal/mcp/scandb.go:45-55`) resolves its schema parser by the **input's shape**
-(`.prisma` / `.sql`) and by `database.type`, *"not the app language (ADR 0018)"* — its own
-comment says so. It never calls `providerForLanguage`.
+Fixed: security now runs only `if secRan` (a provider resolves); the baseline's
+`scanned` set became empty-by-default opt-in (a real corruption — a security-owned
+baseline item could be wrongly pruned by a DB-only pass — was reproduced for real on
+a fixture before being fixed); nothing-measurable (neither dimension runs) is now a
+refusal naming both missing inputs, not a null-filled 200; the supported-language set
+gained a single source (`languageProviders`) with three regression locks against the
+three independent language-resolution switches drifting further apart; and
+`ScanAllResponse` gained an always-present `security` section (`measured`/`note`)
+mirroring `db`'s shape. See
+[ADR 0059](decisions/0059-security-soft-dimension-in-scan-all.md) for the full
+decision record, including the accepted consequence (a narrowed scan on a Go project
+whose changed files exclude its schema now errors) and the deliberate asymmetry vs.
+`codefit-scan-security`/`codefit-scan-endpoint`, which are unchanged.
 
-Measured on a Go project carrying a PostgreSQL schema:
+The evidence that opened this entry, kept because it is what a measurement buys — the
+architect asked why the DB dimension was refused, and the probe answered before any prose
+did:
 
 ```
 codefit-scan-db   → measured=true, score=90, 2 findings, 2 surface items
@@ -147,51 +172,48 @@ codefit-scan-db   → measured=true, score=90, 2 findings, 2 surface items
 codefit-scan-all  → ERROR: unsupported language "go"
 ```
 
-`HandleScanAll` resolves the language provider up front and returns a hard error, so the DB
-section — which would have run fine — is never reached. Only the code×schema cross
-(`crossrules`) genuinely needs the language, because it extracts query filters from
-application code; the schema-only rules do not.
+Filed as P0 rather than a capability gap on this document's own criterion: a user with a Go
+backend and a SQL schema was told `unsupported language` and would conclude codefit could not
+audit their project. It could. codefit denied a capability it had — a false statement about
+itself, in the one direction this project treats as unforgivable. The generated skill made it
+worse by telling the agent to call `scan-all` **first**, so the agent hit the error and never
+learned `scan-db` would have worked.
 
-**Why this is P0 and not a capability gap.** The criterion at the top of this document is
-whether a user is *misled*. A user with a Go or Python backend and a SQL schema is told
-`unsupported language`, and concludes codefit cannot audit their project. It can — it audits
-their schema today. codefit denies a capability it has, which is a false statement about
-itself in the one direction this project treats as unforgivable. It is also made worse by
-the generated skill, which tells the agent to call `scan-all` **first**: the agent hits the
-error and never learns `scan-db` would have worked.
-
-The fix is a soft path, not a new capability: the language provider is required only for the
-sections that use it. Every not-measured path in the DB dimension is already soft by ADR 0020
-(a DB misconfiguration must never blank the security audit) — this is the same principle
-pointing the other way, and the `scope` block already has the vocabulary to say which
-dimensions were measured and which were not.
+**Explicitly NOT done here** (see P1-1b/c and P4-1 below): unifying the three
+language-resolution switches beyond the divergence locks, resolving the
+`init`-welcomes/`scan-all`-refuses contradiction for Go beyond "the DB dimension now
+measures it", and wiring `golang.New()` into `providerForLanguage` (a full
+user-facing Go security provider).
 
 ---
 
 ## P1 — the user cannot tell how far codefit reaches
 
-### P1-1 — Say in the README, before install, which dimensions each language gets
+### P1-1a — Say in the README, before install, how far codefit reaches per language
 
-Not "only TypeScript is auditable" — that is the over-broad claim P0-5 corrects. The honest
-statement is per dimension: **security and its surface mapping are TypeScript-only; the
-database dimension works on any project that declares a schema**, because it reads the schema
-file, not the application language. The README must say that before someone installs it,
-and it can only say it truthfully once P0-5 makes `scan-all` behave that way.
+The code refuses honestly for the tools that still refuse (`scan-security`,
+`scan-endpoint`, `coverage`). The documentation must say so just as plainly, *before*
+someone installs it and points it at a Go or Python repository — and, since P0-5, say
+the more nuanced true thing for `scan-all`: DB-dimension-only, schema-only, for a
+language with no security provider. The README's "Supported languages" table's Go row
+was corrected for the one claim P0-5 falsified (P1-1c below owns the rest of the
+table's rewrite).
 
-### P1-1b — Three hand-written language switches disagree, and `init` contradicts `scan-all`
+### P1-1b — Unify the three independent language-resolution switches
 
 Asked by the architect (2026-08-05): *how does codefit know it lacks a capability for a
-language?* It does not know. **It has it written by hand**, and there are three lists:
+language?* It does not know. **It has it written by hand**, and there are three lists, each
+deciding by a different signal:
 
-| where | decides by | recognises |
+| where | decides by | recognised, before P0-5 |
 |---|---|---|
-| `internal/mcp/scanall.go:499` `providerForLanguage` | language name | **TypeScript only** |
-| `internal/mcp/surface.go:193` `providerFor` | file extension | **`.ts`/`.tsx` only** |
-| `internal/scaffold/detect.go:74` `detectLanguage` | marker file (`go.mod`, `package.json`) | **Go *and* TypeScript** |
+| `internal/mcp/scanall.go` `providerForLanguage` | language name | **TypeScript only** |
+| `internal/mcp/surface.go` `providerFor` | file extension | **`.ts`/`.tsx` only** |
+| `internal/scaffold/detect.go` `detectLanguage` | marker file (`go.mod`, `package.json`) | **Go *and* TypeScript** |
 
-Read the last row again. **`codefit init` detects a Go project, configures it, and installs
-the skill** — and that skill tells the agent to call `scan-all` first, which answers
-`unsupported language "go"`. codefit welcomes you at one door and throws you out of another.
+Read the last row again. **`codefit init` detected a Go project, configured it and installed
+the skill** — and that skill tells the agent to call `scan-all` first, which answered
+`unsupported language "go"`. codefit welcomed you at one door and threw you out of another.
 
 The same root cause explains why the Go provider is invisible: it is complete and working
 (`AnalyzeSecurity`/`AnalyzeSurface`/`AnalyzePractices`, used by codefit's own self-audit and
@@ -199,26 +221,25 @@ by `init`'s detection), and unreachable **only because nobody wrote the `case`**
 that exists but is not in the hand-written list is, to a user, a capability that does not
 exist.
 
-P0-5 introduces the single source for the supported set and makes the error message read from
-it — deliberately, so naming the supported languages does not create a **fourth** list. What
-stays here is **convergence**: the other two switches either adopt that source or get a lock
-that makes their divergence visible instead of silent.
+P0-5 gave `providerForLanguage` a single-source table and three regression locks that keep the
+switches' *current* agreement from drifting further in silence — measured: smuggling a `"go"`
+entry into the table turns Lock A **and** Lock B red, the latter precisely because the two
+switches then disagree. What stays here is **convergence**: the other two adopt that source or
+keep the locks permanently. P0-5 deliberately did not converge them, and did not resolve the
+`init`-welcomes / `scan-all`-mostly-refuses shape for Go — that is entangled with P4-1.
 
-Sequenced after P0-5 because, once the DB dimension runs without a language, a Go project with
-a schema is no longer refused outright — it becomes a *messaging* problem: say which dimension
-runs and which does not, never "supported" unqualified.
+### P1-1c — Rewrite the README "Supported languages" table
 
-### P1-1c — The README lists Go under "Supported languages"
-
-`README.md:662`, first row of the table:
+`README.md`'s table has Go in its first row:
 
 > **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI.
 
-Every word is true, and the placement is not: it sits under a heading that reads **Supported
-languages**, so a reader concludes they can audit their Go project. They cannot — `scan-all`
-and `scan-security` refuse it today, and after P0-5 they will get the database dimension only.
-
-The row has to say what a *user* gets, not what codefit does to itself in CI.
+Every word is true and the placement is not: under a heading that reads **Supported
+languages**, a reader concludes they can audit their Go project. Since P0-5 they get the
+database dimension only. P0-5 corrected the one claim it directly falsified; the table's
+framing, its other rows, and its relationship to the per-tool refusal behaviour (P1-1a) are
+unreviewed. The row has to say what a *user* gets, not what codefit does to itself in CI.
+Owed a full pass once P1-1b settles what the table should actually claim.
 
 ### P1-2 — `report.score_weights` is validated and then ignored
 
@@ -294,12 +315,19 @@ The ones most worth revisiting first, by user impact:
 
 ## P4 — scope decisions owed to the architect
 
-### P4-1 — Does Go become a user-facing auditable language?
+### P4-1 — Does Go become a user-facing auditable SECURITY language?
 
-Today the Go provider maps **one** surface category (`authz`) against TypeScript's four, has
-six hand-written security rules against TypeScript's rule engine, and has no coverage
-manifest. Wiring it into `providerForLanguage` is one line — and would be dishonest, because
-what sits behind it returns almost nothing.
+Since P0-5, "does Go become auditable" is no longer all-or-nothing: `scan-all`
+already measures the DB dimension for a Go project with a configured schema. What
+remains is narrower and still a real scope decision: does `providerForLanguage`
+(`internal/mcp/scanall.go`'s `languageProviders` table) ever gain a `"go"` entry so
+`codefit-scan-security`/`codefit-scan-endpoint`/`by_dimension.security` become real
+for Go code? Today the Go provider maps **one** surface category (`authz`) against
+TypeScript's four, has six hand-written security rules against TypeScript's rule
+engine, and has no coverage manifest. Wiring it in is one line — Lock A
+(`internal/mcp/language_source_test.go`) exists specifically to turn that one line
+into a failing test instead of a silent slide, so this stays a decision, not an
+accident.
 
 Parity is a phase-sized effort, comparable to what Phase 1 did for TypeScript. The argument
 *for* it: codefit is written in Go, developed with AI, and cannot audit itself through its

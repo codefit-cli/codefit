@@ -663,7 +663,7 @@ data left the handler) it hands off at the *frontier*; what it does not cover it
 
 | Language / Ecosystem | Status |
 | --- | --- |
-| **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI. |
+| **Go** | `codefit-scan-all` audits the DB dimension (schema-only) when `database.schema_paths` is configured — no code security detectors are wired for Go: `codefit-scan-security` and `codefit-scan-endpoint` still refuse it, and `scan-all` reports `by_dimension.security: null`. The Go provider itself is otherwise used internally for codefit's own CI self-audit, not exposed to a Go user's project. |
 | **TypeScript / Next.js / Express / Fastify / NestJS / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, Fastify, and NestJS. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js, Express/Prisma, and NestJS/Prisma backends. |
 | Java / Spring | Roadmap |
 | Python / FastAPI / Django | Roadmap |

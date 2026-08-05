@@ -24,6 +24,52 @@ work below — which declares gaps rather than closing them.
 
 ### Added
 
+- **`codefit-scan-all` measures the DB dimension for a project whose language has no
+  security provider, instead of refusing the whole scan.** A Go project with a
+  configured `database.schema_paths` used to get `unsupported language "go"` from
+  `scan-all` even though the DB dimension's schema parser never depended on
+  `language` at all — the security sensor's unconditional hard error sat ~30 lines
+  before the DB section ever ran
+  ([ADR 0059](docs/decisions/0059-security-soft-dimension-in-scan-all.md)). Security
+  now runs only `if secRan` (a provider resolves for `language`); a nil provider is
+  non-fatal, a config-load or sensor error inside it is still a hard error, unchanged.
+  When **neither** a security provider resolves **nor** the DB dimension runs,
+  `scan-all` now returns an **error** naming both missing inputs (and the
+  single-sourced supported-language set) instead of a 200 response with every score
+  dimension `null` — indistinguishable from an impeccable project to an agent
+  skimming it, and the one call shape that would have driven `scoring.Compute` with
+  an empty `measured` set.
+  - **⚠️ `ScanAllResponse` gains an always-present `security` key** —
+    `{"measured": bool, "note"?: string}` — mirroring `db`'s shape but, unlike `db`,
+    never `omitempty`: security applies to every project `scan-all` can run at all,
+    so an absent section could only mean an older codefit build. A TypeScript
+    response now carries `"security": {"measured": true}` beside everything it
+    already carried; nothing else about the response changes value. Verified against
+    the real pre-change response (captured via `git worktree` from `main` before this
+    change, not re-implemented) with the new key stripped from both sides before
+    comparing — the same class of change as `by_dimension.practices` below.
+  - **The baseline's `scanned` set is now empty-by-default opt-in.** Before this
+    change a security-owned baseline item (e.g. an `authz` item) could be wrongly
+    marked `gone` and pruned by a DB-only pass, because `scanned` unioned the
+    security categories unconditionally regardless of whether security ran. Proven,
+    not assumed: the fix landed as two commits specifically so the corruption could
+    be reproduced for real on a Go+schema fixture with a planted item (`Gone=1`) before
+    the fix turned it green.
+  - **The supported-language set now has one source.** `providerForLanguage`'s
+    hand-written `switch` became a table (`languageProviders`); the new
+    `SupportedLanguageNames()` derives the list the refusal message reads from what
+    the table actually constructs. Three new regression locks
+    (`internal/mcp/language_source_test.go`) keep it from silently diverging from the
+    two other independent language-resolution switches in the codebase
+    (`surface.go`'s `providerFor`, `scaffold/detect.go`'s `detectLanguage`) — one of
+    them is the mechanical fence against wiring `golang.New()` into
+    `providerForLanguage` without the open scope decision that would require
+    (roadmap P4-1).
+  - **`codefit-scan-security` and `codefit-scan-endpoint` are unchanged** and keep
+    hard-erroring on an unresolved language — deliberate asymmetry: `scan-all`'s
+    multi-dimension design lets one dimension be soft when another can still deliver
+    value; the single-dimension tools have no dimension to fall back to.
+
 - **The coverage manifest now answers for every capability the PRD promises, and a control
   enforces it.** `dbcoverage` had two mechanical controls and both looked **outward from
   the code** — one asks "is every registered rule declared?", the other "does every declared
