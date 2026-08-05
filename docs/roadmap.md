@@ -178,6 +178,48 @@ database dimension works on any project that declares a schema**, because it rea
 file, not the application language. The README must say that before someone installs it,
 and it can only say it truthfully once P0-5 makes `scan-all` behave that way.
 
+### P1-1b — Three hand-written language switches disagree, and `init` contradicts `scan-all`
+
+Asked by the architect (2026-08-05): *how does codefit know it lacks a capability for a
+language?* It does not know. **It has it written by hand**, and there are three lists:
+
+| where | decides by | recognises |
+|---|---|---|
+| `internal/mcp/scanall.go:499` `providerForLanguage` | language name | **TypeScript only** |
+| `internal/mcp/surface.go:193` `providerFor` | file extension | **`.ts`/`.tsx` only** |
+| `internal/scaffold/detect.go:74` `detectLanguage` | marker file (`go.mod`, `package.json`) | **Go *and* TypeScript** |
+
+Read the last row again. **`codefit init` detects a Go project, configures it, and installs
+the skill** — and that skill tells the agent to call `scan-all` first, which answers
+`unsupported language "go"`. codefit welcomes you at one door and throws you out of another.
+
+The same root cause explains why the Go provider is invisible: it is complete and working
+(`AnalyzeSecurity`/`AnalyzeSurface`/`AnalyzePractices`, used by codefit's own self-audit and
+by `init`'s detection), and unreachable **only because nobody wrote the `case`**. A capability
+that exists but is not in the hand-written list is, to a user, a capability that does not
+exist.
+
+P0-5 introduces the single source for the supported set and makes the error message read from
+it — deliberately, so naming the supported languages does not create a **fourth** list. What
+stays here is **convergence**: the other two switches either adopt that source or get a lock
+that makes their divergence visible instead of silent.
+
+Sequenced after P0-5 because, once the DB dimension runs without a language, a Go project with
+a schema is no longer refused outright — it becomes a *messaging* problem: say which dimension
+runs and which does not, never "supported" unqualified.
+
+### P1-1c — The README lists Go under "Supported languages"
+
+`README.md:662`, first row of the table:
+
+> **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI.
+
+Every word is true, and the placement is not: it sits under a heading that reads **Supported
+languages**, so a reader concludes they can audit their Go project. They cannot — `scan-all`
+and `scan-security` refuse it today, and after P0-5 they will get the database dimension only.
+
+The row has to say what a *user* gets, not what codefit does to itself in CI.
+
 ### P1-2 — `report.score_weights` is validated and then ignored
 
 `config.Validate` rejects the map when it does not sum to 100, and **nothing ever reads it**.
