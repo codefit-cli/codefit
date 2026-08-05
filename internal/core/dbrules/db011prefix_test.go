@@ -154,6 +154,31 @@ func TestDB011Prefix_NeverAffirms(t *testing.T) {
 	}
 }
 
+// TestDB011Prefix_ZeroColumnIndexNeverSubsumesOrIsSubsumed is the DB-011b
+// mirror of TestDB011_TwoZeroColumnIndexes_NeverFlaggedAsDuplicates
+// (index_method_render_test.go, DB-011a) — spec "DB-011b MUST be proven safe
+// against zero-column indexes" (sql-ddl-phantom-index). isStrictPrefix
+// already guards `len(short) == 0` (db011prefix.go), so this table names a
+// real limit, not a fix: a zero-column index (T-SQL's CLUSTERED COLUMNSTORE
+// INDEX, applyCreateColumnstoreIndex, reduce.go:2027 — Columns: nil is
+// LEGITIMATE, not a parser gap) must never be reported as subsuming another
+// index (isStrictPrefix(nil, ...) is never a prefix of anything) or as
+// subsumed by one (nothing can be a strict prefix of a nil column list —
+// len(long) <= len(short) is true whenever long is empty).
+func TestDB011Prefix_ZeroColumnIndexNeverSubsumesOrIsSubsumed(t *testing.T) {
+	s := &db.Schema{Tables: []db.Table{{
+		Name: "FactSales",
+		Indexes: []db.Index{
+			{Columns: []string{"a", "b"}, Unique: false, Pos: db.Pos{File: "s.sql", Line: 10}},
+			{Method: "columnstore", Pos: db.Pos{File: "s.sql", Line: 20}}, // Columns: nil, on purpose
+		},
+	}}}
+	_, items := dbrules.Run(s)
+	if got := surfaceWithCategory(items, surface.CategoryDBPrefixRedundantIndex); len(got) != 0 {
+		t.Errorf("a zero-column index must never be reported as subsuming or subsumed, got %d: %+v", len(got), got)
+	}
+}
+
 func TestDB011Prefix_MultipleSubsumedIndexes_EachEmitOwnItem(t *testing.T) {
 	s := &db.Schema{Tables: []db.Table{{
 		Name: "T",
