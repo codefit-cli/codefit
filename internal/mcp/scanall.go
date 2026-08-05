@@ -530,17 +530,50 @@ func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
 	return ScanEndpointResponse{File: req.File, Found: true, Endpoints: matched}, nil
 }
 
+// languageProviders is THE supported set — the single source providerForLanguage
+// and SupportedLanguageNames both read, so the two can never hand-diverge into a
+// fourth list (D4). "typescript", "ts", "tsx" all alias the one canonical
+// TypeScript provider; adding an entry here is the one place that expands what
+// codefit-scan-all can resolve a security provider for (Lock A guards this
+// exact set staying {typescript, ts, tsx} until a future change deliberately
+// grows it).
+var languageProviders = map[string]func(authzHelpers []string) providers.LanguageProvider{
+	"typescript": func(authzHelpers []string) providers.LanguageProvider {
+		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
+	},
+	"ts":  func(authzHelpers []string) providers.LanguageProvider { return typescript.New(typescript.WithAuthzHelpers(authzHelpers)) },
+	"tsx": func(authzHelpers []string) providers.LanguageProvider { return typescript.New(typescript.WithAuthzHelpers(authzHelpers)) },
+}
+
 // providerForLanguage resolves a provider by language name — the MCP adapter is
 // the single place that maps language → provider (the core never does). The
 // project's registered authz helpers (from the baseline) are passed to the
 // provider so surface recognition reflects per-project knowledge (ADR 0013).
 func providerForLanguage(lang string, authzHelpers []string) providers.LanguageProvider {
-	switch lang {
-	case "typescript", "ts", "tsx":
-		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
-	default:
+	ctor, ok := languageProviders[lang]
+	if !ok {
 		return nil
 	}
+	return ctor(authzHelpers)
+}
+
+// SupportedLanguageNames returns the canonical, deduplicated, sorted set of
+// language names codefit-scan-all can resolve a security provider for — DERIVED
+// from what languageProviders actually constructs (each entry's Language()),
+// never a hand-written literal. This is the single source the nothing-measurable
+// error message reads (D4/D5): a language and its aliases (ts/tsx) collapse to
+// one canonical name here.
+func SupportedLanguageNames() []string {
+	seen := map[string]bool{}
+	for _, ctor := range languageProviders {
+		seen[ctor(nil).Language()] = true
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // nothingMeasurableError names BOTH reasons codefit-scan-all has nothing to
@@ -557,11 +590,8 @@ func nothingMeasurableError(language string, dbSection *DBSection) error {
 	if dbSection != nil && dbSection.Note != "" {
 		dbReason = dbSection.Note
 	}
-	// TODO(Phase 4, D4): read the supported set from the single source
-	// (SupportedLanguageNames) instead of this literal — updated in the same
-	// change once providerForLanguage becomes a table.
 	return fmt.Errorf("nothing to audit: no security provider for language %q (supported: %s), and %s",
-		language, "typescript", dbReason)
+		language, strings.Join(SupportedLanguageNames(), ", "), dbReason)
 }
 
 // runDBForScanAll resolves the schema parser by input and runs the DB sensor,
