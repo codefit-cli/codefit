@@ -48,16 +48,23 @@ func TestCrossSeam_CollectsFiltersButProducesNothing(t *testing.T) {
 	// The seam is a no-op with an empty rule set: a schema that WOULD reconcile still
 	// yields nothing.
 	schema := &db.Schema{Tables: []db.Table{{Name: "User", Columns: []db.Column{{Name: "email"}}}}}
-	f, s := runCross(root, "typescript", schema, nil, nil, scope.Full())
+	f, s, skip := runCross(root, "typescript", schema, nil, nil, scope.Full())
 	if f != nil || s != nil {
 		t.Errorf("runCross with an empty rule set must yield nothing, got findings=%v surface=%v", f, s)
+	}
+	if skip != "" {
+		t.Errorf("runCross must actually RUN here (typescript has a QueryExtractor and a parsed schema), got skip reason %q", skip)
 	}
 }
 
 // TestRunCross_NilSchema — no schema, no cross (a project with no database).
 func TestRunCross_NilSchema(t *testing.T) {
-	if f, s := runCross(t.TempDir(), "typescript", nil, nil, nil, scope.Full()); f != nil || s != nil {
+	f, s, skip := runCross(t.TempDir(), "typescript", nil, nil, nil, scope.Full())
+	if f != nil || s != nil {
 		t.Error("runCross(nil schema, scope.Full()) must yield nothing")
+	}
+	if skip == "" {
+		t.Error("runCross(nil schema) must report a non-empty skip reason (D6)")
 	}
 }
 

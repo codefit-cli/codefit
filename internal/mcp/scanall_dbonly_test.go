@@ -176,3 +176,100 @@ func TestHandleScanAll_NothingMeasurable_Errors(t *testing.T) {
 		t.Errorf("the nothing-measurable guard must fire BEFORE any baseline write, but %s exists", baseline.Name)
 	}
 }
+
+// TestHandleScanAll_GoProjectWithSchema_SecurityNotMeasured is D3b: the
+// Security section is ALWAYS present (never a zero value silently standing
+// in for "not applicable"), and on a DB-only pass it honestly reports
+// Measured=false with a non-empty note naming that the schema was audited
+// while the code was not.
+func TestHandleScanAll_GoProjectWithSchema_SecurityNotMeasured(t *testing.T) {
+	root := writeGoSchemaProj(t)
+
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "go"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.Security.Measured {
+		t.Error("security must be reported NOT measured for a Go project (no provider)")
+	}
+	note := strings.ToLower(resp.Security.Note)
+	if note == "" {
+		t.Fatal("security.note must be non-empty when security did not run")
+	}
+	if !strings.Contains(note, "schema") || !strings.Contains(note, "code") {
+		t.Errorf("security.note must say the schema was audited but the code was not, got %q", resp.Security.Note)
+	}
+}
+
+// TestHandleScanAll_GoProjectWithSchema_BucketNotesNonEmpty is the D1 site-15
+// lock: when security did not run, actionable/resolved_clean/frontier_pending
+// are all zero — but the zero is because security did not run, NOT because
+// codefit looked and found nothing, and each note must say so.
+func TestHandleScanAll_GoProjectWithSchema_BucketNotesNonEmpty(t *testing.T) {
+	root := writeGoSchemaProj(t)
+
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "go"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.Actionable.Count != 0 || resp.ResolvedClean.Count != 0 || resp.FrontierPending.Count != 0 {
+		t.Fatalf("a Go project with no security provider must have zero endpoints in every bucket, got %+v/%+v/%+v",
+			resp.Actionable, resp.ResolvedClean, resp.FrontierPending)
+	}
+	for name, note := range map[string]string{
+		"actionable":      resp.Actionable.Note,
+		"resolved_clean":  resp.ResolvedClean.Note,
+		"frontier_pending": resp.FrontierPending.Note,
+	} {
+		if note == "" {
+			t.Errorf("%s.note must be non-empty when the zero count is because security did not run", name)
+			continue
+		}
+		if !strings.Contains(strings.ToLower(note), "security did not run") {
+			t.Errorf("%s.note must say the zero is because security did not run, got %q", name, note)
+		}
+	}
+}
+
+// TestHandleScanAll_GoProjectWithSchema_AuditableTotalReflectsSchema is D3:
+// on a DB-only pass, scope.auditable_total must reflect the distinct schema
+// sources the DB dimension actually read — not the security-only value of 0,
+// which would falsely assert "no auditable files exist".
+func TestHandleScanAll_GoProjectWithSchema_AuditableTotalReflectsSchema(t *testing.T) {
+	root := writeGoSchemaProj(t)
+
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "go"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.Scope.AuditableTotal != 1 {
+		t.Errorf("scope.auditable_total must equal the 1 distinct schema source read, got %d", resp.Scope.AuditableTotal)
+	}
+	if resp.Scope.Mode != mcp.ScopeModeFull || resp.Scope.Note != "" {
+		t.Errorf("a full, unnarrowed scan must stay mode=full with no note, got mode=%q note=%q",
+			resp.Scope.Mode, resp.Scope.Note)
+	}
+}
+
+// TestHandleScanAll_GoProjectWithSchema_CrossSkipNoted is D6: the DB section's
+// note must name the skipped code x schema cross and the reason — Go has no
+// QueryExtractor, so the cross rule family never runs on this path, and
+// silence about it would look like the cross simply had nothing to say.
+func TestHandleScanAll_GoProjectWithSchema_CrossSkipNoted(t *testing.T) {
+	root := writeGoSchemaProj(t)
+
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "go"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("DB section must be measured, got %+v", resp.DB)
+	}
+	note := strings.ToLower(resp.DB.Note)
+	if !strings.Contains(note, "cross") {
+		t.Errorf("db.note must name the skipped code x schema cross, got %q", resp.DB.Note)
+	}
+	if !strings.Contains(note, "query extractor") {
+		t.Errorf("db.note must state there is no query extractor for this language, got %q", resp.DB.Note)
+	}
+}

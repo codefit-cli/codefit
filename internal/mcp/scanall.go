@@ -108,12 +108,30 @@ type ScanAllResponse struct {
 	Actionable      ActionableSection `json:"actionable"`
 	ResolvedClean   ResolvedClean     `json:"resolved_clean"`
 	FrontierPending FrontierPending   `json:"frontier_pending"`
+	// Security reports whether the security dimension ran (D3b). It is ALWAYS
+	// present — deliberately NOT `omitempty`, unlike DB: the db dimension may
+	// legitimately not apply to a project (no database configured), but security
+	// applies to every project, so an ABSENT section could only mean an older
+	// codefit build. Measured=false with a Note is the honest "no provider for
+	// this language" state, mirroring DBSection's own Measured/Note shape.
+	Security SecuritySection `json:"security"`
 	// DB is the parallel database-structure section — the db dimension's findings
 	// and surface, baseline-filtered. It is NON-endpoint (a table has no route), so
 	// it is its own section, not one of the three endpoint buckets. Nil when the
 	// project has no database.schema_paths configured, so a project without a
 	// database yields a response byte-identical to before db was wired (ADR 0020).
 	DB *DBSection `json:"db,omitempty"`
+}
+
+// SecuritySection reports whether the security dimension ran this pass (D3b).
+// Measured=false is SOFT, exactly like DBSection: it never fails scan-all, it
+// is reported. Note is empty when Measured is true (nothing to caveat) and
+// non-empty otherwise, naming why (no provider resolved for the language) and
+// what that means for the rest of the response (the schema may still have
+// been audited; the code was not).
+type SecuritySection struct {
+	Measured bool   `json:"measured"`
+	Note     string `json:"note,omitempty"`
 }
 
 // DBSection is the database dimension's result inside scan-all. Measured=false with
@@ -376,7 +394,18 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// files and, when the db dimension ran, the configured schema sources it read.
 	// Without the union a requested schema path would be reported unmatched even
 	// though the audit read it — the security walk does not open .prisma files.
-	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), secRes.AuditableTotal)
+	//
+	// auditableTotal (D3): when security ran, its own walk-based count is the
+	// denominator, unchanged. When it did NOT run, the only census this pass
+	// actually took is the distinct schema sources the DB dimension read — 0
+	// would falsely assert "no auditable files exist"; the residual (how many
+	// files a security provider WOULD have counted) is unknowable without a
+	// provider, and that caveat lives in Security.Note, not here.
+	auditableTotal := secRes.AuditableTotal
+	if !secRan {
+		auditableTotal = len(distinctCanon(dbRes.AuditedFiles))
+	}
+	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), auditableTotal)
 	if err := block.Validate(); err != nil {
 		return ScanAllResponse{}, nil, err
 	}
@@ -396,22 +425,57 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		Baseline: delta,
 		Actionable: ActionableSection{
 			Count: len(actionable),
-			Note:  actionableNote(len(actionable)),
+			Note:  actionableNote(len(actionable), secRan),
 			// Endpoints is filled by the rendering step (withNamedActionable), from
 			// the complete list returned alongside this response.
 		},
 		ResolvedClean: ResolvedClean{
 			Count:     len(clean),
-			Note:      resolvedCleanNote(len(clean)),
+			Note:      resolvedCleanNote(len(clean), secRan),
 			Endpoints: clean,
 		},
 		FrontierPending: FrontierPending{
 			Count:     len(frontier),
-			Note:      frontierNote(len(frontier), resolvedLocally),
+			Note:      frontierNote(len(frontier), resolvedLocally, secRan),
 			Endpoints: frontier,
 		},
-		DB: dbSection,
+		Security: securitySection(secRan),
+		DB:       dbSection,
 	}, actionable, nil
+}
+
+// distinctCanon returns the canonical, deduplicated form of paths (D3's
+// denominator for a DB-only pass) — a schema configured twice, or under
+// different slash/case spelling, must count once.
+func distinctCanon(paths []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range paths {
+		c := scope.Canon(p)
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// securitySection builds the ALWAYS-present Security field (D3b). When
+// secRan is true there is nothing to caveat (Measured=true, empty Note,
+// mirroring how a full ScopeBlock carries no note). When false, the note
+// names why (no provider resolved) and what it means for the rest of the
+// response: the schema may still have been audited (by the DB dimension)
+// while the code was not — this is reachable only after the
+// nothing-measurable guard, so a DB-only pass having run is guaranteed here.
+func securitySection(secRan bool) SecuritySection {
+	if secRan {
+		return SecuritySection{Measured: true}
+	}
+	return SecuritySection{
+		Measured: false,
+		Note: "security was NOT audited for this language (no provider) — this is not a clean security " +
+			"result; the schema was audited, the code was not.",
+	}
 }
 
 // endpointOrdering is the one sentence the response uses to state HOW its
@@ -430,9 +494,19 @@ const endpointOrdering = "endpoints are ranked hardest gap kind first (affirmed 
 // deliberately not here and how to get it, and that the deterministic findings
 // that ARE here are complete — otherwise an agent reasonably assumes it is
 // looking at a truncated finding too and re-fetches a fact it already has.
-func actionableNote(count int) string {
+//
+// secRan distinguishes the two reasons this bucket can be empty (D1 site 15,
+// same precedent as BudgetBlock.Note at :138-140): a zero count when security
+// DID run is a real "nothing to act on"; a zero count when it did NOT run is
+// "codefit never looked" and must say so, or an agent reasonably reads
+// silence as "clean".
+func actionableNote(count int, secRan bool) string {
 	if count == 0 {
-		return ""
+		if secRan {
+			return ""
+		}
+		return "0 actionable endpoints, but because security did not run for this language, not because " +
+			"nothing was found — no local analysis was performed."
 	}
 	return fmt.Sprintf("%d endpoint(s) codefit resolved locally and found a gap in — act on these. They are "+
 		"NAMED with what it takes to rank them (how many concerns and of which categories, which kinds of gap, "+
@@ -446,10 +520,14 @@ func actionableNote(count int) string {
 // resolvedCleanNote phrases the resolved-clean bucket as the affirmation it is:
 // codefit checked these locally and the controls are present, no gap. It must not
 // read as "ignore" — it is information (these are verified), and the full detail is
-// a codefit-scan-endpoint call away.
-func resolvedCleanNote(count int) string {
+// a codefit-scan-endpoint call away. secRan: see actionableNote.
+func resolvedCleanNote(count int, secRan bool) string {
 	if count == 0 {
-		return ""
+		if secRan {
+			return ""
+		}
+		return "0 resolved-clean endpoints, but because security did not run for this language, not because " +
+			"nothing was found — no local analysis was performed."
 	}
 	return fmt.Sprintf("%d endpoint(s) codefit resolved locally and found clean: the controls are present "+
 		"(authorization and/or field selection) and no gap was detected in the handler body. They are named "+
@@ -458,15 +536,20 @@ func resolvedCleanNote(count int) string {
 }
 
 // frontierNote phrases what the frontier-pending list means, honestly. When there
-// are no frontier endpoints it is silent. When some endpoints were resolved and
-// some are frontier, it explains they are named-only and how to fetch them. When
-// NOTHING was resolved locally (all frontier), it states emphatically that codefit
-// concluded nothing locally — this is NOT a clean result, every endpoint requires
-// following the data in the code — the same principle as the frontier signal
-// wording: absence of actionable items is not "clean".
-func frontierNote(frontierCount, resolvedLocallyCount int) string {
+// are no frontier endpoints it is silent (unless security did not run — see
+// secRan below). When some endpoints were resolved and some are frontier, it
+// explains they are named-only and how to fetch them. When NOTHING was resolved
+// locally (all frontier), it states emphatically that codefit concluded nothing
+// locally — this is NOT a clean result, every endpoint requires following the
+// data in the code — the same principle as the frontier signal wording: absence
+// of actionable items is not "clean". secRan: see actionableNote.
+func frontierNote(frontierCount, resolvedLocallyCount int, secRan bool) string {
 	if frontierCount == 0 {
-		return ""
+		if secRan {
+			return ""
+		}
+		return "0 frontier-pending endpoints, but because security did not run for this language, not because " +
+			"nothing was found — no local analysis was performed."
 	}
 	if resolvedLocallyCount == 0 {
 		return fmt.Sprintf("codefit concluded nothing locally: every one of these %d endpoint(s) is "+
@@ -623,15 +706,25 @@ func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrul
 	// (schema, filters), merging its output into the db result. With crossrules.All()
 	// empty this slice, this is a proven no-op — the seam, never an output change.
 	res := r.Res
-	crossF, crossS := runCross(root, language, r.Schema, r.SchemaContent, rules, scp)
+	crossF, crossS, crossSkip := runCross(root, language, r.Schema, r.SchemaContent, rules, scp)
 	res.Findings = append(res.Findings, crossF...)
 	res.Surface = append(res.Surface, crossS...)
 
 	// r.Note carries the sensor's composed audit trace (design SS4 "scanall.go
 	// Note Leak" / SS7a) — the completeness inventory plus any 3NF-suppression
 	// trace. The unmeasured paths above already carry Note; this was the one
-	// path that dropped it.
-	return &DBSection{Measured: true, Note: r.Note, Score: res.Score}, res, true
+	// path that dropped it. crossSkip (D6) names WHY the cross did not run, so a
+	// DB-only pass over a language without a QueryExtractor does not read as the
+	// cross simply having nothing to say.
+	fullNote := r.Note
+	if crossSkip != "" {
+		if fullNote != "" {
+			fullNote += " " + crossSkip
+		} else {
+			fullNote = crossSkip
+		}
+	}
+	return &DBSection{Measured: true, Note: fullNote, Score: res.Score}, res, true
 }
 
 // runCross extracts the code's query filters (when the language provider implements
@@ -639,23 +732,29 @@ func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrul
 // filters, stamping the emitted items so they carry a baseline fingerprint (they
 // are produced AFTER the db sensor, so they miss its stamping — content is the
 // parsed schema content, exposed on the sensor result). The rule set is INJECTED:
-// production passes crossrules.All(); the seam gate passes nil. Returns nothing
-// when the schema is nil or the provider has no extractor. The cross is SOFT: a
+// production passes crossrules.All(); the seam gate passes nil. The cross is SOFT: a
 // read/parse hiccup never blanks the db result (ADR 0020) — the walk swallows
 // per-file errors, mirroring the security walk's resilience.
-func runCross(root, language string, schema *db.Schema, content map[string][]byte, rules []crossrules.Rule, scp scope.Scope) ([]findings.Finding, []findings.SurfaceItem) {
+//
+// The third return is the SKIP REASON (D6): empty when the cross ran, otherwise
+// naming why it did not — the schema was not parsed, or (the DB-only path's
+// permanent state) the language's provider has no QueryExtractor, so the code
+// x schema cross rule family (DB-010/DB-013) was never evaluated. Silence on
+// this path would read as "the cross ran and found nothing", which is false.
+func runCross(root, language string, schema *db.Schema, content map[string][]byte, rules []crossrules.Rule, scp scope.Scope) ([]findings.Finding, []findings.SurfaceItem, string) {
 	if schema == nil {
-		return nil, nil
+		return nil, nil, "schema not parsed"
 	}
 	provider := providerForLanguage(language, nil)
 	extractor, ok := provider.(providers.QueryExtractor)
 	if !ok {
-		return nil, nil
+		return nil, nil, fmt.Sprintf(
+			"language %q has no query extractor — the code x schema cross (DB-010/DB-013) was not evaluated", language)
 	}
 	filters := collectQueryFilters(root, provider.FileExtensions(), extractor, scp)
 	fs, surf := crossrules.RunWith(schema, filters, rules)
 	dbsensor.StampSurface(surf, content)
-	return fs, surf
+	return fs, surf, ""
 }
 
 // dbInputsInScope reports whether a pass narrowed to scp has any reason to audit
