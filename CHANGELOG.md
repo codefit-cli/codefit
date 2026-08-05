@@ -129,6 +129,46 @@ work below — which declares gaps rather than closing them.
   MCP tool descriptions and the generated skill are all untouched. This change is one map
   of integers.
 
+### Fixed
+
+- **SQL-DDL: a real column named `key`/`index`/`fulltext`/`spatial` with an unmapped type
+  and no parenthesized column list is now read as a COLUMN, not silently dropped.**
+  `isInlineKeyIndexForm` (the MySQL inline-secondary-index-shorthand discriminator, shared
+  dialect-free code, `internal/providers/sqlddl/reduce.go`) treated *any* unmapped type-like
+  token after the keyword as the index form — parens or not. A real column whose type is
+  simply outside the dialect's vocabulary (PostgreSQL's own `tsvector`, as in real Pagila's
+  `film.fulltext` column) was misread as the shorthand and dropped (`Complete=false`, an
+  honest abstention — the `tsql-alter-add-constraint` FABRICATION GUARD landed 2026-07-31
+  and had already stopped the worse, zero-column-index *fabrication* four days earlier as a
+  side effect; this closes the remaining drop). The fix splits off the type expression's
+  trailing modifiers (the same split a column definition already uses) and asks whether
+  exactly one bare, unmapped token remains with no `(` in it — a positive column test, not
+  bare paren-presence, which would have regressed T-SQL's paren-less inline index into a
+  fabricated column. Covered by a 24-cell matrix (4 keywords × 3 dialects × 2 call sites)
+  and Pagila's `film` table, previously omitted from the fixture entirely because it tripped
+  this exact bug — restored verbatim from upstream (commit `5ba5a57`) and now parses with
+  all 14 columns and `Complete()==true`.
+  - **Declared limit, not silently left behind:** the same unmapped-type token *with* a
+    parenthesized argument list after it (`fulltext tsvector(10)`, `spatial
+    geometry(Point,4326)`) is structurally identical to a named inline index (`KEY idx(a)`)
+    and stays undecidable without reserved-word knowledge — it still fabricates an index
+    from the type's own arguments. Locked as a characterization test
+    (`internal/providers/sqlddl/limits_test.go`) so a future change cannot make it worse
+    without the lock going red first.
+  - **Two manifest sentences this bug's history had left stale are corrected in the same
+    change** ([ADR 0058](docs/decisions/0058-a-declared-limit-can-go-stale-and-nobody-re-verifies-it.md)):
+    `dbcoverage.go`/`COVERAGE.md` limit (5) still described the drop as a *fabrication*
+    ("not yet fixed") four days after the FABRICATION GUARD had already closed that specific
+    consequence as a side effect — the manifest was lying in the *safer* direction, but
+    lying nonetheless. And `dbcoverage.go`'s DW-002 documentation claimed a specific
+    warehouse shape (a dimension keyed by `PRIMARY KEY (fulltext)`) was "reachable, not
+    hypothetical" for DW-002's surrogate-key check — measured directly in a `git worktree`
+    of the pre-fix tip, it was **never** reachable: DW-002 abstains on an unproven table
+    *before* reaching that check, and the same drop this fix closes was what made the table
+    unproven in the first place. Post-fix, that exact shape becomes newly reachable and
+    correctly fires — closing the drop did not just stop a silent loss, it also restored
+    this shape's visibility to DW-002.
+
 ### Declared limits — stated, not hidden
 
 - **`report.score_weights` in `.codefit.yaml` does nothing, and did nothing before this

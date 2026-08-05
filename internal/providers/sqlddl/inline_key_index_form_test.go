@@ -153,8 +153,9 @@ func TestInlineKeyIndexForm(t *testing.T) {
 }
 
 // TestInlineKeyIndexForm_QuotedIdentifierBypassesDispatch is M2: a QUOTED
-// reserved-word identifier (`` `fulltext` ``, `[fulltext]`, `"fulltext"`)
-// never reaches the bare, unquoted leadingKeyword check at all — quoting is
+// reserved-word identifier — MySQL-backtick-quoted, T-SQL bracket-quoted, or
+// ANSI double-quoted — never reaches the bare, unquoted leadingKeyword check
+// at all — quoting is
 // canonicalized to a leading '"' by split() before reduce.go ever sees it
 // (reduce.go:1183-1186's doc comment asserts this; nothing exercised it
 // before this test).

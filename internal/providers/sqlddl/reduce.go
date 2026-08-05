@@ -1426,21 +1426,21 @@ var reservedHeadContinuation = map[string]bool{
 //
 // Two rules were tried and rejected here, both wrong in a different
 // direction (see design sql-ddl-phantom-index §2, D2):
-//   - "no '(' anywhere in item ⇒ column" regresses T-SQL's paren-less inline
-//     index ("INDEX ix CLUSTERED COLUMNSTORE") from honest abstention into a
-//     fabricated column literally named "index".
+//   - no '(' anywhere in item implies column regresses T-SQL's paren-less
+//     inline index (`INDEX ix CLUSTERED COLUMNSTORE`) from honest abstention
+//     into a fabricated column literally named "index".
 //   - a plain re-check of typeBase's OWN first token (ignoring modifiers)
 //     misreads a column whose DEFAULT/GENERATED tail carries parens
-//     ("fulltext tsvector NOT NULL DEFAULT to_tsvector('')") as the index
-//     form, because typeBase alone cannot see past the modifier boundary
-//     splitTypeAndMods exists to find.
+//     (`fulltext tsvector NOT NULL DEFAULT to_tsvector(EMPTY_STRING)`) as
+//     the index form, because typeBase alone cannot see past the modifier
+//     boundary splitTypeAndMods exists to find.
 //
 // The '('-in-token clause is still load-bearing after splitting off
-// modifiers: without it, MySQL's legal UNSPACED "KEY idx(a)" collapses to
-// one token ("idx(a)") with no further tail, and would be misread as a
-// column. Residual, deliberately NOT closed: "<kw> <unmapped-type>(args)"
-// ("fulltext tsvector(10)", "spatial geometry(Point,4326)") is structurally
-// identical to "KEY idx(a)" and stays the index form — undecidable without
+// modifiers: without it, MySQL's legal UNSPACED `KEY idx(a)` collapses to
+// one token (`idx(a)`) with no further tail, and would be misread as a
+// column. Residual, deliberately NOT closed: `<kw> <unmapped-type>(args)`
+// (`fulltext tsvector(10)`, `spatial geometry(Point,4326)`) is structurally
+// identical to `KEY idx(a)` and stays the index form — undecidable without
 // reserved-word knowledge, which the "grammar shape, not vocabulary" design
 // choice (D1) deliberately does not add.
 func (b *builder) isInlineKeyIndexForm(item string) bool {
