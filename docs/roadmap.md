@@ -119,16 +119,36 @@ inline index and still fabricates one — locked as a characterization test. See
 full history, including the lesson this leaves behind: a declared limit needs its own
 re-verification, or it goes stale exactly like an undeclared one.
 
-### P0-3 — Prove or disprove the empty-read false all-clear
+### P0-3 — CLOSED (`empty-read-hole`) — the declared empty-read false all-clear: cache half disproved, walk half narrowed and withdrawn as a cache risk
 
 `os.ReadFile` returns `([]byte{}, nil)` on a first-read EOF, so a file ever observed as
-zero-length would be analysed as empty and *that nothing* cached — a clean verdict for a file
-never read. codefit declared this itself and says, in its own words, **"this is not proven to
-occur"** (ADR 0053).
+zero-length would be analysed as empty. codefit declared this itself and said, in its own
+words, **"this is not proven to occur"** (ADR 0053), asking for a reproduction before a fix.
 
-It is the same family as the cache defect fixed before `v0.2.7`, which *was* real. The first
-step is a reproduction, not a fix: if it cannot be reproduced, the warning is withdrawn with
-the evidence; if it can, it is P0 in earnest.
+Run against the real sensor and the real cache on unmodified `main` @ `ac91109`:
+
+```
+PROBE pass1 (file empty)   findings=0  audited=1     <- "nothing" gets cached
+PROBE pass2 (real content) findings=1  SEC-001 high leak.ts:1
+PROBE control (no cache)   findings=1
+*** NOT REPRODUCED: pass2 matches the uncached control ***
+```
+
+**Not reproduced, and disproved structurally.** The cache key is
+`sha256(analyzer identity ‖ path ‖ content)` — empty content and real content at the same path
+hash to two different keys, so a pass over real content is always a MISS. A poisoned empty
+entry can never be served for non-empty content: not "did not happen", **cannot happen**, by
+the key formula ADR 0053 already specifies. Locked with
+`TestCache_EmptyReadNeverPoisonsLaterRealContentAtSamePath`
+(`internal/sensors/security/cache_test.go`), mutation-proved (edit the key to ignore content,
+the guard fails exactly as predicted; restore it, green again).
+
+**What remains true is not a cache defect.** `os.ReadFile` reporting an empty read on a file
+mid-write is real, present with or without the cache — codefit reports what it read — and it
+is **transient**: the next scan reads the real bytes. There is no sound fix (codefit cannot
+tell a legitimately empty file from one mid-write), so none is attempted. No behaviour
+changed: this closes as a declared limit narrowed to what is true, not as a code fix. See ADR
+0053's superseding note for the full record.
 
 ### P0-4 — Measure the real MCP response ceiling
 

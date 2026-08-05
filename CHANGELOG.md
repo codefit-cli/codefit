@@ -217,6 +217,22 @@ work below — which declares gaps rather than closing them.
 
 ### Declared limits — stated, not hidden
 
+- **The empty-read hole ADR 0053 declared against the finding cache is narrowed: the cache
+  half is reproduced-and-disproved, not merely undisproved.** `v0.2.7` shipped that ADR's own
+  words, verbatim: "this is not proven to occur" (`docs/roadmap.md` P0-3). Run against the
+  real sensor and the real cache on unmodified `main`: a file observed empty (`findings=0`)
+  and then holding real leaking content at the same path produced `findings=1` (`SEC-001`),
+  byte-identical to an uncached control — **not reproduced**. The cache key is
+  `sha256(analyzer ‖ path ‖ content)`, so empty and real content at one path are two different
+  keys and a poisoned empty entry can never be served for non-empty content there: not
+  "did not happen", **cannot happen**, by the key formula ADR 0053 already specified. Locked
+  with `TestCache_EmptyReadNeverPoisonsLaterRealContentAtSamePath`
+  (`internal/sensors/security/cache_test.go`), mutation-proved against a key edited to ignore
+  content. **What remains true is not a cache defect**: `os.ReadFile` observing a file
+  mid-write as empty is real, present with or without the cache, and transient — the next scan
+  reads the real bytes. No sound fix exists (a legitimately empty file is common and
+  indistinguishable from one mid-write), so none is attempted, and nothing about the cache or
+  the walk changed. See ADR 0053's superseding note and `docs/roadmap.md` P0-3 (closed).
 - **`report.score_weights` in `.codefit.yaml` does nothing, and did nothing before this
   change either.** The key is parsed, and `config.Validate` rejects it when it does not sum
   to 100 — and **nothing ever reads it**. `scoring.DefaultWeights()` is hardcoded at both
@@ -688,6 +704,8 @@ of codefit, and read the corpus's honest limits with them (ADR
   defect with a different cause (what the walk accepts as a file's content, not what the cache
   accepts as an entry), it wants its own reproduction before it gets its own fix, and it is
   written down here so it is met as a known item rather than rediscovered. See ADR 0053.
+  (**Narrowed after this tag** — reproduced and disproved as a cache risk; see the
+  "Declared limits" entry under `[Unreleased]` and ADR 0053's superseding note.)
 - **The DB dimension is not cached** — neither the DB sensor nor the code×schema cross.
   Their inputs are the configured `database.schema_paths`, not a repository walk, and a
   schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not
