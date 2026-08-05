@@ -173,13 +173,22 @@ var gateCorpusExpectations = []gateCorpusCase{
 	},
 	{path: "mysql/sakila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
 	{
-		// NO signal fires, where no_audit_timestamps used to: four of these five
-		// tables (actor, customer, address, rental) carry last_update. The fifth,
-		// the payment_p2022_01 partition, does not — which is why DB-052 still
-		// has something to say here while this schema-wide signal does not.
-		// "Not ONE table stamps its rows" is a different claim from "this table
+		// NO signal fires, where no_audit_timestamps used to: four of these six
+		// tables (actor, customer, address, rental) carry last_update. Two do
+		// not — the payment_p2022_01 partition (pre-existing) and film
+		// (sql-ddl-phantom-index: film's own audit stamp IS last_update too, so
+		// this does not move the count) — which is why DB-052 still has
+		// something to say here while this schema-wide signal does not. "Not
+		// ONE table stamps its rows" is a different claim from "this table
 		// does not".
-		path: "pagila_excerpt.sql", tables: 5, proven: 5,
+		//
+		// tables/proven moved 5/5 -> 6/6 when film was restored (sql-ddl-
+		// phantom-index, the D2 fix): film is an ORDINARY, fully-provable OLTP
+		// table with no calendar/surrogate-key/star-topology shape of its own,
+		// so it changes only the raw count — measured directly (a temporary
+		// probe, deleted after use), not assumed: fired stays [], Qualifies()
+		// stays false, Detect().Paradigm stays oltp.
+		path: "pagila_excerpt.sql", tables: 6, proven: 6,
 		paradigmIs: paradigm.ParadigmOLTP,
 	},
 	{path: "pagila_real_objects.sql", tables: 0, proven: 0, paradigmIs: paradigm.ParadigmOLTP},
