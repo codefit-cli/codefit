@@ -54,5 +54,11 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 			"An Express/Fastify route handler passed by REFERENCE — a named identifier rather than an inline function (router.get('/x', listUsers), where listUsers is defined elsewhere) — is not enumerated: codefit maps inline handler bodies, and a handler whose body lives in another scope is a cross-file case the agent must follow. (An auth GUARD by reference is unaffected: it is matched by name in the registration, so a known/registered guard still sets known_authz_detected without codefit reading its body.)",
 			"Server Action input read inline from a FormData (formData.get('key')) and passed DIRECTLY into a service call, with no intermediate variable and no local Prisma access, may not link to that indirect access; when bound to a variable first, it links. The local-access case always enumerates.",
 		}, dbcoverage.NotCovered()...),
+		// TypeScript contributes no entry of its own here yet: the only promised
+		// id delivered under another identifier today is the DB dimension's
+		// DB-201, and dbcoverage owns the DB/DW namespace. Composed by append,
+		// exactly like the three lists above, so a later TypeScript entry lands
+		// in front of the DB ones without touching dbcoverage.
+		DeliveredElsewhere: append([]string{}, dbcoverage.DeliveredElsewhere()...),
 	}
 }

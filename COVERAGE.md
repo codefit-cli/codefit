@@ -2,8 +2,16 @@
 
 What codefit audits, and how. This is the honesty contract: it states what is
 detected deterministically (codefit **affirms** it), what is mapped as surface
-for the agent to reason (codefit **asks**), and what is **not covered** at all —
+for the agent to reason (codefit **asks**), what is **delivered under another
+identifier** than the one the PRD promises, and what is **not covered** at all —
 so a blind spot is *declared and known*, never silent (PRD §10).
+
+> **Every rule id the PRD names gets one of those answers, and silence is not one
+> of them** ([ADR 0057](docs/decisions/0057-the-coverage-manifest-answers-for-every-capability-the-prd-promises.md)).
+> A mechanical control reads `docs/PRD-codefit-v1.4.md`, extracts every
+> `DB-###`/`DW-###` token and fails if any of them is answered by nothing —
+> which is how seven promised ids were found undeclared, and why editing the PRD
+> can now fail a test.
 
 > **The truth chain has three levels, and this file is the last one.** The
 > ROOT source is the rules themselves — `rules/<lang>/`, the sensors in
@@ -1112,6 +1120,28 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     model always counts as unpartitioned — a faithful report of what the
     **source** declares, not a claim about the database.
 
+### Delivered elsewhere — promised under one id, shipped under another
+
+The capability **exists**; only the PRD's identifier does not. Calling these "not
+covered" would be a lie, and leaving them out would be the silence this document
+exists to prevent — so they get their own answer
+([ADR 0057](docs/decisions/0057-the-coverage-manifest-answers-for-every-capability-the-prd-promises.md)).
+
+- **N+1 query-in-loop (DB-201).** Promised by the PRD as a DB rule id (RF-04),
+  **delivered since `v0.2.2`** as the language provider's **`nplus1` surface
+  category** — not a DB/DW rule. It is reachable today:
+  `codefit-surface-nplus1` enumerates it, `scan-all` reports it in the
+  **endpoint** buckets, and the full description is in the *Reasoning* section
+  above. What does not exist is a rule registered under the id `DB-201`, and it
+  never will: N+1 is a **code** fact (a query call site lexically inside a loop)
+  while a `dbrules.Rule` is handed a `*db.Schema` and never sees code —
+  `internal/core/dbrules/layering_test.go` locks that `dbrules.All()` never gains
+  an N+1 entry. So an agent that searches the DB dimension for `DB-201`, finds
+  nothing and concludes N+1 is uncovered is **wrong**, and correcting that is what
+  this entry is for. **Scope:** the deliverer is a *provider*, not the neutral DB
+  dimension, so N+1 exists only for a language whose provider maps it —
+  TypeScript alone today — and the schema-only `codefit-scan-db` never emits it.
+
 ### Not covered (declared, not silent)
 
 - Race conditions in business logic.
@@ -1137,10 +1167,82 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   never connects to a database — it reads only DDL/schema text — so this rule
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
-- **The routine-body rule family is now COMPLETE.** DB-030 (dynamic SQL
-  construction), DB-031 (routine without exception handling), DB-040 (trigger
+- **View logic that should be a function (DB-021)** is **not** covered. It would
+  ask whether a view's `SELECT` body carries computation — a `CASE` ladder,
+  business arithmetic, string assembly — that belongs in a stored function
+  instead, where it is nameable, parameterizable and reusable rather than frozen
+  into one projection. **The parser is not the blocker:** `db.View` carries
+  `Name`, `Pos` and `Body`, so the text is already in the neutral model. What is
+  missing is the judgment, and that judgment is why it is unbuilt rather than
+  merely unscheduled — *"this expression is business logic"* needs the
+  surrounding application to decide, which makes it a **surface candidate**
+  (enumerate the views whose bodies compute, let the agent judge), never a
+  deterministic affirmation. Not built, not scheduled.
+- **Materialized view without a refresh (DB-022)** is **not covered today**.
+  Refresh cadence lives in scheduler state — a cron entry, a CI pipeline, an
+  application job — that static DDL does not carry, so codefit cannot **affirm**
+  that a materialized view is stale; that is the same reasoning recorded for its
+  analytic twin, the DW-022 candidate (below). What that reasoning settles is
+  **affirmations**, and what it does not settle is **surface**: codefit could
+  enumerate the materialized views a schema declares, state that their freshness
+  depends on a scheduler outside the DDL, and let the agent — which reads the
+  cron, the migrations and the CI pipeline codefit never sees — resolve it. That
+  reframing is **decided but not built**
+  ([roadmap](docs/roadmap.md) P4-3): it **reverses a recorded permanent
+  exclusion**, so it owes an ADR, and it needs a **parser floor first** —
+  `db.View` has no way to say a view is *materialized*, the same shape of floor
+  DW-021 (`Index.Method`) and DW-020 (`Table.Partitioning`) each needed. Until
+  both land this is a declared gap, not a capability.
+- **View with broken references (DB-023)** is **not** covered. It would ask
+  whether a view's body still references tables and columns that exist — a view
+  outliving a dropped column or a renamed table keeps its definition and fails
+  only when someone queries it. The blocker is not the view text but **name
+  resolution**: codefit does not resolve identifiers inside a `SELECT` (no alias
+  tracking, no schema qualification, no `*` expansion, no CTE scope), so
+  *"references a column that does not exist"* cannot be established from what the
+  model holds. Doing it half-way is worse than not doing it: a false *broken
+  reference* raised over an alias codefit failed to follow is a **fabrication**,
+  the class `db.Table.Complete` structurally cannot catch. Not built, not
+  scheduled.
+- **Undocumented routine side effects (DB-032)** is **not** covered — the one
+  member of the routine-body family that is not built (see the next bullet for
+  the four that are). It would ask whether a procedure or function that **writes**
+  — an `INSERT`/`UPDATE`/`DELETE`, a call out, a state change beyond its declared
+  result — says so, in a comment or in its name. Two halves are missing and only
+  one is mechanical: reading the writes out of a body is within reach today (the
+  body is captured complete and the family already gates on `Body.Complete`, so
+  unread text is never evaluated), but deciding whether a side effect is
+  **documented** means judging prose, which is agent reasoning. So this is a
+  **surface candidate** — enumerate the routines that write and what they write —
+  and recording that is the point: built as a rule that *affirms* "undocumented",
+  it would be an auditor asserting something it cannot establish.
+- **Candidate 2NF violations (DB-101)** are **not** covered. It would flag a
+  non-key column that depends on **part** of a composite primary key rather than
+  on the whole of it (an `order_line` carrying `product_name` beside its
+  `product_id`). **Surface, never an affirmation** — and that is not a local
+  preference: the PRD promises this one and DB-102 explicitly *"vía razonamiento
+  del agente"* (RF-03). A functional dependency is a fact about the **data** and
+  the **domain**, not about the DDL; no schema text proves `product_name` is
+  determined by `product_id` rather than by the row, and codefit never reads rows.
+  The most codefit could honestly do is **enumerate the shape** — composite-keyed
+  tables and their non-key columns — and let the agent judge. Stated so a future
+  implementer does not build it as a deterministic rule.
+- **Candidate 3NF violations (DB-102)** are **not** covered. It would flag a
+  non-key column that depends on **another non-key column** rather than on the key
+  (a `customer` carrying both `zip` and `city`). Same footing as DB-101 and for
+  the same reason. One interaction is already built and any future implementation
+  must respect it: on a schema classified **OLAP**, denormalization is
+  *intentional* and 3NF-style findings are suppressed by design
+  (`internal/core/paradigm` plus the schema gate, ADR 0037) — surface enumerated
+  for DB-102 has to run behind that same gate or it will flag every dimension
+  table in every warehouse.
+- **The routine-body rule family that READS A BODY is COMPLETE.** DB-030 (dynamic
+  SQL construction), DB-031 (routine without exception handling), DB-040 (trigger
   cross-table cascade), and DB-041 (trigger external-effecting call) are **all
-  covered** as surface (see above), **none deferred**. The parser prerequisite
+  covered** as surface (see above), **none deferred**. It is **not** the whole of
+  what the PRD promises for routines: **DB-032** is a fifth member and is **not
+  built** (declared in its own bullet above). This bullet used to say "the
+  routine-body rule family is now COMPLETE" without that qualification. The parser prerequisite
   was **done** — a multi-statement T-SQL routine body is captured **complete** to
   the `GO` batch separator (or EOF), **not** truncated at its first internal `;`
   (ADR 0027; PostgreSQL dollar-quoted and MySQL `DELIMITER`-wrapped bodies were

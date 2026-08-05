@@ -18,10 +18,55 @@ All notable changes to codefit are documented here. The format is based on
 risk) has started but no dimension of it exists: there is still **no practices sensor and
 no `codefit-check-practices` tool**, and **nothing a user runs reaches a practices rule** —
 `providerForLanguage` maps only TypeScript, and the TypeScript `AnalyzePractices` is still
-a stub. What landed so far is the score weight (below) and an audit of the Go provider's
-own best-practice rules, which no product path currently calls.
+a stub. What landed so far is the score weight (below), an audit of the Go provider's
+own best-practice rules (which no product path currently calls), and the manifest-honesty
+work below — which declares gaps rather than closing them.
+
+### Added
+
+- **The coverage manifest now answers for every capability the PRD promises, and a control
+  enforces it.** `dbcoverage` had two mechanical controls and both looked **outward from
+  the code** — one asks "is every registered rule declared?", the other "does every declared
+  rule exist?". Neither looked **inward from the PRD**, which `CLAUDE.md` names as the
+  project's source of scope, so a capability the PRD promises that was never built and never
+  declared absent passed both: invisible from either end
+  ([ADR 0057](docs/decisions/0057-the-coverage-manifest-answers-for-every-capability-the-prd-promises.md)).
+  Measured: the PRD names **31** DB/DW rule ids, **23** are registered rules, and **7** were
+  answered by nothing at all.
+  - **The new control derives the promised set mechanically** — it reads
+    `docs/PRD-codefit-v1.4.md` and extracts rule-id tokens with the same regexp the existing
+    phantom-capability control uses. There is deliberately **no hand-maintained list** of
+    "ids the PRD promises": a second list drifts exactly the way the manifest drifted and
+    passes its own test while doing so. **Consequence, chosen rather than discovered:
+    editing the PRD can now fail a test.**
+  - **A third answer bucket, `DeliveredElsewhere`,** for a promised id whose capability
+    ships under a different identifier. It exists because two buckets forced a lie: **N+1
+    is promised as `DB-201` and has shipped since `v0.2.2`** as the provider's `nplus1`
+    surface category, so calling it "not covered" is false and omitting it is the silence
+    the manifest exists to prevent. `codefit-coverage` serves the new bucket, and the
+    `codefit-coverage` tool description tells the agent to read it before concluding a rule
+    id is uncovered.
+  - **Six ids are now declared not covered,** each with what it would detect and why it is
+    not built: `DB-021` (view logic that should be a function), `DB-022` (materialized view
+    without a refresh), `DB-023` (view with broken references), `DB-032` (undocumented
+    routine side effects), `DB-101`/`DB-102` (candidate 2NF/3NF violations). `DB-101` and
+    `DB-102` are recorded as **surface candidates, never affirmations** — the PRD promises
+    them *"vía razonamiento del agente"*, and a functional dependency is a fact about data
+    and domain that no schema text establishes — so a future implementer does not build them
+    as deterministic rules.
+  - **No rule was built and no detection changed.** Every response, score, finding and
+    baseline fingerprint is byte-identical; the change is to what the manifest **declares**,
+    which is what the agent reads. `DW-022`'s entry is untouched — `DB-022` is declared
+    against today's truth and points at the roadmap's P4-3, where reframing it as *surface*
+    is decided but owes its own ADR and a `db.View` parser floor.
 
 ### Changed
+
+- **Two manifest sentences that this change falsified were corrected, not left standing.**
+  "The routine-body rule family is now COMPLETE … none deferred" enumerated `DB-030`,
+  `DB-031`, `DB-040` and `DB-041` — but `DB-032` is a fifth member of that family and is
+  not built. Both `dbcoverage.go` and `COVERAGE.md` now scope the claim to the four rules
+  that read a body and name `DB-032` as the missing one.
 
 - **The Go practices rules now say only what they check, and one of them was deleted for
   not doing so.** All five emitted at `Confidence: 1.0` with no `Probabilistic` flag —

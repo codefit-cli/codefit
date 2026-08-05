@@ -135,33 +135,81 @@ func TestManifest_UndeclaredRule_Fails(t *testing.T) {
 // independent of whether it is registered.
 var ruleIDToken = regexp.MustCompile(`\bD[BW]-[0-9]+[a-z]?\b`)
 
+// mentionedTokenIsAnswered is Control B's per-token predicate, extracted so the
+// control and its negative scenario run the SAME logic rather than two
+// descriptions of it. A rule-ID-shaped token the manifest mentions is legitimate
+// when it is answered in one of the THREE ways R1 allows: it is REGISTERED, it
+// is named in NotCovered(), or it is named in DeliveredElsewhere().
+//
+// THE THIRD BRANCH IS THE AMENDMENT (spec R3), and it was forced by DB-201. N+1
+// ships — as the provider's nplus1 surface, not as a DB/DW rule — so the DB
+// manifest names DB-201 in Reasoning() to point at it. Before this branch
+// existed, that mention read as a phantom: not registered, and rightly not in
+// NotCovered(), because calling a shipped capability absent is a lie. The bucket
+// and this branch are one change; either alone is wrong (the bucket alone leaves
+// the tree red, the branch alone widens Control B's hole).
+//
+// What did NOT change: a token in NO bucket is still a phantom capability, and
+// still fails. TestManifest_PhantomCapability_StillFailsAfterTheAmendment holds
+// that line.
+func mentionedTokenIsAnswered(id string) bool {
+	for _, registered := range registeredIDs() {
+		if registered == id {
+			return true
+		}
+	}
+	if containsWholeToken(strings.Join(dbcoverage.NotCovered(), "\n"), id) {
+		return true
+	}
+	return containsWholeToken(strings.Join(dbcoverage.DeliveredElsewhere(), "\n"), id)
+}
+
 // TestManifest_NoPhantomCapability is Control B (secondary, design SS9):
 // every rule-ID-shaped token the manifest MENTIONS in Deterministic()/
 // Reasoning() must be either a REGISTERED rule, or ALSO named in
 // NotCovered() — the legitimate way to describe a not-yet-built rule (DB-012
-// and the permanently-dropped DW-022 candidate are the standing examples).
-// DW-020 and DW-021 both used to sit on that branch and both took the OTHER
-// one when they shipped, in S4 and S3: they are registered rules now, and the
-// manifest describes them as capabilities rather than as gaps. A token that
-// is neither is a phantom capability: prose describing a rule that does not
-// exist and is not declared absent either.
+// and the permanently-dropped DW-022 candidate are the standing examples) —
+// or named in DeliveredElsewhere(), for a promised id whose capability ships
+// under another identifier (DB-201 is the standing example).
+// DW-020 and DW-021 both used to sit on the NotCovered() branch and both took
+// the REGISTERED one when they shipped, in S4 and S3: they are registered rules
+// now, and the manifest describes them as capabilities rather than as gaps. A
+// token in none of the three is a phantom capability: prose describing a rule
+// that does not exist, is not declared absent, and is not delivered by anything
+// else either.
 func TestManifest_NoPhantomCapability(t *testing.T) {
-	registered := map[string]bool{}
-	for _, id := range registeredIDs() {
-		registered[id] = true
-	}
-	notCovered := strings.Join(dbcoverage.NotCovered(), "\n")
-
 	seen := map[string]bool{}
 	for _, id := range ruleIDToken.FindAllString(manifestText(), -1) {
-		if seen[id] || registered[id] {
+		if seen[id] {
 			continue
 		}
 		seen[id] = true
-		if !containsWholeToken(notCovered, id) {
-			t.Errorf("manifest mentions %q in Deterministic()/Reasoning() — it is neither a registered rule "+
-				"nor named in NotCovered() — a phantom capability", id)
+		if !mentionedTokenIsAnswered(id) {
+			t.Errorf("manifest mentions %q in Deterministic()/Reasoning() — it is not a registered rule, "+
+				"not named in NotCovered() and not named in DeliveredElsewhere() — a phantom capability", id)
 		}
+	}
+}
+
+// TestManifest_PhantomCapability_StillFailsAfterTheAmendment is the guard on the
+// amendment itself. Widening Control B to accept a third bucket is one edit away
+// from widening it to accept ANYTHING, and a control that accepts anything
+// reports nothing while still looking green.
+//
+// Both directions are asserted against the REAL predicate the control runs:
+// DB-201 (answered by DeliveredElsewhere() and by nothing else) must now be
+// ACCEPTED, and a fabricated token that appears in no bucket at all must still
+// be REJECTED. The mutation that proves it: make mentionedTokenIsAnswered
+// return true unconditionally — the second assertion fails.
+func TestManifest_PhantomCapability_StillFailsAfterTheAmendment(t *testing.T) {
+	if !mentionedTokenIsAnswered("DB-201") {
+		t.Errorf("Control B must ACCEPT DB-201: it is mentioned in Reasoning() and answered by " +
+			"DeliveredElsewhere() — reporting a phantom for a capability that ships is the defect the " +
+			"amendment exists to fix")
+	}
+	if mentionedTokenIsAnswered("DB-997") {
+		t.Errorf("Control B must still REJECT a token in no bucket at all — DB-997 is registered nowhere, " +
+			"named in NotCovered() nowhere and named in DeliveredElsewhere() nowhere, so it is a true phantom")
 	}
 }
 
