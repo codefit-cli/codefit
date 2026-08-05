@@ -1,6 +1,6 @@
 # Roadmap — priorities, debts, and what is still owed
 
-**Status:** current as of `main` @ `8657607` (2026-08-04). Every claim here was measured
+**Status:** current as of `main` @ `337f158` (2026-08-05). Every claim here was measured
 against the repository, not inferred from the PRD.
 
 This document exists because the Phase-3 thread plan lived only in a conversation. A plan
@@ -27,7 +27,8 @@ nothing. An undeclared one costs them their trust.
 
 **What works, from `main`, right now:**
 
-- MCP stdio server; TypeScript projects only.
+- MCP stdio server. **Per dimension, not per project:** security and its surface mapping are
+  TypeScript-only; the database dimension audits **any** language that declares a schema.
 - Security: deterministic rules + surface mapping (IDOR, authz, over-fetching, N+1).
 - Database: schema-only OLTP rules across Prisma and SQL-DDL (PostgreSQL, MySQL, T-SQL),
   the DW-0xx analytic family, and the code×schema cross (`scan-all` only).
@@ -50,6 +51,16 @@ and refuses only when **neither** a security provider resolves **nor** the DB
 dimension runs, naming both missing inputs. `by_dimension.security` is honestly
 `null` on that path, not a false all-clear.
 
+> **How this section got here (2026-08-05) — kept because the mistake is the lesson.**
+> It used to say codefit refuses "a non-TypeScript project", and that the refusal "is the
+> intended behaviour and it is already right", full stop. **Too broad, and the architect
+> caught it.** The database dimension never needed a language provider: `HandleScanDB`
+> resolves its parser by the **input's shape** (`.prisma` / `.sql`), exactly as ADR 0018
+> specifies. Measured at the time on a Go project with a Postgres schema, `codefit-scan-db`
+> returned `measured=true`, score 90, 2 findings, 2 surface items — while `codefit-scan-all`
+> on the *same* project errored `unsupported language "go"`. The capability worked and the
+> front door refused it. P0-5 closed that; the paragraphs above describe today.
+
 **What does not exist:** the review, tests, complexity and practices sensors. Phase 3 is
 started, not half-done — see P2.
 
@@ -57,7 +68,15 @@ started, not half-done — see P2.
 
 ## P0 — codefit lies or breaks. Nothing ships before these.
 
-### P0-1 — The coverage manifest omits capabilities the PRD promises
+### P0-1 — CLOSED (PR #113) — the coverage manifest omitted capabilities the PRD promises
+
+**Seven**, not six: the survey missed `DB-201`, and it was the one that changed the design.
+The manifest now answers for every rule id the PRD names, and a control derives that promised
+set **mechanically from the PRD** so the next omission cannot pass silently. The answer set
+has three members, not two — `DB-201` (N+1) is *delivered under another identifier*, and
+forcing it into `NotCovered()` would have been a lie about a capability that ships.
+
+The original entry, kept for its reasoning:
 
 Six rule IDs appear in the PRD and **nowhere else**: `DB-021`, `DB-022`, `DB-023`, `DB-032`,
 `DB-101`, `DB-102`. They are not built, and they are **not declared as not-covered in any
@@ -142,6 +161,24 @@ decision record, including the accepted consequence (a narrowed scan on a Go pro
 whose changed files exclude its schema now errors) and the deliberate asymmetry vs.
 `codefit-scan-security`/`codefit-scan-endpoint`, which are unchanged.
 
+The evidence that opened this entry, kept because it is what a measurement buys — the
+architect asked why the DB dimension was refused, and the probe answered before any prose
+did:
+
+```
+codefit-scan-db   → measured=true, score=90, 2 findings, 2 surface items
+                    DB-050 "Table without a primary key"  schema.sql:1
+                    DB-050 "Table without a primary key"  schema.sql:6
+codefit-scan-all  → ERROR: unsupported language "go"
+```
+
+Filed as P0 rather than a capability gap on this document's own criterion: a user with a Go
+backend and a SQL schema was told `unsupported language` and would conclude codefit could not
+audit their project. It could. codefit denied a capability it had — a false statement about
+itself, in the one direction this project treats as unforgivable. The generated skill made it
+worse by telling the agent to call `scan-all` **first**, so the agent hit the error and never
+learned `scan-db` would have worked.
+
 **Explicitly NOT done here** (see P1-1b/c and P4-1 below): unifying the three
 language-resolution switches beyond the divergence locks, resolving the
 `init`-welcomes/`scan-all`-refuses contradiction for Go beyond "the DB dimension now
@@ -164,22 +201,45 @@ table's rewrite).
 
 ### P1-1b — Unify the three independent language-resolution switches
 
-`providerForLanguage` (`internal/mcp/scanall.go`), `providerFor` (`internal/mcp/surface.go`),
-and `detectLanguage` (`internal/scaffold/detect.go`) each decide "what language is
-this" by a different signal (name, file extension, marker file) and, before P0-5,
-disagreed outright: `detectLanguage` recognized Go, the other two did not. P0-5 gave
-`providerForLanguage` a single-source table and added regression locks that keep the
-three switches' *current* agreement from silently drifting further, but it
-deliberately did not converge them into one implementation, and it did not resolve
-the `init`-welcomes/`scan-all`-(mostly)-refuses shape for Go — that decision is
-entangled with P4-1.
+Asked by the architect (2026-08-05): *how does codefit know it lacks a capability for a
+language?* It does not know. **It has it written by hand**, and there are three lists, each
+deciding by a different signal:
+
+| where | decides by | recognised, before P0-5 |
+|---|---|---|
+| `internal/mcp/scanall.go` `providerForLanguage` | language name | **TypeScript only** |
+| `internal/mcp/surface.go` `providerFor` | file extension | **`.ts`/`.tsx` only** |
+| `internal/scaffold/detect.go` `detectLanguage` | marker file (`go.mod`, `package.json`) | **Go *and* TypeScript** |
+
+Read the last row again. **`codefit init` detected a Go project, configured it and installed
+the skill** — and that skill tells the agent to call `scan-all` first, which answered
+`unsupported language "go"`. codefit welcomed you at one door and threw you out of another.
+
+The same root cause explains why the Go provider is invisible: it is complete and working
+(`AnalyzeSecurity`/`AnalyzeSurface`/`AnalyzePractices`, used by codefit's own self-audit and
+by `init`'s detection), and unreachable **only because nobody wrote the `case`**. A capability
+that exists but is not in the hand-written list is, to a user, a capability that does not
+exist.
+
+P0-5 gave `providerForLanguage` a single-source table and three regression locks that keep the
+switches' *current* agreement from drifting further in silence — measured: smuggling a `"go"`
+entry into the table turns Lock A **and** Lock B red, the latter precisely because the two
+switches then disagree. What stays here is **convergence**: the other two adopt that source or
+keep the locks permanently. P0-5 deliberately did not converge them, and did not resolve the
+`init`-welcomes / `scan-all`-mostly-refuses shape for Go — that is entangled with P4-1.
 
 ### P1-1c — Rewrite the README "Supported languages" table
 
-Beyond the single Go-row correction P0-5 made (the one claim it directly falsified),
-the table's framing, the other rows, and its relationship to the per-tool refusal
-behavior (P1-1a) are unreviewed. Owed a full pass once P1-1b's switch unification (or
-an explicit decision not to unify) settles what the table should actually claim.
+`README.md`'s table has Go in its first row:
+
+> **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI.
+
+Every word is true and the placement is not: under a heading that reads **Supported
+languages**, a reader concludes they can audit their Go project. Since P0-5 they get the
+database dimension only. P0-5 corrected the one claim it directly falsified; the table's
+framing, its other rows, and its relationship to the per-tool refusal behaviour (P1-1a) are
+unreviewed. The row has to say what a *user* gets, not what codefit does to itself in CI.
+Owed a full pass once P1-1b settles what the table should actually claim.
 
 ### P1-2 — `report.score_weights` is validated and then ignored
 
