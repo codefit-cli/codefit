@@ -294,10 +294,19 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	}
 
 	// One unified baseline diff over both sensors' observations, scoped to the
-	// categories of the sensors that ran (ADR 0019), persisted once. When db ran,
-	// the cross rules' categories join the db scope too — their items are part of the
-	// db result, so gone-detection/pruning must cover them (ADR 0029).
-	scanned := securityScope(req.Language)
+	// categories of the sensors that ran (ADR 0019), persisted once. scanned
+	// starts EMPTY and is only ever added to inside the "if <dim>Ran" block of the
+	// dimension that owns the categories (invariant SCANNED-OPT-IN, D2): a
+	// forgotten gate can then only fail to ADD categories, never prune something a
+	// sensor never looked at. When db ran, the cross rules' categories join the db
+	// scope too — their items are part of the db result, so gone-detection/pruning
+	// must cover them (ADR 0029).
+	scanned := map[string]bool{}
+	if secRan {
+		for c := range securityScope(req.Language) {
+			scanned[c] = true
+		}
+	}
 	if dbRan {
 		for _, c := range dbsensor.New(nil).OwnedCategories() {
 			scanned[c] = true
