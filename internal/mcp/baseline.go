@@ -37,19 +37,25 @@ type GoneItem struct {
 }
 
 // diffBaseline computes the UNIFIED baseline diff over the observed union (across
-// the sensors that ran), persists the next baseline once, and builds the delta.
-// It is scoped by the categories of the sensors that ran (ADR 0019), so a sensor
-// that did not run never marks another dimension's items gone. Presentation
-// (endpoints for security, a flat section for db) is layered on top of the same
-// diff — the seam declared in ADR 0019, now used by two consumers.
+// the sensors that ran) and builds the delta. It is scoped by the categories of
+// the sensors that ran (ADR 0019), so a sensor that did not run never marks
+// another dimension's items gone. Presentation (endpoints for security, a flat
+// section for db) is layered on top of the same diff — the seam declared in
+// ADR 0019, now used by two consumers.
 // files is the pass's FILE scope: with a partial scan, a baseline item in a file
 // this pass never opened must not become a gone/prune candidate (R5 of the
 // change-scope spec). A full scan passes scope.Full() and the guard is inert.
-func diffBaseline(prev *baseline.Baseline, path string, observed []baseline.Observed, scanned map[string]bool, files scope.Scope) (baseline.DiffResult, BaselineDelta, error) {
+//
+// diffBaseline deliberately does NOT persist diff.Next (R1 of the
+// baseline-write-gate spec). The caller needs the computed diff to build the
+// response; it does not need the save yet, and the save must wait until every
+// check codefit can perform on its own output — scoring.MissingWeights,
+// ScopeBlock.Validate(), and fitToBudget's stillOver — has passed. A response
+// the client cannot receive complete must leave the baseline exactly as it
+// found it, so the next scan re-observes everything honestly rather than
+// having "known" items the reader never saw.
+func diffBaseline(prev *baseline.Baseline, observed []baseline.Observed, scanned map[string]bool, files scope.Scope) (baseline.DiffResult, BaselineDelta) {
 	diff := baseline.Diff(prev, observed, scanned, files)
-	if err := diff.Next.Save(path); err != nil {
-		return baseline.DiffResult{}, BaselineDelta{}, fmt.Errorf("saving baseline: %w", err)
-	}
 	delta := BaselineDelta{
 		New: diff.Counts.New, Changed: diff.Counts.Changed, Known: diff.Counts.Known,
 		Acknowledged: diff.Counts.Acknowledged, Gone: diff.Counts.Gone,
@@ -57,7 +63,7 @@ func diffBaseline(prev *baseline.Baseline, path string, observed []baseline.Obse
 		GoneCandidates:    goneItems(diff.Gone),
 		Note:              baselineNote(diff.Counts),
 	}
-	return diff, delta, nil
+	return diff, delta
 }
 
 // filterEndpointsByBaseline is security's presentation: keep the endpoints with a

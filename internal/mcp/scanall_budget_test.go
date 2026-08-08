@@ -295,14 +295,15 @@ func TestScanAllBudget_NamedEndpointIsFetchableAndMatchesTheWithheldDetail(t *te
 	root := t.TempDir()
 	budgetFixture(t, root)
 
-	resp, complete, err := buildScanAll(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), freshBaseline(t))
+	resp, complete, _, err := buildScanAll(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), freshBaseline(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(complete) == 0 {
 		t.Fatal("the fixture produced no actionable endpoint — nothing to fetch")
 	}
-	named := namedActionable(withNamedActionable(resp, complete, ResponseBudgetBytes))
+	rendered, _ := withNamedActionable(resp, complete, ResponseBudgetBytes)
+	named := namedActionable(rendered)
 	if len(named) != len(complete) {
 		t.Fatalf("the response names %d endpoint(s) for %d complete one(s)", len(named), len(complete))
 	}
@@ -442,11 +443,12 @@ func TestScanAllBudget_NamedEndpointCarriesEnoughToRank(t *testing.T) {
 	root := t.TempDir()
 	budgetFixture(t, root)
 
-	resp, complete, err := buildScanAll(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), freshBaseline(t))
+	resp, complete, _, err := buildScanAll(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), freshBaseline(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	named := withNamedActionable(resp, complete, ResponseBudgetBytes).Actionable.Endpoints
+	rendered, _ := withNamedActionable(resp, complete, ResponseBudgetBytes)
+	named := rendered.Actionable.Endpoints
 	if len(named) == 0 {
 		t.Fatal("no actionable endpoint — this test would prove nothing")
 	}
