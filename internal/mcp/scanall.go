@@ -241,11 +241,27 @@ func handleScanAllScoped(req ScanAllRequest, scp scope.Scope) (ScanAllResponse, 
 //     test can drive the withholding path over a real response instead of having
 //     to synthesise a project with thousands of endpoints.
 func handleScanAllBudgeted(req ScanAllRequest, scp scope.Scope, baselinePath string, budget int) (ScanAllResponse, error) {
-	resp, actionable, err := buildScanAll(req, scp, baselinePath)
+	resp, actionable, next, err := buildScanAll(req, scp, baselinePath)
 	if err != nil {
 		return ScanAllResponse{}, err
 	}
-	return withNamedActionable(resp, actionable, budget), nil
+	rendered, stillOver := withNamedActionable(resp, actionable, budget)
+	// R1 (baseline-write-gate): the baseline is persisted only once the response
+	// has passed EVERY check codefit can perform on its own output.
+	// scoring.MissingWeights and ScopeBlock.Validate() already gated this point —
+	// buildScanAll returns before computing `next` on either failure, so an error
+	// from it never reaches here (see TestScanAllWriteGate_BuildScanAllErrorNeverWrites).
+	// stillOver is the last and, per the census, the most dangerous of the three:
+	// the probability of a response not fitting RISES with the number of
+	// findings, so a still-over response must leave the baseline exactly as it
+	// found it — the next scan re-observes everything, which is the correct
+	// outcome for a reader who never received this one.
+	if !stillOver {
+		if err := next.Save(baselinePath); err != nil {
+			return ScanAllResponse{}, fmt.Errorf("saving baseline: %w", err)
+		}
+	}
+	return rendered, nil
 }
 
 // buildScanAll runs the audit and returns the COMPLETE analysis: the response
@@ -259,14 +275,21 @@ func handleScanAllBudgeted(req ScanAllRequest, scp scope.Scope, baselinePath str
 // be read back into a conclusion — a count taken from the rendered list, a score
 // recomputed over what fit, and the response would be lying about a project it
 // analysed in full.
-func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (ScanAllResponse, []report.EndpointReport, error) {
+//
+// The FOURTH return, next, is the baseline diffBaseline computed but did NOT
+// persist (R1 of the baseline-write-gate spec): the caller decides whether to
+// save it, and only after the budget-fitting step (fitToBudget's stillOver) has
+// also passed — a check this function cannot perform, because it runs before
+// the response is rendered. next is nil on every error return: an error here
+// means the caller must not save anything, and a nil next makes that the only
+// possible outcome rather than a caller obligation to remember.
+func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (ScanAllResponse, []report.EndpointReport, *baseline.Baseline, error) {
 	// Load the committed baseline ONCE: it provides both the project's registered
 	// authz helpers (recognized during the scan) and the previous items the unified
 	// diff is computed against (diffBaseline reuses this same load — no double read).
-	path := baselinePath
-	prev, err := baseline.Load(path)
+	prev, err := baseline.Load(baselinePath)
 	if err != nil {
-		return ScanAllResponse{}, nil, fmt.Errorf("loading baseline: %w", err)
+		return ScanAllResponse{}, nil, nil, fmt.Errorf("loading baseline: %w", err)
 	}
 
 	// Security runs only when a language provider resolves for req.Language — the
@@ -281,7 +304,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		var err error
 		secRes, err = runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
 		if err != nil {
-			return ScanAllResponse{}, nil, err
+			return ScanAllResponse{}, nil, nil, err
 		}
 	}
 	endpoints := report.AggregateEndpoints(secRes.Findings, secRes.Surface)
@@ -296,7 +319,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// before db was wired.
 	cfg, err := config.LoadOptional(filepath.Join(req.Root, ".codefit.yaml"))
 	if err != nil {
-		return ScanAllResponse{}, nil, fmt.Errorf("loading project config: %w", err)
+		return ScanAllResponse{}, nil, nil, fmt.Errorf("loading project config: %w", err)
 	}
 	//
 	// Under a PARTIAL scope the dimension also needs one of its configured schema
@@ -333,7 +356,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// `measured` set (scoring.Compute would return Global:0, a false "worst
 	// possible" reading — proven unreachable by this guard, see D5).
 	if len(measured) == 0 {
-		return ScanAllResponse{}, nil, nothingMeasurableError(req.Language, dbSection)
+		return ScanAllResponse{}, nil, nil, nothingMeasurableError(req.Language, dbSection)
 	}
 
 	// One unified baseline diff over both sensors' observations, scoped to the
@@ -369,10 +392,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 			}
 		}
 	}
-	diff, delta, err := diffBaseline(prev, path, observedFrom(secRes, dbRes), scanned, scp)
-	if err != nil {
-		return ScanAllResponse{}, nil, err
-	}
+	diff, delta := diffBaseline(prev, observedFrom(secRes, dbRes), scanned, scp)
 
 	// Two presentations of the same diff: endpoints for security, a flat section for db.
 	actionable, clean, frontier := report.ClassifyEndpoints(filterEndpointsByBaseline(endpoints, diff))
@@ -386,7 +406,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// guard). The guard below fails loudly if a measured dimension has no weight
 	// (a wiring bug), never a silently incomplete score.
 	if missing := scoring.MissingWeights(measured, scoring.DefaultWeights()); len(missing) > 0 {
-		return ScanAllResponse{}, nil, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
+		return ScanAllResponse{}, nil, nil, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
 	}
 	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
 
@@ -407,7 +427,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	}
 	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), auditableTotal)
 	if err := block.Validate(); err != nil {
-		return ScanAllResponse{}, nil, err
+		return ScanAllResponse{}, nil, nil, err
 	}
 
 	// Every count below is taken from the COMPLETE classification, never from what
@@ -441,7 +461,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		},
 		Security: securitySection(secRan),
 		DB:       dbSection,
-	}, actionable, nil
+	}, actionable, diff.Next, nil
 }
 
 // distinctCanon returns the canonical, deduplicated form of paths (D3's

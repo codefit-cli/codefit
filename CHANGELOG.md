@@ -177,6 +177,33 @@ work below — which declares gaps rather than closing them.
 
 ### Fixed
 
+- **`codefit-scan-all` no longer writes `.codefit-baseline` before it knows the response can
+  reach its reader.** Reproduced live against a real MCP client: a fresh project's `scan-all`
+  response was REJECTED by the client ("result (312,692 characters) exceeds maximum allowed
+  tokens"), and `.codefit-baseline` had already been written in full — 373 items recorded as
+  seen by a reader who received nothing; the retry reported "0 new, 373 known". The write ran
+  ~100 lines before every check codefit performs on its own output
+  ([ADR 0061](docs/decisions/0061-the-baseline-write-is-gated-on-every-check-codefit-can-perform.md)).
+  The save now happens only after `scoring.MissingWeights`, `ScopeBlock.Validate()`, and
+  `fitToBudget`'s `stillOver` have all passed — a response that fails any of them leaves the
+  baseline exactly as it found it, byte-for-byte, and the next scan re-observes everything
+  honestly.
+  - **R2's symmetry, closed on the `known` side too:** the `gone` direction was already
+    guarded by a two-dimensional scope (category AND file, ADR 0048) so a pass cannot prune
+    what it never opened. `known` had no equivalent guard — concretely reachable through the
+    code×schema cross rules (DB-010/DB-013), whose fingerprint anchors to the always-fully-read
+    schema file, letting a narrowed pass re-confirm `known` (and duplicate the item in the
+    saved baseline) under a category it had itself excluded from scope. One guard, the same
+    shape as the existing `gone` guard, closes both.
+  - **Declared, not solved:** MCP defines no delivery acknowledgement, so a well-formed,
+    in-budget response can still be lost after codefit returns it — the Two Generals problem,
+    unclosable by this or any bounded protocol. This change is a mitigation of the reachable
+    instance (a response codefit itself already knows will not arrive intact), not the cure —
+    the cure is deriving "seen before" from confirmed delivery, a larger structural change
+    (invariant I3, `docs/decisions/0060-*.md`).
+  - **Not a fix by atomicity:** `Baseline.Save` was already atomic (temp file + rename) before
+    this change, and it did not help — the write was atomic, complete, and wrong. Recorded so
+    "we made the write atomic" is not mistaken for closing this defect.
 - **SQL-DDL: a real column named `key`/`index`/`fulltext`/`spatial` with an unmapped type
   and no parenthesized column list is now read as a COLUMN, not silently dropped.**
   `isInlineKeyIndexForm` (the MySQL inline-secondary-index-shorthand discriminator, shared

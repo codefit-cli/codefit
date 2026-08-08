@@ -17,7 +17,13 @@ import (
 // in resp, computed over the whole audit; nothing here recomputes one from what
 // survived the cut. That is the entire content of R4, and the reason the naming
 // and the fitting live behind one function that takes a finished response.
-func withNamedActionable(resp ScanAllResponse, actionable []report.EndpointReport, budget int) ScanAllResponse {
+//
+// The second return, stillOver, is R1's third and last check (baseline-write-gate
+// spec): true when the response does not fit its budget even after withholding
+// every droppable endpoint. The caller uses it to decide whether the baseline
+// may be persisted — a response the client cannot receive complete must not
+// advance codefit's memory of what it saw.
+func withNamedActionable(resp ScanAllResponse, actionable []report.EndpointReport, budget int) (ScanAllResponse, bool) {
 	resp.Actionable.Endpoints = report.NameActionable(actionable)
 	return fitToBudget(resp, budget)
 }
@@ -33,7 +39,7 @@ func withNamedActionable(resp ScanAllResponse, actionable []report.EndpointRepor
 // Response size is monotone in the number of endpoints rendered except for the
 // note prose, whose numbers gain and lose digits, so the binary search is
 // followed by a forward walk that makes the result true rather than nearly true.
-func fitToBudget(resp ScanAllResponse, budget int) ScanAllResponse {
+func fitToBudget(resp ScanAllResponse, budget int) (ScanAllResponse, bool) {
 	max := maxDroppable(resp)
 
 	lo, hi := 0, max
@@ -53,7 +59,7 @@ func fitToBudget(resp ScanAllResponse, budget int) ScanAllResponse {
 	// the honest move is to say so, not to start clipping a section whose shape the
 	// agent has no way to check.
 	over := !fitsBudget(withheldBy(resp, lo, budget, false), budget)
-	return withheldBy(resp, lo, budget, over)
+	return withheldBy(resp, lo, budget, over), over
 }
 
 func fitsBudget(resp ScanAllResponse, budget int) bool {

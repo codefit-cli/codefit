@@ -43,7 +43,7 @@ func TestDogfoodResponseBudget(t *testing.T) {
 		t.Run(p.Name, func(t *testing.T) {
 			root := dogfoodRoot(t, p)
 
-			resp, complete, err := buildScanAll(
+			resp, complete, _, err := buildScanAll(
 				ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), dogfoodBaselinePath(t))
 			if err != nil {
 				t.Fatalf("scan-all over %s: %v", root, err)
@@ -60,7 +60,8 @@ func TestDogfoodResponseBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 			// AFTER: the real serialized payload an MCP client receives.
-			after, err := json.Marshal(withNamedActionable(resp, complete, ResponseBudgetBytes))
+			rendered, _ := withNamedActionable(resp, complete, ResponseBudgetBytes)
+			after, err := json.Marshal(rendered)
 			if err != nil {
 				t.Fatal(err)
 			}

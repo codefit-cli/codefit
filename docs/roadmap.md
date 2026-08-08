@@ -205,6 +205,39 @@ language-resolution switches beyond the divergence locks, resolving the
 measures it", and wiring `golang.New()` into `providerForLanguage` (a full
 user-facing Go security provider).
 
+### P0-6 — CLOSED (`baseline-write-gate`) — the baseline was written before codefit knew the response would arrive
+
+Found while measuring P0-4 (above): `codefit-scan-all` persisted `.codefit-baseline` while
+still building its own response, ~100 lines before every check codefit performs on its own
+output (`scoring.MissingWeights`, `ScopeBlock.Validate()`, `fitToBudget`'s `stillOver`).
+
+Reproduced live against a real MCP client, on a fresh project:
+
+```
+codefit-scan-all → the client REJECTS the response:
+    "result (312,692 characters) exceeds maximum allowed tokens"
+codefit had already written .codefit-baseline — 66,227 bytes, 373 items
+the retry reports: "0 new, 373 known"
+```
+
+373 findings recorded as seen by a reader who received nothing. The census that found this
+measured its own test coverage: breaking delivery on purpose turned 20+ tests red, every one
+on "the handler returned an error", and not one on "the baseline was written anyway".
+
+Fixed: `diffBaseline` now only computes the diff; the save moved to the one caller that also
+knows the budget-fitting outcome, and runs only when `MissingWeights`, `ScopeBlock.Validate()`,
+and `stillOver` have all passed. R2's asymmetric scope guard (the `gone` direction was
+protected, `known` was not) closed the same way, concretely reachable through the
+code×schema cross rules' schema-anchored fingerprint under a narrowed scan. See
+[ADR 0061](decisions/0061-the-baseline-write-is-gated-on-every-check-codefit-can-perform.md)
+for the full decision record, including the declared (not solved) residual — MCP defines no
+delivery acknowledgement, so this is a mitigation of the reachable instance, not the cure.
+
+**Explicitly NOT done here:** deriving `known` from confirmed delivery instead of storing it
+(the structural cure, invariant I3's full design); fixing the budget's unit mismatch (bytes
+vs. the client's tokens, still P0-4); and `codefit-baseline-prune`'s same-shaped
+compute-then-save-before-returning, on its own human-triggered path — recorded, not fixed.
+
 ---
 
 ## P1 — the user cannot tell how far codefit reaches
