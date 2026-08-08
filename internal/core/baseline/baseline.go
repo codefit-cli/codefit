@@ -230,6 +230,23 @@ func Diff(prev *Baseline, observed []Observed, scanned map[string]bool, files sc
 
 	for _, o := range observed {
 		if prevItem, ok := prevByFP[o.FP]; ok {
+			// R2's symmetry: the SAME two-dimensional guard that decides whether a
+			// previous item may become "gone" also decides whether it may be
+			// promoted to "known" — an item's state may only be advanced by a pass
+			// that actually looked at it. When either dimension fails, this
+			// observation is not this item's confirmation: the item was already
+			// carried forward verbatim by the out-of-scope loop above, so it is
+			// left untouched here (never re-added — that would duplicate it in
+			// Next.Items) and never marked known/shown from an observation whose
+			// own category or file this pass declared out of scope. This matters
+			// concretely for the code x schema cross rules (DB-010/DB-013): their
+			// fingerprint anchors to the schema file, which the DB dimension
+			// always reads in full, so a narrowed pass can re-observe the same
+			// fingerprint from a shrunken set of query filters even though its
+			// category was deliberately excluded from `scanned` (ADR 0029).
+			if !scanned[prevItem.Category] || !files.Includes(prevItem.File) {
+				continue
+			}
 			if prevItem.Ack != nil {
 				res.State[o.FP] = StateAcked
 				res.Counts.Acknowledged++
