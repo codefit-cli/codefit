@@ -150,14 +150,30 @@ tell a legitimately empty file from one mid-write), so none is attempted. No beh
 changed: this closes as a declared limit narrowed to what is true, not as a code fix. See ADR
 0053's superseding note for the full record.
 
-### P0-4 — Measure the real MCP response ceiling
+### P0-4 — CLOSED, in part (`response-budget-calibrated`) — the response budget is now measured by bisection, not chosen; the structural cap is the remaining half
 
-`ResponseBudgetBytes` is 60 000. That number was **chosen, not measured**. What was observed
-against a real client: 312 692 bytes rejected, 40 282 bytes accepted. The actual cap was
-never seen, only bracketed, and nothing was measured between 40 282 and 60 000.
+`ResponseBudgetBytes` was 60 000, **chosen, not measured** — 312 692 bytes rejected, 40 282
+accepted, and nothing measured between them.
 
-If the real ceiling sits below 60 000, `scan-all` fails today for users on mid-sized
-projects — the exact defect `v0.2.7` was cut to fix.
+Measured by bisection against a real MCP client (Claude Code, 2026-08-09), driving controlled-
+size responses cut from a real 317-file project over stdio: **64 097 bytes ACCEPTED, 74 195
+REJECTED** ("exceeds maximum allowed tokens") — the real ceiling is bracketed there, narrower
+than the ~75 KB the old derivation assumed.
+
+Fixed: `ResponseBudgetBytes` moves to **40 000** — 62% of the largest observed acceptance, with
+room for roughly a 60% increase in token density before approaching the rejected end of the
+bracket. See [ADR 0062](decisions/0062-the-response-budget-is-calibrated-by-bisection-not-chosen.md)
+for the full arithmetic, the stated assumption the number rests on (bytes are a content-dependent
+proxy for the client's real token limit), and the measured consequence: the same real project
+that fit entirely at 60 000 (0 withheld) now withholds 19 of 174 endpoints (5 actionable, 14
+frontier_pending) at 40 000 — a genuine, declared, user-visible behaviour change, not a free
+tightening.
+
+**Explicitly NOT done here, and the reason this closes only "in part":** a byte budget cannot
+guarantee a token limit, no matter how carefully the byte number is calibrated. The structural
+answer — a hard cap on entries per bucket, so response size stops being a function of project
+size at all — is not built. That is P0-4's remaining item, carried forward rather than reopened
+under a new number, because it is the same unresolved half this priority named from the start.
 
 ### P0-5 — CLOSED (`scan-all-db-without-language`) — scan-all refused the DB dimension over a language it did not need
 

@@ -27,26 +27,47 @@ import (
 // ResponseBudgetBytes is the byte budget codefit-scan-all declares for its own
 // serialized response.
 //
-// What is MEASURED, against a real MCP client (Claude Code, 2026-08-04): a
-// 312 692-character response was REJECTED, and a 40 282-byte one was ACCEPTED.
-// That is the whole of the evidence — the client's actual cap was never
-// observed, only bracketed.
+// What is MEASURED (roadmap P0-4): a bisection run against a real MCP client
+// (Claude Code, 2026-08-09), driving the v0.2.6 binary over stdio with
+// controlled-size responses cut from trimmed copies of a real 317-file
+// project. The real ceiling was bracketed, not pinpointed:
 //
-// What is DERIVED: MCP clients cap tool output (Claude Code's default is 25 000
-// tokens) and this dense JSON runs around 3 bytes per token, which puts the cap
-// near 75 KB. 60 KB sits under that and inside the measured bracket.
+//	64 097 bytes  ACCEPTED   <- largest observed acceptance
+//	74 195 bytes  REJECTED   "exceeds maximum allowed tokens"
 //
-// The two are not the same kind of statement, and the gap is real: 60 KB is
-// still 49% above the largest response proven to arrive. It is the number to
-// revisit the first time a response is rejected under it — and because the
-// budget is declared rather than silently applied, that rejection would be
-// visible rather than a quiet half-answer.
+// 40 000 was CHOSEN inside that bracket, not measured directly: 62% of the
+// largest observed acceptance (64 097), leaving room for roughly a 60%
+// increase in token density before approaching the rejected end (74 195), and
+// it matches an earlier, independent data point — a 40 282-byte response that
+// is known to have arrived (2026-08-04, before this bisection existed).
+//
+// The assumption this number rests on, stated plainly: the client's limit is
+// in TOKENS; this budget counts BYTES. The bytes-per-token ratio is
+// content-dependent (identifiers, hex digests and deep paths run denser than
+// prose), so the margin above is NOT fixed — a byte count under budget can
+// still cross a token ceiling the same client would reject. And the
+// measurement is of ONE client, ONE date, ONE content shape: other MCP
+// clients (Cursor, VSCode, OpenCode) have their own limits, unmeasured here.
+//
+// Measured consequence of moving this number down (2026-08-09, same real
+// project, fresh baseline): payload 39 962 bytes, 19 of 174 endpoints
+// withheld (5 actionable, 14 frontier_pending) — at the old 60 000 this same
+// project fit entirely with 0 withheld. Real mid-sized projects now see a
+// non-zero withheld count where they previously did not; each bucket's
+// `count` stays the complete number and codefit-scan-endpoint still fetches
+// full detail on request (ADR 0054), but this is a user-visible behaviour
+// change, not a free tightening.
+//
+// See ADR 0062 for the full record, including what this number does NOT fix:
+// a byte budget cannot guarantee a token limit. The structural answer — a
+// hard cap on entries per bucket, so response size stops being a function of
+// project size — is roadmap P0-4's declared follow-up, not this change.
 //
 // The budget is DECLARED in the response (see BudgetBlock) and enforced by
 // withholding the lowest-ranked endpoints, never by truncating the payload: a
 // clipped response that reads like a complete one is the one outcome forbidden
 // (ADR 0054, same principle as ADR 0048).
-const ResponseBudgetBytes = 60_000
+const ResponseBudgetBytes = 40_000
 
 // ScanAllRequest is the input to codefit-scan-all: a project root and language.
 // codefit walks the project, runs the deterministic sensor and the surface
