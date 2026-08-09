@@ -177,6 +177,39 @@ work below — which declares gaps rather than closing them.
 
 ### Fixed
 
+- **⚠️ The `scan-all` response byte budget is now calibrated by measurement, not chosen —
+  and it moves down: `ResponseBudgetBytes` 60 000 → 40 000, a user-visible behaviour
+  change.** The old 60 000 was picked from a derivation (Claude Code's 25 000-token default
+  at ~3 bytes/token, ~75 KB, minus margin) plus two single data points, never a measured
+  ceiling (roadmap P0-4). Bisected live against a real MCP client (Claude Code, 2026-08-09),
+  driving controlled-size responses cut from a real 317-file project over stdio: **64 097
+  bytes ACCEPTED, 74 195 REJECTED** ("exceeds maximum allowed tokens") — the real ceiling
+  sits in a narrower bracket than the old derivation assumed, with only 6–24% margin under
+  it at 60 000, not the ~49% previously believed. 40 000 is 62% of the largest observed
+  acceptance, chosen to tolerate roughly a 60% increase in token density before approaching
+  the rejected end of the bracket. See
+  [ADR 0062](docs/decisions/0062-the-response-budget-is-calibrated-by-bisection-not-chosen.md)
+  for the full arithmetic and the stated assumption the number rests on: the client's limit
+  is in **tokens**, this budget counts **bytes**, and the ratio between them is
+  content-dependent, so the margin is not fixed — this is one client, one date, one content
+  shape, not a guarantee about other MCP clients (Cursor, VS Code, OpenCode) or other project
+  shapes.
+  - **Measured consequence, verified directly against the real corpus, not assumed:** the
+    same 174-endpoint project that fit entirely at 60 000 (0 withheld) now withholds **19 of
+    174 endpoints** (5 actionable, 14 frontier_pending) at 40 000, in a 39 962-byte response.
+    Real mid-sized projects will start seeing non-zero `withheld` counts they did not see
+    before this change. This is honestly declared, not hidden: each bucket's `count` remains
+    the complete number codefit classified, `withheld` says exactly how many are missing, and
+    `codefit-scan-endpoint` still fetches any named endpoint's full detail on request — but it
+    is a real behaviour change for real projects, not a free tightening.
+  - **What this does NOT fix, stated so it is not mistaken for closed:** a byte budget cannot
+    guarantee a token limit no matter how well the byte number is calibrated. The structural
+    answer — a hard cap on entries per bucket, so response size stops being a function of
+    project size — remains roadmap P0-4's open follow-up.
+  - No rule, finding, surface item or baseline fingerprint changes; this is the same class of
+    change as [ADR 0054](docs/decisions/0054-actionable-endpoints-are-named-and-the-response-declares-its-budget.md)
+    (which this change supersedes only in its number, not its reasoning — naming instead of
+    inlining is what made a byte budget worth calibrating at all).
 - **`codefit-scan-all` no longer writes `.codefit-baseline` before it knows the response can
   reach its reader.** Reproduced live against a real MCP client: a fresh project's `scan-all`
   response was REJECTED by the client ("result (312,692 characters) exceeds maximum allowed

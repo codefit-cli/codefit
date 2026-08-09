@@ -3,6 +3,23 @@
 **Status:** accepted · **Date:** 2026-08-04 · **Supersedes nothing; finishes applying
 [ADR 0006](0006-scan-all-endpoint-synthesis.md) and [ADR 0008](0008-scan-all-frontier-named-not-detailed.md)**
 
+**Superseded in scope (2026-08-09) by
+[ADR 0062](0062-the-response-budget-is-calibrated-by-bisection-not-chosen.md), in the number only.**
+Everything below still holds: naming instead of inlining, the never-droppable deterministic
+finding, the honest over-budget declaration, and the complete-analysis-only-rendering-narrows
+requirement (R4) are all unchanged and are exactly what made the number below worth calibrating
+at all. What is no longer true:
+
+- **§Decision 3's `ResponseBudgetBytes`, 60 000, is FALSE as of ADR 0062.** The constant is
+  `40 000`. The reasoning quoted here (Claude Code's 25 000-token default, ~3 bytes/token, ~75
+  KB derived ceiling) was a derivation, never a measurement — ADR 0062 bisected the real ceiling
+  against a live client and found it bracketed between 64 097 (accepted) and 74 195 (rejected)
+  bytes, narrower than the ~75 KB this ADR assumed.
+- **§Consequences "0 endpoints withheld" for salonpro is FALSE as of ADR 0062.** At 60 000 bytes
+  salonpro's response fit entirely; at the recalibrated 40 000 it withholds 19 of 174 endpoints
+  (5 actionable, 14 frontier_pending). Read ADR 0062 for the full measurement and what it does
+  and does not fix.
+
 ## Context
 
 `codefit-scan-all` over a real 317-file TypeScript project returned **313 368 bytes** and

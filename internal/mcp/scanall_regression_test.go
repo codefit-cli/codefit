@@ -121,11 +121,21 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 				t.Fatalf("marshal: %v", err)
 			}
 
-			gotWithoutSecurity := stripKey(t, live, "security")
-			wantWithoutSecurity := stripKey(t, golden, "security") // golden has no "security" key; delete is a no-op, kept for symmetry
+			// "budget" is also excluded from the identical-fields comparison, on top
+			// of "security": this test's scope is the ADR 0059 regression (the
+			// response for a resolvable language gains exactly one field), not the
+			// budget's own byte number. ADR 0062 recalibrated ResponseBudgetBytes
+			// 60 000 -> 40 000 (roadmap P0-4, measured by bisection against a real
+			// client) after this golden was captured, so `budget.bytes` and
+			// `budget.note`'s embedded number now legitimately differ from the
+			// golden — that recalibration has its own dedicated, mutation-proved
+			// coverage in scanall_budget_test.go, including the I4 honesty lock
+			// (TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding).
+			gotWithoutSecurity := stripKey(t, []byte(stripKey(t, live, "security")), "budget")
+			wantWithoutSecurity := stripKey(t, []byte(stripKey(t, golden, "security")), "budget") // golden has no "security" key; delete is a no-op, kept for symmetry
 			if gotWithoutSecurity != wantWithoutSecurity {
 				t.Errorf("the change moved a pre-existing field for a resolvable-language project.\n"+
-					"pre-change (minus security): %s\npost-change (minus security): %s", wantWithoutSecurity, gotWithoutSecurity)
+					"pre-change (minus security, budget): %s\npost-change (minus security, budget): %s", wantWithoutSecurity, gotWithoutSecurity)
 			}
 		})
 	}
