@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -511,6 +512,103 @@ func TestScanAllBudget_NamedEndpointCarriesEnoughToRank(t *testing.T) {
 	if !sawAffirmation || !sawWithout {
 		t.Errorf("the fixture exercised has_affirmation=true:%v false:%v — a constant would pass this test",
 			sawAffirmation, sawWithout)
+	}
+}
+
+// --- I4 honesty lock (audit-protocol.md) ---------------------------------------
+
+// manyActionableFixture writes n distinct IDOR-shaped endpoints (local access,
+// no authz, no field selection — each one lands in `actionable` with a certain
+// concern). n is chosen by the caller to be large enough that the rendered
+// response overflows ResponseBudgetBytes regardless of what that constant is
+// currently tuned to — the test below verifies that overflow actually happened
+// instead of assuming it, so a future re-calibration cannot silently turn this
+// into a no-op.
+func manyActionableFixture(t *testing.T, root string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		rel := fmt.Sprintf("app/resource%d/[id]/route.ts", i)
+		content := fmt.Sprintf(`
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  return Response.json(await prisma.resource%d.findUnique({ where: { id: params.id } }));
+}`, i)
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding locks
+// invariant I4 (docs/specs/audit-protocol.md): "a result that is a prefix of
+// the truth must say which prefix". It is deliberately independent of
+// TestScanAllBudget_ConclusionsAreComputedOverTheCompleteAnalysis, which only
+// checks that two runs at DIFFERENT budgets agree with EACH OTHER — a mutation
+// that broke both runs identically (e.g. hardcoding every bucket's Count to 0)
+// would pass that comparison. This test instead checks each bucket's Count
+// against a KNOWN GROUND TRUTH: the exact number of endpoints the fixture
+// created, established independently of any rendering.
+//
+// Mutation-proved: with report.ClassifyEndpoints/NameActionable's Count wired
+// from len(rendered Endpoints) instead of the complete pre-render slice (the
+// exact defect ADR 0054 R4 forbids), this test fails — actionableCount no
+// longer equals n once withholding drops entries, and Budget.Withheld no
+// longer accounts for the gap. Restoring the wiring turns it green again.
+func TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding(t *testing.T) {
+	root := t.TempDir()
+	const n = 450
+	manyActionableFixture(t, root, n)
+
+	resp := runBudgeted(t, root, ResponseBudgetBytes)
+
+	// The rendered response always fits (fitToBudget withholds exactly until it
+	// does), so the guard that this fixture actually FORCES withholding is on
+	// Budget.Withheld, not on the marshaled size exceeding the budget. If a
+	// future re-calibration raises the budget past what n endpoints produce,
+	// this guard fails loudly instead of the invariant quietly going untested.
+	if resp.Budget.Withheld == 0 {
+		t.Fatalf("the %d-endpoint fixture fit entirely within the %d-byte budget — this test no longer "+
+			"forces withholding; grow the fixture", n, ResponseBudgetBytes)
+	}
+	if raw, err := json.Marshal(resp); err != nil {
+		t.Fatal(err)
+	} else if len(raw) > ResponseBudgetBytes {
+		t.Errorf("the rendered response is %d bytes, %d over the declared %d-byte budget",
+			len(raw), len(raw)-ResponseBudgetBytes, ResponseBudgetBytes)
+	}
+
+	// I4, ground truth: Actionable.Count is the COMPLETE number codefit
+	// classified — every one of the n endpoints the fixture created, none of
+	// them clean or frontier by construction (IDOR with no authz is always a
+	// certain, actionable gap).
+	if resp.Actionable.Count != n {
+		t.Fatalf("the fixture created %d actionable endpoint(s), the response's Actionable.Count says %d — "+
+			"Count drifted from the complete classification", n, resp.Actionable.Count)
+	}
+	if resp.ResolvedClean.Count != 0 || resp.FrontierPending.Count != 0 {
+		t.Fatalf("the fixture is actionable-only by construction, got resolved_clean=%d frontier_pending=%d",
+			resp.ResolvedClean.Count, resp.FrontierPending.Count)
+	}
+
+	// I4, the arithmetic a reader relies on: what is rendered plus what is
+	// declared withheld must reconstruct the complete count, per bucket and in
+	// the roll-up Budget.Withheld.
+	rendered := len(resp.Actionable.Endpoints)
+	if rendered >= n {
+		t.Fatalf("the response rendered all %d endpoint(s) despite overflowing the budget — nothing was withheld", rendered)
+	}
+	if resp.Actionable.Withheld != resp.Actionable.Count-rendered {
+		t.Errorf("actionable: count=%d rendered=%d but withheld=%d", resp.Actionable.Count, rendered, resp.Actionable.Withheld)
+	}
+	if resp.Budget.Withheld != n-rendered {
+		t.Errorf("Budget.Withheld=%d, want %d (the %d endpoints the fixture created minus the %d rendered)",
+			resp.Budget.Withheld, n-rendered, n, rendered)
+	}
+	if !strings.Contains(strings.ToLower(resp.Budget.Note), "withheld") {
+		t.Errorf("Budget.Note must say endpoints were withheld, got %q", resp.Budget.Note)
 	}
 }
 
