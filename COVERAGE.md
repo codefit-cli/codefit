@@ -1197,12 +1197,14 @@ exists to prevent — so they get their own answer
   enumerate the materialized views a schema declares, state that their freshness
   depends on a scheduler outside the DDL, and let the agent — which reads the
   cron, the migrations and the CI pipeline codefit never sees — resolve it. That
-  reframing is **decided but not built**
-  ([roadmap](docs/roadmap.md) P4-3): it **reverses a recorded permanent
-  exclusion**, so it owes an ADR, and it needs a **parser floor first** —
-  `db.View` has no way to say a view is *materialized*, the same shape of floor
-  DW-021 (`Index.Method`) and DW-020 (`Table.Partitioning`) each needed. Until
-  both land this is a declared gap, not a capability.
+  reframing is **decided and recorded** in
+  [ADR 0063](docs/decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md)
+  ([roadmap](docs/roadmap.md) P4-3), but **not built**: it **reverses a
+  recorded permanent exclusion**, and it still needs a **parser floor
+  first** — `db.View` has no way to say a view is *materialized*, the same
+  shape of floor DW-021 (`Index.Method`) and DW-020 (`Table.Partitioning`)
+  each needed. Until the floor lands and a rule is built this is a declared
+  gap, not a capability.
 - **View with broken references (DB-023)** is **not** covered. It would ask
   whether a view's body still references tables and columns that exist — a view
   outliving a dropped column or a renamed table keeps its definition and fails
@@ -1282,6 +1284,19 @@ exists to prevent — so they get their own answer
   Materialized-view refresh staleness (a DW-022 candidate) was evaluated and
   **permanently dropped**, same DB-012 lineage as never-used-index: refresh
   cadence lives in external cron/scheduler state absent from static DDL.
+  **Superseded by [ADR 0063](docs/decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md)
+  (2026-08-10; kept append-only as the record of the original call):** that
+  reasoning is right about **affirmations** (codefit still cannot say a
+  materialized view is stale) and wrong about **surface** — codefit can
+  enumerate the materialized views a schema declares and let the agent
+  resolve freshness from the cron, the migrations and the CI pipeline
+  codefit never sees. The reframing is **decided and recorded, not built**:
+  `db.View` has no way to say a view is materialized yet (the same parser
+  floor `DW-021`'s `Index.Method` and `DW-020`'s `Table.Partitioning` each
+  needed before their own rules), and the future rule is a **schema-level
+  census** — one item per schema, never one per view — following
+  `DW-005`/`DW-011`/`DW-020`. `DB-022`, the OLTP twin, takes the same
+  reversal (see its own entry above).
   Separately from the rules, the **name-vocabulary limit recorded here has
   narrowed**: table-role detection now recognizes **PascalCase Kimball naming**
   (`FactInternetSales`, `DimCustomer` — as Microsoft's own AdventureWorksDW

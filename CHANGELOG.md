@@ -341,7 +341,7 @@ work below — which declares gaps rather than closing them.
   reads the real bytes. No sound fix exists (a legitimately empty file is common and
   indistinguishable from one mid-write), so none is attempted, and nothing about the cache or
   the walk changed. See ADR 0053's superseding note and `docs/roadmap.md` P0-3 (closed).
-- **`report.score_weights` in `.codefit.yaml` does nothing, and did nothing before this
+- ~~**`report.score_weights` in `.codefit.yaml` does nothing, and did nothing before this
   change either.** The key is parsed, and `config.Validate` rejects it when it does not sum
   to 100 — and **nothing ever reads it**. `scoring.DefaultWeights()` is hardcoded at both
   call sites in `internal/mcp/scanall.go`, and the field has no reference anywhere in the
@@ -349,9 +349,46 @@ work below — which declares gaps rather than closing them.
   today gets their map validated and then ignored. Pre-existing, not introduced here, and
   deliberately **not fixed here**: making it real means deciding what a partial user map
   means and how it interacts with the `measured ⊆ weights` guard. Declared so it stops
-  being a silent one.
+  being a silent one.~~ **Fixed** (`p1-config-and-owed-entries`, still within this same
+  `[Unreleased]` — kept struck through rather than deleted so the history of this entry
+  stays legible): see the `⚠️ report.score_weights is now actually used` entry under
+  `### Fixed` above for the resolution, including the `measured ⊆ weights` interaction this
+  entry named as the open question.
 - **The PRD still reads `complexity: 15`** in its defaults line and its `.codefit.yaml`
   sketch. The PRD is exempt from the reflect-today rule, so this is recorded, not corrected.
+- **DW-022's owed ADR is written — and it reverses the "permanently dropped" call it was
+  expected to confirm.** `VERSIONING.md` recorded a materialized-view-refresh exclusion
+  (`DW-022`, and its OLTP twin `DB-022`) as permanent, same lineage as `DB-012`
+  (never-used index), and said the ADR was still owed. Per the decision recorded in
+  `docs/roadmap.md` P4-3 (2026-08-04),
+  [ADR 0063](docs/decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md)
+  pays that debt by reversing it: codefit still cannot **affirm** that a materialized view is
+  stale (refresh cadence lives in scheduler state no DDL carries), but it *can* **enumerate**
+  the materialized views a schema declares as surface and let the agent — which can read the
+  cron, the migrations and the CI pipeline codefit never sees — resolve freshness. `DB-012`
+  is unaffected: it has no equivalent smaller, DDL-provable claim to fall back to, so it stays
+  exactly as [ADR 0024](docs/decisions/0024-db-012-never-used-index-permanently-not-covered.md)
+  left it. **Decided and recorded, not built:** verified directly against the struct, not
+  assumed — `db.View` (`internal/core/db/db.go`) carries only `Name`, `Pos` and `Body`, with
+  no way to say a view is materialized, the same parser-floor shape `DW-021`'s `Index.Method`
+  and `DW-020`'s `Table.Partitioning` each needed before their own rules; the eventual rule is
+  planned as a **schema-level census** (one item per schema, never one per view, following
+  `DW-005`/`DW-011`/`DW-020`), not a per-view affirmation.
+  - `VERSIONING.md`, `COVERAGE.md` and `internal/core/dbcoverage/dbcoverage.go` each carry an
+    append-only superseding note pointing at ADR 0063 — the original "permanently dropped"
+    prose stays legible as the record of what Phase 2.5 decided and why it changed, rather
+    than being rewritten to erase it.
+  - **No rule, finding, surface item or baseline fingerprint changes.** `dwrules.All()` stays
+    seven rules, `dbrules.All()` stays fourteen — this closes a decision debt, not an
+    implementation one.
+- **PRAC-004's owed coverage-manifest entry is recorded as BLOCKED, not faked.** Its
+  permanent drop is recorded in
+  [ADR 0056](docs/decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
+  and the CHANGELOG, and it owes a manifest entry — but there is no Go coverage manifest to
+  put it in (`internal/providers/golang/coverage.go` does not exist), and creating one just to
+  host this single entry would pre-empt the still-open architect decision on the Go
+  provider's status (roadmap P1-3/P4-1). `docs/roadmap.md` P1-4b now names this blocker
+  explicitly instead of leaving the debt unqualified. No code changes.
 
 ## [0.2.7] — 2026-08-04
 
