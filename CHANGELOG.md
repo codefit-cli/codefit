@@ -188,6 +188,43 @@ work below — which declares gaps rather than closing them.
 
 ### Fixed
 
+- **⚠️ `report.score_weights` is now actually used by `codefit-scan-all` — a behaviour
+  change, not just a bug fix.** `config.Validate` rejected a map that did not sum to 100
+  and then `scan-all` discarded it: `scoring.MissingWeights` and `scoring.Compute` were
+  both called with `scoring.DefaultWeights()` at every call site, so a re-weighted audit
+  was validated and silently ignored (roadmap P1-2). `scoring.ResolveWeights` now decides
+  which map `scan-all` uses: the user's `cfg.Report.ScoreWeights`, converted to
+  `findings.Dimension` keys, when it names at least one entry; `DefaultWeights()`
+  otherwise — an absent key is byte-identical to before this change (locked against a
+  golden response captured via `git worktree add --detach` at this branch's base,
+  `cfd1ad7`, not re-implemented by hand).
+  - **⚠️ A partial map that used to be silently ignored can now produce an error.**
+    `scoring.MissingWeights` has existed since [ADR 0021](docs/decisions/0021-by-dimension-scoring-wired-into-scan-all.md)
+    specifically to catch a measured dimension with no weight, but it could never fire in
+    practice: `DefaultWeights()` names every dimension `core/findings` declares. A
+    user-supplied map is not guaranteed to — `{security: 100}` validates (it sums to 100)
+    but names nothing for `db`, and a scan that also measures `db` now surfaces an
+    **actionable, worded-for-the-user** error (`report.score_weights in .codefit.yaml has
+    no weight for measured dimension(s) [db] — add them to score_weights (the map must
+    still sum to 100), or remove score_weights entirely to use codefit's defaults`)
+    instead of either silently dropping the dimension from the global or (the old,
+    unreachable path) reading `codefit internal: ...`, which is reserved for a genuine
+    codefit wiring bug (`DefaultWeights()` itself missing an entry), never a user config
+    mistake.
+  - **The sum-to-100 validation stays, unchanged, and is now defended in its own doc
+    comment** (`internal/config/validate.go`): `scoring.Compute` normalizes by the weight
+    sum of the *measured* dimensions, not by a hardcoded 100, so sum-to-100 is not
+    load-bearing for the arithmetic — it is kept so the numbers mean what they look like
+    they mean (an 80/20 split reads as percentage points only if 80 and 20 already are
+    one), and so validation has one fixed target instead of an open-ended "just be
+    positive" that would need its own new rules. Deliberately **not** required to name
+    every one of the six declared dimensions: validation cannot know in advance which
+    dimensions a given project will measure (`db` only runs when `schema_paths` is
+    configured and in scope), so that completeness check stays at scan time
+    (`scoring.MissingWeights`), where the actually-measured set is known.
+  - No rule, finding, surface item or baseline fingerprint changes; the only response
+    field this can move is `score` (`global` and, indirectly, nothing else — per-dimension
+    scores are unaffected by weights).
 - **⚠️ The `scan-all` response byte budget is now calibrated by measurement, not chosen —
   and it moves down: `ResponseBudgetBytes` 60 000 → 40 000, a user-visible behaviour
   change.** The old 60 000 was picked from a derivation (Claude Code's 25 000-token default

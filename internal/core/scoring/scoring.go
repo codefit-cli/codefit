@@ -48,6 +48,30 @@ func DefaultWeights() map[findings.Dimension]int {
 	}
 }
 
+// ResolveWeights decides WHICH weight map a scan-all run uses: userWeights
+// (typically cfg.Report.ScoreWeights, string-keyed as .codefit.yaml spells
+// dimension names) converted to findings.Dimension keys, when the caller
+// named at least one entry; DefaultWeights() otherwise (roadmap P1-2 —
+// report.score_weights was validated and then never read).
+//
+// This does NOT re-validate the sum-to-100 contract — config.Validate already
+// rejected a map that does not sum to 100 before it ever reaches here — and it
+// does NOT pad a partial map with defaults for the dimensions it omits: a map
+// naming only {"security": 100} resolves to exactly {security: 100}, nothing
+// else. Whether that partial map is USABLE for a given scan (every dimension
+// the scan actually measured has a weight) is Compute's/MissingWeights'
+// concern, not this function's — ResolveWeights only picks the map.
+func ResolveWeights(userWeights map[string]int) map[findings.Dimension]int {
+	if len(userWeights) == 0 {
+		return DefaultWeights()
+	}
+	resolved := make(map[findings.Dimension]int, len(userWeights))
+	for k, v := range userWeights {
+		resolved[findings.Dimension(k)] = v
+	}
+	return resolved
+}
+
 // counts reports whether a finding contributes to scoring. Suppressed
 // (consent-accepted) and baselined (historical debt) findings do not penalize.
 func counts(f findings.Finding) bool {

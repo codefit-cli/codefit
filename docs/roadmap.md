@@ -335,12 +335,39 @@ rows (Java/Spring, Python/FastAPI/Django) make no capability claim at all. No ta
 was needed beyond the Go row P0-5 already fixed; P1-1a above closes the surrounding
 per-dimension framing the table's heading needed.
 
-### P1-2 — `report.score_weights` is validated and then ignored
+### P1-2 — CLOSED (`p1-config-and-owed-entries`) — `report.score_weights` is validated and then ignored
 
-`config.Validate` rejects the map when it does not sum to 100, and **nothing ever reads it**.
-`scoring.DefaultWeights()` is hardcoded at both call sites. A user who re-weights their audit
-gets their map validated and silently discarded. Either it works or it is rejected with a
-message; today it does the worst of both.
+`config.Validate` rejected the map when it did not sum to 100, and **nothing ever read it**:
+`scoring.DefaultWeights()` was hardcoded at both `scan-all` call sites
+(`scoring.MissingWeights` and `scoring.Compute`). A user who re-weighted their audit got
+their map validated and silently discarded.
+
+**Fixed.** `scoring.ResolveWeights(userWeights)` decides which map `scan-all` uses: the
+user's `cfg.Report.ScoreWeights`, converted to `findings.Dimension` keys, when it names at
+least one entry; `DefaultWeights()` otherwise. An absent key is byte-identical to before
+this change, locked against a golden response captured from a real `git worktree` at this
+change's base commit (`cfd1ad7`), not a hand-written expectation.
+
+**The declared consequence, handled deliberately:** `scoring.MissingWeights` has existed
+since [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md) to catch a
+measured dimension with no weight, but could never fire — `DefaultWeights()` names every
+declared dimension. A user map is not guaranteed to: `{security: 100}` validates (sums to
+100) but omits `db`, and a scan that also measures `db` now surfaces an actionable,
+user-worded error naming `db` and pointing at `score_weights`, distinct from the
+`codefit internal: ...` wording reserved for a genuine wiring bug.
+
+**Decided and defended:** the sum-must-be-100 validation stays unchanged.
+`scoring.Compute` normalizes by the measured dimensions' own weight sum, not by a
+hardcoded 100, so the constraint is not load-bearing for the arithmetic — it is kept so a
+weight reads as a percentage point, and so validation has one fixed target instead of an
+open-ended "just be positive". It is deliberately **not** widened to require every one of
+the six declared dimensions: validation cannot know in advance which dimensions a given
+project will measure (`db` only runs when configured and in scope), so that completeness
+check stays at scan time (`scoring.MissingWeights`), where the actual measured set is
+known and the error can name exactly what is missing. See `internal/config/validate.go`'s
+doc comment for the full reasoning and the CHANGELOG's `[Unreleased]` entry for the
+user-facing behaviour change (⚠️ — a config key that did nothing now does something, and a
+partial map that was silently ignored can now error).
 
 ### P1-3 — Decide and declare the Go provider's status
 

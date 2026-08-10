@@ -424,12 +424,40 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// Scoring (ADR 0021), over RAW findings (not baseline-filtered) so the global
 	// equals the flat security score exactly when db is absent — no value
 	// regression. measured/scored were HOISTED above (see the nothing-measurable
-	// guard). The guard below fails loudly if a measured dimension has no weight
-	// (a wiring bug), never a silently incomplete score.
-	if missing := scoring.MissingWeights(measured, scoring.DefaultWeights()); len(missing) > 0 {
+	// guard).
+	//
+	// weights (roadmap P1-2): cfg.Report.ScoreWeights, when the user set it, IS
+	// now the map scoring actually uses — config.Validate already rejected one
+	// that does not sum to 100, but nothing ever read it past that point.
+	// ResolveWeights falls back to scoring.DefaultWeights() when the user set
+	// nothing (cfg == nil or an empty map), so an absent key is byte-identical
+	// to before this change.
+	var userWeights map[string]int
+	if cfg != nil {
+		userWeights = cfg.Report.ScoreWeights
+	}
+	weights := scoring.ResolveWeights(userWeights)
+
+	// The guard below fails loudly if a measured dimension has no weight,
+	// never a silently incomplete score. It now has TWO reachable causes,
+	// worded differently so the reader knows who must act:
+	//   - a user-supplied partial map that does not name every dimension THIS
+	//     scan measured (validation only checks the map it was given sums to
+	//     100 — it cannot know in advance which dimensions a given project
+	//     will measure, since that depends on what is configured/found) — a
+	//     CONFIG error, actionable in .codefit.yaml.
+	//   - DefaultWeights() itself missing a dimension core/findings declares —
+	//     a codefit WIRING bug, never a silently incomplete score (ADR 0021).
+	if missing := scoring.MissingWeights(measured, weights); len(missing) > 0 {
+		if len(userWeights) > 0 {
+			return ScanAllResponse{}, nil, nil, fmt.Errorf(
+				"config: report.score_weights in .codefit.yaml has no weight for measured dimension(s) %v — "+
+					"add them to score_weights (the map must still sum to 100), or remove score_weights entirely to use codefit's defaults",
+				missing)
+		}
 		return ScanAllResponse{}, nil, nil, fmt.Errorf("codefit internal: measured dimension(s) without a weight: %v", missing)
 	}
-	score := scoring.Compute(measured, scored, scoring.DefaultWeights())
+	score := scoring.Compute(measured, scored, weights)
 
 	// The scope block unions what BOTH dimensions examined: the security walk's
 	// files and, when the db dimension ran, the configured schema sources it read.

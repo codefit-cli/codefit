@@ -56,6 +56,35 @@ func validate(cfg *Config, root *yaml.Node, src string) error {
 			dt, strings.Join(allowedDBTypes, ", ")),
 			"database", "type")
 	}
+	// The sum-to-100 rule stays even though a PARTIAL map is a real,
+	// supported case since roadmap P1-2 (scoring.ResolveWeights uses exactly
+	// the dimensions the user named, never padded by the defaults). It is
+	// deliberately kept, not relaxed to "just be positive":
+	//
+	//   - scoring.Compute normalizes by the WEIGHT SUM OF THE MEASURED
+	//     dimensions, not by a hardcoded 100 — so sum-to-100 is not required
+	//     for the arithmetic to be correct. It is required for the NUMBERS
+	//     TO MEAN WHAT THEY LOOK LIKE THEY MEAN: {security: 80, db: 20} reads
+	//     as an 80/20 split only if 80 and 20 are already percentage points.
+	//     Drop the constraint and {security: 5000} becomes "valid", producing
+	//     a coherent-looking but meaningless score.
+	//   - It gives validation a fixed, unambiguous target instead of an
+	//     open-ended one ("must be positive", "must not overflow", ...) that
+	//     would need its own new rules for what counts as a "reasonable"
+	//     partial sum.
+	//   - It matches DefaultWeights()'s own doc comment and its own test
+	//     (TestDefaultWeights_SumIsExactly100) — a user's map and codefit's
+	//     defaults share one contract, not two.
+	//
+	// Completeness (does the map name every dimension THIS scan will
+	// measure) is deliberately NOT checked here: validation cannot know in
+	// advance which dimensions a given project measures (db only runs when
+	// schema_paths is configured and in scope), so requiring every one of
+	// the six declared dimensions here would force users to weight
+	// dimensions their project may never run. That check belongs, and lives,
+	// at scan time (scoring.MissingWeights, internal/mcp/scanall.go), where
+	// the actual measured set is known and the error can name exactly what
+	// is missing.
 	if w := cfg.Report.ScoreWeights; len(w) > 0 {
 		sum := 0
 		for _, v := range w {
