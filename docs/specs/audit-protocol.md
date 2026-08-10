@@ -101,6 +101,32 @@ A declared limit that no test exercises is a belief, not a limit.
 
 ## L3 in full — the delivery layer
 
+> **Correction (2026-08-10) — the mechanism below was proposed, reviewed and REJECTED.
+> What L3 actually got is different, and this section is kept for its reasoning, not as a
+> plan.**
+>
+> The architect's objection killed it: **`pending → known` depends on the agent doing
+> something.** An agent that reads a report and acts on none of it — the common case on a
+> mostly-clean project — promotes nothing. Everything stays `pending` and is re-reported
+> forever, the noise never stops, and the baseline loses the only thing it exists to provide.
+> It inverts worst: *the cleaner the project, the noisier codefit becomes over time.* A
+> mechanism whose correctness depends on the other party behaving well is not a mechanism.
+>
+> The question that replaced it: not *"how does codefit learn the report arrived?"* but
+> **"in which cases does codefit already KNOW its response cannot arrive?"** — and it knows in
+> three of four (over budget, score weights inconsistent, scope block invalid). The write moved
+> behind those checks. See `docs/specs/baseline-write-gate.md` and **ADR 0061**.
+>
+> What that costs, stated: the fourth case — a well-formed, in-budget response lost to a
+> dropped connection — stays open. **MCP defines no delivery acknowledgement** (verified
+> against the specification), so it is the Two Generals problem and no bounded protocol closes
+> it. The gate is a **mitigation, not a cure**, and the structural cure is deriving "seen
+> before" rather than storing it (the Semgrep / golangci-lint shape), which is a separate,
+> larger change.
+>
+> The `pending` state is **archived, not discarded**: if that residual is ever measured to
+> occur, it is the design that covers it — at the cost this correction names.
+
 ### The mistake in one sentence
 
 `known` currently means *"codefit computed this"*. It must mean *"the reader received this"* —
