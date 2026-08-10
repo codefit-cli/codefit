@@ -283,7 +283,7 @@ schema parser "by the INPUT's shape (.prisma / .sql), not the app language (ADR
 0018)" — a comment in the code itself, and `req.Language` is never read for parser
 selection). No code changed.
 
-### P1-1b — Unify the three independent language-resolution switches
+### P1-1b — CLOSED (`language-capability-source`) — Unify the three independent language-resolution switches
 
 Asked by the architect (2026-08-05): *how does codefit know it lacks a capability for a
 language?* It does not know. **It has it written by hand**, and there are three lists, each
@@ -308,9 +308,30 @@ exist.
 P0-5 gave `providerForLanguage` a single-source table and three regression locks that keep the
 switches' *current* agreement from drifting further in silence — measured: smuggling a `"go"`
 entry into the table turns Lock A **and** Lock B red, the latter precisely because the two
-switches then disagree. What stays here is **convergence**: the other two adopt that source or
-keep the locks permanently. P0-5 deliberately did not converge them, and did not resolve the
-`init`-welcomes / `scan-all`-mostly-refuses shape for Go — that is entangled with P4-1.
+switches then disagree. What stayed open after P0-5 was **convergence**: the other two adopt
+that source or keep the locks permanently. P0-5 deliberately did not converge them, and did not
+resolve the `init`-welcomes / `scan-all`-mostly-refuses shape for Go — that is entangled with
+P4-1.
+
+**Fixed.** `internal/providers/registry` is now the one ordered table all three switches query
+(ADR 0064): `providerForLanguage`/`SupportedLanguageNames` (`scanall.go`), `providerFor`
+(`surface.go`), and `detectLanguage` (`scaffold/detect.go`) each read it by their own signal —
+name, extension, marker file — and none of them builds a concrete provider on its own anymore
+(`scaffold/detect.go` drops its `golang`/`typescript` imports entirely). The table also carries
+a `Capability()` declaration per provider (rule IDs per family, surface categories, whether a
+coverage manifest exists) alongside its `Exposure` (which resolvers admit it), so capability and
+exposure are two independent, checkable facts instead of one inferred from the other. Every
+answer set stays byte-identical to before this change by construction — Locks A and C needed no
+edit and stayed green throughout; Lock B compile-broke exactly where the deleted
+`languageProviders` map was named and was fixed by editing only its iteration source. Go stays
+registered with `Exposure.SecurityScan`/`SurfaceTools` both `false` (P4-1's wiring is still a
+deliberate, later decision) and `InitDetect` `true`.
+
+**Side effect, not a resolution:** `internal/providers/golang/capability.go` is now a real,
+tested landing site for a per-rule declaration, which is what P1-4b was blocked on missing (a
+place to put PRAC-004's owed manifest entry) — but P1-4b names a *coverage manifest*
+(`golang/coverage.go`, `CoverageManifest()`), which this change deliberately does not build.
+P1-4b stays open.
 
 ### P1-1c — CLOSED (`readme-per-dimension-reach`) — rewrite the README "Supported languages" table
 
