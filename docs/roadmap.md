@@ -258,7 +258,7 @@ compute-then-save-before-returning, on its own human-triggered path — recorded
 
 ## P1 — the user cannot tell how far codefit reaches
 
-### P1-1a — Say in the README, before install, how far codefit reaches per language
+### P1-1a — CLOSED (`readme-per-dimension-reach`) — say in the README, before install, how far codefit reaches per language
 
 The code refuses honestly for the tools that still refuse (`scan-security`,
 `scan-endpoint`, `coverage`). The documentation must say so just as plainly, *before*
@@ -267,6 +267,21 @@ the more nuanced true thing for `scan-all`: DB-dimension-only, schema-only, for 
 language with no security provider. The README's "Supported languages" table's Go row
 was corrected for the one claim P0-5 falsified (P1-1c below owns the rest of the
 table's rewrite).
+
+**Fixed.** `README.md`'s `## Status` section — the first thing a reader sees, before
+`## Install` — now opens with a "Reach is per dimension, not per project" paragraph:
+security/surface mapping is TypeScript-only and `scan-security`/`scan-endpoint`/
+`coverage` refuse anything else; the database dimension resolves its parser by the
+schema file's shape (`.prisma`/`.sql`), never by the app's language, so a Go or Python
+project with `database.schema_paths` gets it audited. The "What codefit covers today"
+section's `Languages` bullet, which used to read as a whole-product language list
+(`TypeScript / TSX ... and Go`), now says the same per-dimension thing and points at
+the language-independent database-dimension bullet below it. Verified against
+`internal/mcp/scanall.go` (`languageProviders` resolves only
+`typescript`/`ts`/`tsx`) and `internal/mcp/scandb.go`'s `HandleScanDB` (resolves the
+schema parser "by the INPUT's shape (.prisma / .sql), not the app language (ADR
+0018)" — a comment in the code itself, and `req.Language` is never read for parser
+selection). No code changed.
 
 ### P1-1b — Unify the three independent language-resolution switches
 
@@ -297,18 +312,28 @@ switches then disagree. What stays here is **convergence**: the other two adopt 
 keep the locks permanently. P0-5 deliberately did not converge them, and did not resolve the
 `init`-welcomes / `scan-all`-mostly-refuses shape for Go — that is entangled with P4-1.
 
-### P1-1c — Rewrite the README "Supported languages" table
+### P1-1c — CLOSED (`readme-per-dimension-reach`) — rewrite the README "Supported languages" table
 
-`README.md`'s table has Go in its first row:
+`README.md`'s table had Go in its first row:
 
 > **Go** | Provider + static security/best-practice detectors. codefit audits itself in CI.
 
-Every word is true and the placement is not: under a heading that reads **Supported
+Every word was true and the placement was not: under a heading that reads **Supported
 languages**, a reader concludes they can audit their Go project. Since P0-5 they get the
 database dimension only. P0-5 corrected the one claim it directly falsified; the table's
-framing, its other rows, and its relationship to the per-tool refusal behaviour (P1-1a) are
+framing, its other rows, and its relationship to the per-tool refusal behaviour (P1-1a) were
 unreviewed. The row has to say what a *user* gets, not what codefit does to itself in CI.
-Owed a full pass once P1-1b settles what the table should actually claim.
+
+**Fixed, in two steps.** The Go row itself was corrected in `817070e` (P0-5, 2026-08-05):
+it now says what a Go *user* gets — the DB dimension only, when they configure a schema,
+with `codefit-scan-security`/`codefit-scan-endpoint` still refusing and
+`by_dimension.security: null` — not what the Go provider does internally in CI. This
+change reviewed the rest of the table for the same class of error and found none: the
+TypeScript row names the actual frameworks (Next.js App Router/Server Actions, Express,
+Fastify, NestJS) it maps surface for, with no unsupported claim, and the two "Roadmap"
+rows (Java/Spring, Python/FastAPI/Django) make no capability claim at all. No table edit
+was needed beyond the Go row P0-5 already fixed; P1-1a above closes the surrounding
+per-dimension framing the table's heading needed.
 
 ### P1-2 — `report.score_weights` is validated and then ignored
 
@@ -331,10 +356,18 @@ not an auditable language today. See P4-1 for the larger question.
 - **PRAC-004**'s permanent drop is recorded only in ADR 0056 and the CHANGELOG. It owes a
   manifest entry, which is blocked on there being a Go manifest at all (P1-3).
 
-### P1-5 — Check whether the README promises the HTTP/SSE transport
+### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 
 `--port` is not implemented; the server is stdio only. If the README offers it, that is one
 more claim to correct.
+
+**Checked, no change needed.** `README.md:181` already says
+`"**On the roadmap (not yet in \`main\`):** the HTTP/SSE transport;"` — filed under what is
+**not** yet available, not offered as a working feature. Verified against
+`internal/cli/mcp.go`'s `newMCPServeCmd`: the `--port` flag exists but its `RunE` returns
+`"the HTTP/SSE transport (--port) is not implemented yet; use stdio (no --port)"` whenever
+`port != 0`, and the flag's own help text says `"(not implemented yet)"`. The claim matches
+the code exactly; no README edit was needed for this item.
 
 ---
 
