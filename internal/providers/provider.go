@@ -65,6 +65,14 @@ type LanguageProvider interface {
 	Frameworks() []string     // recognized frameworks
 	FileExtensions() []string // e.g. [".go"], [".ts", ".tsx"]
 
+	// Capability declares what this provider implements — its rule IDs per
+	// family and its surface category coverage — independent of which
+	// resolvers currently expose it (that is internal/providers/registry's
+	// Exposure, a separate fact). A provider cannot know which resolvers admit
+	// it, so it never declares its own exposure; it only declares what it can
+	// do. Every registered provider MUST return a non-zero Capability (C1).
+	Capability() Capability
+
 	// DefaultPathCriticality returns sensible production/test/example defaults
 	// for this ecosystem (RF-11), overridable in .codefit.yaml.
 	DefaultPathCriticality() config.PathCriticality
