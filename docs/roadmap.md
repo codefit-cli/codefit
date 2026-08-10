@@ -417,13 +417,20 @@ not an auditable language today. See P4-1 for the larger question.
   at the ADR — the original "permanently dropped" text is kept, not deleted, as the record of
   what Phase 2.5 decided and why it changed. No rule, finding, surface item or baseline
   fingerprint changes: `dwrules.All()` stays seven rules, `dbrules.All()` stays fourteen.
-- **P1-4b — BLOCKED — PRAC-004's owed manifest entry.** Its permanent drop is recorded only
-  in [ADR 0056](decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
-  and the CHANGELOG; it owes a coverage-manifest entry. **Blocker:** there is no Go coverage
-  manifest to put it in — `internal/providers/golang/coverage.go` does not exist — and that is
-  entangled with the still-open architect decision on the Go provider's status (P1-3/P4-1).
-  Creating a Go manifest to host one entry would pre-empt that decision and is deliberately
-  out of scope here; this item stays open until P1-3/P4-1 resolves.
+- **P1-4b — STILL OPEN, blocker resolved differently — PRAC-004's owed manifest entry.**
+  Its permanent drop is recorded only in
+  [ADR 0056](decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
+  and the CHANGELOG; it owes a coverage-manifest entry. **The blocker this item names — "no
+  Go coverage manifest to put it in, entangled with the still-open P1-3/P4-1 decision" — no
+  longer applies as written: P4-1 resolved** ([ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md),
+  `declared-partial-language-exposure`) **without building `internal/providers/golang/coverage.go`.**
+  R1 of that change made a hand-written prose manifest unnecessary for correctness — Go's
+  security/practices rule ids (`internal/providers/golang/capability.go`) are already a real,
+  tested landing site the coverage tool derives an honest answer from directly, with no
+  manifest file needed. PRAC-004's entry could land there in the derived list, or in a future
+  hand-written `golang/coverage.go` if one is ever written (it would become authoritative over
+  the derived floor, same as TypeScript's). Neither is done by this item's own act — it
+  **stays open**, but its landing site is no longer hypothetical.
 
 ### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 
@@ -486,23 +493,53 @@ The ones most worth revisiting first, by user impact:
 
 ## P4 — scope decisions owed to the architect
 
-### P4-1 — Does Go become a user-facing auditable SECURITY language?
+### P4-1 — CLOSED (`declared-partial-language-exposure`) — Does Go become a user-facing auditable SECURITY language?
 
-Since P0-5, "does Go become auditable" is no longer all-or-nothing: `scan-all`
-already measures the DB dimension for a Go project with a configured schema. What
-remains is narrower and still a real scope decision: does `providerForLanguage`
-(`internal/mcp/scanall.go`'s `languageProviders` table) ever gain a `"go"` entry so
-`codefit-scan-security`/`codefit-scan-endpoint`/`by_dimension.security` become real
-for Go code? Today the Go provider maps **one** surface category (`authz`) against
-TypeScript's four, has six hand-written security rules against TypeScript's rule
-engine, and has no coverage manifest. Wiring it in is one line — Lock A
-(`internal/mcp/language_source_test.go`) exists specifically to turn that one line
-into a failing test instead of a silent slide, so this stays a decision, not an
-accident.
+**Decided: yes, exposed — not as a parity claim.** Since P0-5, "does Go become
+auditable" was no longer all-or-nothing: `scan-all` already measured the DB dimension
+for a Go project with a configured schema. What remained was narrower: does
+`providerForLanguage` (via `internal/providers/registry`'s `Exposure`, since ADR 0064)
+ever gain a `"go"` entry so `codefit-scan-security`/`codefit-scan-endpoint`/
+`by_dimension.security` become real for Go code?
 
-Parity is a phase-sized effort, comparable to what Phase 1 did for TypeScript. The argument
-*for* it: codefit is written in Go, developed with AI, and cannot audit itself through its
-own tools — only through an internal test.
+The measurement that forced the decision: Go's exposure was flipped locally and the
+real binary was driven over stdio against a Go project containing a SQL injection. It
+found the finding — and `surface_items: 1` carried no statement that three of Go's four
+surface categories were never searched for, and `codefit-coverage` for `"go"` returned
+an error instead of an answer. Exposure without declaration is a partial audit that
+reads as a complete one.
+
+**Fixed.** `internal/providers/registry`'s Go entry now declares
+`Exposure{SecurityScan: true, SurfaceTools: true, InitDetect: true}` — flipping the one
+line Lock A existed to turn into a failing test, deliberately, this time. The rule that
+made it safe to flip: **a language may be exposed only if the response declares what it
+does not cover for that language.** `surface.DeriveCoverage` computes, for any
+provider's declared `Capability.Surface`, the mapped/not-mapped split against the
+locked `surface.ProviderCategories` vocabulary — never a hardcoded list — and that
+statement now rides on `codefit-coverage` (R1, replacing the old error with a DERIVED
+manifest), on `codefit-scan-security`/`scan-all`'s responses (R2, a new
+`surface_coverage` field), and on `codefit init`'s printed line and the generated
+skill (R4), all before a user runs a single scan. Go's real reach — 6 security rules,
+1 of 4 surface categories (`authz` only) — is stated everywhere it is exposed, never
+implied as parity with TypeScript's four-of-four.
+
+Flipping the boundary turned seven pre-existing tests red — Locks A/B/C plus four
+`scan-all` tests that depended on Go having no resolvable provider — and that was them
+working. The locks were not deleted: Locks A/B/C now assert the resolvable set is
+`{typescript, ts, tsx, go}` explicitly, the four DB-only `scan-all` tests moved their
+fixture to an unregistered language (preserving the exact scenario they always
+tested), and a new lock (`TestExposedLanguageDeclaresNonEmptyCapability` +
+`TestReplacementLock_ExposedLanguageDeclaresCompleteGap`, generic over every exposed
+language) replaces the guarantee the old ones held: nothing is exposed without being
+declared.
+
+See [ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md)
+and `docs/specs/declared-partial-language-exposure.md`. **Out of scope, deliberately:**
+no new Go rules or surface categories (parity remains a phase-sized effort, comparable
+to what Phase 1 did for TypeScript — codefit is written in Go, developed with AI, and
+still cannot audit itself through its own tools, only through an internal test); no
+`internal/providers/golang/coverage.go` (R1 makes it unnecessary for correctness — see
+P1-4b below).
 
 ### P4-2 — Documentation-quality rules do not exist anywhere
 

@@ -15,6 +15,26 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- ⚠️ **`"go"` is now a resolvable language for security scanning and surface
+  mapping (roadmap P4-1)**: `codefit-scan-security`, `codefit-scan-endpoint`,
+  `codefit-scan-all`, and the `codefit-surface-*` family now accept `"go"`
+  instead of refusing it — the registry's `Exposure.SecurityScan`/
+  `SurfaceTools` for Go flipped from `false` to `true`. Go's reach is narrow
+  and stated as such, never as parity with TypeScript: **6** declared
+  security rules, **1 of 4** surface categories (`authz` only). Every scan
+  response for an exposed language — Go and TypeScript both — gains a new
+  `surface_coverage` field (on `codefit-scan-security`'s response and on
+  `scan-all`'s `security` section) declaring exactly which surface
+  categories were mapped and which were not, both machine-readable and in
+  prose. `codefit-coverage` for `"go"` now returns a manifest DERIVED from
+  its declared `Capability()` (a new `derived: true` field marks it) instead
+  of erroring `"no coverage manifest for language \"go\""`; TypeScript's
+  hand-written manifest is unchanged (`derived: false`), verified
+  field-for-field against a pre-change golden. `codefit init`'s printed
+  capability line and the generated skill both state the same N-of-4 reach
+  before a user installs anything. See
+  [ADR 0065](docs/decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md)
+  and `docs/specs/declared-partial-language-exposure.md`.
 - `internal/providers/registry`: the one ordered `language → provider` table.
   `LanguageProvider` gained `Capability()` (rule IDs per family, surface
   category coverage, coverage-manifest presence), and each registry `Entry`
@@ -23,11 +43,14 @@ All notable changes to codefit are documented here. The format is based on
   facts instead of five hand-written, disagreeing ones. `scan-all`'s
   `providerForLanguage`/`surface.go`'s `providerFor`/`scaffold`'s
   `detectLanguage` all query the registry now; none of them builds a concrete
-  provider on its own. No user-visible behaviour change — every resolver's
-  answer set is byte-identical to before this change, verified against the
-  pre-existing regression locks. Go stays unexposed to security/surface
-  tooling (roadmap P4-1, unchanged); only `codefit init`'s detection reaches
-  it, as before. `Exposure.InitDetect` is now actually enforced —
+  provider on its own. No user-visible behaviour change at THIS commit —
+  every resolver's answer set is byte-identical to before this change,
+  verified against the pre-existing regression locks; Go stayed unexposed to
+  security/surface tooling here, only `codefit init`'s detection reached it.
+  (A later entry in this same `[Unreleased]` section — roadmap P4-1, ADR
+  0065 — flips Go's `Exposure.SecurityScan`/`SurfaceTools` to `true`; this
+  entry's registry/mechanism is what made that a one-field, checked change
+  rather than a new switch.) `Exposure.InitDetect` is now actually enforced —
   `registry.ByMarkerFile` skips any entry whose `InitDetect` is false, table
   order preserved for the entries that remain eligible — closing a same-PR
   correction where the field was declared and documented but not yet
