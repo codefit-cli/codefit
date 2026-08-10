@@ -62,7 +62,60 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **In flight: the `0.3.0` line. Phase 3 has started.** The next tag is a
+- **`v0.2.8` — a PATCH: no phase closes here.** *(This bullet supersedes the one below it,
+  kept append-only rather than deleted: the architect reversed the call it made.)* The
+  superseded bullet argued the next tag should be `v0.3.0-alpha.N` because "from H1 onward
+  the work is new capability." **That premise was wrong**: nearly everything landed since
+  `v0.2.7` is `0.2`-line debt, not Phase 3 capability — the SQL-DDL fix to a real dropped
+  column (`sql-ddl-phantom-index`), the DB coverage manifest closing its promised-but-absent
+  gap (`DB-021`/`-022`/`-023`/`-032`/`-101`/`-102`, plus the DW-022 reversal via ADR 0063),
+  the DB dimension running in `scan-all` for a language with no security provider (ADR 0059),
+  the response byte budget calibrated by bisection (ADR 0062, 60 000 → 40 000), and
+  `report.score_weights` going from validated-and-ignored to actually wired
+  (`scoring.ResolveWeights`). Phase 2 closed at `v0.2.5`; this closes that line's residual
+  debt. The MINOR ↔ phase table above gains **no row** — it maps phase *closures*, and this
+  closes none.
+
+  **It is not 100% Phase-2 work, and that is said here rather than buried.** Two pieces of
+  Phase 3 shipped on `main` inside this same window: `practices` became a weighted dimension
+  in `scoring.DefaultWeights()` (5 points, funded by `complexity`; ADR 0055; PR #109), and the
+  Go provider's own best-practice rules were audited for over-claiming, with `PRAC-004`
+  dropped for asserting a synchronization check it never performed (ADR 0056; PR #111).
+  Neither reaches a product path: `providerForLanguage` maps only TypeScript, the TypeScript
+  `AnalyzePractices` is still a stub, and there is no `codefit-check-practices` tool — so
+  `by_dimension.practices` is `null` on every response, unchanged by either landing.
+
+  **Four user-visible contract changes ship in this PATCH**, each measured against the code,
+  not asserted:
+  1. `by_dimension` gains a `practices` key — always `null`, since no sensor exists yet.
+  2. `ScanAllResponse` gains an always-present `security` section (`measured`/`note`),
+     mirroring `db`'s shape but never `omitempty` (ADR 0059).
+  3. `ResponseBudgetBytes` moves **60 000 → 40 000**, calibrated by bisection against a real
+     MCP client: 64 097 bytes accepted, 74 195 rejected (ADR 0062). Measured consequence on a
+     real 317-file project: 19 of 174 endpoints withheld (5 actionable, 14 frontier_pending),
+     a 39 962-byte response — the same project fit entirely at the old 60 000.
+  4. `report.score_weights` now actually drives the score (`scoring.ResolveWeights`) instead
+     of being validated and silently discarded; a partial user map missing a measured
+     dimension's weight now produces a named, actionable error instead of either silently
+     dropping the dimension or hitting the internal-bug branch.
+
+  **No new audit capability ships here.** Checked against the code, not assumed: no rule was
+  added to `dbrules`, `dwrules`, `paradigm` or `crossrules`; no surface category was added;
+  no dimension gained a sensor. The six P0 defects this PATCH closes (see `docs/roadmap.md`)
+  and the audit-protocol work behind them are about codefit telling the truth about what it
+  already does, not about auditing anything new.
+
+  **Declared and not fixed:** the byte budget still guards a **token** limit with a **byte**
+  proxy — the structural per-bucket cap that would make response size stop depending on
+  project size is P0-4's remaining half. MCP defines no delivery acknowledgement, so the
+  baseline-write gate (ADR 0061) is a mitigation of the reachable instance, not a cure for the
+  underlying Two Generals problem. P1-1b (unifying the three language-resolution switches)
+  and P1-3 (deciding the Go provider's user-facing status) are deferred by explicit decision,
+  and P1-4b (`PRAC-004`'s owed coverage-manifest entry) stays blocked on P1-3, since there is
+  no Go coverage manifest to host it in yet. See the [CHANGELOG](CHANGELOG.md) `[0.2.8]`
+  section for the itemized list.
+- *(Superseded by the bullet above — kept as the record of the original, incorrect call.)*
+  **In flight: the `0.3.0` line. Phase 3 has started.** The next tag is a
   **`v0.3.0-alpha.N`**, not a `v0.2.8` — per the Pre-releases rule above, work *toward* a
   MINOR carries the pre-release suffix on the **target** version, and `0.3.0` is Phase 3's
   target in the table. `v0.2.7` was the last tag on the `0.2` line: it shipped Phase 3's
