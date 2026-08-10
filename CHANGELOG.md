@@ -58,6 +58,19 @@ All notable changes to codefit are documented here. The format is based on
   already wanted it `true`, so no answer set changed). See
   [ADR 0064](docs/decisions/0064-language-capability-and-exposure-registry.md).
 
+### Fixed
+- **README.md's TypeScript surface-mapping reach was stated as three
+  categories; it is four.** `nplus1` shipped as a fourth surface category in
+  `v0.2.2` (`codefit-surface-nplus1`); two restatements — the "Works today"
+  bullet and the Supported-languages table row — were never updated and
+  undercounted it for roughly seven weeks, pre-existing and unrelated to any
+  change in this window. Both corrected to name all four categories, and
+  locked: `internal/providers/readme_surface_count_test.go` reads README.md
+  and checks, per category actually in `typescript.New().Capability().Surface`,
+  that a matching prose marker appears in both restatements — so a category
+  added to the vocabulary with no updated README fails this test for a real
+  reason instead of drifting silently again.
+
 ## [0.2.8] — 2026-08-10
 
 **A PATCH release: no PRD phase closes here.** Phase 2 closed at `v0.2.5`; this release pays

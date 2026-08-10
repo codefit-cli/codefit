@@ -445,6 +445,26 @@ more claim to correct.
 `port != 0`, and the flag's own help text says `"(not implemented yet)"`. The claim matches
 the code exactly; no README edit was needed for this item.
 
+### P1-6 — CLOSED (`readme-count-and-prac004-entry`) — README undercounted TypeScript's surface-mapping reach
+
+`README.md` stated TypeScript's surface mapping as **three** categories in two places (the
+"Works today" bullet and the Supported-languages table row); it is **four** —
+`nplus1` shipped as a real category (`codefit-surface-nplus1`) in `v0.2.2`, and both
+restatements were never updated, undercounting it for roughly seven weeks. Pre-existing,
+unrelated to any change in this window; `sdd-verify` measured it and `git blame` confirmed
+the age.
+
+**Both lines corrected** to name all four categories (IDOR, broken authorization,
+over-fetching, N+1). **Locked**, not just fixed:
+`internal/providers/readme_surface_count_test.go` reads `README.md` and, for every category
+in `typescript.New().Capability().Surface`, checks that a matching prose marker appears in
+both restatements — derived against the real declaration rather than a second hardcoded
+count, so a category added to the vocabulary with no README update fails this test for a
+real reason. No other restatement of the count was found on a positive-probe search of the
+repository (README's own intro line, `CLAUDE.md`, `COVERAGE.md`, and every CHANGELOG/ADR hit
+were checked; the CHANGELOG/ADR mentions are dated, pre-`v0.2.2` historical entries this
+project's doctrine does not rewrite).
+
 ---
 
 ## P2 — finish Phase 3

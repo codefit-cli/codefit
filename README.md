@@ -116,8 +116,8 @@ the full per-language, per-dimension breakdown.
   not implied as parity.
 - **Deterministic security rules (TypeScript)** — five categories, each a fact at
   certainty 1.0 (see [COVERAGE.md](COVERAGE.md)).
-- **Surface mapping** — three categories (IDOR, broken authorization,
-  over-fetching) for Next.js (App Router + Server Actions), **Express, Fastify, and
+- **Surface mapping** — four categories (IDOR, broken authorization,
+  over-fetching, N+1) for Next.js (App Router + Server Actions), **Express, Fastify, and
   NestJS**, enumerated completely for the agent to reason. Resource access in another
   file is signalled (`indirect_access`), not followed across files.
 - **`scan-all` three-bucket synthesis** + on-demand `scan-endpoint` detail.
@@ -689,7 +689,7 @@ data left the handler) it hands off at the *frontier*; what it does not cover it
 | Language / Ecosystem | Status |
 | --- | --- |
 | **Go** | `codefit-scan-security`, `codefit-scan-endpoint`, and `codefit-scan-all` audit Go code: **6** declared deterministic security rules (hardcoded secrets, SQL injection by string concatenation, OS command injection by string concatenation, an env var read without a default, insecure `math/rand` fed into a security value, weak hashing with MD5/SHA-1) and **1 of 4** surface categories mapped (`authz` — HTTP handlers; IDOR, over-fetching, and N+1 are not mapped for Go). Every `codefit-coverage`/scan response for Go states this reach explicitly (a `surface_coverage` field naming what was mapped and what was not), never a bare pass/fail. `codefit-scan-all` also audits the DB dimension (schema-only) when `database.schema_paths` is configured. |
-| **TypeScript / Next.js / Express / Fastify / NestJS / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, Fastify, and NestJS. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js, Express/Prisma, and NestJS/Prisma backends. |
+| **TypeScript / Next.js / Express / Fastify / NestJS / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching, N+1) for Next.js App Router, Server Actions, Express, Fastify, and NestJS. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js, Express/Prisma, and NestJS/Prisma backends. |
 | Java / Spring | Roadmap |
 | Python / FastAPI / Django | Roadmap |
 
