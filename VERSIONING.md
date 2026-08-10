@@ -34,7 +34,7 @@ pieces of it are still stubs.
 | `0.2.2`  | Phase 2.2 | DB debt Slice A: N+1 surface (RF-04), view sensitive-column (DB-020), prefix-redundant index (DB-011b), neutral DB coverage source (ADRs 0023–0026) |
 | `0.2.3`  | Phase 2.3 | Routine-body rules: dynamic SQL (DB-030), exception handling (DB-031), trigger cross-table cascade (DB-040), trigger external call (DB-041), over de-truncated T-SQL bodies (ADRs 0027–0028) |
 | `0.2.4`  | Phase 2.4 | Index-vs-query cross (a Phase-2 debt deferred in `0.2.0`; OLAP still open): filtered column without an index (DB-010), multi-column filter without a composite index (DB-013), neutral cross infrastructure + four dogfood-driven noise corrections (ADRs 0029–0032) |
-| `0.2.5`  | Phase 2.5 | RF-03 OLAP closure (the last Phase-2 debt): paradigm/table-role detection + 3NF-suppression on OLAP, star-schema/SCD rules (DW-001/002/005/010/011), columnar index (DW-021) and partitioning (DW-020). Paradigm/role architecture in ADR 0033. DW-022 permanently dropped — recorded in the coverage manifest; its ADR is still owed, unlike the structurally identical DB-012 exclusion (ADR 0024) |
+| `0.2.5`  | Phase 2.5 | RF-03 OLAP closure (the last Phase-2 debt): paradigm/table-role detection + 3NF-suppression on OLAP, star-schema/SCD rules (DW-001/002/005/010/011), columnar index (DW-021) and partitioning (DW-020). Paradigm/role architecture in ADR 0033. DW-022 permanently dropped — recorded in the coverage manifest; its ADR is still owed, unlike the structurally identical DB-012 exclusion (ADR 0024) *(superseded 2026-08-10 — [ADR 0063](docs/decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md) pays the owed ADR by REVERSING the exclusion, not confirming it: not built, still declared, see the row below and the coverage manifest)* |
 | `0.3.0`  | Phase 3   | Code review + best practices + tests + regression risk |
 | `0.4.0`  | Phase 4   | Knowledge packs + coverage manifest + public `v0.1.0`-class release |
 | `1.0.0`  | —         | Stable API; post-1.0 brings Java (`1.1`), Python (`1.2`) |
@@ -210,7 +210,13 @@ stage" — it does **not** claim `0.1.0` is done.
   `db.Table.Partitioning`, taking `dwrules.All()` to **seven** rules
   (DW-001/002/005/010/011/020/021) with **no DW-0xx rule left unbuilt**; the two alpha
   entries below carry the rest of the phase. DW-022 stays **permanently** dropped —
-  refresh cadence lives in scheduler state that static DDL does not carry. The phase's
+  refresh cadence lives in scheduler state that static DDL does not carry.
+  *(Superseded 2026-08-10, kept append-only as the record of the original call:
+  [ADR 0063](docs/decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md)
+  reverses the exclusion — codefit cannot AFFIRM staleness, but it can ENUMERATE the
+  materialized views as surface for the agent to resolve. Decided and recorded, not
+  built: `db.View` still has no way to say a view is materialized. `DB-022`, the OLTP
+  twin, takes the same reversal.)* The phase's
   largest structural change was not in the original plan: the **schema gate** (ADR
   **0037**, which inverts ADR 0033) judges the whole schema **before** any table is given
   a warehouse role, so one table named `dim_status` can no longer silence its own

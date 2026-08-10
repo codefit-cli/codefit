@@ -335,12 +335,39 @@ rows (Java/Spring, Python/FastAPI/Django) make no capability claim at all. No ta
 was needed beyond the Go row P0-5 already fixed; P1-1a above closes the surrounding
 per-dimension framing the table's heading needed.
 
-### P1-2 — `report.score_weights` is validated and then ignored
+### P1-2 — CLOSED (`p1-config-and-owed-entries`) — `report.score_weights` is validated and then ignored
 
-`config.Validate` rejects the map when it does not sum to 100, and **nothing ever reads it**.
-`scoring.DefaultWeights()` is hardcoded at both call sites. A user who re-weights their audit
-gets their map validated and silently discarded. Either it works or it is rejected with a
-message; today it does the worst of both.
+`config.Validate` rejected the map when it did not sum to 100, and **nothing ever read it**:
+`scoring.DefaultWeights()` was hardcoded at both `scan-all` call sites
+(`scoring.MissingWeights` and `scoring.Compute`). A user who re-weighted their audit got
+their map validated and silently discarded.
+
+**Fixed.** `scoring.ResolveWeights(userWeights)` decides which map `scan-all` uses: the
+user's `cfg.Report.ScoreWeights`, converted to `findings.Dimension` keys, when it names at
+least one entry; `DefaultWeights()` otherwise. An absent key is byte-identical to before
+this change, locked against a golden response captured from a real `git worktree` at this
+change's base commit (`cfd1ad7`), not a hand-written expectation.
+
+**The declared consequence, handled deliberately:** `scoring.MissingWeights` has existed
+since [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md) to catch a
+measured dimension with no weight, but could never fire — `DefaultWeights()` names every
+declared dimension. A user map is not guaranteed to: `{security: 100}` validates (sums to
+100) but omits `db`, and a scan that also measures `db` now surfaces an actionable,
+user-worded error naming `db` and pointing at `score_weights`, distinct from the
+`codefit internal: ...` wording reserved for a genuine wiring bug.
+
+**Decided and defended:** the sum-must-be-100 validation stays unchanged.
+`scoring.Compute` normalizes by the measured dimensions' own weight sum, not by a
+hardcoded 100, so the constraint is not load-bearing for the arithmetic — it is kept so a
+weight reads as a percentage point, and so validation has one fixed target instead of an
+open-ended "just be positive". It is deliberately **not** widened to require every one of
+the six declared dimensions: validation cannot know in advance which dimensions a given
+project will measure (`db` only runs when configured and in scope), so that completeness
+check stays at scan time (`scoring.MissingWeights`), where the actual measured set is
+known and the error can name exactly what is missing. See `internal/config/validate.go`'s
+doc comment for the full reasoning and the CHANGELOG's `[Unreleased]` entry for the
+user-facing behaviour change (⚠️ — a config key that did nothing now does something, and a
+partial map that was silently ignored can now error).
 
 ### P1-3 — Decide and declare the Go provider's status
 
@@ -351,10 +378,31 @@ not an auditable language today. See P4-1 for the larger question.
 
 ### P1-4 — Two owed manifest/ADR entries
 
-- **DW-022** owes its ADR. `VERSIONING.md` says so in its own words — and per the decision
-  recorded in P4-3 below, that ADR should now reverse the exclusion rather than confirm it.
-- **PRAC-004**'s permanent drop is recorded only in ADR 0056 and the CHANGELOG. It owes a
-  manifest entry, which is blocked on there being a Go manifest at all (P1-3).
+- **P1-4a — CLOSED (`p1-config-and-owed-entries`) — DW-022's owed ADR, written as a
+  reversal.** `VERSIONING.md` said DW-022's ADR was still owed. It is paid by
+  [ADR 0063](decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md),
+  which does not confirm the original "permanently dropped" call — it **reverses** it, per
+  the decision P4-3 recorded (2026-08-04): codefit cannot **affirm** that a materialized view
+  is stale (refresh cadence lives in scheduler state no DDL carries), but it **can** enumerate
+  the materialized views a schema declares as **surface** and let the agent resolve freshness
+  from the cron, the migrations and the CI pipeline codefit never sees. `DB-022`, the OLTP
+  twin, takes the identical reversal in the same ADR. **Decided and recorded, not built**:
+  `db.View` (`internal/core/db/db.go`) still carries only `Name`, `Pos` and `Body` — verified
+  against the struct, not assumed — with no way to say a view is materialized, the same
+  parser-floor shape `DW-021` (`Index.Method`) and `DW-020` (`Table.Partitioning`) each needed
+  before their rules; the future rule is a **schema-level census**, one item per schema,
+  following `DW-005`/`DW-011`/`DW-020`. `VERSIONING.md`, `COVERAGE.md` and
+  `internal/core/dbcoverage/dbcoverage.go` each carry an append-only superseding note pointing
+  at the ADR — the original "permanently dropped" text is kept, not deleted, as the record of
+  what Phase 2.5 decided and why it changed. No rule, finding, surface item or baseline
+  fingerprint changes: `dwrules.All()` stays seven rules, `dbrules.All()` stays fourteen.
+- **P1-4b — BLOCKED — PRAC-004's owed manifest entry.** Its permanent drop is recorded only
+  in [ADR 0056](decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
+  and the CHANGELOG; it owes a coverage-manifest entry. **Blocker:** there is no Go coverage
+  manifest to put it in — `internal/providers/golang/coverage.go` does not exist — and that is
+  entangled with the still-open architect decision on the Go provider's status (P1-3/P4-1).
+  Creating a Go manifest to host one entry would pre-empt that decision and is deliberately
+  out of scope here; this item stays open until P1-3/P4-1 resolves.
 
 ### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 
@@ -444,29 +492,35 @@ review sensor, which is unbuilt (H3). Nothing addresses doc comments on exported
 This is one of the two **language-agnostic** rule families, which makes it worth more than a
 language-specific rule: it pays off in every provider at once.
 
-### P4-3 — Materialized-view refresh: reframed as surface, not impossible
+### P4-3 — CLOSED as a decision (`p1-config-and-owed-entries`), open as an implementation — materialized-view refresh: reframed as surface, not impossible
 
-**Decided (2026-08-04), pending its ADR.** `DW-022` was dropped as permanently uncoverable
-because refresh cadence lives in scheduler state that static DDL does not carry. `DB-022` is
-the same rule on the OLTP side.
+**Decided (2026-08-04), recorded (2026-08-10).** `DW-022` was dropped as permanently
+uncoverable because refresh cadence lives in scheduler state that static DDL does not carry.
+`DB-022` is the same rule on the OLTP side. That reasoning is right about **affirmations** and
+wrong about **surface**. codefit cannot say "this view is stale". It *can* enumerate: *this
+schema declares N materialized views; their freshness depends on a scheduler outside the DDL;
+here they are.* The agent then resolves it — it can read the cron, the migrations, the CI
+pipeline and the application code, none of which codefit sees. That is precisely the division
+of labour the project declares (PRD §10).
 
-That reasoning is right about **affirmations** and wrong about **surface**. codefit cannot
-say "this view is stale". It *can* enumerate: *this schema declares N materialized views;
-their freshness depends on a scheduler outside the DDL; here they are.* The agent then
-resolves it — it can read the cron, the migrations, the CI pipeline and the application
-code, none of which codefit sees. That is precisely the division of labour the project
-declares (PRD §10).
+**The ADR this decision owed is written:**
+[ADR 0063](decisions/0063-materialized-view-refresh-is-surface-not-a-permanent-exclusion.md)
+(P1-4a, closed above). What P4-3 named as consequences "in scope when this is taken" are the
+ADR's own decisions now, not open questions:
 
-Consequences, all of them in scope when this is taken:
-
-- It **reverses a recorded permanent exclusion**, so it needs an ADR — which is the same ADR
-  `DW-022` already owes (P1-4). The debt gets paid with a better answer instead of a burial.
+- It **reverses a recorded permanent exclusion** — recorded in the ADR, which pays the debt
+  `DW-022` owed (P1-4a) with a better answer instead of a burial.
 - It needs a **parser floor first**: `db.View` carries `Name`, `Pos` and `Body` and has **no
-  way to say a view is materialized**. Same shape as the floors `DW-021` (`Index.Method`) and
-  `DW-020` (`Table.Partitioning`) needed before their rules.
+  way to say a view is materialized** — verified against the struct, not assumed. Same shape
+  as the floors `DW-021` (`Index.Method`) and `DW-020` (`Table.Partitioning`) needed before
+  their rules. **Not built.**
 - It should be a **census** — one item per schema carrying the list, not one per view —
   following `DW-005`/`DW-011`/`DW-020`. A schema with forty materialized views must not
-  produce forty items.
+  produce forty items. **Not built.**
+
+**What remains open, carried forward as its own future slice, not by this entry:** the parser
+floor on `db.View` and the census rule itself. Building them is sized like what `DW-020`/
+`DW-021` each took on their own — this document does not schedule that slice yet.
 
 ### P4-4 — Algorithmic complexity stays deferred
 
