@@ -11,6 +11,14 @@ import (
 // InitDetect); go is exposed to InitDetect only. This is the mechanical
 // version of "Go declares narrow capability, minimal exposure" — a capable
 // provider that stays deliberately unreachable everywhere but init.
+//
+// This test only asserts the field's VALUE, never its EFFECT — that gap
+// (InitDetect declared but not enforced by ByMarkerFile) was WARNING 1 in
+// this change's own verify report. initdetect_test.go carries the effect
+// proof: it drives ByMarkerFile itself with a hand-built entry whose
+// InitDetect is false and asserts it is skipped, exactly as this snapshot's
+// SecurityScan/SurfaceTools values are already backed by Lock A/Lock B
+// exercising providerForLanguage/providerFor directly.
 func TestC5_ExposureSnapshot(t *testing.T) {
 	cases := []struct {
 		lang string

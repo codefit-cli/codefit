@@ -129,6 +129,26 @@ locks after each step, not by inspection:
   rules). Control A only fires where `Enumerable: true`; everywhere else it is
   an explicit skip, never a pass.
 
+## Correction: InitDetect was declared but not enforced
+
+The Decision section above states `Exposure{SecurityScan, SurfaceTools,
+InitDetect bool}` is "independent of `Capability`, and the one place a
+language becomes reachable through a given resolver." That claim was false
+for `InitDetect` at the moment this ADR was written: `scaffold/detect.go`'s
+`detectLanguage` called `registry.ByMarkerFile` unconditionally, and
+`ByMarkerFile` returned the first table match by marker file alone — it never
+read `Exposure.InitDetect`. `SecurityScan`/`SurfaceTools` genuinely gated their
+consumers (`providerForLanguage`, `providerFor`); `InitDetect` did not gate
+`ByMarkerFile`. This change's own `sdd-verify` pass found it (WARNING 1,
+`rg InitDetect` had zero non-test, non-declaration hits) and it was fixed in
+the same PR, before merge: `ByMarkerFile` now skips any entry whose
+`Exposure.InitDetect` is false, falling through to the next entry in table
+order rather than returning an ineligible one — locked by
+`internal/providers/registry/initdetect_test.go`. Both registered entries
+(`go`, `typescript`) already declared `InitDetect: true`, so no resolver's
+answer set changed; the claim above is true as of this correction, not as
+originally written.
+
 ## Consequences
 
 - Capability and exposure are now two independent, test-checked facts instead

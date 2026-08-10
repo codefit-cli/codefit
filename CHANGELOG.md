@@ -27,7 +27,13 @@ All notable changes to codefit are documented here. The format is based on
   answer set is byte-identical to before this change, verified against the
   pre-existing regression locks. Go stays unexposed to security/surface
   tooling (roadmap P4-1, unchanged); only `codefit init`'s detection reaches
-  it, as before. See [ADR 0064](docs/decisions/0064-language-capability-and-exposure-registry.md).
+  it, as before. `Exposure.InitDetect` is now actually enforced —
+  `registry.ByMarkerFile` skips any entry whose `InitDetect` is false, table
+  order preserved for the entries that remain eligible — closing a same-PR
+  correction where the field was declared and documented but not yet
+  consulted by `scaffold`'s `detectLanguage` (both registered languages
+  already wanted it `true`, so no answer set changed). See
+  [ADR 0064](docs/decisions/0064-language-capability-and-exposure-registry.md).
 
 ## [0.2.8] — 2026-08-10
 

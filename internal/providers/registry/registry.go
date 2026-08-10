@@ -94,10 +94,20 @@ func ByExtension(ext string) (Entry, bool) {
 }
 
 // ByMarkerFile resolves the first entry (in table order) with a marker file
-// directly under root. Table order is the priority: in a polyglot root with
-// both go.mod and package.json, "go" (listed first) wins.
+// directly under root, restricted to entries whose Exposure.InitDetect is
+// true — this query's only production caller is internal/scaffold's Detect
+// (codefit init), so an entry with InitDetect: false is skipped exactly as
+// Exposure.SecurityScan/SurfaceTools already make an entry unresolvable to
+// their own consumers (providerForLanguage, providerFor). Table order remains
+// the priority among the entries that stay eligible: in a polyglot root with
+// both go.mod and package.json, "go" (listed first) wins when its InitDetect
+// is true; skipping an ineligible entry falls through to the next one in
+// table order rather than failing the whole resolution.
 func ByMarkerFile(root string) (Entry, bool) {
 	for _, e := range table {
+		if !e.Exposure.InitDetect {
+			continue
+		}
 		for _, m := range e.MarkerFiles {
 			if _, err := os.Stat(filepath.Join(root, m)); err == nil {
 				return e, true
