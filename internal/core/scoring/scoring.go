@@ -35,8 +35,14 @@ var severityPenalty = map[findings.Severity]int{
 // so the re-balance moves no score codefit produces today.
 //
 // The PRD's defaults line still reads complexity 15; it is exempt from
-// reflect-today and is not corrected. `cfg.Report.ScoreWeights` is validated but
-// never read — this map is hardcoded at both call sites (declared limit, ADR 0055).
+// reflect-today and is not corrected.
+//
+// These are the DEFAULTS, not the effective weights: since roadmap P1-2 a project
+// may override them with `report.score_weights` in .codefit.yaml, resolved by
+// [ResolveWeights] and consumed at both call sites. Until then the key was
+// validated and never read — a config knob that did nothing — and this comment
+// said so; it is corrected here rather than left to contradict the code three
+// lines below it.
 func DefaultWeights() map[findings.Dimension]int {
 	return map[findings.Dimension]int{
 		findings.DimensionSecurity:   35,
