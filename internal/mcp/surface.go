@@ -7,7 +7,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
-	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 )
 
 // This file implements the surface tool HANDLERS and their JSON contracts. The
@@ -187,14 +187,15 @@ func HandleConfirmSurface(req ConfirmSurfaceRequest) ConfirmSurfaceResponse {
 	}
 }
 
-// providerFor resolves the language provider for a file by extension. The MCP
-// adapter is the single place that maps language → provider (the core never
-// does); today only TypeScript carries surface queries.
+// providerFor resolves the language provider for a file by extension,
+// filtered to entries the registry EXPOSES for surface tools
+// (Entry.Exposure.SurfaceTools) — the MCP adapter is a CONSUMER of the
+// registry, never a second source of the language->provider mapping (D2).
+// Today only TypeScript is exposed for surface tools.
 func providerFor(path string) providers.LanguageProvider {
-	switch filepath.Ext(path) {
-	case ".ts", ".tsx":
-		return typescript.New()
-	default:
+	e, ok := registry.ByExtension(filepath.Ext(path))
+	if !ok || !e.Exposure.SurfaceTools {
 		return nil
 	}
+	return e.New(nil)
 }

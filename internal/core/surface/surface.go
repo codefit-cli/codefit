@@ -176,3 +176,21 @@ const (
 	// their carrier, design SS7a).
 	CategoryDBTableStructureUnproven Category = "db-table-structure-unproven"
 )
+
+// ProviderCategories is the sole enumeration of provider-emitted surface
+// categories — the ones a LanguageProvider's AnalyzeSurface can produce
+// (idor/authz/overfetch/nplus1 today). It deliberately excludes every db-/dw-
+// prefixed const above: those are schema-derived (produced by the DB sensor
+// over internal/core/db.Schema, never by a LanguageProvider), a disjoint
+// namespace distinguished by the naming convention this comment states as a
+// rule for the next contributor — a provider-emitted category must NOT be
+// named with a "db-"/"dw-" prefix, or vocabulary_test.go's const-block parse
+// will silently mis-partition it into the wrong side.
+//
+// This slice is locked against the const block above by
+// vocabulary_test.go's go/ast parse, in both directions: a const added here
+// and forgotten in the slice fails, and a slice entry with no backing const
+// fails too. Any "N of len(ProviderCategories)" claim (e.g. a provider
+// declaring "1 of 4" surface categories) must be computed from this slice,
+// never a literal — that is what makes the claim derived, not asserted.
+var ProviderCategories = []Category{CategoryIDOR, CategoryAuthz, CategoryOverfetch, CategoryNPlus1}

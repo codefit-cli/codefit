@@ -1,8 +1,11 @@
 package providers
 
 import (
+	"slices"
+
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
 // SourceFile is the input to a provider's analysis: a project-relative path and
@@ -10,6 +13,43 @@ import (
 type SourceFile struct {
 	Path    string
 	Content []byte
+}
+
+// RuleSet is what a provider declares for one deterministic rule family
+// (security or practices): the rule IDs it implements, and whether that list
+// is derivable from a real rule loader (Enumerable: true, e.g. TypeScript's
+// YAML-backed security rules) or a hand-maintained mirror of the provider's
+// own Go source (Enumerable: false, e.g. Go's AST-detector rules, which have
+// no All()/ID() loader today). Declared is never a count — a count cannot be
+// checked against anything; a list of IDs can (Control A, for the
+// Enumerable==true case).
+type RuleSet struct {
+	Declared   []string // rule IDs, sorted
+	Enumerable bool
+}
+
+// Capability is what a LanguageProvider declares it implements — a fact about
+// the provider, independent of which resolvers currently admit it (exposure,
+// owned by internal/providers/registry). Surface must be a subset of
+// surface.ProviderCategories (C2, checked by ValidSurface); CoverageManifest
+// mirrors whether the provider implements the optional CoverageManifest()
+// method (C4, checked where the provider is resolved).
+type Capability struct {
+	Security, Practices RuleSet
+	Surface             []surface.Category
+	CoverageManifest    bool
+}
+
+// ValidSurface reports whether every category in c.Surface is a member of
+// surface.ProviderCategories — C2, the guard that keeps a declared Capability
+// within the vocabulary D1b locked to the const block in internal/core/surface.
+func (c Capability) ValidSurface() bool {
+	for _, cat := range c.Surface {
+		if !slices.Contains(surface.ProviderCategories, cat) {
+			return false
+		}
+	}
+	return true
 }
 
 // LanguageProvider is the contract every supported language implements. The
@@ -24,6 +64,14 @@ type LanguageProvider interface {
 	Language() string         // "go", "typescript", "java", "python"
 	Frameworks() []string     // recognized frameworks
 	FileExtensions() []string // e.g. [".go"], [".ts", ".tsx"]
+
+	// Capability declares what this provider implements — its rule IDs per
+	// family and its surface category coverage — independent of which
+	// resolvers currently expose it (that is internal/providers/registry's
+	// Exposure, a separate fact). A provider cannot know which resolvers admit
+	// it, so it never declares its own exposure; it only declares what it can
+	// do. Every registered provider MUST return a non-zero Capability (C1).
+	Capability() Capability
 
 	// DefaultPathCriticality returns sensible production/test/example defaults
 	// for this ecosystem (RF-11), overridable in .codefit.yaml.

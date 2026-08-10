@@ -14,7 +14,26 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-Nothing here yet.
+### Added
+- `internal/providers/registry`: the one ordered `language → provider` table.
+  `LanguageProvider` gained `Capability()` (rule IDs per family, surface
+  category coverage, coverage-manifest presence), and each registry `Entry`
+  carries an independent `Exposure` (which resolvers currently admit the
+  language) — capability and exposure are now two declared, test-checked
+  facts instead of five hand-written, disagreeing ones. `scan-all`'s
+  `providerForLanguage`/`surface.go`'s `providerFor`/`scaffold`'s
+  `detectLanguage` all query the registry now; none of them builds a concrete
+  provider on its own. No user-visible behaviour change — every resolver's
+  answer set is byte-identical to before this change, verified against the
+  pre-existing regression locks. Go stays unexposed to security/surface
+  tooling (roadmap P4-1, unchanged); only `codefit init`'s detection reaches
+  it, as before. `Exposure.InitDetect` is now actually enforced —
+  `registry.ByMarkerFile` skips any entry whose `InitDetect` is false, table
+  order preserved for the entries that remain eligible — closing a same-PR
+  correction where the field was declared and documented but not yet
+  consulted by `scaffold`'s `detectLanguage` (both registered languages
+  already wanted it `true`, so no answer set changed). See
+  [ADR 0064](docs/decisions/0064-language-capability-and-exposure-registry.md).
 
 ## [0.2.8] — 2026-08-10
 

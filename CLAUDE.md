@@ -366,6 +366,7 @@ de oro: se edita la FUENTE, después se espeja.**
 | `internal/providers/<lang>/coverage.go` | espejo-a-mano de las reglas | resumen | Se verifica contra la raíz; se edita ANTES que COVERAGE.md. |
 | `internal/mcp/server.go` (descripciones de las tools) | fuente cara-al-agente | resumen | Es lo ÚNICO que el agente lee antes de elegir una tool: si describe mal una capacidad, el agente le cree. Se verifica contra las reglas/handlers reales en cada cierre. Ya driftó una vez —`codefit-scan-db` decía "(Prisma today)" con el parser SQL-DDL shippeado desde `v0.2.0` y toda la familia DW-0xx sin mencionar. |
 | `internal/scaffold/skill.go` (la skill que genera `codefit init`) | fuente cara-al-agente | resumen | Es lo PRIMERO que el agente lee, ANTES que las descripciones de las tools — y su `description` **gatea la carga**: si el trigger no nombra el dominio, la divulgación progresiva descarta la skill sin leerla y el agente no ve una skill incompleta, no ve ninguna. Ya driftó DOS FASES: la dimensión DB shippeó entre `v0.2.0` y `v0.2.5` mientras la skill seguía describiendo solo seguridad de endpoints, sin nombrar `codefit-scan-db`, `codefit-coverage` ni `codefit-check-cves`. Hoy hay candado: `TestSkillNamesEveryRegisteredTool` (en `internal/mcp`, el paquete de test que ya importa `scaffold`) falla si una tool registrada en `NewServer` no está nombrada en la skill ni declarada en `deliberatelyNotInSkill` con su razón; `TestSkillOmissionAllowlistHasNoGhosts` cuida la dirección inversa. El candado obliga a la DECISIÓN, no al contenido: al cerrar, igual se verifica que lo enseñado sea verdad. |
+| `internal/providers/registry/registry.go` (la tabla `lenguaje → provider`, capacidad + exposición) | fuente cara-al-agente | resumen | Es la única tabla que las otras dos fuentes cara-al-agente de esta fila (`server.go`, `skill.go`) deben terminar reflejando: `Entry.Exposure` dice qué resolver admite cada lenguaje HOY, y `LanguageProvider.Capability()` dice qué implementa cada provider (reglas por familia, categorías de superficie, si hay manifiesto de cobertura) — el vocabulario de superficie que ambas usan vive en `internal/core/surface.ProviderCategories`, verificado contra el bloque de consts real (`vocabulary_test.go`, `go/ast`), nunca copiado a mano. Se edita ANTES que la skill o las descripciones de las tools cuando cambia qué lenguaje está registrado o expuesto (ADR 0064). |
 | `docs/roadmap.md` | fuente (prioridades + estado) | por slice | Qué se ataca y en qué orden, con el criterio "alguien que baja codefit hoy no puede ser engañado". Ordena por **daño al usuario**, no por capacidad: primero lo que MIENTE o se rompe, después lo que impide conocer los límites, recién ahí lo nuevo. **Es un PUNTERO, no una cuarta copia** — no re-enumera los ~40 límites declarados de `COVERAGE.md`/manifiestos, apunta a ellos; duplicarlos crearía un cuarto lugar donde driftear. Se actualiza cuando una prioridad se toma o cuando aparece una deuda nueva. |
 | `CLAUDE.md` (este archivo) | fuente | resumen | Doctrina/método; el rollout apunta a PRD/VERSIONING/CHANGELOG. |
 | `CONTRIBUTING.md` | fuente | por cambio | Proceso; no declara estado de fase. |
@@ -425,9 +426,23 @@ viven en `go test ./...` y corren en cada PR (PRD §26).
 - **`core/findings/` es una HOJA**: no importa ningún otro paquete de codefit.
   `AuditContext` vive en `core/context/` y no en `findings/` (tiene un
   `*config.Config`; ponerlo en `findings/` crearía un ciclo con el parser).
-- **El núcleo NUNCA importa un provider concreto.** El adapter MCP (o el plumbing
-  que resuelva `language → provider`) es el único lugar que mapea lenguaje a
-  provider. Los sensores solo conocen la interface `providers.LanguageProvider`.
+- **El núcleo NUNCA importa un provider concreto**, y el mapeo `lenguaje → provider`
+  vive en **UNA sola tabla**, `internal/providers/registry`, única fuente de esa
+  correspondencia. `internal/mcp` y `internal/scaffold` son **consumidores**: cada
+  uno hace su propia CONSULTA sobre esa tabla — por nombre, por extensión, por
+  marker file, por presencia de manifiesto — y **ninguno construye un provider
+  concreto por su cuenta**. Ningún otro paquete de **producción** importa
+  `internal/providers/<lang>`; un test externo sí puede construir un provider real
+  como fixture (es preferible a un struct armado a mano, § Metodología), y eso no
+  es mapeo. La tabla distingue **capacidad** — lo que el provider declara que
+  implementa, sobre el vocabulario que ya vive en `internal/core/surface` — de
+  **exposición** — qué resolvers lo admiten hoy: un lenguaje puede estar
+  registrado y deliberadamente NO expuesto, y esa diferencia es exactamente lo
+  que codefit le declara al agente. El vocabulario se queda en el núcleo porque
+  **no nombra ningún provider**; la declaración de capacidad NO, porque nombra
+  exactamente eso. **Queda fuera** el parser de esquema de la dimensión DB:
+  resuelve por la forma del INPUT (`.prisma`/`.sql`), no por lenguaje (ADR 0018).
+  Los sensores solo conocen la interface `providers.LanguageProvider`.
 - **La interface `LanguageProvider` es agnóstica al parser** (ver
   `docs/decisions/`): el provider es dueño de su parser. **Go usa `go/ast`**;
   tree-sitter puro Go queda para TS/Java/Python.

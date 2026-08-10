@@ -182,6 +182,35 @@ func TestInitInteractiveOverwriteDecision(t *testing.T) {
 	})
 }
 
+// TestInitCommandStatesRealGoCapability is 10.8: `codefit init` on a Go
+// project must state the real capability gap — DB-dimension coverage only,
+// scan-security does NOT resolve a provider for Go — DERIVED from the
+// registry, never a hardcoded string. It must NOT claim security scanning is
+// available.
+func TestInitCommandStatesRealGoCapability(t *testing.T) {
+	root := t.TempDir()
+	writeGoProject(t, root)
+
+	out, err := runInit(t, root, "", "--non-interactive")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	low := strings.ToLower(out)
+	if !strings.Contains(low, "does not resolve") {
+		t.Errorf("init output for a Go project must state that scan-security does not resolve a provider for it, got:\n%s", out)
+	}
+	if !strings.Contains(low, "db dimension") {
+		t.Errorf("init output for a Go project must name the DB-dimension-only coverage, got:\n%s", out)
+	}
+}
+
+func writeGoProject(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeTSProject(t *testing.T, root string) {
 	t.Helper()
 	write := func(rel, content string) {
