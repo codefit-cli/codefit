@@ -14,13 +14,77 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-**Nothing here is a release yet.** Phase 3 (code review, best practices, tests, regression
-risk) has started but no dimension of it exists: there is still **no practices sensor and
-no `codefit-check-practices` tool**, and **nothing a user runs reaches a practices rule** —
-`providerForLanguage` maps only TypeScript, and the TypeScript `AnalyzePractices` is still
-a stub. What landed so far is the score weight (below), an audit of the Go provider's
-own best-practice rules (which no product path currently calls), and the manifest-honesty
-work below — which declares gaps rather than closing them.
+Nothing here yet.
+
+## [0.2.8] — 2026-08-10
+
+**A PATCH release: no PRD phase closes here.** Phase 2 closed at `v0.2.5`; this release pays
+that line's residual debt rather than opening Phase 3. So the line stays `0.2` and the MINOR
+↔ phase table in [VERSIONING.md](VERSIONING.md) gains **no row** — that table maps phase
+*closures*, and this closes none. The debt itself: a SQL-DDL parser fix for a real dropped
+column, the DB coverage manifest closing a gap it had neither built nor declared, the DB
+dimension running in `scan-all` without a security provider, the baseline write gated on
+every check codefit can perform on its own output, the response byte budget calibrated by
+measurement instead of chosen, and `report.score_weights` going from validated-and-ignored to
+actually wired.
+
+**It is not 100% Phase-2 work, and that is said here rather than left implicit.** Two Phase-3
+pieces landed on `main` in this same window: `practices` became a weighted dimension in
+`scoring.DefaultWeights()` (5 points, funded by `complexity`; [ADR 0055](docs/decisions/0055-practices-is-its-own-dimension-and-carries-the-smallest-weight.md)),
+and the Go provider's own best-practice rules were audited for asserting more than they
+checked, with `PRAC-004` dropped for claiming a synchronization check it never performed
+([ADR 0056](docs/decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)).
+**Neither reaches a product path**: `providerForLanguage` maps only TypeScript, the
+TypeScript `AnalyzePractices` is still a stub, and there is no `codefit-check-practices`
+tool — so `by_dimension.practices` stays `null` on every response regardless of either
+change.
+
+**Four user-visible contract changes ship in this PATCH, each measured against the code:**
+
+1. `by_dimension` gains a `practices` key — always `null`, since no sensor exists yet.
+2. `ScanAllResponse` gains an always-present `security` section (`{measured, note?}`),
+   mirroring `db`'s shape but, unlike `db`, never `omitempty`.
+3. `ResponseBudgetBytes` moves **60 000 → 40 000**
+   ([ADR 0062](docs/decisions/0062-the-response-budget-is-calibrated-by-bisection-not-chosen.md)),
+   calibrated by bisection against a real MCP client: **64 097 bytes accepted, 74 195
+   rejected**. Measured consequence on a real 317-file project: **19 of 174 endpoints
+   withheld** (5 actionable, 14 frontier_pending) in a 39 962-byte response — the same
+   project fit entirely, nothing withheld, at the old 60 000.
+4. `report.score_weights` **now actually drives the score** instead of being validated and
+   silently discarded (`scoring.ResolveWeights`); a partial user map missing a measured
+   dimension's weight now surfaces a named, actionable error instead of either silently
+   dropping the dimension or hitting the internal-wiring-bug branch.
+
+**The headline is honesty about what codefit already does, not new capability.** Checked
+against the code rather than assumed: no rule was added to `dbrules`, `dwrules`, `paradigm`
+or `crossrules`; no surface category was added; no dimension gained a sensor. What closes
+here is six P0 defects (`docs/roadmap.md` P0-1 through P0-6 — an undeclared manifest gap, a
+parser drop, a false all-clear risk in the cache, a response budget chosen rather than
+measured, a wrongful language refusal, and a baseline written before delivery was known),
+each traced during the work to the same shape — a layer asserting what the layer beneath it
+never established — and named as such in
+[ADR 0060](docs/decisions/0060-the-audit-protocol-five-layers-and-a-delivery-layer-that-did-not-exist.md)
+and its contract, `docs/specs/audit-protocol.md`: five layers, one layering law, and six
+invariants (I1–I6), each traceable to the defect that taught it. **Stated precisely, not
+oversold: the protocol is a design contract targeting the `0.3.0` line, not a runtime
+mechanism this release ships** — L3 (the delivery layer, `pending` state) is specified but
+not implemented, and the document itself declines to assert I1–I6's control coverage from
+memory. Only **I4** ("a partial result declares itself partial") carries a mechanical lock
+tied to it by name as of this tag (`TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding`,
+`internal/mcp/scanall_budget_test.go`); the other five invariants are each addressed by
+existing, older mechanisms (the completeness contract, the scope block, the coverage
+manifest, the declared-limit tests) rather than by a registry that names them as such.
+
+**Declared and not fixed:** the byte budget still guards a **token** limit with a **byte**
+proxy, no matter how well the byte number is calibrated — the structural per-bucket cap that
+would stop response size from depending on project size at all is P0-4's remaining half. MCP
+defines no delivery acknowledgement, so the baseline-write gate
+([ADR 0061](docs/decisions/0061-the-baseline-write-is-gated-on-every-check-codefit-can-perform.md))
+mitigates the one reachable instance of that gap; it is not the structural cure the L3 design
+above targets. `docs/roadmap.md` P1-1b (unifying the three independent language-resolution
+switches) and P1-3 (deciding the Go provider's user-facing status) are deferred by explicit
+architect decision, and P1-4b (`PRAC-004`'s owed coverage-manifest entry) stays blocked on
+P1-3, since there is no Go coverage manifest to host it in without pre-empting that decision.
 
 ### Added
 
@@ -350,7 +414,7 @@ work below — which declares gaps rather than closing them.
   deliberately **not fixed here**: making it real means deciding what a partial user map
   means and how it interacts with the `measured ⊆ weights` guard. Declared so it stops
   being a silent one.~~ **Fixed** (`p1-config-and-owed-entries`, still within this same
-  `[Unreleased]` — kept struck through rather than deleted so the history of this entry
+  `[0.2.8]` release — kept struck through rather than deleted so the history of this entry
   stays legible): see the `⚠️ report.score_weights is now actually used` entry under
   `### Fixed` above for the resolution, including the `measured ⊆ weights` interaction this
   entry named as the open question.
@@ -850,7 +914,7 @@ of codefit, and read the corpus's honest limits with them (ADR
   accepts as an entry), it wants its own reproduction before it gets its own fix, and it is
   written down here so it is met as a known item rather than rediscovered. See ADR 0053.
   (**Narrowed after this tag** — reproduced and disproved as a cache risk; see the
-  "Declared limits" entry under `[Unreleased]` and ADR 0053's superseding note.)
+  "Declared limits" entry under `[0.2.8]` and ADR 0053's superseding note.)
 - **The DB dimension is not cached** — neither the DB sensor nor the code×schema cross.
   Their inputs are the configured `database.schema_paths`, not a repository walk, and a
   schema is reconstructed from an *ordered* set of migrations, so a per-file entry is not
