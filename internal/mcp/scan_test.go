@@ -37,8 +37,42 @@ func TestHandleCoverage(t *testing.T) {
 	if resp.Manifest.Language != "typescript" || len(resp.Manifest.Deterministic) == 0 {
 		t.Errorf("coverage manifest incomplete: %+v", resp.Manifest)
 	}
+	if resp.Derived {
+		t.Error("typescript has a hand-written prose manifest — Derived must be false")
+	}
 	if _, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "cobol"}); err == nil {
 		t.Error("unsupported language should error")
+	}
+}
+
+// TestHandleCoverage_DerivedForLanguageWithNoProseManifest is R1: a
+// registered, exposed language with no hand-written CoverageManifest() (go
+// today) must still get a truthful, DERIVED answer from its Capability() —
+// never the old "no coverage manifest for language" error. It must name the
+// declared security rule ids and the surface categories it does NOT map,
+// derived from surface.ProviderCategories, not a literal.
+func TestHandleCoverage_DerivedForLanguageWithNoProseManifest(t *testing.T) {
+	resp, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "go"})
+	if err != nil {
+		t.Fatalf("codefit-coverage must answer for a registered language with no prose manifest, got error: %v", err)
+	}
+	if !resp.Derived {
+		t.Error("go has no CoverageManifest() — Derived must be true")
+	}
+	if resp.Manifest.Language != "go" {
+		t.Errorf("Manifest.Language = %q, want %q", resp.Manifest.Language, "go")
+	}
+	if len(resp.Manifest.Deterministic) == 0 {
+		t.Fatal("Deterministic must name go's declared security rule ids, got none")
+	}
+	joinedNotCovered := strings.Join(resp.Manifest.NotCovered, "\n")
+	for _, cat := range []string{"idor", "overfetch", "nplus1"} {
+		if !strings.Contains(joinedNotCovered, cat) {
+			t.Errorf("NotCovered does not name unmapped surface category %q: %v", cat, resp.Manifest.NotCovered)
+		}
+	}
+	if strings.Contains(strings.Join(resp.Manifest.Reasoning, "\n"), "idor") {
+		t.Error("Reasoning must not claim idor is mapped for go — go maps only authz")
 	}
 }
 

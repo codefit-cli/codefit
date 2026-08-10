@@ -144,14 +144,15 @@ func TestScanAllWriteGate_HappyPath_BaselineStillWritten(t *testing.T) {
 // error from buildScanAll must never be followed by a write.
 func TestScanAllWriteGate_BuildScanAllErrorNeverWrites(t *testing.T) {
 	root := t.TempDir()
-	// language: go, no database section at all — neither a security provider
-	// resolves nor the DB dimension runs, so buildScanAll's nothing-measurable
-	// guard (D5) must error.
-	writeFile(t, root, "main.go", "package main\n\nfunc main() {}\n")
-	writeFile(t, root, "go.mod", "module example.com/t\n\ngo 1.25\n")
+	// language: python (unregistered — no resolvable security provider), no
+	// database section at all: neither a security provider resolves nor the
+	// DB dimension runs, so buildScanAll's nothing-measurable guard (D5) must
+	// error. "go" no longer proves this fixture (roadmap P4-1 exposed it —
+	// docs/specs/declared-partial-language-exposure.md); the guard's own
+	// behaviour is unchanged, only the language that demonstrates it moved.
 	baselinePath := filepath.Join(root, baseline.Name)
 
-	if _, err := handleScanAllBudgeted(ScanAllRequest{Root: root, Language: "go"},
+	if _, err := handleScanAllBudgeted(ScanAllRequest{Root: root, Language: "python"},
 		scope.Full(), baselinePath, ResponseBudgetBytes); err == nil {
 		t.Fatal("expected the nothing-measurable guard to error")
 	}

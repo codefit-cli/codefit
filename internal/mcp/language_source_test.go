@@ -11,28 +11,29 @@ import (
 )
 
 // initDetectsButScanAllCannotAudit lists languages codefit init
-// (scaffold.Detect) recognizes that codefit-scan-all cannot (yet) resolve a
+// (scaffold.Detect) recognizes that codefit-scan-all cannot resolve a
 // SECURITY provider for — the init-welcomes / scan-all-refuses contradiction
-// (proposal-scope-decision finding: three independent language switches that
-// disagreed), made a DECLARED gap instead of a silent one. Same shape as
+// made a DECLARED gap instead of a silent one. Same shape as
 // deliberatelyNotInSkill (skill_tools_test.go): an entry here is a choice a
-// test enforces, not an oversight nobody noticed.
-var initDetectsButScanAllCannotAudit = map[string]string{
-	"go": "codefit-scan-all can measure the DB dimension for a Go project with a " +
-		"configured schema (P0-5), but no security provider is wired into " +
-		"providerForLanguage yet — that wiring is roadmap P4-1, deliberately out " +
-		"of this change's scope",
-}
+// test enforces, not an oversight nobody noticed. Empty today: roadmap P4-1
+// (docs/specs/declared-partial-language-exposure.md) wired Go in, closing the
+// only entry this map ever carried — kept as a live map, not deleted, so a
+// FUTURE init-detected/scan-all-refused language has a declared landing site
+// again (TestLanguageSource_LockC_InitVsScanAllDivergence fails loudly the
+// moment one appears undeclared).
+var initDetectsButScanAllCannotAudit = map[string]string{}
 
-// TestLanguageSource_LockA_ResolvableSetIsExactlyTypeScript is D4's Lock A: the
-// resolvable language set codefit-scan-all's provider resolution recognizes is
-// EXACTLY {typescript, ts, tsx}, all aliasing the single canonical provider.
-// Adding a case (e.g. "go") to providerForLanguage without this test noticing
-// is exactly the scope creep P0-5 forbids (roadmap P4-1 owns wiring
-// golang.New() in, as an explicit later decision) — this test turns that
-// smuggling into a RED instead of a silent slide.
-func TestLanguageSource_LockA_ResolvableSetIsExactlyTypeScript(t *testing.T) {
-	resolves := []string{"typescript", "ts", "tsx"}
+// TestLanguageSource_LockA_ResolvableSetIncludesGo is D4's Lock A, moved
+// (roadmap P4-1, docs/specs/declared-partial-language-exposure.md R3): the
+// guarantee was never "Go stays out", it was "nothing is exposed without
+// being declared" — Go's Capability declaration is checked by
+// internal/providers/registry's TestExposedLanguageDeclaresNonEmptyCapability,
+// and its response-level not-covered statement by scan_test.go /
+// scanall_test.go. This lock now asserts the resolvable set is EXACTLY
+// {typescript, ts, tsx, go} — adding a further language without this test
+// noticing is still a RED, not a silent slide.
+func TestLanguageSource_LockA_ResolvableSetIncludesGo(t *testing.T) {
+	resolves := []string{"typescript", "ts", "tsx", "go"}
 	for _, lang := range resolves {
 		t.Run("resolves/"+lang, func(t *testing.T) {
 			if p := providerForLanguage(lang, nil); p == nil {
@@ -41,7 +42,7 @@ func TestLanguageSource_LockA_ResolvableSetIsExactlyTypeScript(t *testing.T) {
 		})
 	}
 
-	doesNotResolve := []string{"go", "python", "java", ""}
+	doesNotResolve := []string{"python", "java", ""}
 	for _, lang := range doesNotResolve {
 		t.Run("nil/"+lang, func(t *testing.T) {
 			if p := providerForLanguage(lang, nil); p != nil {
@@ -50,7 +51,7 @@ func TestLanguageSource_LockA_ResolvableSetIsExactlyTypeScript(t *testing.T) {
 		})
 	}
 
-	want := []string{"typescript"}
+	want := []string{"go", "typescript"}
 	got := SupportedLanguageNames()
 	if !slices.Equal(got, want) {
 		t.Errorf("SupportedLanguageNames() = %v, want %v", got, want)
@@ -88,8 +89,9 @@ func TestLanguageSource_LockB_ProviderForDivergence(t *testing.T) {
 	}
 
 	// Positive probe: extensions OUTSIDE the resolvable set must resolve
-	// nothing through providerFor either.
-	for _, ext := range []string{".go", ".py"} {
+	// nothing through providerFor either. ".go" moved INTO the loop above
+	// (roadmap P4-1) — it is no longer a negative case.
+	for _, ext := range []string{".py", ".java"} {
 		if resolved := providerFor("file" + ext); resolved != nil {
 			t.Errorf("providerFor(%q) resolved %+v, want nil (no resolvable language owns this extension)", ext, resolved)
 		}

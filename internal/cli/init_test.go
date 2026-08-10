@@ -182,11 +182,13 @@ func TestInitInteractiveOverwriteDecision(t *testing.T) {
 	})
 }
 
-// TestInitCommandStatesRealGoCapability is 10.8: `codefit init` on a Go
-// project must state the real capability gap — DB-dimension coverage only,
-// scan-security does NOT resolve a provider for Go — DERIVED from the
-// registry, never a hardcoded string. It must NOT claim security scanning is
-// available.
+// TestInitCommandStatesRealGoCapability is R4
+// (docs/specs/declared-partial-language-exposure.md): `codefit init` on a Go
+// project must state the real capability — exposed for security scanning
+// (roadmap P4-1), but with its ACTUAL narrow reach named (6 declared
+// security rules, 1-of-4 surface categories), DERIVED from the registry,
+// never a hardcoded string and never a bare "can audit" claim that would
+// read as parity with TypeScript.
 func TestInitCommandStatesRealGoCapability(t *testing.T) {
 	root := t.TempDir()
 	writeGoProject(t, root)
@@ -196,11 +198,11 @@ func TestInitCommandStatesRealGoCapability(t *testing.T) {
 		t.Fatalf("init: %v\n%s", err, out)
 	}
 	low := strings.ToLower(out)
-	if !strings.Contains(low, "does not resolve") {
-		t.Errorf("init output for a Go project must state that scan-security does not resolve a provider for it, got:\n%s", out)
+	if !strings.Contains(low, "scan-security") && !strings.Contains(low, "scan-all") {
+		t.Errorf("init output for a Go project must state security scanning is available, got:\n%s", out)
 	}
-	if !strings.Contains(low, "db dimension") {
-		t.Errorf("init output for a Go project must name the DB-dimension-only coverage, got:\n%s", out)
+	if !strings.Contains(low, "1 of 4") {
+		t.Errorf("init output for a Go project must name its 1-of-4 surface category reach, got:\n%s", out)
 	}
 }
 
