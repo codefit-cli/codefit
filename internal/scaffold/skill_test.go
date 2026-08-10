@@ -199,6 +199,31 @@ func TestSkillTeachesCVEsAndCoverage(t *testing.T) {
 	}
 }
 
+// TestSkillStatesSurfaceReachBeforeInstalling is R4/"Also in scope"
+// (docs/specs/declared-partial-language-exposure.md): the generated skill —
+// read by the agent BEFORE it audits anything — must state the language's
+// surface reach as an N-of-M claim, the same shape as the per-dimension
+// reach statement in README, DERIVED from Capability()/ProviderCategories,
+// never a hardcoded per-language sentence. TypeScript maps every category
+// (4 of 4); Go maps only authz (1 of 4) — the two must read differently.
+func TestSkillStatesSurfaceReachBeforeInstalling(t *testing.T) {
+	_, tsBody := renderSkill(t, tsInfo())
+	if !strings.Contains(tsBody, "4 of 4") {
+		t.Errorf("typescript's skill must state its 4-of-4 surface reach, got:\n%s", tsBody)
+	}
+
+	_, goBody := renderSkill(t, scaffold.ProjectInfo{Name: "x", Language: "go"})
+	if !strings.Contains(goBody, "1 of 4") {
+		t.Errorf("go's skill must state its 1-of-4 surface reach, got:\n%s", goBody)
+	}
+	low := strings.ToLower(goBody)
+	for _, notMapped := range []string{"idor", "overfetch", "nplus1"} {
+		if !strings.Contains(low, notMapped) {
+			t.Errorf("go's skill must name the unmapped surface category %q, got:\n%s", notMapped, goBody)
+		}
+	}
+}
+
 // RenderSkill is exported and may be called with no detected language; it must
 // still produce valid, exact commands (defaulting the baked language).
 func TestSkillEmptyLanguageDefaults(t *testing.T) {

@@ -10,6 +10,8 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
+	"github.com/codefit-cli/codefit/internal/core/surface"
+	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/sensors/security"
 )
 
@@ -37,6 +39,15 @@ type ScanResponse struct {
 	Score    int                    `json:"score"`
 	Blocked  bool                   `json:"blocked"`
 	Scope    ScopeBlock             `json:"scope"`
+	// SurfaceCoverage declares which of surface.ProviderCategories this
+	// language's provider mapped and which it did not (R2,
+	// docs/specs/declared-partial-language-exposure.md): a project whose
+	// provider maps a narrow slice of the vocabulary (Go today: authz only)
+	// must never report surface_items with no statement that the rest was
+	// never searched for. ALWAYS present — HandleScanSecurity errors before
+	// reaching this point when no provider resolves, so a returned response
+	// always has one.
+	SurfaceCoverage surface.CoverageStatement `json:"surface_coverage"`
 }
 
 // HandleScanSecurity runs the security sensor over the project and returns the
@@ -54,12 +65,28 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 		return ScanResponse{}, err
 	}
 	return ScanResponse{
-		Findings: res.Findings,
-		Surface:  res.Surface,
-		Score:    res.Score,
-		Blocked:  scoring.IsBlocked(res.Findings),
-		Scope:    block,
+		Findings:        res.Findings,
+		Surface:         res.Surface,
+		Score:           res.Score,
+		Blocked:         scoring.IsBlocked(res.Findings),
+		Scope:           block,
+		SurfaceCoverage: surfaceCoverageFor(req.Language),
 	}, nil
+}
+
+// surfaceCoverageFor computes the surface coverage statement for the
+// language's resolved provider (R2): which of surface.ProviderCategories it
+// mapped, and which it did not. Returns the zero CoverageStatement when no
+// provider resolves — every production caller only reaches this after a
+// provider has already been proven to resolve (runSecurity itself errors
+// otherwise), so the zero case is unreachable in practice, not silently
+// papered over.
+func surfaceCoverageFor(language string) surface.CoverageStatement {
+	p := providerForLanguage(language, nil)
+	if p == nil {
+		return surface.CoverageStatement{}
+	}
+	return surface.DeriveCoverage(p.Capability().Surface)
 }
 
 // runSecurity resolves the provider (recognizing the project's registered authz
@@ -105,16 +132,73 @@ type CoverageRequest struct {
 // deterministically vs reasoned over surface vs not covered.
 type CoverageResponse struct {
 	Manifest coverage.Manifest `json:"manifest"`
+	// Derived is true when Manifest was COMPUTED from the provider's
+	// Capability() rather than served from a hand-written CoverageManifest()
+	// (R1, docs/specs/declared-partial-language-exposure.md): the derived
+	// answer is the FLOOR every registered, exposed language gets; a
+	// hand-written prose manifest (TypeScript today) stays authoritative and
+	// is never replaced by this.
+	Derived bool `json:"derived"`
 }
 
-// HandleCoverage returns the coverage manifest for the language. Thin adapter:
-// the manifest is the provider's single source of truth.
+// HandleCoverage returns the coverage manifest for the language. A provider
+// with a hand-written CoverageManifest() serves it unchanged (Derived: false)
+// — the prose manifest stays authoritative. A registered, resolvable provider
+// with NO prose manifest still gets a truthful, DERIVED answer from its
+// Capability() (Derived: true) — "no coverage manifest for language X" is the
+// wrong answer to "what do you cover", not the absence of an error. Only a
+// language that resolves NO provider at all (unregistered, or registered but
+// not exposed for security scanning) still errors: there is nothing to
+// derive from.
 func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
 	p := providerForLanguage(req.Language, nil)
+	if p == nil {
+		return CoverageResponse{}, fmt.Errorf("no coverage manifest for language %q", req.Language)
+	}
 	if cm, ok := p.(interface {
 		CoverageManifest() coverage.Manifest
 	}); ok {
-		return CoverageResponse{Manifest: cm.CoverageManifest()}, nil
+		return CoverageResponse{Manifest: cm.CoverageManifest(), Derived: false}, nil
 	}
-	return CoverageResponse{}, fmt.Errorf("no coverage manifest for language %q", req.Language)
+	return CoverageResponse{Manifest: deriveManifest(p), Derived: true}, nil
+}
+
+// deriveManifest builds the FLOOR coverage answer (R1) from a provider's
+// Capability(): the security/practices rule ids it declares, prose for each
+// surface category it maps, and prose for each it does NOT — the not-mapped
+// half derived from surface.DeriveCoverage against the locked
+// surface.ProviderCategories vocabulary, never a literal list of category
+// names (test contract item 4).
+func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
+	cap := p.Capability()
+	cs := surface.DeriveCoverage(cap.Surface)
+
+	det := make([]string, 0, len(cap.Security.Declared)+len(cap.Practices.Declared))
+	for _, id := range cap.Security.Declared {
+		det = append(det, fmt.Sprintf("%s (security rule, declared)", id))
+	}
+	for _, id := range cap.Practices.Declared {
+		det = append(det, fmt.Sprintf("%s (practices rule, declared)", id))
+	}
+
+	reasoning := make([]string, 0, len(cs.Mapped))
+	for _, c := range cs.Mapped {
+		reasoning = append(reasoning, fmt.Sprintf(
+			"Surface category %q is mapped for %s: the provider enumerates this structural surface for the agent to reason about.",
+			c, p.Language()))
+	}
+
+	notCovered := make([]string, 0, len(cs.NotMapped))
+	for _, c := range cs.NotMapped {
+		notCovered = append(notCovered, fmt.Sprintf(
+			"Surface category %q is NOT mapped for %s — never searched for, not merely absent from this scan.",
+			c, p.Language()))
+	}
+
+	return coverage.Manifest{
+		Language:      p.Language(),
+		Deterministic: det,
+		Reasoning:     reasoning,
+		NotCovered:    notCovered,
+	}
 }

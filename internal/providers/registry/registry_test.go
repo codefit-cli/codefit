@@ -111,29 +111,30 @@ func TestByMarkerFile_NoMarkersFound(t *testing.T) {
 	}
 }
 
-// TestExposedForSecurity_TypeScriptOnly locks the exposure filter's current
-// state: only typescript is exposed for security scanning, matching the
-// existing Lock A set ({typescript, ts, tsx} all aliasing one canonical
-// entry).
-func TestExposedForSecurity_TypeScriptOnly(t *testing.T) {
+// TestExposedForSecurity_GoAndTypeScript locks the exposure filter's current
+// state (roadmap P4-1: the boundary that used to be "only typescript" MOVED
+// to include go, in table order — go is listed first in the table).
+func TestExposedForSecurity_GoAndTypeScript(t *testing.T) {
 	exposed := registry.ExposedForSecurity()
-	if len(exposed) != 1 {
-		t.Fatalf("ExposedForSecurity() = %d entries, want 1, got %+v", len(exposed), exposed)
+	if len(exposed) != 2 {
+		t.Fatalf("ExposedForSecurity() = %d entries, want 2, got %+v", len(exposed), exposed)
 	}
-	if exposed[0].Canonical != "typescript" {
-		t.Errorf("ExposedForSecurity()[0].Canonical = %q, want %q", exposed[0].Canonical, "typescript")
+	if exposed[0].Canonical != "go" || exposed[1].Canonical != "typescript" {
+		t.Errorf("ExposedForSecurity() canonicals = [%q, %q], want [go, typescript] (table order)",
+			exposed[0].Canonical, exposed[1].Canonical)
 	}
 }
 
-// TestExposedForSurfaceTools_TypeScriptOnly mirrors the security exposure
+// TestExposedForSurfaceTools_GoAndTypeScript mirrors the security exposure
 // lock for the surface-tools resolver.
-func TestExposedForSurfaceTools_TypeScriptOnly(t *testing.T) {
+func TestExposedForSurfaceTools_GoAndTypeScript(t *testing.T) {
 	exposed := registry.ExposedForSurfaceTools()
-	if len(exposed) != 1 {
-		t.Fatalf("ExposedForSurfaceTools() = %d entries, want 1, got %+v", len(exposed), exposed)
+	if len(exposed) != 2 {
+		t.Fatalf("ExposedForSurfaceTools() = %d entries, want 2, got %+v", len(exposed), exposed)
 	}
-	if exposed[0].Canonical != "typescript" {
-		t.Errorf("ExposedForSurfaceTools()[0].Canonical = %q, want %q", exposed[0].Canonical, "typescript")
+	if exposed[0].Canonical != "go" || exposed[1].Canonical != "typescript" {
+		t.Errorf("ExposedForSurfaceTools() canonicals = [%q, %q], want [go, typescript] (table order)",
+			exposed[0].Canonical, exposed[1].Canonical)
 	}
 }
 

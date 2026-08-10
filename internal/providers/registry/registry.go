@@ -43,7 +43,15 @@ var table = []Entry{
 		Canonical:   "go",
 		MarkerFiles: []string{"go.mod"},
 		New:         func(_ []string) providers.LanguageProvider { return golang.New() },
-		Exposure:    Exposure{SecurityScan: false, SurfaceTools: false, InitDetect: true},
+		// Exposed for security scan and surface tools (roadmap P4-1,
+		// docs/specs/declared-partial-language-exposure.md): Go's Capability
+		// (6 security rule ids, 1 of 4 surface categories — authz only) is now
+		// reachable through providerForLanguage/providerFor, on the condition
+		// this change establishes as the replacement guarantee — every response
+		// declares what it does not cover (R2, checked by
+		// internal/mcp/scan.go's/scanall.go's surface-coverage statement, and by
+		// this package's own capability-non-empty lock, see exposure_test.go).
+		Exposure: Exposure{SecurityScan: true, SurfaceTools: true, InitDetect: true},
 	},
 	{
 		Canonical:   "typescript",

@@ -91,22 +91,29 @@ independent audit layer that validates AI-generated code is secure and correct
 
 ## Status — Phase 2 (the database dimension), OLAP closed
 
-**Reach is per dimension, not per project — read this before you install.**
+**Reach is per dimension AND per language — read this before you install.**
 Security detection and surface mapping (IDOR, broken authorization, over-fetching,
-N+1) run on **TypeScript only**; `codefit-scan-security`, `codefit-scan-endpoint`,
-and `codefit-coverage` refuse any other language with a clear error rather than a
-false all-clear. The **database dimension does not depend on your app's
-language**: `codefit-scan-db` (and `codefit-scan-all`) resolves its schema parser
-by the schema file's shape (`.prisma` / `.sql`), never by the project's language —
-so a Go or Python backend that declares `database.schema_paths` still gets the DB
-dimension audited, with `by_dimension.security` reported honestly as `null`
+N+1) run on **TypeScript** (all four categories) and on **Go** (broken authorization
+only — 6 declared security rules, 1 of 4 surface categories); `codefit-scan-security`,
+`codefit-scan-endpoint`, and `codefit-coverage` refuse any other language with a clear
+error rather than a false all-clear. Every response from an exposed language states its
+own reach: `codefit-coverage {language}` and `codefit-scan-all`'s `security` section
+both carry a `surface_coverage` statement naming exactly which categories were mapped
+and which were not — Go's coverage says so explicitly rather than leaving a bare
+`surface_items` count to be misread as complete. The **database dimension does not
+depend on your app's language**: `codefit-scan-db` (and `codefit-scan-all`) resolves
+its schema parser by the schema file's shape (`.prisma` / `.sql`), never by the
+project's language — so a Python backend that declares `database.schema_paths` still
+gets the DB dimension audited, with `by_dimension.security` reported honestly as `null`
 rather than silently skipped. See [Supported languages](#supported-languages) for
 the full per-language, per-dimension breakdown.
 
 **Works today, on `main`, validated in real use against real backends:**
 
-- **Providers:** TypeScript (gotreesitter, pure Go) and Go (`go/ast`, used for the
-  CI self-audit).
+- **Providers:** TypeScript (gotreesitter, pure Go) and Go (`go/ast`) — both exposed
+  to `codefit-scan-security`/`-scan-endpoint`/`-scan-all`, with Go's narrower reach
+  (6 security rules, 1 of 4 surface categories) stated in its own coverage answer,
+  not implied as parity.
 - **Deterministic security rules (TypeScript)** — five categories, each a fact at
   certainty 1.0 (see [COVERAGE.md](COVERAGE.md)).
 - **Surface mapping** — three categories (IDOR, broken authorization,
@@ -681,7 +688,7 @@ data left the handler) it hands off at the *frontier*; what it does not cover it
 
 | Language / Ecosystem | Status |
 | --- | --- |
-| **Go** | `codefit-scan-all` audits the DB dimension (schema-only) when `database.schema_paths` is configured — no code security detectors are wired for Go: `codefit-scan-security` and `codefit-scan-endpoint` still refuse it, and `scan-all` reports `by_dimension.security: null`. The Go provider itself is otherwise used internally for codefit's own CI self-audit, not exposed to a Go user's project. |
+| **Go** | `codefit-scan-security`, `codefit-scan-endpoint`, and `codefit-scan-all` audit Go code: **6** declared deterministic security rules (hardcoded secrets, SQL injection by string concatenation, OS command injection by string concatenation, an env var read without a default, insecure `math/rand` fed into a security value, weak hashing with MD5/SHA-1) and **1 of 4** surface categories mapped (`authz` — HTTP handlers; IDOR, over-fetching, and N+1 are not mapped for Go). Every `codefit-coverage`/scan response for Go states this reach explicitly (a `surface_coverage` field naming what was mapped and what was not), never a bare pass/fail. `codefit-scan-all` also audits the DB dimension (schema-only) when `database.schema_paths` is configured. |
 | **TypeScript / Next.js / Express / Fastify / NestJS / Prisma** | Deterministic security rules (5 categories, any TS file) + surface mapping (IDOR, authz, over-fetching) for Next.js App Router, Server Actions, Express, Fastify, and NestJS. Cross-file resource access is signalled (`indirect_access`), not followed. Validated against real Next.js, Express/Prisma, and NestJS/Prisma backends. |
 | Java / Spring | Roadmap |
 | Python / FastAPI / Django | Roadmap |
