@@ -87,14 +87,21 @@ func extractBulletBlock(readme, anchor string) (string, error) {
 }
 
 // TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability locks README.md's
-// two restatements of TypeScript's surface-mapping reach against the real
+// THREE restatements of TypeScript's surface-mapping reach against the real
 // declaration (typescript.New().Capability().Surface) instead of a literal
 // count: for every category TypeScript actually declares, its marker must
-// appear in BOTH the "Works today" bullet and the "Supported languages" table
-// row. This is the class of drift that let README say "three categories" for
-// seven weeks after N+1 shipped as TypeScript's fourth (v0.2.2) — a category
-// added to Capability().Surface with no matching README marker now fails this
-// test for a real reason, not because two hardcoded numbers moved together.
+// appear in the "Works today" bullet, the "Supported languages" table row,
+// AND the "What codefit covers today" bullet (line ~214, "Surface mapping —
+// the agent reasons."). This is the class of drift that let README say
+// "three categories" for seven weeks after N+1 shipped as TypeScript's fourth
+// (v0.2.2) — a category added to Capability().Surface with no matching
+// README marker now fails this test for a real reason, not because hardcoded
+// numbers moved together.
+//
+// The third site was found by sdd-verify (obs #1467, SUGGESTION): it was a
+// known gap, not a live defect (the site was already accurate), but the lock
+// existed to catch exactly this class of drift and was not exhaustive over
+// every restatement in the file. Extended here rather than left undeclared.
 func TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability(t *testing.T) {
 	root := repoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
@@ -108,6 +115,10 @@ func TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	row, err := extractLineContaining(readme, "| **TypeScript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coversBullet, err := extractBulletBlock(readme, "**Surface mapping — the agent reasons.**")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +137,9 @@ func TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability(t *testing.T) {
 		}
 		if !containsAny(row, markers) {
 			t.Errorf("README's Supported-languages TypeScript row does not name category %q (any of %v): %s", cat, markers, row)
+		}
+		if !containsAny(coversBullet, markers) {
+			t.Errorf("README's \"What codefit covers today\" Surface-mapping bullet does not name category %q (any of %v): %s", cat, markers, coversBullet)
 		}
 	}
 }

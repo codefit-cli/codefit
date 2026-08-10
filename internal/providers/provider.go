@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"regexp"
 	"slices"
 
 	"github.com/codefit-cli/codefit/internal/config"
@@ -56,6 +57,88 @@ func (r RuleSet) ValidExclusions() bool {
 		}
 	}
 	return true
+}
+
+// ruleIDShapePattern matches exactly one rule id in the "<PREFIX>-<digits>"
+// shape every id in this codebase uses (e.g. "SEC-001", "PRAC-004").
+var ruleIDShapePattern = regexp.MustCompile(`^([A-Z]+)-([0-9]+)$`)
+
+// familyIDShape derives the "<PREFIX>-<N digits>" shape shared by every id in
+// declared (e.g. ["SEC-001","SEC-010"] -> prefix "SEC", width 3), or
+// ok==false if declared is empty, contains an id outside the shape, or the
+// ids do not share one uniform prefix and digit width — in which case no
+// shape claim can be honestly derived from them.
+func familyIDShape(declared []string) (prefix string, width int, ok bool) {
+	if len(declared) == 0 {
+		return "", 0, false
+	}
+	for i, id := range declared {
+		m := ruleIDShapePattern.FindStringSubmatch(id)
+		if m == nil {
+			return "", 0, false
+		}
+		p, digits := m[1], m[2]
+		if i == 0 {
+			prefix, width = p, len(digits)
+			continue
+		}
+		if p != prefix || len(digits) != width {
+			return "", 0, false
+		}
+	}
+	return prefix, width, true
+}
+
+// ValidExclusionSource is the phantom-exclusion check (C7) — the gap
+// sdd-verify found by mutation: ValidExclusions (C6) only checks that an
+// excluded id is not simultaneously Declared, never whether it ever
+// corresponded to a real rule. Renaming a real excluded id to a fabricated
+// marker (e.g. "PRAC-999-NEVER-EXISTED") left C6, and every other existing
+// check, green.
+//
+// This mirrors ADR 0057's own finding about internal/core/dbcoverage
+// (mirrored in reverse here: that ADR's Control B forbids the manifest
+// claiming a capability that does not exist; a phantom exclusion is the same
+// lie pointed the other way — a hole the manifest claims exists but never
+// did) and follows the SAME epistemic split its Control C draws: the check
+// is built ONLY where a real rule source exists to check against, and
+// declared as impossible-for-now everywhere else, never faked in either
+// direction.
+//
+//   - r.Enumerable == true (e.g. TypeScript's YAML-backed security rules):
+//     Control A (typescript/control_a_test.go) already proves Declared is
+//     the EXACT set the real rule loader produces, so the "<PREFIX>-<digits>"
+//     shape every Declared id shares is itself grounded in that real source.
+//     ValidExclusionSource requires every Excluded id to match that same
+//     shape, and reports every one that does not.
+//   - r.Enumerable == false (e.g. Go's hand-written PRAC/SEC literals, which
+//     have no All()/ID() loader): Declared's own shape is unverified, so
+//     deriving a pattern from it and calling that "checked against the real
+//     rule source" would be exactly the over-promise this check exists to
+//     prevent. ValidExclusionSource returns (true, nil) — not applicable, no
+//     claim made — rather than silently skip; see ADR 0066.
+//
+// This is a correspondence check, never an accuracy one (the same
+// discipline ADR 0057's dbcoverage Controls B/C draw): it cannot prove an
+// excluded id was ever actually built or considered — a fabricated id that
+// happens to share the family's shape (e.g. "SEC-999") still passes. It
+// catches exactly the defect sdd-verify's mutation produced: an id that does
+// not even look like a member of the family.
+func (r RuleSet) ValidExclusionSource() (ok bool, phantom []string) {
+	if !r.Enumerable || len(r.Excluded) == 0 {
+		return true, nil
+	}
+	prefix, width, derivable := familyIDShape(r.Declared)
+	if !derivable {
+		return true, nil
+	}
+	for _, ex := range r.Excluded {
+		m := ruleIDShapePattern.FindStringSubmatch(ex.ID)
+		if m == nil || m[1] != prefix || len(m[2]) != width {
+			phantom = append(phantom, ex.ID)
+		}
+	}
+	return len(phantom) == 0, phantom
 }
 
 // Capability is what a LanguageProvider declares it implements — a fact about

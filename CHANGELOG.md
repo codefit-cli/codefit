@@ -69,6 +69,18 @@ All notable changes to codefit are documented here. The format is based on
   want of a landing site; `internal/providers/golang/capability.go` (ADR
   0064) is that site, so it lands here instead of in a coverage manifest
   file, which stays out of scope.
+- **`RuleSet.ValidExclusionSource()` (C7)** — a phantom-exclusion check found
+  owed by `sdd-verify` (obs #1467): C6 only proved an excluded id was not
+  simultaneously `Declared`, never that it ever corresponded to a real rule;
+  renaming Go's real `PRAC-004` entry to a fabricated marker left every
+  existing test green. C7 closes that for `Enumerable:true` rule families
+  (checked against the exact rule-id shape Control A already proves accurate
+  for a real loader) and explicitly declares it not-applicable — never
+  faked — for `Enumerable:false` ones, the same split
+  `internal/core/dbcoverage`'s Control C draws for `internal/core/paradigm/`.
+  See [ADR 0066](docs/decisions/0066-a-permanent-exclusion-is-a-typed-cross-provider-fact-and-a-phantom-one-is-still-a-lie.md),
+  which also records why `ExcludedRule`/C6 itself earned this ADR after
+  shipping without one.
 
 ### Fixed
 - **README.md's TypeScript surface-mapping reach was stated as three
@@ -81,7 +93,9 @@ All notable changes to codefit are documented here. The format is based on
   and checks, per category actually in `typescript.New().Capability().Surface`,
   that a matching prose marker appears in both restatements — so a category
   added to the vocabulary with no updated README fails this test for a real
-  reason instead of drifting silently again.
+  reason instead of drifting silently again. A **third** restatement (line
+  ~214, "Surface mapping — the agent reasons.") was found by `sdd-verify` as
+  an already-accurate but unlocked gap; the same test now also checks it.
 
 ## [0.2.8] — 2026-08-10
 

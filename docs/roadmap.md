@@ -435,6 +435,18 @@ not an auditable language today. See P4-1 for the larger question.
   absence from `Declared`. No rule, finding, or coverage-manifest file was built —
   `internal/providers/golang/coverage.go` still does not exist, deliberately, matching what
   ADR 0065 already decided.
+  **Follow-up, same change name:** `sdd-verify` judged the "no ADR needed" call on
+  `ExcludedRule`/C6 unsound (different in kind from `dbcoverage.NotCovered()`'s untyped
+  prose precedent) and found, by mutation, that C6 cannot tell a real exclusion from a
+  fabricated one. Both are now recorded in
+  [ADR 0066](decisions/0066-a-permanent-exclusion-is-a-typed-cross-provider-fact-and-a-phantom-one-is-still-a-lie.md),
+  which also adds `RuleSet.ValidExclusionSource()` (C7) — a phantom-exclusion shape check
+  built only where `Enumerable` is `true` (TypeScript's loader-backed security rules) and
+  explicitly declared not-applicable where it is `false` (Go's hand-written lists,
+  including `PRAC-004` itself — that specific gap stays open, see the ADR). README's third
+  restatement of TypeScript's surface-mapping reach (line ~214, "Surface mapping — the
+  agent reasons.") was also added to the P1-6 lock below, closing the gap `sdd-verify`
+  flagged as a SUGGESTION.
 
 ### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 
@@ -468,6 +480,15 @@ real reason. No other restatement of the count was found on a positive-probe sea
 repository (README's own intro line, `CLAUDE.md`, `COVERAGE.md`, and every CHANGELOG/ADR hit
 were checked; the CHANGELOG/ADR mentions are dated, pre-`v0.2.2` historical entries this
 project's doctrine does not rewrite).
+
+**Follow-up, same change name:** `sdd-verify` (obs #1467) found a *third* restatement the
+lock did not cover — README.md's "What codefit covers today" section, "Surface mapping —
+the agent reasons." bullet (line ~214) — already accurate (not a live defect), but outside
+the lock's exhaustiveness. Extended: the test now also checks that bullet, proven by
+mutation (removing the `over-fetching` marker from it fails the test; the first mutation
+tried, removing only the first `N+1` mention, did **not** fail, because the same word
+recurs later in the same bullet's unrelated prose about item ordering — a disclosed,
+narrow false-negative surface specific to this wider block, not fixed here).
 
 ---
 
