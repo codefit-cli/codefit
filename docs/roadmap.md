@@ -417,20 +417,36 @@ not an auditable language today. See P4-1 for the larger question.
   at the ADR — the original "permanently dropped" text is kept, not deleted, as the record of
   what Phase 2.5 decided and why it changed. No rule, finding, surface item or baseline
   fingerprint changes: `dwrules.All()` stays seven rules, `dbrules.All()` stays fourteen.
-- **P1-4b — STILL OPEN, blocker resolved differently — PRAC-004's owed manifest entry.**
-  Its permanent drop is recorded only in
+- **P1-4b — CLOSED (`readme-count-and-prac004-entry`) — PRAC-004's owed manifest entry.**
+  Its permanent drop was recorded only in
   [ADR 0056](decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
-  and the CHANGELOG; it owes a coverage-manifest entry. **The blocker this item names — "no
-  Go coverage manifest to put it in, entangled with the still-open P1-3/P4-1 decision" — no
-  longer applies as written: P4-1 resolved** ([ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md),
-  `declared-partial-language-exposure`) **without building `internal/providers/golang/coverage.go`.**
-  R1 of that change made a hand-written prose manifest unnecessary for correctness — Go's
-  security/practices rule ids (`internal/providers/golang/capability.go`) are already a real,
-  tested landing site the coverage tool derives an honest answer from directly, with no
-  manifest file needed. PRAC-004's entry could land there in the derived list, or in a future
-  hand-written `golang/coverage.go` if one is ever written (it would become authoritative over
-  the derived floor, same as TypeScript's). Neither is done by this item's own act — it
-  **stays open**, but its landing site is no longer hypothetical.
+  and the CHANGELOG; it owed a coverage-manifest entry. The blocker this item used to name —
+  "no Go coverage manifest to put it in, entangled with the still-open P1-3/P4-1 decision" —
+  stopped applying once P4-1 resolved
+  ([ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md),
+  `declared-partial-language-exposure`) without building
+  `internal/providers/golang/coverage.go`, which left this item's landing site real but not
+  yet used. **Paid, without a coverage-manifest file**: `providers.RuleSet` gained
+  `Excluded []ExcludedRule` (id + reason) and `ValidExclusions()` (C6 — an excluded id can
+  never also be `Declared`, checked through the interface with both real providers). Go's
+  `Practices` RuleSet (`internal/providers/golang/capability.go`) now names `PRAC-004` there
+  with its ADR 0056 reason, so `codefit-coverage` for `"go"` states the permanent gap in
+  `NotCovered` (derived by R1) instead of leaving an agent to infer it from `PRAC-004`'s
+  absence from `Declared`. No rule, finding, or coverage-manifest file was built —
+  `internal/providers/golang/coverage.go` still does not exist, deliberately, matching what
+  ADR 0065 already decided.
+  **Follow-up, same change name:** `sdd-verify` judged the "no ADR needed" call on
+  `ExcludedRule`/C6 unsound (different in kind from `dbcoverage.NotCovered()`'s untyped
+  prose precedent) and found, by mutation, that C6 cannot tell a real exclusion from a
+  fabricated one. Both are now recorded in
+  [ADR 0066](decisions/0066-a-permanent-exclusion-is-a-typed-cross-provider-fact-and-a-phantom-one-is-still-a-lie.md),
+  which also adds `RuleSet.ValidExclusionSource()` (C7) — a phantom-exclusion shape check
+  built only where `Enumerable` is `true` (TypeScript's loader-backed security rules) and
+  explicitly declared not-applicable where it is `false` (Go's hand-written lists,
+  including `PRAC-004` itself — that specific gap stays open, see the ADR). README's third
+  restatement of TypeScript's surface-mapping reach (line ~214, "Surface mapping — the
+  agent reasons.") was also added to the P1-6 lock below, closing the gap `sdd-verify`
+  flagged as a SUGGESTION.
 
 ### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 
@@ -444,6 +460,35 @@ more claim to correct.
 `"the HTTP/SSE transport (--port) is not implemented yet; use stdio (no --port)"` whenever
 `port != 0`, and the flag's own help text says `"(not implemented yet)"`. The claim matches
 the code exactly; no README edit was needed for this item.
+
+### P1-6 — CLOSED (`readme-count-and-prac004-entry`) — README undercounted TypeScript's surface-mapping reach
+
+`README.md` stated TypeScript's surface mapping as **three** categories in two places (the
+"Works today" bullet and the Supported-languages table row); it is **four** —
+`nplus1` shipped as a real category (`codefit-surface-nplus1`) in `v0.2.2`, and both
+restatements were never updated, undercounting it for roughly seven weeks. Pre-existing,
+unrelated to any change in this window; `sdd-verify` measured it and `git blame` confirmed
+the age.
+
+**Both lines corrected** to name all four categories (IDOR, broken authorization,
+over-fetching, N+1). **Locked**, not just fixed:
+`internal/providers/readme_surface_count_test.go` reads `README.md` and, for every category
+in `typescript.New().Capability().Surface`, checks that a matching prose marker appears in
+both restatements — derived against the real declaration rather than a second hardcoded
+count, so a category added to the vocabulary with no README update fails this test for a
+real reason. No other restatement of the count was found on a positive-probe search of the
+repository (README's own intro line, `CLAUDE.md`, `COVERAGE.md`, and every CHANGELOG/ADR hit
+were checked; the CHANGELOG/ADR mentions are dated, pre-`v0.2.2` historical entries this
+project's doctrine does not rewrite).
+
+**Follow-up, same change name:** `sdd-verify` (obs #1467) found a *third* restatement the
+lock did not cover — README.md's "What codefit covers today" section, "Surface mapping —
+the agent reasons." bullet (line ~214) — already accurate (not a live defect), but outside
+the lock's exhaustiveness. Extended: the test now also checks that bullet, proven by
+mutation (removing the `over-fetching` marker from it fails the test; the first mutation
+tried, removing only the first `N+1` mention, did **not** fail, because the same word
+recurs later in the same bullet's unrelated prose about item ordering — a disclosed,
+narrow false-negative surface specific to this wider block, not fixed here).
 
 ---
 

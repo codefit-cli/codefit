@@ -76,6 +76,29 @@ func TestHandleCoverage_DerivedForLanguageWithNoProseManifest(t *testing.T) {
 	}
 }
 
+// TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded is P1-4b's owed
+// manifest entry, landing where R1 put it: codefit-coverage for "go" must
+// name PRAC-004 in NotCovered, with its ADR 0056 reason, derived from
+// golang.Provider.Capability().Practices.Excluded — not silently absent from
+// the declared Practices list the way it was before this change.
+func TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded(t *testing.T) {
+	resp, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "go"})
+	if err != nil {
+		t.Fatalf("HandleCoverage(go): %v", err)
+	}
+	joined := strings.Join(resp.Manifest.NotCovered, "\n")
+	if !strings.Contains(joined, "PRAC-004") {
+		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got NotCovered: %v", resp.Manifest.NotCovered)
+	}
+	if !strings.Contains(joined, "ADR 0056") {
+		t.Errorf("PRAC-004's NotCovered entry must carry its reason (ADR 0056), got: %v", resp.Manifest.NotCovered)
+	}
+	declared := strings.Join(resp.Manifest.Deterministic, "\n")
+	if strings.Contains(declared, "PRAC-004") {
+		t.Error("PRAC-004 must not also appear in Deterministic — it is excluded, not declared")
+	}
+}
+
 // TestC4_CoverageManifestCapabilityMatchesAssertion is C4: for every
 // registered provider, Capability().CoverageManifest must be true if and
 // only if the provider actually implements the optional CoverageManifest()
