@@ -106,3 +106,27 @@ func ByMarkerFile(root string) (Entry, bool) {
 	}
 	return Entry{}, false
 }
+
+// ExposedForSecurity returns the entries whose Exposure.SecurityScan is true,
+// in table order — the set internal/mcp's providerForLanguage/
+// SupportedLanguageNames resolve a security provider for.
+func ExposedForSecurity() []Entry {
+	return filterExposure(func(e Entry) bool { return e.Exposure.SecurityScan })
+}
+
+// ExposedForSurfaceTools returns the entries whose Exposure.SurfaceTools is
+// true, in table order — the set internal/mcp/surface.go's providerFor
+// resolves for the codefit-surface-* tools.
+func ExposedForSurfaceTools() []Entry {
+	return filterExposure(func(e Entry) bool { return e.Exposure.SurfaceTools })
+}
+
+func filterExposure(pred func(Entry) bool) []Entry {
+	var out []Entry
+	for _, e := range table {
+		if pred(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}

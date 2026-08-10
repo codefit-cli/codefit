@@ -111,6 +111,32 @@ func TestByMarkerFile_NoMarkersFound(t *testing.T) {
 	}
 }
 
+// TestExposedForSecurity_TypeScriptOnly locks the exposure filter's current
+// state: only typescript is exposed for security scanning, matching the
+// existing Lock A set ({typescript, ts, tsx} all aliasing one canonical
+// entry).
+func TestExposedForSecurity_TypeScriptOnly(t *testing.T) {
+	exposed := registry.ExposedForSecurity()
+	if len(exposed) != 1 {
+		t.Fatalf("ExposedForSecurity() = %d entries, want 1, got %+v", len(exposed), exposed)
+	}
+	if exposed[0].Canonical != "typescript" {
+		t.Errorf("ExposedForSecurity()[0].Canonical = %q, want %q", exposed[0].Canonical, "typescript")
+	}
+}
+
+// TestExposedForSurfaceTools_TypeScriptOnly mirrors the security exposure
+// lock for the surface-tools resolver.
+func TestExposedForSurfaceTools_TypeScriptOnly(t *testing.T) {
+	exposed := registry.ExposedForSurfaceTools()
+	if len(exposed) != 1 {
+		t.Fatalf("ExposedForSurfaceTools() = %d entries, want 1, got %+v", len(exposed), exposed)
+	}
+	if exposed[0].Canonical != "typescript" {
+		t.Errorf("ExposedForSurfaceTools()[0].Canonical = %q, want %q", exposed[0].Canonical, "typescript")
+	}
+}
+
 // TestExtensions_ReadFromProviderNotStoredField locks D2's rule that
 // extensions are NEVER a table field — re-typing them would make the table a
 // sixth hand-written answer to "what can this language do", the exact defect

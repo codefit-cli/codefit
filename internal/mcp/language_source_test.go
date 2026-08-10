@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
@@ -65,8 +66,8 @@ func TestLanguageSource_LockA_ResolvableSetIsExactlyTypeScript(t *testing.T) {
 // switch gains a language the other does not know.
 func TestLanguageSource_LockB_ProviderForDivergence(t *testing.T) {
 	seen := map[string]bool{}
-	for _, ctor := range languageProviders {
-		p := ctor(nil)
+	for _, e := range registry.ExposedForSecurity() {
+		p := e.New(nil)
 		canonical := p.Language()
 		if seen[canonical] {
 			continue // alias already checked

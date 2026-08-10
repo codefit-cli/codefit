@@ -11,8 +11,7 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/providers"
-	"github.com/codefit-cli/codefit/internal/providers/golang"
-	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 )
 
 // ProjectInfo is the deterministic picture of a project that drives config and
@@ -65,22 +64,19 @@ func Detect(root string) (ProjectInfo, error) {
 	return info, nil
 }
 
-// detectLanguage resolves the project's language provider from marker files, in
-// priority order. Only TypeScript and Go have providers today; Python and Java
-// markers are recognized but unsupported, so they fall through to nil.
-//
-// go.mod wins over package.json: in a polyglot root with both, codefit detects
-// Go. A monorepo with separate per-language sub-projects should run init per
-// sub-project root rather than at the polyglot root.
+// detectLanguage resolves the project's language provider from marker files,
+// via internal/providers/registry.ByMarkerFile — the registry's table order
+// IS the priority (go.mod wins over package.json in a polyglot root; a
+// monorepo with separate per-language sub-projects should run init per
+// sub-project root rather than at the polyglot root). Only TypeScript and Go
+// are registered today; Python and Java markers are recognized elsewhere
+// (readPackageDeps et al.) but unsupported, so they fall through to nil.
 func detectLanguage(root string) providers.LanguageProvider {
-	switch {
-	case exists(root, "go.mod"):
-		return golang.New()
-	case exists(root, "package.json") || exists(root, "tsconfig.json"):
-		return typescript.New()
-	default:
+	e, ok := registry.ByMarkerFile(root)
+	if !ok {
 		return nil
 	}
+	return e.New(nil)
 }
 
 // enrichTypeScript fills framework, ORM and database from a TypeScript project's

@@ -20,7 +20,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/providers"
-	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
@@ -682,47 +682,34 @@ func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
 	return ScanEndpointResponse{File: req.File, Found: true, Endpoints: matched}, nil
 }
 
-// languageProviders is THE supported set — the single source providerForLanguage
-// and SupportedLanguageNames both read, so the two can never hand-diverge into a
-// fourth list (D4). "typescript", "ts", "tsx" all alias the one canonical
-// TypeScript provider; adding an entry here is the one place that expands what
-// codefit-scan-all can resolve a security provider for (Lock A guards this
-// exact set staying {typescript, ts, tsx} until a future change deliberately
-// grows it).
-var languageProviders = map[string]func(authzHelpers []string) providers.LanguageProvider{
-	"typescript": func(authzHelpers []string) providers.LanguageProvider {
-		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
-	},
-	"ts": func(authzHelpers []string) providers.LanguageProvider {
-		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
-	},
-	"tsx": func(authzHelpers []string) providers.LanguageProvider {
-		return typescript.New(typescript.WithAuthzHelpers(authzHelpers))
-	},
-}
-
-// providerForLanguage resolves a provider by language name — the MCP adapter is
-// the single place that maps language → provider (the core never does). The
-// project's registered authz helpers (from the baseline) are passed to the
-// provider so surface recognition reflects per-project knowledge (ADR 0013).
+// providerForLanguage resolves a provider by language name, filtered to
+// entries the registry EXPOSES for security scanning (Entry.Exposure.
+// SecurityScan) — the MCP adapter is the single CONSUMER of the registry
+// here, never the single source of the mapping itself (that is
+// internal/providers/registry, D2/D4). A registered-but-unexposed language
+// (go today) resolves nil here exactly as an unregistered one would; the
+// registry's Exposure field is what makes that gap deliberate, not an
+// omission. The project's registered authz helpers (from the baseline) are
+// passed to the provider so surface recognition reflects per-project
+// knowledge (ADR 0013).
 func providerForLanguage(lang string, authzHelpers []string) providers.LanguageProvider {
-	ctor, ok := languageProviders[lang]
-	if !ok {
+	e, ok := registry.ByName(lang)
+	if !ok || !e.Exposure.SecurityScan {
 		return nil
 	}
-	return ctor(authzHelpers)
+	return e.New(authzHelpers)
 }
 
 // SupportedLanguageNames returns the canonical, deduplicated, sorted set of
-// language names codefit-scan-all can resolve a security provider for — DERIVED
-// from what languageProviders actually constructs (each entry's Language()),
-// never a hand-written literal. This is the single source the nothing-measurable
-// error message reads (D4/D5): a language and its aliases (ts/tsx) collapse to
-// one canonical name here.
+// language names codefit-scan-all can resolve a security provider for —
+// DERIVED from registry.ExposedForSecurity(), never a hand-written literal.
+// This is the single source the nothing-measurable error message reads
+// (D4/D5): a language and its aliases (ts/tsx) collapse to one canonical name
+// here.
 func SupportedLanguageNames() []string {
 	seen := map[string]bool{}
-	for _, ctor := range languageProviders {
-		seen[ctor(nil).Language()] = true
+	for _, e := range registry.ExposedForSecurity() {
+		seen[e.Canonical] = true
 	}
 	names := make([]string, 0, len(seen))
 	for name := range seen {

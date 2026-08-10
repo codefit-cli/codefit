@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/coverage"
 	"github.com/codefit-cli/codefit/internal/mcp"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 )
 
 // codefit-scan-security: runs the deterministic + surface analysis over a project
@@ -37,6 +39,26 @@ func TestHandleCoverage(t *testing.T) {
 	}
 	if _, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "cobol"}); err == nil {
 		t.Error("unsupported language should error")
+	}
+}
+
+// TestC4_CoverageManifestCapabilityMatchesAssertion is C4: for every
+// registered provider, Capability().CoverageManifest must be true if and
+// only if the provider actually implements the optional CoverageManifest()
+// method HandleCoverage's type assertion looks for. HandleCoverage's
+// behavior is UNCHANGED by this change (it still type-asserts); C4 only adds
+// the check that the declared fact and the runtime fact never disagree.
+func TestC4_CoverageManifestCapabilityMatchesAssertion(t *testing.T) {
+	for _, e := range registry.All() {
+		t.Run(e.Canonical, func(t *testing.T) {
+			p := e.New(nil)
+			_, assertionOK := p.(interface{ CoverageManifest() coverage.Manifest })
+			declared := p.Capability().CoverageManifest
+			if declared != assertionOK {
+				t.Errorf("%s: Capability().CoverageManifest = %v, but the type assertion HandleCoverage uses = %v — they must agree (C4)",
+					e.Canonical, declared, assertionOK)
+			}
+		})
 	}
 }
 
