@@ -91,6 +91,18 @@ independent audit layer that validates AI-generated code is secure and correct
 
 ## Status — Phase 2 (the database dimension), OLAP closed
 
+**Reach is per dimension, not per project — read this before you install.**
+Security detection and surface mapping (IDOR, broken authorization, over-fetching,
+N+1) run on **TypeScript only**; `codefit-scan-security`, `codefit-scan-endpoint`,
+and `codefit-coverage` refuse any other language with a clear error rather than a
+false all-clear. The **database dimension does not depend on your app's
+language**: `codefit-scan-db` (and `codefit-scan-all`) resolves its schema parser
+by the schema file's shape (`.prisma` / `.sql`), never by the project's language —
+so a Go or Python backend that declares `database.schema_paths` still gets the DB
+dimension audited, with `by_dimension.security` reported honestly as `null`
+rather than silently skipped. See [Supported languages](#supported-languages) for
+the full per-language, per-dimension breakdown.
+
 **Works today, on `main`, validated in real use against real backends:**
 
 - **Providers:** TypeScript (gotreesitter, pure Go) and Go (`go/ast`, used for the
@@ -179,7 +191,13 @@ See the [PRD](docs/PRD-codefit-v1.4.md) §25 and [VERSIONING.md](VERSIONING.md).
 Concretely, on `main` — so you know exactly what to expect without reading
 [COVERAGE.md](COVERAGE.md) in full:
 
-- **Languages.** TypeScript / TSX (full rules + surface) and Go (the CI self-audit).
+- **Languages — reach is per dimension, not per project.** Deterministic security
+  rules and surface mapping run on TypeScript / TSX only. Go's provider is used
+  internally for codefit's own CI self-audit — not exposed to a Go user's
+  project. The **database dimension bullet below is language-independent**: it
+  runs for any project (Go, Python, anything) that declares
+  `database.schema_paths`, because its schema parser resolves by the schema
+  file's shape, not by the app's language.
 - **Deterministic rules (TypeScript, certainty 1.0).** Hardcoded secrets, weak
   crypto (MD5/SHA-1, insecure `Math.random` for tokens), dangerous
   `eval`/`new Function`, inline SQL injection, and inline XSS via

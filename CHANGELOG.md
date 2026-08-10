@@ -175,6 +175,17 @@ work below — which declares gaps rather than closing them.
   MCP tool descriptions and the generated skill are all untouched. This change is one map
   of integers.
 
+- **README.md described codefit's reach per PROJECT ("TypeScript is supported / Go is
+  not") when, since P0-5, it is per DIMENSION: security and surface mapping run on
+  TypeScript only, but the database dimension runs for any project that declares
+  `database.schema_paths`, regardless of its language.** A reader with a Go or Python
+  backend and a SQL schema could not tell from the README that codefit audits their
+  schema. The `## Status` section now opens with the per-dimension statement before
+  Install, and the "What codefit covers today" `Languages` bullet no longer reads as a
+  whole-product language list. No code changed — the `## Supported languages` table's
+  Go row was already corrected in `817070e` (P0-5); this closes the roadmap's P1-1a and
+  P1-1c. No rule, response or baseline fingerprint moves.
+
 ### Fixed
 
 - **⚠️ The `scan-all` response byte budget is now calibrated by measurement, not chosen —
