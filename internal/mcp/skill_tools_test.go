@@ -8,6 +8,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/codefit-cli/codefit/internal/mcp"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
@@ -131,6 +132,37 @@ func TestSkillNamesEveryRegisteredTool(t *testing.T) {
 		case !named && strings.TrimSpace(reason) == "":
 			t.Errorf("%s is omitted from the skill with an empty reason — declare why", name)
 		}
+	}
+}
+
+// TestSkillNamesEveryRegisteredTool_ForEveryLanguage widens
+// TestSkillNamesEveryRegisteredTool's drift lock to every REGISTERED
+// language, not just the TypeScript fixture — the derived category slot
+// (D5) narrows per language, but the tool-naming floor must not narrow with
+// it. TestSkillNamesEveryRegisteredTool and deliberatelyNotInSkill
+// themselves stay untouched.
+func TestSkillNamesEveryRegisteredTool_ForEveryLanguage(t *testing.T) {
+	registered := registeredTools(t)
+	for _, e := range registry.All() {
+		t.Run(e.Canonical, func(t *testing.T) {
+			skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: e.Canonical})
+			if err != nil {
+				t.Fatalf("RenderSkill(%s): %v", e.Canonical, err)
+			}
+			body := string(skill)
+			for _, name := range registered {
+				named := strings.Contains(body, name)
+				reason, declared := deliberatelyNotInSkill[name]
+				switch {
+				case named && declared:
+					t.Errorf("%s: %s is named in the skill but still listed as deliberately omitted", e.Canonical, name)
+				case !named && !declared:
+					t.Errorf("%s: %s is registered by the MCP server but the skill never names it, and no reason is declared", e.Canonical, name)
+				case !named && strings.TrimSpace(reason) == "":
+					t.Errorf("%s: %s is omitted from the skill with an empty reason", e.Canonical, name)
+				}
+			}
+		})
 	}
 }
 

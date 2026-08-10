@@ -3,8 +3,53 @@ package scaffold
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"text/template"
+
+	"github.com/codefit-cli/codefit/internal/core/surface"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 )
+
+// categoryPhrases maps each surface.ProviderCategories entry to the human
+// phrase the skill's DERIVED slot renders for it. Locked exhaustive over
+// surface.ProviderCategories, both directions, by
+// category_phrase_test.go's C2b — a category added to the vocabulary with no
+// phrase here is a hard test failure, not a blank spot in the agent's skill.
+var categoryPhrases = map[surface.Category]string{
+	surface.CategoryIDOR:      "IDOR",
+	surface.CategoryAuthz:     "broken authorization",
+	surface.CategoryOverfetch: "data over-fetching",
+	surface.CategoryNPlus1:    "N+1 query patterns",
+}
+
+// surfaceClause renders D5's derived slot: a comma-joined list of phrases for
+// the given declared categories, walked in surface.ProviderCategories order
+// (deterministic — never map iteration order). Empty when declared has no
+// provider-vocabulary category — the caller omits the clause WHOLE (never an
+// empty dash pair), which is why this returns "" rather than a placeholder.
+func surfaceClause(declared []surface.Category) string {
+	set := make(map[surface.Category]bool, len(declared))
+	for _, c := range declared {
+		set[c] = true
+	}
+	var phrases []string
+	for _, c := range surface.ProviderCategories {
+		if set[c] {
+			phrases = append(phrases, categoryPhrases[c])
+		}
+	}
+	return strings.Join(phrases, ", ")
+}
+
+// hasCategory reports whether declared contains want.
+func hasCategory(declared []surface.Category, want surface.Category) bool {
+	for _, c := range declared {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
 
 // skillTemplate is codefit's own skill, kept deliberately THIN: it triggers and
 // points at the MCP tools, it does not restate what codefit already knows. The
@@ -27,13 +72,13 @@ import (
 // or carry a declared reason for staying out.
 var skillTemplate = template.Must(template.New("skill").Parse(`---
 name: ` + SkillName + `
-description: Audit AI-generated code for security flaws agents miss — IDOR, broken authorization, data over-fetching — and for database schema risks in a Prisma schema or SQL migrations. Use when reviewing API endpoints or route handlers, auditing a database schema, or before merging AI-written backend code.
+description: Audit AI-generated code for security flaws agents miss{{if .SurfaceClause}} — {{.SurfaceClause}} —{{end}} and for database schema risks in a Prisma schema or SQL migrations. Use when reviewing API endpoints or route handlers, auditing a database schema, or before merging AI-written backend code.
 ---
 
 # codefit — audit AI-generated code
 
 To audit code you MUST call ` + "`codefit-scan-all`" + ` FIRST. Do NOT audit by reading files
-manually — codefit maps the surface (IDOR, broken authorization, over-fetching) and your
+manually — codefit maps the surface{{if .SurfaceClause}} ({{.SurfaceClause}}){{end}} and your
 job is to REASON over its output, not to replace it. It does NOT call an LLM — you do the
 reasoning. Drive it through its MCP tools.
 
@@ -151,20 +196,37 @@ like your authz helper — register it?"). ONLY when the human approves, call
 ` + "`codefit-baseline-unregister-authz-helper`" + `. NEVER register a helper on your own — registering
 silences the authz gap on EVERY item that calls it (dozens at once), far more reach than
 accepting one. Registering changes a FACT ("this helper is present"), not a verdict: it
-clears the AUTHZ gap (permission), NOT the IDOR/ownership gap. An IDOR endpoint stays
+clears the AUTHZ gap (permission){{if .HasIDOR}}, NOT the IDOR/ownership gap. An IDOR endpoint stays
 actionable — the helper proves "is the caller permitted?", never "does the caller own
-THIS resource?". Keep reviewing those.
+THIS resource?". Keep reviewing those.{{else}} only. Keep reviewing anything else this project's surface maps.{{end}}
 `))
 
 // RenderSkill renders codefit's SKILL.md for the detected project, baking in the
-// language so the example commands are exact.
+// language so the example commands are exact. The DERIVED slot (surface
+// category phrases) is read from the registry's real Capability() for this
+// language — never a hardcoded per-language string (D5); an unregistered
+// language (should not occur from scaffold.Detect, but handled defensively)
+// declares no categories, so the clause is omitted whole.
 func RenderSkill(info ProjectInfo) ([]byte, error) {
 	lang := info.Language
 	if lang == "" {
 		lang = "typescript"
 	}
+	var declared []surface.Category
+	if e, ok := registry.ByName(lang); ok {
+		declared = e.New(nil).Capability().Surface
+	}
+	data := struct {
+		Language      string
+		SurfaceClause string
+		HasIDOR       bool
+	}{
+		Language:      lang,
+		SurfaceClause: surfaceClause(declared),
+		HasIDOR:       hasCategory(declared, surface.CategoryIDOR),
+	}
 	var buf bytes.Buffer
-	if err := skillTemplate.Execute(&buf, struct{ Language string }{Language: lang}); err != nil {
+	if err := skillTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("rendering skill: %w", err)
 	}
 	return buf.Bytes(), nil

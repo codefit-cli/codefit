@@ -90,6 +90,7 @@ func formatReport(res scaffold.Result) string {
 
 	fmt.Fprintln(&b, "Detected:")
 	fmt.Fprintf(&b, "  language    %s\n", info.Language)
+	fmt.Fprintf(&b, "  capability  %s\n", scaffold.CapabilityStatement(info.Language))
 	if info.Framework != "" {
 		fmt.Fprintf(&b, "  framework   %s\n", info.Framework)
 	}

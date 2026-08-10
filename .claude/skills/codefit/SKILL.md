@@ -1,12 +1,12 @@
 ---
 name: codefit
-description: Audit AI-generated code for security flaws agents miss — IDOR, broken authorization, data over-fetching — and for database schema risks in a Prisma schema or SQL migrations. Use when reviewing API endpoints or route handlers, auditing a database schema, or before merging AI-written backend code.
+description: Audit AI-generated code for security flaws agents miss — broken authorization — and for database schema risks in a Prisma schema or SQL migrations. Use when reviewing API endpoints or route handlers, auditing a database schema, or before merging AI-written backend code.
 ---
 
 # codefit — audit AI-generated code
 
 To audit code you MUST call `codefit-scan-all` FIRST. Do NOT audit by reading files
-manually — codefit maps the surface (IDOR, broken authorization, over-fetching) and your
+manually — codefit maps the surface (broken authorization) and your
 job is to REASON over its output, not to replace it. It does NOT call an LLM — you do the
 reasoning. Drive it through its MCP tools.
 
@@ -125,6 +125,4 @@ like your authz helper — register it?"). ONLY when the human approves, call
 `codefit-baseline-unregister-authz-helper`. NEVER register a helper on your own — registering
 silences the authz gap on EVERY item that calls it (dozens at once), far more reach than
 accepting one. Registering changes a FACT ("this helper is present"), not a verdict: it
-clears the AUTHZ gap (permission), NOT the IDOR/ownership gap. An IDOR endpoint stays
-actionable — the helper proves "is the caller permitted?", never "does the caller own
-THIS resource?". Keep reviewing those.
+clears the AUTHZ gap (permission) only. Keep reviewing anything else this project's surface maps.
