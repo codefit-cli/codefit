@@ -19,6 +19,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/registry"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
@@ -153,6 +154,15 @@ type ScanAllResponse struct {
 type SecuritySection struct {
 	Measured bool   `json:"measured"`
 	Note     string `json:"note,omitempty"`
+	// SurfaceCoverage declares which of surface.ProviderCategories this
+	// language's provider mapped and which it did not (R2,
+	// docs/specs/declared-partial-language-exposure.md) — the "1 of 4"
+	// statement a bare `surface_items: 1` never made. Present only when
+	// Measured is true: a pointer, so a DB-only pass (Measured=false, no
+	// provider resolved) serializes no surface_coverage key at all, rather
+	// than a zero-valued statement that could be misread as "nothing
+	// unmapped".
+	SurfaceCoverage *surface.CoverageStatement `json:"surface_coverage,omitempty"`
 }
 
 // DBSection is the database dimension's result inside scan-all. Measured=false with
@@ -508,7 +518,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 			Note:      frontierNote(len(frontier), resolvedLocally, secRan),
 			Endpoints: frontier,
 		},
-		Security: securitySection(secRan),
+		Security: securitySection(secRan, req.Language),
 		DB:       dbSection,
 	}, actionable, diff.Next, nil
 }
@@ -536,9 +546,10 @@ func distinctCanon(paths []string) []string {
 // response: the schema may still have been audited (by the DB dimension)
 // while the code was not — this is reachable only after the
 // nothing-measurable guard, so a DB-only pass having run is guaranteed here.
-func securitySection(secRan bool) SecuritySection {
+func securitySection(secRan bool, language string) SecuritySection {
 	if secRan {
-		return SecuritySection{Measured: true}
+		cs := surfaceCoverageFor(language)
+		return SecuritySection{Measured: true, SurfaceCoverage: &cs}
 	}
 	return SecuritySection{
 		Measured: false,

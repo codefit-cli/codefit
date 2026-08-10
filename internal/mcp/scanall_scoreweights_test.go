@@ -159,6 +159,15 @@ func TestScanAll_ScoreWeights_PartialMapMissingMeasuredDimension_ActionableError
 // captured with `git worktree add --detach cfd1ad7` (this branch's base) and
 // `go run` over internal/mcp.HandleScanAll on this exact fixture — not
 // re-implemented by hand.
+//
+// "security" is excluded from the comparison (same stripKey idiom as
+// scanall_regression_test.go): roadmap P4-1
+// (docs/specs/declared-partial-language-exposure.md) added
+// security.surface_coverage to EVERY resolvable-language response, TypeScript
+// included, as the R2 not-covered statement — a real, declared, user-visible
+// field addition, not a regression this golden should catch. Everything else
+// this test's scope actually covers (score_weights' effect on the score) is
+// still asserted byte-for-byte.
 func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 	root := writeProj(t, scoreWeightsFixtureFiles(scoreWeightsYAMLAbsent))
 	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
@@ -173,7 +182,10 @@ func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading pre-change golden: %v", err)
 	}
-	if strings.TrimRight(string(live), "\n") != strings.TrimRight(string(golden), "\n") {
-		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response.\nlive:\n%s\ngolden:\n%s", live, golden)
+	gotWithoutSecurity := stripKey(t, live, "security")
+	wantWithoutSecurity := stripKey(t, golden, "security")
+	if gotWithoutSecurity != wantWithoutSecurity {
+		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response (minus security).\nlive:\n%s\ngolden:\n%s",
+			gotWithoutSecurity, wantWithoutSecurity)
 	}
 }
