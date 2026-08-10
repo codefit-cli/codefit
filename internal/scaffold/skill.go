@@ -165,7 +165,7 @@ checks.
   lockfile versions. ` + "`codefit-scan-all`" + ` does NOT run it; call it separately.
 - ` + "`codefit-coverage`" + ` ` + "`{language}`" + ` — what codefit audits deterministically, what it maps as
   surface, and what it does NOT cover. Read it before telling the human something is out
-  of scope; do not assume the boundary.
+  of scope; do not assume the boundary. For ` + "`{{.Language}}`" + ` today: {{.SurfaceReach}}
 
 ## Baseline (don't re-review what's already tracked)
 codefit records the audited surface in ` + "`.codefit-baseline`" + ` (committed). ` + "`codefit-scan-all`" + `
@@ -220,10 +220,18 @@ func RenderSkill(info ProjectInfo) ([]byte, error) {
 		Language      string
 		SurfaceClause string
 		HasIDOR       bool
+		// SurfaceReach is R4/"Also in scope"
+		// (docs/specs/declared-partial-language-exposure.md): the N-of-M
+		// surface reach claim the skill states before the agent audits
+		// anything, derived from surface.DeriveCoverage against the same
+		// locked vocabulary the response-level not-covered statement uses —
+		// never a hardcoded per-language sentence.
+		SurfaceReach string
 	}{
 		Language:      lang,
 		SurfaceClause: surfaceClause(declared),
 		HasIDOR:       hasCategory(declared, surface.CategoryIDOR),
+		SurfaceReach:  surface.DeriveCoverage(declared).Note,
 	}
 	var buf bytes.Buffer
 	if err := skillTemplate.Execute(&buf, data); err != nil {

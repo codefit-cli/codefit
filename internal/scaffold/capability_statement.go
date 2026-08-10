@@ -26,9 +26,12 @@ func CapabilityStatement(language string) string {
 	}
 	cap := e.New(nil).Capability()
 	cs := surface.DeriveCoverage(cap.Surface)
+	// cs.Note already ends with a period (surface.DeriveCoverage's own
+	// sentence) — no extra period is appended here, or the rendered sentence
+	// reads "...this scan.. The DB dimension...".
 	return fmt.Sprintf(
 		"codefit-scan-security/codefit-scan-endpoint/codefit-scan-all can audit %s code: %d declared "+
-			"security rule(s), %s. The DB dimension audits the schema too when database.schema_paths is configured.",
+			"security rule(s), %s The DB dimension audits the schema too when database.schema_paths is configured.",
 		e.Canonical, len(cap.Security.Declared), cs.Note)
 }
 

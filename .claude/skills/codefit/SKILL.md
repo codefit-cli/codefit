@@ -93,7 +93,7 @@ checks.
   lockfile versions. `codefit-scan-all` does NOT run it; call it separately.
 - `codefit-coverage` `{language}` — what codefit audits deterministically, what it maps as
   surface, and what it does NOT cover. Read it before telling the human something is out
-  of scope; do not assume the boundary.
+  of scope; do not assume the boundary. For `go` today: 1 of 4 surface categories mapped (authz); not mapped: idor, overfetch, nplus1 — these were never searched for, not merely absent from this scan.
 
 ## Baseline (don't re-review what's already tracked)
 codefit records the audited surface in `.codefit-baseline` (committed). `codefit-scan-all`
