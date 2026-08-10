@@ -188,11 +188,17 @@ func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
 			c, p.Language()))
 	}
 
-	notCovered := make([]string, 0, len(cs.NotMapped))
+	notCovered := make([]string, 0, len(cs.NotMapped)+len(cap.Security.Excluded)+len(cap.Practices.Excluded))
 	for _, c := range cs.NotMapped {
 		notCovered = append(notCovered, fmt.Sprintf(
 			"Surface category %q is NOT mapped for %s — never searched for, not merely absent from this scan.",
 			c, p.Language()))
+	}
+	for _, ex := range cap.Security.Excluded {
+		notCovered = append(notCovered, fmt.Sprintf("%s is permanently NOT covered: %s", ex.ID, ex.Reason))
+	}
+	for _, ex := range cap.Practices.Excluded {
+		notCovered = append(notCovered, fmt.Sprintf("%s is permanently NOT covered: %s", ex.ID, ex.Reason))
 	}
 
 	return coverage.Manifest{

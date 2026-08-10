@@ -15,6 +15,20 @@ type SourceFile struct {
 	Content []byte
 }
 
+// ExcludedRule names a rule id a provider will PERMANENTLY not implement, and
+// why. This is a different kind of fact from Declared: Declared says a rule
+// IS covered; a permanent drop says it never will be, and silently omitting
+// it from a coverage answer is indistinguishable from "not yet" — exactly the
+// over-promise this project's coverage manifests exist to prevent (mirrors
+// internal/core/dbcoverage's NotCovered() precedent: DB-012 and DW-022 are
+// recorded there with their reasons rather than left as an absence). Scoped
+// to one rule id rather than free prose, so it can be checked (ValidExclusions)
+// instead of only read.
+type ExcludedRule struct {
+	ID     string // rule id, e.g. "PRAC-004"
+	Reason string // why it is permanently not covered
+}
+
 // RuleSet is what a provider declares for one deterministic rule family
 // (security or practices): the rule IDs it implements, and whether that list
 // is derivable from a real rule loader (Enumerable: true, e.g. TypeScript's
@@ -22,10 +36,26 @@ type SourceFile struct {
 // own Go source (Enumerable: false, e.g. Go's AST-detector rules, which have
 // no All()/ID() loader today). Declared is never a count — a count cannot be
 // checked against anything; a list of IDs can (Control A, for the
-// Enumerable==true case).
+// Enumerable==true case). Excluded names rule ids this family permanently
+// will NOT implement, each with why (see ExcludedRule) — checked disjoint
+// from Declared by ValidExclusions (C6).
 type RuleSet struct {
 	Declared   []string // rule IDs, sorted
 	Enumerable bool
+	Excluded   []ExcludedRule
+}
+
+// ValidExclusions reports whether r's Excluded rule ids are disjoint from its
+// Declared ones (C6) — a rule id cannot be claimed as both covered and
+// permanently excluded; that contradiction would make the declaration
+// self-defeating rather than a real fact about the provider.
+func (r RuleSet) ValidExclusions() bool {
+	for _, ex := range r.Excluded {
+		if slices.Contains(r.Declared, ex.ID) {
+			return false
+		}
+	}
+	return true
 }
 
 // Capability is what a LanguageProvider declares it implements — a fact about

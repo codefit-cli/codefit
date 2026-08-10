@@ -55,6 +55,34 @@ func TestCapability_EveryRegisteredProviderDeclaresNonZero(t *testing.T) {
 			if !cap.ValidSurface() {
 				t.Errorf("%s.Capability().Surface is not a subset of surface.ProviderCategories (C2)", p.Language())
 			}
+			if !cap.Security.ValidExclusions() {
+				t.Errorf("%s.Capability().Security has a rule id in both Declared and Excluded (C6)", p.Language())
+			}
+			if !cap.Practices.ValidExclusions() {
+				t.Errorf("%s.Capability().Practices has a rule id in both Declared and Excluded (C6)", p.Language())
+			}
 		})
+	}
+}
+
+// TestRuleSet_ExcludedCannotAlsoBeDeclared is C6: a rule id in Excluded must
+// never also appear in Declared — Declared says a rule IS covered, Excluded
+// says it permanently is NOT, and a rule id claiming both is a self-defeating
+// declaration, not a real fact about the provider.
+func TestRuleSet_ExcludedCannotAlsoBeDeclared(t *testing.T) {
+	disjoint := providers.RuleSet{
+		Declared: []string{"PRAC-001", "PRAC-002"},
+		Excluded: []providers.ExcludedRule{{ID: "PRAC-004", Reason: "dropped, ADR 0056"}},
+	}
+	if !disjoint.ValidExclusions() {
+		t.Error("a RuleSet whose Excluded ids are disjoint from Declared must be ValidExclusions() == true")
+	}
+
+	overlapping := providers.RuleSet{
+		Declared: []string{"PRAC-004"},
+		Excluded: []providers.ExcludedRule{{ID: "PRAC-004", Reason: "dropped, ADR 0056"}},
+	}
+	if overlapping.ValidExclusions() {
+		t.Error("a RuleSet whose Excluded id also appears in Declared must be ValidExclusions() == false (C6)")
 	}
 }

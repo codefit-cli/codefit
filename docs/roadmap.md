@@ -417,20 +417,24 @@ not an auditable language today. See P4-1 for the larger question.
   at the ADR — the original "permanently dropped" text is kept, not deleted, as the record of
   what Phase 2.5 decided and why it changed. No rule, finding, surface item or baseline
   fingerprint changes: `dwrules.All()` stays seven rules, `dbrules.All()` stays fourteen.
-- **P1-4b — STILL OPEN, blocker resolved differently — PRAC-004's owed manifest entry.**
-  Its permanent drop is recorded only in
+- **P1-4b — CLOSED (`readme-count-and-prac004-entry`) — PRAC-004's owed manifest entry.**
+  Its permanent drop was recorded only in
   [ADR 0056](decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
-  and the CHANGELOG; it owes a coverage-manifest entry. **The blocker this item names — "no
-  Go coverage manifest to put it in, entangled with the still-open P1-3/P4-1 decision" — no
-  longer applies as written: P4-1 resolved** ([ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md),
-  `declared-partial-language-exposure`) **without building `internal/providers/golang/coverage.go`.**
-  R1 of that change made a hand-written prose manifest unnecessary for correctness — Go's
-  security/practices rule ids (`internal/providers/golang/capability.go`) are already a real,
-  tested landing site the coverage tool derives an honest answer from directly, with no
-  manifest file needed. PRAC-004's entry could land there in the derived list, or in a future
-  hand-written `golang/coverage.go` if one is ever written (it would become authoritative over
-  the derived floor, same as TypeScript's). Neither is done by this item's own act — it
-  **stays open**, but its landing site is no longer hypothetical.
+  and the CHANGELOG; it owed a coverage-manifest entry. The blocker this item used to name —
+  "no Go coverage manifest to put it in, entangled with the still-open P1-3/P4-1 decision" —
+  stopped applying once P4-1 resolved
+  ([ADR 0065](decisions/0065-go-is-exposed-because-the-response-declares-what-it-lacks.md),
+  `declared-partial-language-exposure`) without building
+  `internal/providers/golang/coverage.go`, which left this item's landing site real but not
+  yet used. **Paid, without a coverage-manifest file**: `providers.RuleSet` gained
+  `Excluded []ExcludedRule` (id + reason) and `ValidExclusions()` (C6 — an excluded id can
+  never also be `Declared`, checked through the interface with both real providers). Go's
+  `Practices` RuleSet (`internal/providers/golang/capability.go`) now names `PRAC-004` there
+  with its ADR 0056 reason, so `codefit-coverage` for `"go"` states the permanent gap in
+  `NotCovered` (derived by R1) instead of leaving an agent to infer it from `PRAC-004`'s
+  absence from `Declared`. No rule, finding, or coverage-manifest file was built —
+  `internal/providers/golang/coverage.go` still does not exist, deliberately, matching what
+  ADR 0065 already decided.
 
 ### P1-5 — CLOSED (`readme-per-dimension-reach`) — check whether the README promises the HTTP/SSE transport
 

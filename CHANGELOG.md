@@ -57,6 +57,18 @@ All notable changes to codefit are documented here. The format is based on
   consulted by `scaffold`'s `detectLanguage` (both registered languages
   already wanted it `true`, so no answer set changed). See
   [ADR 0064](docs/decisions/0064-language-capability-and-exposure-registry.md).
+- **`providers.RuleSet` gained `Excluded []ExcludedRule`** (roadmap P1-4b),
+  a declared, permanent exclusion — a different fact from `Declared`, which
+  says a rule IS covered. `ValidExclusions()` (C6) checks an excluded rule id
+  never also appears in `Declared`, driven through the interface with both
+  real providers. Go's `Practices` RuleSet now names `PRAC-004` there with
+  its [ADR 0056](docs/decisions/0056-a-practices-rule-affirms-only-what-it-checked-and-prac-004-is-dropped.md)
+  reason, so `codefit-coverage` for `"go"` states the permanent gap in
+  `NotCovered` instead of leaving an agent to infer it from `PRAC-004`'s
+  absence from the declared list — v0.2.8 recorded this drop as BLOCKED for
+  want of a landing site; `internal/providers/golang/capability.go` (ADR
+  0064) is that site, so it lands here instead of in a coverage manifest
+  file, which stays out of scope.
 
 ### Fixed
 - **README.md's TypeScript surface-mapping reach was stated as three
