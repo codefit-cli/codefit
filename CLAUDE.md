@@ -151,6 +151,50 @@ es evidencia.**
 - **Preferir la fuente de verdad a una reimplementación.** Correr la función real
   sobre los datos reales, no una copia de la lógica en otro lado.
 
+## Dogfood sobre proyectos ajenos (OBLIGATORIA)
+
+codefit se valida contra proyectos reales que **no son codefit** — plantalinda,
+salonpro, bitacoras, metricasbatch. Esa es su mejor evidencia y también su única
+vía de fuga: el repo es **público**, y lo que se mide entra a un artefacto público
+si nadie lo detiene.
+
+### La línea
+
+> **Contar hallazgos de un proyecto con nombre es seguro. Ubicarlos no lo es.**
+
+- **Publicable:** el nombre del proyecto, el conteo de archivos/hallazgos/superficie,
+  los tiempos, el stack cuando el ADR lo necesita para explicar una decisión de
+  diseño. Es lo que hoy publican el README, el CHANGELOG y el ADR 0018.
+- **NO publicable:** dónde está un hallazgo, el path de un endpoint vulnerable, y
+  cualquier identificador del esquema ajeno — nombres de tablas, de columnas, SQL
+  copiado. **Se cita la FORMA, nunca el identificador**: `ALTER COLUMN … TYPE`, no
+  `ALTER TABLE diagnosis ALTER COLUMN corrective_action TYPE TEXT`.
+
+Un nombre de tabla no da acceso a nada y no es un secreto en ningún modelo de
+amenaza serio — el que ya tiene una inyección SQL saca todos los nombres de
+`information_schema`. Pero **ubicar un hallazgo en un proyecto con nombre sí abre
+una puerta**, y esa asimetría es toda la regla.
+
+### Dónde aplica
+
+A **todo** artefacto que sale del repo, no solo al código: cuerpo del PR, mensaje
+de commit, ADR, CHANGELOG, README, fixtures, comentarios. El cuerpo de un PR **no
+está en el diff**, así que ninguna sonda sobre el diff lo alcanza — se revisa
+aparte, siempre.
+
+### El clon es temporal, la medición no
+
+Auditar un proyecto ajeno se corre **siempre sobre una copia** bajo el scratchpad,
+con el path verificado por prefijo antes de invocar nada: `codefit-scan-all`
+**escribe** `.codefit-baseline` dentro del proyecto que audita. Esa restricción
+protege los ARCHIVOS del otro proyecto y **no protege sus DATOS** — el texto
+medido sobrevive al clon borrado y es exactamente por ahí que se filtra.
+
+**Origen:** en PR #128 el cuerpo del PR publicó dos sentencias SQL reales con
+nombres de tablas y columnas de un proyecto ajeno. El clon se había borrado
+correctamente; la restricción de path se había respetado. No hubo descuido: no
+había regla que consultar. Esta es esa regla.
+
 ## Restricciones técnicas NO NEGOCIABLES
 
 - **`CGO_ENABLED=0` SIEMPRE.** Ninguna dependencia puede requerir CGO. Verificar
