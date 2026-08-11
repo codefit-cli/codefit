@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/scoring"
@@ -143,16 +144,19 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			// evidence the undercount existed. Narrowing this strip-set BEFORE
 			// that wiring would have recorded evidence of a rename instead.
 			//
-			// Summary coverage is not dropped, it is HANDED OVER — to two tests
-			// that assert against this same golden and this same fixture:
+			// Summary coverage is not dropped, it is HANDED OVER — to two
+			// controls that assert against this same golden and this same
+			// fixture:
 			//   - TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount (below):
 			//     the golden's own bytes contradict themselves, and the live
 			//     response reports both dimensions.
-			//   - TestScanAll_TheMigrationIsExact (below): summary.security.* is
-			//     verbatim what the golden's flat summary.* carried, for BOTH the
-			//     no-db and with-db cases — the adapter half that the
-			//     scanall_budget_test.go copy of flatten() performs for the
-			//     invariant golden.
+			//   - assertSummarySecurityMatchesFlatGolden (below), called at the
+			//     end of THIS subtest: summary.security.* is verbatim what the
+			//     golden's flat summary.* carried, for BOTH the no-db and with-db
+			//     cases — the adapter half that the scanall_budget_test.go copy of
+			//     flatten() performs for the invariant golden. It is a helper on
+			//     this test rather than a test of its own; there is no separate
+			//     migration test to look for.
 			strip := func(t *testing.T, raw []byte) string {
 				t.Helper()
 				return stripKey(t, []byte(stripKey(t, []byte(stripKey(t, raw, "security")), "budget")), "summary")
@@ -250,6 +254,88 @@ func assertSummarySecurityMatchesFlatGolden(t *testing.T, golden []byte, resp mc
 	}
 }
 
+// preChangeFlatSummaryKeys is the exact key set `summary` carried on the wire
+// BEFORE this change: four unqualified counts and nothing else. It is the
+// fingerprint of a pre-change capture, and the only reliable one — see below.
+var preChangeFlatSummaryKeys = []string{
+	"endpoints", "deterministic_findings", "surface_items", "certain_concerns",
+}
+
+// assertGoldenSummaryIsThePreChangeFlatZero is the anti-regeneration guard: it
+// fails unless the named golden's `summary` is still the pre-change FLAT block
+// with every count at zero — the self-contradiction that makes the file
+// evidence rather than a comparison target.
+//
+// It reads the raw key set instead of unmarshalling into flatSummary, and that
+// is the whole point of the helper. Decoding into a struct cannot tell a
+// pre-change capture from a post-change one: a golden regenerated from the
+// FIXED build nests its counts under security/db/totals, so every flat field
+// decodes to its zero value and an "is it the zero struct?" comparison reads as
+// SATISFIED over a file that has stopped testifying to anything. That is not
+// hypothetical — this control shipped in exactly that vacuous form, passed its
+// own named mutation, and was reported as proved. The realistic regeneration
+// (rerun the handler, dump json.MarshalIndent, per testdata/README.md) produces
+// a nested summary, never a flat non-zero one, so the struct comparison was
+// blind to the only way this file actually gets destroyed.
+//
+// Three independent ways to fail, in the order a regeneration trips them:
+//
+//  1. an unknown key — security/db/totals/note — means the file came from a
+//     build that already had the per-dimension shape;
+//  2. a missing pre-change key means the flat block is gone;
+//  3. a non-zero count means the summary no longer contradicts the db section
+//     it carries (this is the hand-edit case the old guard could see).
+func assertGoldenSummaryIsThePreChangeFlatZero(t *testing.T, raw []byte, goldenName string) {
+	t.Helper()
+	const restore = "If this golden was regenerated from a fixed build, the only committed evidence the " +
+		"undercount existed has been destroyed; restore it from 337f158 (see testdata/README.md)."
+
+	var envelope struct {
+		Summary map[string]json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("parsing %s's summary block: %v", goldenName, err)
+	}
+	if envelope.Summary == nil {
+		t.Fatalf("%s carries no `summary` key at all — it cannot testify to what its summary reported. %s",
+			goldenName, restore)
+	}
+
+	expected := make(map[string]bool, len(preChangeFlatSummaryKeys))
+	for _, k := range preChangeFlatSummaryKeys {
+		expected[k] = true
+	}
+	unknown := make([]string, 0, len(envelope.Summary))
+	for k := range envelope.Summary {
+		if !expected[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	if len(unknown) > 0 {
+		t.Fatalf("%s's summary carries %v, which the PRE-CHANGE shape never had — the file is a capture of "+
+			"the per-dimension summary, not of the defect it is supposed to witness. Its counts are nested "+
+			"under those keys, so nothing at the top level is unqualified any more and the undercount it "+
+			"recorded is gone. %s", goldenName, unknown, restore)
+	}
+	for _, k := range preChangeFlatSummaryKeys {
+		if _, ok := envelope.Summary[k]; !ok {
+			t.Fatalf("%s's summary is missing the pre-change key %q — it is no longer the flat block this "+
+				"control reads. %s", goldenName, k, restore)
+		}
+	}
+	for _, k := range preChangeFlatSummaryKeys {
+		var n int
+		if err := json.Unmarshal(envelope.Summary[k], &n); err != nil {
+			t.Fatalf("%s's summary.%s is not a number (%s): %v", goldenName, k, envelope.Summary[k], err)
+		}
+		if n != 0 {
+			t.Fatalf("%s's summary must be ALL ZERO — that is the defect it testifies to. summary.%s = %d. %s",
+				goldenName, k, n, restore)
+		}
+	}
+}
+
 // TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount turns the golden from
 // a comparison target into a WITNESS.
 //
@@ -262,17 +348,23 @@ func assertSummarySecurityMatchesFlatGolden(t *testing.T, golden []byte, resp mc
 //
 // The assertions below read the golden's bytes directly — no live handler is
 // involved in establishing the defect — and then run the live handler over the
-// same fixture to show the same project now reports both dimensions. If someone
-// ever regenerates the golden from a fixed build (the mutation this control
-// exists to catch), the first half fails immediately: a regenerated file has a
-// non-zero summary and stops testifying to anything.
+// same fixture to show the same project now reports both dimensions.
+//
+// The mutation this control exists to catch is a REGENERATION of the golden
+// from a fixed build, and catching it takes a shape check, not a value check.
+// The obvious guard — unmarshal `summary` into flatSummary and require the
+// zero value — is VACUOUS against exactly that mutation: a regenerated file
+// nests its counts under security/db/totals, so every flat field decodes to 0
+// and "all zero" reads as satisfied over a file that has stopped testifying to
+// anything. That vacuity was real and was shipped; it is why assertGoldenSummaryIsThePreChangeFlatZero
+// below reads the raw key set instead, and fails on a summary that is nested,
+// missing a pre-change key, carries an unknown key, or holds a non-zero count.
 func TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "scanall_ts_withdb_prechange.json"))
 	if err != nil {
 		t.Fatalf("reading the pre-change golden: %v", err)
 	}
 	var captured struct {
-		Summary  flatSummary `json:"summary"`
 		Baseline struct {
 			New int `json:"new"`
 		} `json:"baseline"`
@@ -303,12 +395,7 @@ func TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount(t *testing.T) {
 			"control reads a capture it does not recognise", captured.Baseline.New)
 	}
 	// And the verdict it published over that evidence: nothing, anywhere.
-	if captured.Summary != (flatSummary{}) {
-		t.Fatalf("the golden's summary must be ALL ZERO — that is the defect it testifies to. Got %+v. "+
-			"If this golden was regenerated from a fixed build, the only committed evidence the undercount "+
-			"existed has been destroyed; restore it from 337f158 (see testdata/README.md).",
-			captured.Summary)
-	}
+	assertGoldenSummaryIsThePreChangeFlatZero(t, raw, "scanall_ts_withdb_prechange.json")
 
 	// Same project, current build: both dimensions are counted, and each count
 	// declares which dimension it counted.
