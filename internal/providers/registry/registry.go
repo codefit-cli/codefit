@@ -42,7 +42,9 @@ var table = []Entry{
 	{
 		Canonical:   "go",
 		MarkerFiles: []string{"go.mod"},
-		New:         func(_ []string) providers.LanguageProvider { return golang.New() },
+		New: func(authzHelpers []string) providers.LanguageProvider {
+			return golang.New(golang.WithAuthzHelpers(authzHelpers))
+		},
 		// Exposed for security scan and surface tools (roadmap P4-1,
 		// docs/specs/declared-partial-language-exposure.md): Go's Capability
 		// (6 security rule ids, 1 of 4 surface categories — authz only) is now

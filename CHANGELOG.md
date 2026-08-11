@@ -83,6 +83,22 @@ All notable changes to codefit are documented here. The format is based on
   shipping without one.
 
 ### Fixed
+- **`codefit-scan-security` and `codefit-surface-authz` hard-failed on any Go project
+  containing an HTTP handler** — a regression shipped hours earlier in the same
+  `[Unreleased]` window that first exposed Go (above): `internal/providers/golang/surface.go`
+  never set `SurfaceItem.StructuralFacts`, so the Go zero-value nil map marshaled to JSON
+  `null` and the tool's own output-schema validation rejected it
+  (`structural_facts ... has type "null", want "object"`). On `main`, never released. Go's
+  authz surface item now carries real facts from a go/ast body scan —
+  `authz_denial_response_detected` (always present) and `known_authz_detected` (present only
+  when the project has registered at least one authz helper, never a vacuous `false` against
+  an empty searched set) — and the registry's `"go"` entry stops discarding its
+  `authzHelpers` parameter, so a registered helper reaches the Go provider the same way it
+  already reached TypeScript's. A new registry-driven contract test
+  (`internal/providers/registry/surfacecontract_test.go`) asserts every registered
+  provider's surface items marshal `structural_facts` as a JSON object, so this omission
+  class cannot recur silently for a future provider. See
+  [ADR 0067](docs/decisions/0067-every-surface-producer-emits-non-nil-structural-facts.md).
 - **README.md's TypeScript surface-mapping reach was stated as three
   categories; it is four.** `nplus1` shipped as a fourth surface category in
   `v0.2.2` (`codefit-surface-nplus1`); two restatements — the "Works today"
