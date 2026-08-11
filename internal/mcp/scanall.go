@@ -372,14 +372,13 @@ func summarize(
 			CertainConcerns:       certain,
 		}
 	}
-	// STEP A (transient, inside this change only): the DB dimension is NOT wired
-	// into the summary yet — that is the next commit. Leaving it nil here is what
-	// makes this commit a provably behaviour-preserving renest: summary.security.*
-	// carries verbatim what the flat summary.* carried, and totals equals it, so
-	// every migrated test stays green and nothing about the response's meaning
-	// moved. The parameters are already in the signature because the NEXT commit's
-	// red must come from the wiring, not from a signature change.
-	_, _, _ = dbRan, dbRes, dbSources
+	if dbRan {
+		s.DB = &DBSummary{
+			SchemaSources:         len(dbSources),
+			DeterministicFindings: len(dbRes.Findings),
+			SurfaceItems:          len(dbRes.Surface),
+		}
+	}
 	// Totals DERIVED from whichever sub-blocks exist (D4), never a literal: a
 	// hand-written total is right exactly once and then silently drifts. Only
 	// the commensurable pair is projected here; a dimension's own scale unit
@@ -524,6 +523,16 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// disagree about how much schema this pass read.
 	dbSources := distinctCanon(dbRes.AuditedFiles)
 
+	// The summary is computed HERE, not down at the return literal (design D3).
+	// filterDBByBaseline below mutates dbSection's Findings/Surface IN PLACE to
+	// the baseline-filtered subset; the summary must count the RAW population —
+	// the same population Score is computed over — so that a fully-baselined
+	// re-scan still reports what the sensors observed instead of collapsing to
+	// zero. summarize's signature already makes reading the section impossible;
+	// computing before the mutation removes even the window in which a future
+	// edit could reintroduce it.
+	summary := summarize(secRan, secRes, endpoints, dbRan, dbRes, dbSources)
+
 	// Per-dimension scoring input (ADR 0021): security measured only when it ran,
 	// db only when it ran. HOISTED here, above the baseline diff (which SAVES the
 	// next baseline), so the nothing-measurable guard right below can refuse
@@ -653,7 +662,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
 		Scope:    block,
-		Summary:  summarize(secRan, secRes, endpoints, dbRan, dbRes, dbSources),
+		Summary:  summary,
 		Score:    score,
 		Baseline: delta,
 		Actionable: ActionableSection{
