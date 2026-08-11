@@ -14,6 +14,56 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — BREAKING
+- ⚠️ **`codefit-scan-all`'s `summary` is now PER DIMENSION.** The four
+  unqualified counts (`endpoints`, `deterministic_findings`, `surface_items`,
+  `certain_concerns`) were all computed from the **security** sensor's result
+  while presenting themselves as the response's summary. A project whose only
+  audited dimension was the database therefore received an all-zero summary
+  over a `db.surface` holding dozens of items — a zero that means "nobody
+  looked", read as "audited and clean". Observed in dogfood:
+  `summary.surface_items: 0` beside 62 mapped DB surface items.
+
+  **Migration.** `summary.security.*` carries the old values **verbatim**;
+  `summary.totals.*` is the new cross-dimension number.
+
+  | before | after |
+  |---|---|
+  | `summary.endpoints` | `summary.security.endpoints` |
+  | `summary.deterministic_findings` | `summary.security.deterministic_findings`, or `summary.totals.deterministic_findings` for both dimensions |
+  | `summary.surface_items` | `summary.security.surface_items`, or `summary.totals.surface_items` for both dimensions |
+  | `summary.certain_concerns` | `summary.security.certain_concerns` |
+
+  New: `summary.db` (`schema_sources`, `deterministic_findings`,
+  `surface_items`) and `summary.note`. A sub-block is **`null` when that
+  dimension was not measured** — the shape `score.by_dimension` already uses;
+  the key is always present, never omitted, because an absent key is not the
+  same statement as an explicit null. `summary.db` is null both when the
+  dimension did not run and when it ran without measuring
+  (`db.measured: false`). `summary.totals` sums only the units that mean the
+  same thing in both dimensions — never `endpoints` (a table has no route) and
+  never `schema_sources`.
+
+  The counts are the RAW sensor population, taken before the baseline filter
+  (the population the score already uses), so they can exceed what the buckets
+  and `db.surface` list; `summary.note` states this in every response, so a
+  reader can explain the difference without opening Go source.
+
+  `summary.db` deliberately carries **no `certain_concerns`**: the security
+  field of that name counts `Deterministic` **plus** `SurfaceConfirmed`, so it
+  is not a certainty-1.0 count and a same-named DB sibling would be exactly the
+  same-name-different-definition defect this change removes. Adding it later is
+  additive; shipping a differently-defined one now would be breaking.
+
+  Both agent-facing surfaces teach the new shape in the same change:
+  `codefit-scan-all`'s tool description and the generated skill. The response
+  floor grew 530 bytes (measured over the budget fixture: withheld-everything
+  floor 4 016 → 4 546, full response 4 747 → 5 277, serialized `summary` block
+  83 → 613 — the same delta three times, because the whole growth is the summary
+  block: 440 bytes of always-present `note` plus 90 of per-dimension nesting),
+  about 1.3% of the 40 000-byte budget — declared, not free. See
+  [ADR 0069](docs/decisions/0069-the-scan-all-summary-declares-the-dimension-of-every-count.md).
+
 ### Added
 - ⚠️ **`"go"` is now a resolvable language for security scanning and surface
   mapping (roadmap P4-1)**: `codefit-scan-security`, `codefit-scan-endpoint`,

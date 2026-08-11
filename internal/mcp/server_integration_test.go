@@ -73,7 +73,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("decode structured result: %v (raw: %s)", err, data)
 	}
-	if out.Summary.Endpoints == 0 || out.Summary.SurfaceItems == 0 {
+	if out.Summary.Security.Endpoints == 0 || out.Summary.Security.SurfaceItems == 0 {
 		t.Errorf("expected a per-endpoint report with surface, got %+v", out.Summary)
 	}
 	// Named, not inlined: the endpoint arrives with what it takes to rank it, and

@@ -36,6 +36,28 @@ ALWAYS read the `scope` block before you report anything:
   dimension may still be measured on its own). Null is not 100 — the code was not looked at.
 - A partial scan is for a fast pass on a change. NEVER prune the baseline after one (below).
 
+## Read `summary` as PER-DIMENSION counts, never as the project's state
+Every count declares which dimension it counted:
+- `summary.security` — `endpoints`, `deterministic_findings`, `surface_items`,
+  `certain_concerns`. Security only.
+- `summary.db` — `schema_sources` (how many schema sources were read),
+  `deterministic_findings`, `surface_items`. The database dimension only.
+- `summary.totals` — the roll-up of ONLY what means the same in both:
+  `deterministic_findings` and `surface_items`. Never endpoints — a table has no route.
+
+A sub-block is `null` when that dimension was NOT measured. **Null is not zero**: zero
+means codefit looked and found nothing; null means nobody looked. So
+`summary.security: null` is never a clean security result, and
+`summary.db: null` is never a clean schema.
+
+NEVER report the project as clean off `summary.security` alone. A schema-heavy project
+can show `summary.security.surface_items: 0` while `summary.db.surface_items` holds dozens
+of open questions. Read every non-null sub-block, and `summary.totals` for the whole.
+
+The counts are the RAW population, taken BEFORE the baseline filter — that is why one can
+exceed what the buckets and `db.surface` actually list. The difference is the surface the
+baseline already tracks, not a contradiction; `summary.note` says so in the response.
+
 ## Read the three buckets in the response
 Every bucket NAMES its endpoints; none of them inlines the concern text. That is on
 purpose — inlining it made `codefit-scan-all` too big to return on a real project.

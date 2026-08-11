@@ -74,7 +74,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("decode report from the spawned server: %v", err)
 	}
-	if out.Summary.Endpoints == 0 {
+	if out.Summary.Security.Endpoints == 0 {
 		t.Errorf("expected a per-endpoint report from the real binary, got %+v", out.Summary)
 	}
 }

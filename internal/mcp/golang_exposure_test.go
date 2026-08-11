@@ -59,7 +59,7 @@ func TestHandleScanAll_Go_EndToEnd_SQLInjectionAndDeclaredGap(t *testing.T) {
 	}
 
 	// The finding: it works, it found the real defect.
-	if resp.Summary.DeterministicFindings == 0 {
+	if resp.Summary.Security.DeterministicFindings == 0 {
 		t.Fatal("scan-all over a go project with a string-concatenated SQL query must report a deterministic finding (SEC-010)")
 	}
 

@@ -57,7 +57,7 @@ export async function GET(req: Request) {
 	if len(fetchConcerns(t, root, ep.File, ep.Line)) != ep.Concerns {
 		t.Errorf("codefit-scan-endpoint must return the %d concern(s) the summary counted", ep.Concerns)
 	}
-	if resp.Summary.Endpoints != 1 || resp.Summary.DeterministicFindings < 1 {
+	if resp.Summary.Security.Endpoints != 1 || resp.Summary.Security.DeterministicFindings < 1 {
 		t.Errorf("summary should count the endpoint and the deterministic finding, got %+v", resp.Summary)
 	}
 }

@@ -105,9 +105,13 @@ type ScanAllRequest struct {
 // Note on the baseline layer: when a baseline exists, the three buckets are
 // FILTERED to what is not yet tracked (new/changed surface, and unaccepted
 // deterministic affirmations). So on an unchanged re-scan all three buckets can be
-// empty even though Summary.CertainConcerns (computed before filtering) is > 0 —
+// empty even though Summary.Security.CertainConcerns (computed before filtering) is > 0 —
 // the difference is exactly the "known" surface the baseline is silencing.
 type ScanAllResponse struct {
+	// Summary is the per-dimension count block: one sub-block per audit
+	// dimension plus a derived totals, each count declaring which dimension it
+	// counted. A null sub-block means that dimension was not measured; see
+	// ScanAllSummary for why an unqualified count was a defect.
 	Summary ScanAllSummary `json:"summary"`
 	// Scope declares how much of the project this response describes: mode full or
 	// partial, how many auditable files were in scope, and which requested paths
@@ -236,12 +240,163 @@ type FrontierPending struct {
 	Endpoints []report.FrontierEndpoint `json:"endpoints,omitempty"`
 }
 
-// ScanAllSummary is the at-a-glance count, not a judgment.
+// ScanAllSummary is the at-a-glance count, not a judgment — and every count in
+// it DECLARES the dimension it counted.
+//
+// The flat shape this replaced had four unqualified fields (endpoints,
+// deterministic_findings, surface_items, certain_concerns) that were all
+// functions of the SECURITY sensor's result while presenting themselves as the
+// response's summary. A DB-heavy project therefore read `surface_items: 0` over
+// a db.surface holding dozens of items: a security-only prefix of the truth,
+// presented unlabelled as the whole (invariant I4 of
+// docs/specs/audit-protocol.md), producing the one thing this project exists to
+// prevent — a zero that means "nobody looked" (I2).
+//
+// A sub-block is a POINTER and deliberately NOT omitempty: the key is always on
+// the wire, and `null` is the statement "this dimension was not measured". That
+// is the shape score.by_dimension already ships (`"db": null` beside
+// `"db": 95`); an ABSENT key would be a third state a reader has to guess at.
 type ScanAllSummary struct {
+	// Security counts the security dimension only. Nil when no provider
+	// resolved for the language — never a zeroed block, which would read as
+	// "codefit looked at the code and found nothing".
+	Security *SecuritySummary `json:"security"`
+	// DB counts the database dimension only. Nil when the dimension did not
+	// run (no database.schema_paths configured, or narrowed out of scope) and
+	// when it ran but could not measure (no parser, unreadable schema) — the
+	// DBSection.Measured=false state.
+	DB *DBSummary `json:"db"`
+	// Totals is DERIVED from the non-nil sub-blocks, never written by hand: a
+	// hand-kept total drifts the first time a dimension is added. It carries
+	// only COMMENSURABLE units — a deterministic finding and a mapped surface
+	// item mean the same thing in both dimensions. Endpoints and schema
+	// sources are each dimension's own scale unit and are summed nowhere: a
+	// table has no route.
+	Totals SummaryTotals `json:"totals"`
+	// Note is ALWAYS present, on the BudgetBlock precedent: "no mention" and
+	// "nothing to mention" must not be the same bytes on the wire.
+	Note string `json:"note"`
+}
+
+// SecuritySummary is the security dimension's own counts — verbatim the four
+// fields the flat ScanAllSummary carried, so a consumer migrating reads
+// summary.security.* for exactly the values it used to read at summary.*.
+type SecuritySummary struct {
 	Endpoints             int `json:"endpoints"`
 	DeterministicFindings int `json:"deterministic_findings"`
 	SurfaceItems          int `json:"surface_items"`
 	CertainConcerns       int `json:"certain_concerns"`
+}
+
+// DBSummary is the database dimension's own counts.
+//
+// SchemaSources is the dimension's scale unit — the distinct schema sources
+// this pass READ, the same census scope's denominator takes (one local, shared;
+// two call sites computing one census is how this repo drifts). It is not a new
+// measurement, and under a narrowed scope it shrinks with what was read,
+// exactly like `scope`.
+//
+// There is deliberately NO certain_concerns here. The security field of that
+// name counts Deterministic PLUS SurfaceConfirmed concerns
+// (core/report/aggregate.go's countCertain), where SurfaceConfirmed is set from
+// a security-surface structural fact DB items never carry — so it is not a
+// certainty-1.0 count, and a DB sibling under the same name would be the exact
+// same-name-different-definition defect this shape exists to fix. Adding the
+// key later is additive; shipping a differently-defined one now would be
+// breaking. See ADR 0069.
+type DBSummary struct {
+	SchemaSources         int `json:"schema_sources"`
+	DeterministicFindings int `json:"deterministic_findings"`
+	SurfaceItems          int `json:"surface_items"`
+}
+
+// SummaryTotals is the cross-dimension roll-up, over commensurable units only.
+// It is a VALUE, not a pointer: totals are always computable (the
+// nothing-measurable guard already refused the response where no dimension
+// ran), and zeros here are backed by at least one non-null sub-block saying who
+// was counted.
+type SummaryTotals struct {
+	DeterministicFindings int `json:"deterministic_findings"`
+	SurfaceItems          int `json:"surface_items"`
+}
+
+// summaryNote is the sentence summary always carries. It states the two things
+// a reader cannot infer from the numbers: that they are the RAW population
+// (pre-baseline-filter, the same population the score is computed over), so a
+// non-zero count over empty rendered buckets is the baseline silencing what is
+// already tracked rather than a contradiction; and that a null sub-block is
+// "not measured" while a zero is "measured, found nothing".
+const summaryNote = "counts are per DIMENSION and RAW: taken before the baseline filter, so a count here can " +
+	"exceed what the buckets and db.surface list — that difference is the surface the baseline already " +
+	"tracks, not a contradiction. A null sub-block means the dimension was NOT measured (nobody looked); a " +
+	"zero means it was measured and nothing was found. totals sums only units that mean the same in every " +
+	"dimension: never endpoints, never schema sources."
+
+// summarize builds the per-dimension summary from the RAW sensor results.
+//
+// The signature is the enforcement, not a convention (design D2): it takes
+// findings.SensorResult values and no *DBSection at all, so the population
+// mistake this change exists to prevent — counting the BASELINE-FILTERED
+// dbSection.Findings/Surface instead of the raw dbRes — cannot be written here.
+// []findings.Finding does not type-check as a findings.SensorResult, so it is a
+// compile error rather than a comment nobody reads.
+//
+// dbRan is the DB dimension's measured predicate: runDBForScanAll returns
+// ran=true only on the same path that returns Measured=true, and every
+// not-measured path (no parser, read/parse failure, sensor abstention) returns
+// ran=false with an empty result. So `dbRan` IS `dbSection != nil &&
+// dbSection.Measured`, without this function having to be handed the section it
+// must not read.
+//
+// dbSources is the shared census (design D5): the distinct schema sources the
+// pass read, computed once by the caller and used both here and as the
+// DB-only scope denominator.
+func summarize(
+	secRan bool,
+	secRes findings.SensorResult,
+	endpoints []report.EndpointReport,
+	dbRan bool,
+	dbRes findings.SensorResult,
+	dbSources []string,
+) ScanAllSummary {
+	s := ScanAllSummary{Note: summaryNote}
+	if secRan {
+		certain := 0
+		for _, ep := range endpoints {
+			certain += ep.CertainConcerns
+		}
+		s.Security = &SecuritySummary{
+			Endpoints:             len(endpoints),
+			DeterministicFindings: len(secRes.Findings),
+			SurfaceItems:          len(secRes.Surface),
+			CertainConcerns:       certain,
+		}
+	}
+	if dbRan {
+		s.DB = &DBSummary{
+			SchemaSources:         len(dbSources),
+			DeterministicFindings: len(dbRes.Findings),
+			SurfaceItems:          len(dbRes.Surface),
+		}
+	}
+	// Totals DERIVED from whichever sub-blocks exist (D4), never a literal: a
+	// hand-written total is right exactly once and then silently drifts. Only
+	// the commensurable pair is projected here; a dimension's own scale unit
+	// (endpoints, schema sources) has no projection and therefore cannot reach
+	// the roll-up by accident.
+	type commensurable struct{ deterministic, surface int }
+	var parts []commensurable
+	if s.Security != nil {
+		parts = append(parts, commensurable{s.Security.DeterministicFindings, s.Security.SurfaceItems})
+	}
+	if s.DB != nil {
+		parts = append(parts, commensurable{s.DB.DeterministicFindings, s.DB.SurfaceItems})
+	}
+	for _, p := range parts {
+		s.Totals.DeterministicFindings += p.deterministic
+		s.Totals.SurfaceItems += p.surface
+	}
+	return s
 }
 
 // HandleScanAll runs the full audit over the project and returns the actionable
@@ -339,10 +494,6 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 		}
 	}
 	endpoints := report.AggregateEndpoints(secRes.Findings, secRes.Surface)
-	certain := 0
-	for _, ep := range endpoints {
-		certain += ep.CertainConcerns
-	}
 
 	// DB runs only when database.schema_paths is configured (the dimension applies
 	// to this project). A DB failure is SOFT — reported in its section, never fatal
@@ -364,6 +515,23 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 && dbInputsInScope(cfg.Database.SchemaPaths, scp) {
 		dbSection, dbRes, dbRan = runDBForScanAll(req.Root, req.Language, cfg, crossrules.All(), scp)
 	}
+
+	// The DB census, taken ONCE and shared (design D5): it is both the DB
+	// dimension's own scale unit in the summary (schema_sources) and, on a
+	// DB-only pass, the scope block's auditable denominator below. Two call
+	// sites computing one census is precisely how the two numbers would come to
+	// disagree about how much schema this pass read.
+	dbSources := distinctCanon(dbRes.AuditedFiles)
+
+	// The summary is computed HERE, not down at the return literal (design D3).
+	// filterDBByBaseline below mutates dbSection's Findings/Surface IN PLACE to
+	// the baseline-filtered subset; the summary must count the RAW population —
+	// the same population Score is computed over — so that a fully-baselined
+	// re-scan still reports what the sensors observed instead of collapsing to
+	// zero. summarize's signature already makes reading the section impossible;
+	// computing before the mutation removes even the window in which a future
+	// edit could reintroduce it.
+	summary := summarize(secRan, secRes, endpoints, dbRan, dbRes, dbSources)
 
 	// Per-dimension scoring input (ADR 0021): security measured only when it ran,
 	// db only when it ran. HOISTED here, above the baseline diff (which SAVES the
@@ -482,7 +650,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// provider, and that caveat lives in Security.Note, not here.
 	auditableTotal := secRes.AuditableTotal
 	if !secRan {
-		auditableTotal = len(distinctCanon(dbRes.AuditedFiles))
+		auditableTotal = len(dbSources)
 	}
 	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), auditableTotal)
 	if err := block.Validate(); err != nil {
@@ -493,13 +661,8 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// the rendering will end up showing (R4).
 	resolvedLocally := len(actionable) + len(clean)
 	return ScanAllResponse{
-		Scope: block,
-		Summary: ScanAllSummary{
-			Endpoints:             len(endpoints),
-			DeterministicFindings: len(secRes.Findings),
-			SurfaceItems:          len(secRes.Surface),
-			CertainConcerns:       certain,
-		},
+		Scope:    block,
+		Summary:  summary,
 		Score:    score,
 		Baseline: delta,
 		Actionable: ActionableSection{

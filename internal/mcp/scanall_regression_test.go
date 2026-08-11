@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/mcp"
 )
 
@@ -116,6 +118,18 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reading pre-change golden %s: %v", tc.golden, err)
 			}
+
+			// Anti-recapture guard, same helper TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount
+			// uses on scanall_ts_withdb_prechange.json. Without it, a golden here
+			// regenerated from the fixed build (nested summary, every flat field
+			// reading as its zero value) would pass strip()'s byte comparison
+			// trivially, because "summary" is one of the stripped keys below —
+			// the exact vacuity CRITICAL-1 fixed on the sibling golden, left open
+			// on this one. Both cases go through it: no-db has no other coverage
+			// of this file's shape at all, and with-db gets a second, redundant
+			// check (harmless — it is already covered by the test above).
+			assertGoldenSummaryIsThePreChangeFlatZero(t, golden, tc.golden)
+
 			live, err := json.Marshal(resp)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -131,12 +145,306 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			// golden — that recalibration has its own dedicated, mutation-proved
 			// coverage in scanall_budget_test.go, including the I4 honesty lock
 			// (TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding).
-			gotWithoutSecurity := stripKey(t, []byte(stripKey(t, live, "security")), "budget")
-			wantWithoutSecurity := stripKey(t, []byte(stripKey(t, golden, "security")), "budget") // golden has no "security" key; delete is a no-op, kept for symmetry
-			if gotWithoutSecurity != wantWithoutSecurity {
-				t.Errorf("the change moved a pre-existing field for a resolvable-language project.\n"+
-					"pre-change (minus security, budget): %s\npost-change (minus security, budget): %s", wantWithoutSecurity, gotWithoutSecurity)
+			//
+			// "summary" joins them, and the reason is worth stating precisely
+			// because it is NOT the same kind of reason. budget and security are
+			// excluded as out of this test's scope. summary is excluded because
+			// this golden PROVED IT WRONG: the with-db capture reports every
+			// summary count as zero over a db section holding 1 finding and 1
+			// surface item. The response deliberately no longer agrees with it,
+			// and the recorded diff (see the commit that wired summary.db) is the
+			// evidence the undercount existed. Narrowing this strip-set BEFORE
+			// that wiring would have recorded evidence of a rename instead.
+			//
+			// Summary coverage is not dropped, it is HANDED OVER — to two
+			// controls that assert against this same golden and this same
+			// fixture:
+			//   - TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount (below):
+			//     the golden's own bytes contradict themselves, and the live
+			//     response reports both dimensions.
+			//   - assertSummarySecurityMatchesFlatGolden (below), called at the
+			//     end of THIS subtest: summary.security.* is verbatim what the
+			//     golden's flat summary.* carried, for BOTH the no-db and with-db
+			//     cases — the adapter half that the scanall_budget_test.go copy of
+			//     flatten() performs for the invariant golden. It is a helper on
+			//     this test rather than a test of its own; there is no separate
+			//     migration test to look for.
+			strip := func(t *testing.T, raw []byte) string {
+				t.Helper()
+				return stripKey(t, []byte(stripKey(t, []byte(stripKey(t, raw, "security")), "budget")), "summary")
 			}
+			gotStripped := strip(t, live)
+			wantStripped := strip(t, golden) // golden has no "security" key; delete is a no-op, kept for symmetry
+			if gotStripped != wantStripped {
+				t.Errorf("the change moved a pre-existing field for a resolvable-language project.\n"+
+					"pre-change (minus security, budget, summary): %s\npost-change (minus security, budget, summary): %s",
+					wantStripped, gotStripped)
+			}
+
+			// The strip above removed `summary` from the byte comparison; it does
+			// NOT remove it from this test's obligations. summary.security.* must
+			// still be verbatim what the golden's flat summary.* held, in the same
+			// run, over the same response — otherwise "consumers read
+			// summary.security.* for the old values" is a promise with no control.
+			assertSummarySecurityMatchesFlatGolden(t, golden, resp)
 		})
+	}
+}
+
+// --- the pre-change summary adapter (forced duplicate) -------------------------
+
+// flatSummary mirrors the summary shape the pre-change goldens RECORDED: four
+// unqualified counts, all of them security. The goldens' bytes are the only
+// committed evidence the undercount existed, and testdata/README.md forbids
+// regenerating them, so the per-dimension renest is absorbed by an adapter on
+// this side and never by an edit on that one.
+//
+// This is a deliberate, exact copy of the adapter in scanall_budget_test.go.
+// That file is package `mcp` (it drives the unexported buildScanAll and
+// handleScanAllBudgeted); this file is package `mcp_test` (it drives the public
+// HandleScanAll). Go offers the two packages no way to share an unexported test
+// helper, so the duplication is FORCED by the package split, not chosen. Keep
+// the two copies textually parallel: if one changes and the other does not, one
+// of them is wrong.
+type flatSummary struct {
+	Endpoints             int `json:"endpoints"`
+	DeterministicFindings int `json:"deterministic_findings"`
+	SurfaceItems          int `json:"surface_items"`
+	CertainConcerns       int `json:"certain_concerns"`
+}
+
+// preChangeInvariant is the conclusion block in the pre-change summary shape —
+// the same struct scanall_budget_test.go reads its 79e34b0 golden into.
+type preChangeInvariant struct {
+	Summary  flatSummary          `json:"summary"`
+	Scope    mcp.ScopeBlock       `json:"scope"`
+	Score    scoring.ScoreSummary `json:"score"`
+	Baseline mcp.BaselineDelta    `json:"baseline"`
+}
+
+// flatten projects a post-change response back onto the pre-change shape by
+// reading summary.security. The projection is the ASSERTION, not a convenience:
+// the removed requirement's migration promise is "consumers read
+// summary.security.* for the old values", and this is what makes that promise
+// checkable against a real pre-change capture.
+func flatten(r mcp.ScanAllResponse) preChangeInvariant {
+	var s flatSummary
+	if r.Summary.Security != nil {
+		s = flatSummary{
+			Endpoints:             r.Summary.Security.Endpoints,
+			DeterministicFindings: r.Summary.Security.DeterministicFindings,
+			SurfaceItems:          r.Summary.Security.SurfaceItems,
+			CertainConcerns:       r.Summary.Security.CertainConcerns,
+		}
+	}
+	return preChangeInvariant{Summary: s, Scope: r.Scope, Score: r.Score, Baseline: r.Baseline}
+}
+
+// assertSummarySecurityMatchesFlatGolden is the migration control: the four
+// counts under summary.security must be VERBATIM the four the pre-change golden
+// carried at summary.*.
+//
+// Note on strength: over a golden whose flat summary is all zeros this
+// comparison is weak (it proves security stayed zero, nothing more). The
+// non-vacuous instance is
+// TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange, whose golden
+// recorded {endpoints:1, deterministic_findings:1, surface_items:3,
+// certain_concerns:4} — and which guards explicitly against that golden going
+// empty.
+func assertSummarySecurityMatchesFlatGolden(t *testing.T, golden []byte, resp mcp.ScanAllResponse) {
+	t.Helper()
+	var g struct {
+		Summary flatSummary `json:"summary"`
+	}
+	if err := json.Unmarshal(golden, &g); err != nil {
+		t.Fatalf("parsing the pre-change golden's flat summary: %v", err)
+	}
+	if got := flatten(resp).Summary; got != g.Summary {
+		t.Errorf("summary.security.* must be verbatim the pre-change flat summary.* (the migration the "+
+			"removed requirement promises).\npre-change summary.*:  %+v\npost-change summary.security.*: %+v",
+			g.Summary, got)
+	}
+}
+
+// preChangeFlatSummaryKeys is the exact key set `summary` carried on the wire
+// BEFORE this change: four unqualified counts and nothing else. It is the
+// fingerprint of a pre-change capture, and the only reliable one — see below.
+var preChangeFlatSummaryKeys = []string{
+	"endpoints", "deterministic_findings", "surface_items", "certain_concerns",
+}
+
+// assertGoldenSummaryIsThePreChangeFlatZero is the anti-regeneration guard: it
+// fails unless the named golden's `summary` is still the pre-change FLAT block
+// with every count at zero — the self-contradiction that makes the file
+// evidence rather than a comparison target.
+//
+// It reads the raw key set instead of unmarshalling into flatSummary, and that
+// is the whole point of the helper. Decoding into a struct cannot tell a
+// pre-change capture from a post-change one: a golden regenerated from the
+// FIXED build nests its counts under security/db/totals, so every flat field
+// decodes to its zero value and an "is it the zero struct?" comparison reads as
+// SATISFIED over a file that has stopped testifying to anything. That is not
+// hypothetical — this control shipped in exactly that vacuous form, passed its
+// own named mutation, and was reported as proved. The realistic regeneration
+// (rerun the handler, dump json.MarshalIndent, per testdata/README.md) produces
+// a nested summary, never a flat non-zero one, so the struct comparison was
+// blind to the only way this file actually gets destroyed.
+//
+// Three independent ways to fail, in the order a regeneration trips them:
+//
+//  1. an unknown key — security/db/totals/note — means the file came from a
+//     build that already had the per-dimension shape;
+//  2. a missing pre-change key means the flat block is gone;
+//  3. a non-zero count means the summary no longer contradicts the db section
+//     it carries (this is the hand-edit case the old guard could see).
+func assertGoldenSummaryIsThePreChangeFlatZero(t *testing.T, raw []byte, goldenName string) {
+	t.Helper()
+	const restore = "If this golden was regenerated from a fixed build, the only committed evidence the " +
+		"undercount existed has been destroyed; restore it from 337f158 (see testdata/README.md)."
+
+	var envelope struct {
+		Summary map[string]json.RawMessage `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("parsing %s's summary block: %v", goldenName, err)
+	}
+	if envelope.Summary == nil {
+		t.Fatalf("%s carries no `summary` key at all — it cannot testify to what its summary reported. %s",
+			goldenName, restore)
+	}
+
+	expected := make(map[string]bool, len(preChangeFlatSummaryKeys))
+	for _, k := range preChangeFlatSummaryKeys {
+		expected[k] = true
+	}
+	unknown := make([]string, 0, len(envelope.Summary))
+	for k := range envelope.Summary {
+		if !expected[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	if len(unknown) > 0 {
+		t.Fatalf("%s's summary carries %v, which the PRE-CHANGE shape never had — the file is a capture of "+
+			"the per-dimension summary, not of the defect it is supposed to witness. Its counts are nested "+
+			"under those keys, so nothing at the top level is unqualified any more and the undercount it "+
+			"recorded is gone. %s", goldenName, unknown, restore)
+	}
+	for _, k := range preChangeFlatSummaryKeys {
+		if _, ok := envelope.Summary[k]; !ok {
+			t.Fatalf("%s's summary is missing the pre-change key %q — it is no longer the flat block this "+
+				"control reads. %s", goldenName, k, restore)
+		}
+	}
+	for _, k := range preChangeFlatSummaryKeys {
+		var n int
+		if err := json.Unmarshal(envelope.Summary[k], &n); err != nil {
+			t.Fatalf("%s's summary.%s is not a number (%s): %v", goldenName, k, envelope.Summary[k], err)
+		}
+		if n != 0 {
+			t.Fatalf("%s's summary must be ALL ZERO — that is the defect it testifies to. summary.%s = %d. %s",
+				goldenName, k, n, restore)
+		}
+	}
+}
+
+// TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount turns the golden from
+// a comparison target into a WITNESS.
+//
+// scanall_ts_withdb_prechange.json is a real response codefit produced at
+// 337f158. It contradicts itself inside its own bytes: every summary count is
+// zero, while the db section it carries holds a deterministic finding and a
+// surface item, and its baseline delta says codefit OBSERVED two items this
+// pass. An agent reading only the summary of that response would have concluded
+// the project was clean.
+//
+// The assertions below read the golden's bytes directly — no live handler is
+// involved in establishing the defect — and then run the live handler over the
+// same fixture to show the same project now reports both dimensions.
+//
+// The mutation this control exists to catch is a REGENERATION of the golden
+// from a fixed build, and catching it takes a shape check, not a value check.
+// The obvious guard — unmarshal `summary` into flatSummary and require the
+// zero value — is VACUOUS against exactly that mutation: a regenerated file
+// nests its counts under security/db/totals, so every flat field decodes to 0
+// and "all zero" reads as satisfied over a file that has stopped testifying to
+// anything. That vacuity was real and was shipped; it is why assertGoldenSummaryIsThePreChangeFlatZero
+// below reads the raw key set instead, and fails on a summary that is nested,
+// missing a pre-change key, carries an unknown key, or holds a non-zero count.
+func TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "scanall_ts_withdb_prechange.json"))
+	if err != nil {
+		t.Fatalf("reading the pre-change golden: %v", err)
+	}
+	var captured struct {
+		Baseline struct {
+			New int `json:"new"`
+		} `json:"baseline"`
+		DB struct {
+			Measured bool             `json:"measured"`
+			Findings []map[string]any `json:"findings"`
+			Surface  []map[string]any `json:"surface"`
+		} `json:"db"`
+	}
+	if err := json.Unmarshal(raw, &captured); err != nil {
+		t.Fatalf("parsing the pre-change golden: %v", err)
+	}
+
+	// The captured response's OWN evidence that it looked at a database.
+	if !captured.DB.Measured {
+		t.Fatal("the golden's db section reports measured=false — it cannot testify to an undercount of a " +
+			"dimension it never measured; the capture is not the one this control needs")
+	}
+	if len(captured.DB.Findings) < 1 || len(captured.DB.Surface) < 1 {
+		t.Fatalf("the golden must hold at least one db finding AND one db surface item to witness the "+
+			"undercount, got %d finding(s) / %d surface item(s)",
+			len(captured.DB.Findings), len(captured.DB.Surface))
+	}
+	// A second, independent contradiction in the same bytes: the baseline delta
+	// counts the items codefit OBSERVED, and it says two.
+	if captured.Baseline.New != 2 {
+		t.Fatalf("the golden's baseline.new must be 2 (the two db items codefit observed), got %d — this "+
+			"control reads a capture it does not recognise", captured.Baseline.New)
+	}
+	// And the verdict it published over that evidence: nothing, anywhere.
+	assertGoldenSummaryIsThePreChangeFlatZero(t, raw, "scanall_ts_withdb_prechange.json")
+
+	// Same project, current build: both dimensions are counted, and each count
+	// declares which dimension it counted.
+	root := writeProj(t, map[string]string{
+		".codefit.yaml":        regressionTSYAMLWithDB,
+		"prisma/schema.prisma": regressionNoPKSchema,
+		"app/x/route.ts":       "export async function GET() { return Response.json({}); }\n",
+	})
+	resp, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatalf("HandleScanAll: %v", err)
+	}
+	if resp.Summary.DB == nil {
+		t.Fatal("summary.db is null over the very project whose db section holds a finding and a surface " +
+			"item — the summary is still blind to the dimension")
+	}
+	if resp.Summary.DB.DeterministicFindings != len(captured.DB.Findings) {
+		t.Errorf("summary.db.deterministic_findings = %d, want %d (the db findings this project produces)",
+			resp.Summary.DB.DeterministicFindings, len(captured.DB.Findings))
+	}
+	if resp.Summary.DB.SurfaceItems != len(captured.DB.Surface) {
+		t.Errorf("summary.db.surface_items = %d, want %d (the db surface items this project produces)",
+			resp.Summary.DB.SurfaceItems, len(captured.DB.Surface))
+	}
+	if resp.Summary.DB.SchemaSources != 1 {
+		t.Errorf("summary.db.schema_sources = %d, want 1 (the single configured schema this pass read)",
+			resp.Summary.DB.SchemaSources)
+	}
+	// The roll-up the agent actually skims must not read as zero open questions.
+	if resp.Summary.Totals.SurfaceItems == 0 {
+		t.Error("summary.totals.surface_items is 0 over a project with a mapped db surface item — this is " +
+			"the exact reading the defect produced")
+	}
+	if resp.Summary.Totals.SurfaceItems != resp.Summary.DB.SurfaceItems+resp.Summary.Security.SurfaceItems {
+		t.Errorf("summary.totals.surface_items = %d, want %d (db %d + security %d) — totals is not derived "+
+			"from the sub-blocks", resp.Summary.Totals.SurfaceItems,
+			resp.Summary.DB.SurfaceItems+resp.Summary.Security.SurfaceItems,
+			resp.Summary.DB.SurfaceItems, resp.Summary.Security.SurfaceItems)
 	}
 }

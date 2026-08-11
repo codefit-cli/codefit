@@ -72,7 +72,7 @@ func TestDogfoodResponseBudget(t *testing.T) {
 			}
 			t.Logf("BUDGET %-14s files=%d endpoints=%d (actionable=%d clean=%d frontier=%d) concerns=%d | "+
 				"actionable-detail BEFORE=%d bytes | whole response AFTER=%d bytes (budget %d)",
-				p.Name, resp.Scope.AuditableTotal, resp.Summary.Endpoints,
+				p.Name, resp.Scope.AuditableTotal, resp.Summary.Security.Endpoints,
 				resp.Actionable.Count, resp.ResolvedClean.Count, resp.FrontierPending.Count, concerns,
 				len(before), len(after), ResponseBudgetBytes)
 
