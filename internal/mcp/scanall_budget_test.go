@@ -78,6 +78,17 @@ export async function POST(req: Request) {
 // CODEFIT CONCLUDED, as opposed to how much of it the response spells out. R4
 // says exactly this much must be byte-identical before and after the change, and
 // identical between two runs at different budgets.
+//
+// What this lock covers and what it does NOT: its axis is complete-analysis vs
+// rendered-subset. It compares two runs of the SAME code over the SAME project,
+// so any blindness both runs share is invisible to it — which is exactly how it
+// carried a `Summary` that counted only the security dimension without ever
+// noticing. It is NOT a dimension-completeness control; the summary covering
+// every measured dimension is locked by
+// TestScanAllBudget_SummaryCountsTheDBDimensionOverADBCarryingProject and by
+// TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount, not here. What this
+// one now DOES add is that whatever the summary covers, it covers identically at
+// both budgets — including summary.db over a DB-carrying project.
 type responseInvariant struct {
 	Summary  ScanAllSummary       `json:"summary"`
 	Scope    ScopeBlock           `json:"scope"`
@@ -87,6 +98,51 @@ type responseInvariant struct {
 
 func invariantOf(r ScanAllResponse) responseInvariant {
 	return responseInvariant{Summary: r.Summary, Scope: r.Scope, Score: r.Score, Baseline: r.Baseline}
+}
+
+// flatSummary mirrors the summary shape as scanall_prechange_invariant.json
+// RECORDED it — four unqualified counts, all security — so the golden's bytes
+// stay untouched. Regenerating that file is forbidden (see testdata/README.md:
+// it was captured at 79e34b0, and re-emitting it from the current tree turns
+// the lock into a tautology), so the shape change is absorbed by an ADAPTER on
+// this side, never by an edit on that one.
+type flatSummary struct {
+	Endpoints             int `json:"endpoints"`
+	DeterministicFindings int `json:"deterministic_findings"`
+	SurfaceItems          int `json:"surface_items"`
+	CertainConcerns       int `json:"certain_concerns"`
+}
+
+// preChangeInvariant is responseInvariant in the pre-change summary shape.
+type preChangeInvariant struct {
+	Summary  flatSummary          `json:"summary"`
+	Scope    ScopeBlock           `json:"scope"`
+	Score    scoring.ScoreSummary `json:"score"`
+	Baseline BaselineDelta        `json:"baseline"`
+}
+
+// flatten projects a post-change response back onto the pre-change shape by
+// reading summary.security. That projection is not a convenience — it ASSERTS
+// the migration the removed requirement promises: "consumers read
+// summary.security.* for the old values". If the four security counts ever stop
+// being verbatim what the flat summary carried, this comparison against the
+// 79e34b0 golden fails.
+//
+// A nil Security (no provider resolved) flattens to the zero flatSummary, which
+// is what the pre-change code would have emitted for that project — the old
+// shape had no way to say "not measured", which is the defect, not a behaviour
+// this adapter should invent a new answer for.
+func flatten(r ScanAllResponse) preChangeInvariant {
+	var s flatSummary
+	if r.Summary.Security != nil {
+		s = flatSummary{
+			Endpoints:             r.Summary.Security.Endpoints,
+			DeterministicFindings: r.Summary.Security.DeterministicFindings,
+			SurfaceItems:          r.Summary.Security.SurfaceItems,
+			CertainConcerns:       r.Summary.Security.CertainConcerns,
+		}
+	}
+	return preChangeInvariant{Summary: s, Scope: r.Scope, Score: r.Score, Baseline: r.Baseline}
 }
 
 func sortedKeys(m map[string]bool) []string {
@@ -170,15 +226,31 @@ func TestScanAllBudget_ConclusionsAreComputedOverTheCompleteAnalysis(t *testing.
 
 	full := runBudgeted(t, root, ResponseBudgetBytes)
 
-	var want responseInvariant
+	// The golden is read into the PRE-CHANGE shape and the live response is
+	// projected onto it (flatten). The golden's bytes are evidence and stay
+	// untouched; the adapter is what absorbs the per-dimension renest.
+	var want preChangeInvariant
 	readGolden(t, "scanall_prechange_invariant.json", &want)
 	// Guard against a golden that locks nothing: a fixture that produced no
 	// endpoints and a zero score would compare equal to anything.
 	if want.Summary.Endpoints == 0 || want.Score.Global == 0 || want.Baseline.New == 0 {
 		t.Fatalf("the pre-change golden is empty (%+v) — this test would pass over any response", want)
 	}
-	if got := mustJSON(t, invariantOf(full)); got != mustJSON(t, want) {
+	if got := mustJSON(t, flatten(full)); got != mustJSON(t, want) {
 		t.Errorf("the change moved what codefit concluded.\npre-change: %s\npost-change: %s", mustJSON(t, want), got)
+	}
+	// budgetFixture configures no database, so the DB dimension never runs over
+	// it. That used to be an ACCIDENT this file relied on without saying so —
+	// the endpoint-anchored equality below survived only because no DB finding
+	// could ever reach the count it read. State it, so the day someone gives
+	// this fixture a schema, the tests that assume otherwise fail loudly here
+	// instead of quietly changing meaning.
+	if full.Summary.DB != nil {
+		t.Fatalf("budgetFixture must configure no database — summary.db is %+v, so every assertion in this "+
+			"file that assumes a security-only project is now measuring something else", full.Summary.DB)
+	}
+	if full.Summary.Security == nil {
+		t.Fatal("budgetFixture is TypeScript with a resolvable provider — summary.security must not be null")
 	}
 
 	// budget=1 cannot fit even the empty response, so every endpoint is withheld:
@@ -255,16 +327,16 @@ func TestScanAllBudget_DeterministicFindingIsNeverDemotedToAName(t *testing.T) {
 	budgetFixture(t, root)
 	resp := runBudgeted(t, root, ResponseBudgetBytes)
 
-	if resp.Summary.DeterministicFindings == 0 {
+	if resp.Summary.Security.DeterministicFindings == 0 {
 		t.Fatal("the fixture produced no deterministic finding — this test would prove nothing")
 	}
 	var found []report.Concern
 	for _, ep := range resp.Actionable.Endpoints {
 		found = append(found, ep.Deterministic...)
 	}
-	if len(found) != resp.Summary.DeterministicFindings {
+	if len(found) != resp.Summary.Security.DeterministicFindings {
 		t.Fatalf("the response carries %d deterministic concern(s) for %d deterministic finding(s) — "+
-			"one was hidden behind a second call", len(found), resp.Summary.DeterministicFindings)
+			"one was hidden behind a second call", len(found), resp.Summary.Security.DeterministicFindings)
 	}
 	for _, c := range found {
 		if c.Certainty != report.Deterministic || !c.Affirms {
@@ -281,9 +353,9 @@ func TestScanAllBudget_DeterministicFindingIsNeverDemotedToAName(t *testing.T) {
 	for _, ep := range starved.Actionable.Endpoints {
 		n += len(ep.Deterministic)
 	}
-	if n != resp.Summary.DeterministicFindings {
+	if n != resp.Summary.Security.DeterministicFindings {
 		t.Errorf("a starved budget withheld %d of %d deterministic finding(s)",
-			resp.Summary.DeterministicFindings-n, resp.Summary.DeterministicFindings)
+			resp.Summary.Security.DeterministicFindings-n, resp.Summary.Security.DeterministicFindings)
 	}
 }
 
@@ -375,7 +447,18 @@ func TestScanAllBudget_WithholdingIsDeclaredNeverSilent(t *testing.T) {
 	if total < 3 {
 		t.Fatalf("the fixture has %d endpoint(s): too few for a withholding test", total)
 	}
-	const tightBudget = 4000 // below the fixture's full size, above its withheld-everything floor
+	// Below the fixture's full size, above its withheld-everything FLOOR. The
+	// floor is not a constant of the fixture: it is the size of a response with
+	// every endpoint withheld, so every always-present block counts against it.
+	// It moved from under 4000 to 4530 when `summary` gained its per-dimension
+	// shape and its always-present note (~380 bytes) — a real, declared cost of
+	// that change, paid once per response and roughly 1% of the 40 000-byte
+	// budget. Measured over this fixture: floor 4530 (2 endpoints, the affirmed
+	// ones R2 pins), full 5277. 4800 sits inside that window and restores this
+	// test's intent — PARTIAL withholding, not the impossible-budget case the
+	// block at the end of this test covers. The guards immediately below fail
+	// loudly if this number ever stops producing partial withholding.
+	const tightBudget = 4800
 	tight := runBudgeted(t, root, tightBudget)
 	rendered := len(tight.Actionable.Endpoints) + len(tight.ResolvedClean.Endpoints) + len(tight.FrontierPending.Endpoints)
 	if rendered == total {
