@@ -182,10 +182,53 @@ func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading pre-change golden: %v", err)
 	}
-	gotWithoutSecurity := stripKey(t, live, "security")
-	wantWithoutSecurity := stripKey(t, golden, "security")
-	if gotWithoutSecurity != wantWithoutSecurity {
-		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response (minus security).\nlive:\n%s\ngolden:\n%s",
-			gotWithoutSecurity, wantWithoutSecurity)
+	// "summary" is excluded on top of "security", for a different reason. security
+	// was excluded as a declared field addition outside this test's scope. summary
+	// is excluded because this golden was PROVED WRONG: it recorded
+	// {endpoints:1, deterministic_findings:1, surface_items:3, certain_concerns:4}
+	// for a project that also produces 1 db finding and 1 db surface item, so its
+	// deterministic count was short by one and its surface count short by one.
+	// The response deliberately no longer agrees with it. The bytes stay: they are
+	// the second independent capture testifying to the undercount, and unlike
+	// scanall_ts_withdb_prechange.json this one shows it WITHOUT having to read
+	// another block — the numbers are simply wrong on their face.
+	// Summary coverage for this fixture is taken over below, in the same run.
+	gotStripped := stripKey(t, []byte(stripKey(t, live, "security")), "summary")
+	wantStripped := stripKey(t, []byte(stripKey(t, golden, "security")), "summary")
+	if gotStripped != wantStripped {
+		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response (minus security, summary).\nlive:\n%s\ngolden:\n%s",
+			gotStripped, wantStripped)
+	}
+
+	// The NON-VACUOUS migration control (scanall_regression_test.go's goldens
+	// have all-zero flat summaries; this one does not). summary.security.* must
+	// be verbatim what the golden's flat summary.* carried.
+	var g struct {
+		Summary flatSummary `json:"summary"`
+	}
+	if err := json.Unmarshal(golden, &g); err != nil {
+		t.Fatalf("parsing the pre-change golden's flat summary: %v", err)
+	}
+	if g.Summary == (flatSummary{}) {
+		t.Fatal("this golden's flat summary is all zero — it is the one capture whose non-zero counts make " +
+			"the migration assertion below mean something; a zeroed one would pass over anything")
+	}
+	assertSummarySecurityMatchesFlatGolden(t, golden, resp)
+
+	// And what the golden got WRONG, stated as the numbers: the db dimension it
+	// measured (its own db section holds a finding and a surface item, and
+	// by_dimension.db is 95) contributed nothing to any count it published.
+	if resp.Summary.DB == nil {
+		t.Fatal("summary.db is null over a project whose schema was measured")
+	}
+	if resp.Summary.Totals.DeterministicFindings != g.Summary.DeterministicFindings+resp.Summary.DB.DeterministicFindings {
+		t.Errorf("totals.deterministic_findings = %d, want %d (the golden's %d security + %d db)",
+			resp.Summary.Totals.DeterministicFindings,
+			g.Summary.DeterministicFindings+resp.Summary.DB.DeterministicFindings,
+			g.Summary.DeterministicFindings, resp.Summary.DB.DeterministicFindings)
+	}
+	if resp.Summary.Totals.SurfaceItems <= g.Summary.SurfaceItems {
+		t.Errorf("totals.surface_items = %d, which is not MORE than the pre-change flat count of %d — the "+
+			"db surface item is still uncounted", resp.Summary.Totals.SurfaceItems, g.Summary.SurfaceItems)
 	}
 }
