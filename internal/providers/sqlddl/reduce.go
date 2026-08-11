@@ -68,6 +68,21 @@ type builder struct {
 	// leaves Strategy empty — never a default.
 	partSchemeFunc   map[string]string
 	partFuncStrategy map[string]string
+
+	// sources is the per-source STATEMENT CENSUS this reducer hands to
+	// db.Schema.Sources — how many statements each file contained and how many
+	// of those the reducer can POSITIVELY explain away (db.StatementOutcome).
+	//
+	// It records facts this reducer has always KNOWN and always DISCARDED. Two
+	// branches below return silently having understood a statement completely:
+	// the idempotent ADD COLUMN and the repeated CREATE TABLE IF NOT EXISTS.
+	// Both are correct to return, and the information they threw away — "this
+	// statement was read, and adding nothing was the RIGHT answer" — is the only
+	// thing that can tell a benign file apart from one codefit was blind over.
+	// The consumer (sensors/db's unread-schema floor) could not derive it: a
+	// no-op leaves no position BY DEFINITION, so absence of a position there is
+	// evidence of nothing.
+	sources map[string]db.SourceStatements
 }
 
 func newBuilder(dialect *Dialect) *builder {
@@ -78,7 +93,36 @@ func newBuilder(dialect *Dialect) *builder {
 		nonTableRelations: map[string]bool{},
 		partSchemeFunc:    map[string]string{},
 		partFuncStrategy:  map[string]string{},
+		sources:           map[string]db.SourceStatements{},
 	}
+}
+
+// countStatement records that one more statement of file reached the dispatch.
+// Called ONCE per statement, at the single funnel apply() is, so that Total and
+// Accounted are always commensurate quantities.
+func (b *builder) countStatement(file string) {
+	c := b.sources[file]
+	c.Total++
+	b.sources[file] = c
+}
+
+// account records that ONE statement of file was fully explained by outcome.
+//
+// Callers must invoke it once per STATEMENT, never once per item: an ALTER TABLE
+// with several comma-separated parts is one statement, and accounting a part of
+// it would report a file that really changed the schema as one that did nothing
+// (applyAlterTable ANDs its parts for exactly this reason).
+//
+// It may only be called from a branch that RECOGNIZED the statement. A residual
+// "everything else" branch is not a recognition — see apply()'s default: — and
+// accounting from one would turn genuine blindness into a reassuring sentence.
+func (b *builder) account(file string, outcome db.StatementOutcome) {
+	c := b.sources[file]
+	if c.Accounted == nil {
+		c.Accounted = map[db.StatementOutcome]int{}
+	}
+	c.Accounted[outcome]++
+	b.sources[file] = c
 }
 
 func (b *builder) schema() *db.Schema {
@@ -87,6 +131,9 @@ func (b *builder) schema() *db.Schema {
 		if t := b.tables[name]; t != nil {
 			s.Tables = append(s.Tables, *t)
 		}
+	}
+	if len(b.sources) > 0 {
+		s.Sources = b.sources
 	}
 	return s
 }
@@ -177,6 +224,28 @@ var (
 	reTrigger    = regexp.MustCompile(`(?is)^create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+("?[\w".]+"?)\b.*?\son\s+("?[\w".]+"?)`)
 	reDropTable  = regexp.MustCompile(`(?is)^drop\s+table\s+(?:if\s+exists\s+)?("?[\w".]+"?)`)
 	reReferences = regexp.MustCompile(`(?is)references\s+("?[\w".]+"?)\s*(?:\(([^)]*)\))?`)
+
+	// reDataOrPermissionHead recognizes the statement family that declares NO
+	// SCHEMA AT ALL — data (INSERT/UPDATE/DELETE/MERGE/TRUNCATE) and permissions
+	// (GRANT/REVOKE). These statements were, and remain, skipped by the reducer:
+	// nothing about them reaches the model. What this regex adds is that the skip
+	// is now RECORDED as a positive recognition (db.OutcomeDeclaresNoSchema)
+	// instead of falling into apply()'s residual default: branch.
+	//
+	// It is deliberately an ENUMERATION, and that is safe here in a way it is not
+	// elsewhere in this file. Everywhere else an enumeration risks SILENCE — the
+	// form nobody listed evaporates — which is why reTableShapedHead and
+	// reIndexShapedHead are written against a shape instead. Here the direction is
+	// inverted: a form nobody listed stays UNACCOUNTED, and an unaccounted
+	// statement is what makes its file report as blindness. So this list can only
+	// ever reduce noise; it can never create a false all-clear. A CTE-prefixed DML
+	// ("WITH x AS (…) INSERT INTO …") is a deliberate example: it is not matched,
+	// so it keeps its file under the blindness reason.
+	//
+	// ^-anchored like every other head regex here: an INSERT inside a routine body
+	// is body CONTENT, and split() keeps it inside its enclosing statement, so
+	// this never sees it.
+	reDataOrPermissionHead = regexp.MustCompile(`(?is)^\s*(?:insert|update|delete|merge|truncate|grant|revoke)\b`)
 
 	// reIndexShapedHead recognizes a CREATE INDEX-family statement head
 	// BROADER than reCreateIndex/reCreateColumnstoreIndex COMBINED — the
@@ -401,6 +470,11 @@ func isRoutineHead(text string) bool {
 func (b *builder) apply(file string, st stmt) bool {
 	pos := db.Pos{File: file, Line: st.line}
 	head := strings.ToLower(strings.TrimSpace(st.text))
+	// The single funnel every statement passes through, so the census's Total
+	// and its Accounted counts are always the same kind of quantity. The run-on
+	// residual path re-enters here, which is exactly right: a statement the
+	// reducer had to FIND is still a statement, and it gets its own count.
+	b.countStatement(file)
 	switch {
 	case reCreateTable.MatchString(st.text):
 		b.applyCreateTable(file, st)
@@ -427,6 +501,24 @@ func (b *builder) apply(file string, st stmt) bool {
 		b.nonTableRelations[normalizeName(reCreateSequence.FindStringSubmatch(st.text)[1])] = true
 	case strings.HasPrefix(head, "alter table"):
 		b.applyAlterTable(file, st)
+	case reDataOrPermissionHead.MatchString(st.text):
+		// A statement that DECLARES NO SCHEMA — data (INSERT/UPDATE/DELETE/
+		// MERGE/TRUNCATE) or permissions (GRANT/REVOKE). It was already skipped
+		// before this branch existed, by falling through to default:, and it is
+		// still skipped now; the ONLY thing that changed is that the skip is
+		// recorded as a POSITIVE recognition instead of vanishing.
+		//
+		// This branch exists for one reason, and inverting it would defeat the
+		// change entirely: state "declares no schema" MUST come from an
+		// enumerated head shape, NEVER from default:. default: is the residual
+		// bucket — it also swallows CREATE DOMAIN, COMMENT ON, PRAGMA, a
+		// truncated file and a dialect nobody has read yet — so reading it as
+		// "declares no schema" would relabel real blindness as a benign fact,
+		// which is worse than the silence it replaced. Because the recognition
+		// is positive, this enumeration can only ever REDUCE noise: a DML form
+		// nobody listed here stays unaccounted and keeps reporting as blindness.
+		b.account(file, db.OutcomeDeclaresNoSchema)
+		return false
 	case reCreateIndex.MatchString(st.text):
 		b.applyCreateIndex(file, st)
 	case reCreateColumnstoreIndex.MatchString(st.text):
@@ -856,7 +948,17 @@ func (b *builder) reduceCreateTable(file string, st stmt) {
 		// affirm over data it never actually saw completely.
 		if !ifNotExists {
 			existing.MarkUnproven(db.ReasonUnreducedTableStatement, st.text, db.Pos{File: file, Line: st.line})
+			return
 		}
+		// The skip above is CORRECT, and it is also the second of the two
+		// branches in this reducer that understood a statement completely and
+		// then returned leaving no trace. The table this statement declares IS
+		// in the model — the earlier CREATE put it there — so the right answer
+		// was to add nothing, and the census is where that positive fact is
+		// recorded (db.OutcomeAlreadySatisfied). Without it, a migration whose
+		// every statement is a guarded re-declaration is indistinguishable from
+		// one codefit could not read at all.
+		b.account(file, db.OutcomeAlreadySatisfied)
 		return
 	}
 	openIdx := loc[1] - 1 // the '(' the regex ended on
@@ -1675,6 +1777,15 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 	// dispatched as its own action exactly as before, so no dialect that
 	// repeats the verb per action is affected.
 	inAddList := false
+	// allSatisfied / parts implement the census's PER-STATEMENT accounting rule
+	// over a per-PART dispatch. applyAlterAdd and applyAlterAction run once per
+	// comma-separated part, but "ALTER TABLE t ADD COLUMN IF NOT EXISTS a, DROP
+	// COLUMN c" is ONE statement: accounting the idempotent add on its own would
+	// declare a file that really dropped a column to be a benign no-op. So the
+	// statement is accounted only when EVERY part was satisfied, and only when
+	// there was at least one part (an empty action list is not a no-op codefit
+	// proved, it is a statement it could not decompose).
+	allSatisfied, parts := true, 0
 	for i, p := range splitTopLevelParts(m[2]) {
 		// p.textOff(), never p.off — same comma-boundary correction as the
 		// CREATE TABLE body loop (ADR 0045). It is invisible on pg_dump output,
@@ -1688,16 +1799,22 @@ func (b *builder) applyAlterTable(file string, st stmt) {
 		if i == 0 {
 			act = trimWithCheckPrefix(act)
 		}
+		parts++
+		var satisfied bool
 		switch {
 		case leadingKeyword(act) == "ADD":
 			inAddList = true
-			b.applyAlterAdd(t, strings.TrimSpace(act[len("ADD"):]), pos)
+			satisfied = b.applyAlterAdd(t, strings.TrimSpace(act[len("ADD"):]), pos)
 		case inAddList && isAddListContinuation(act):
-			b.applyAlterAdd(t, act, pos)
+			satisfied = b.applyAlterAdd(t, act, pos)
 		default:
 			inAddList = false
-			b.applyAlterAction(t, act, pos)
+			satisfied = b.applyAlterAction(t, act, pos)
 		}
+		allSatisfied = allSatisfied && satisfied
+	}
+	if parts > 0 && allSatisfied {
+		b.account(file, db.OutcomeAlreadySatisfied)
 	}
 }
 
@@ -1754,7 +1871,13 @@ func isAddListContinuation(act string) bool {
 // the column list and falls to that same floor when it cannot. No path here
 // can reach applyColumn with a constraint keyword in hand, which is what
 // produced the phantom column literally named "CONSTRAINT".
-func (b *builder) applyAlterAdd(t *db.Table, item string, pos db.Pos) {
+// It returns whether this item was ALREADY SATISFIED by the model — true only
+// for the idempotent add below, where the column being added is one the schema
+// already carries. Every other outcome returns false, including the ones that
+// succeed: a constraint this call really added is a contribution, not a no-op.
+// applyAlterTable ANDs the result across the whole statement's parts, so the
+// census can only ever record a statement none of whose parts changed anything.
+func (b *builder) applyAlterAdd(t *db.Table, item string, pos db.Pos) bool {
 	kw := leadingKeyword(item)
 	switch {
 	case kw == "CONSTRAINT":
@@ -1773,10 +1896,17 @@ func (b *builder) applyAlterAdd(t *db.Table, item string, pos db.Pos) {
 		rest = trimPrefixFold(rest, "IF NOT EXISTS")
 		name, _ := firstToken(rest)
 		if hasColumn(t, normalizeName(name)) {
-			return // idempotent add
+			// Idempotent add: the column is already in the model, so adding
+			// nothing is the CORRECT reduction. This is the branch the whole
+			// census exists for — a Flyway migration made only of guarded
+			// re-declarations lands here for every one of its statements,
+			// leaves no position behind, and used to be indistinguishable from
+			// a file codefit could not read.
+			return true
 		}
 		b.applyColumn(t, rest, pos)
 	}
+	return false
 }
 
 // alterActionRecognizedSkips are the ALTER TABLE action heads this reducer
@@ -1802,7 +1932,21 @@ func isAlterActionRecognizedSkip(up string) bool {
 // applyAlterAction dispatches ONE non-ADD ALTER TABLE action. ADD actions and
 // their comma-continuation items are routed by applyAlterTable to
 // applyAlterAdd before reaching here.
-func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
+// It returns whether this action left the model ALREADY SATISFIED — which no
+// non-ADD action ever does, so it is always false. The signature exists to make
+// applyAlterTable's per-statement AND total over its parts: a statement is
+// accounted only when EVERY part reports satisfied, and a DROP COLUMN sharing a
+// statement with an idempotent ADD is exactly the case that must not be.
+//
+// The RECOGNIZED-SKIP branch deliberately returns false too, and that is the
+// declared residual of this whole change: ALTER COLUMN … TYPE, RENAME, OWNER TO
+// and ENABLE are understood, model nothing, and still leave their file under the
+// blindness reason when they are all it contains. For ALTER COLUMN … TYPE and
+// RENAME that is CORRECT — the model genuinely does not carry what they declare,
+// so codefit really is blind to it. For OWNER TO / ENABLE it is an over-report,
+// accepted here and closable later by giving db.StatementOutcome one more member
+// — which is why that vocabulary is a closed enum rather than a bool.
+func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) bool {
 	up := strings.ToUpper(act)
 	switch {
 	case strings.HasPrefix(up, "DROP COLUMN"), strings.HasPrefix(up, "DROP "):
@@ -1821,6 +1965,7 @@ func (b *builder) applyAlterAction(t *db.Table, act string, pos db.Pos) {
 		// design §2).
 		t.MarkUnproven(db.ReasonUnreducedTableStatement, act, pos)
 	}
+	return false
 }
 
 // isConstraintCheckToggle reports whether an ALTER TABLE action is T-SQL's

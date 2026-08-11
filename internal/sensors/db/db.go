@@ -136,7 +136,7 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 	// all-clear this sensor exists to make impossible.
 	unread := unreadSources(sources, schema)
 	unreadTrace := unreadNote(unread, len(sources))
-	if wholeScanBlind(unread, len(sources)) {
+	if wholeScanUnproductive(unread, len(sources)) {
 		return notMeasured(unreadTrace), nil
 	}
 

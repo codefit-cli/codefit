@@ -83,6 +83,42 @@ All notable changes to codefit are documented here. The format is based on
   shipping without one.
 
 ### Fixed
+- **The db dimension reported files it had read and resolved correctly as files it
+  was blind over.** The unread-schema floor asked the neutral model one question —
+  "does any position name this file?" — and read "no" as "codefit did not see what
+  this file declares". That inference is unsound: the same absence is produced by a
+  migration whose every statement is `ADD COLUMN IF NOT EXISTS` on a column another
+  migration already declares (reduced correctly; the correct reduction adds nothing,
+  so it *cannot* leave a position) and by a file of pure `INSERT`/`GRANT`. Measured
+  on a real 45-migration project: **13 of 45 migrations named under "codefit read
+  NOTHING from this file", now 3** — and the 3 that remain are genuinely unseen
+  content (`ALTER COLUMN … TYPE`, `SET DEFAULT`/`DROP NOT NULL`, and a CTE-prefixed
+  statement). The neutral model gained a per-source **statement census**
+  (`db.Schema.Sources`): how many statements the parser met, and how many it can
+  *positively* explain away. A parser that never fills it (Prisma) degrades to
+  exactly the previous behaviour — noisy, never a false all-clear. Two consequences
+  are user-visible and deliberate: the **blind-file list is now enumerated in full**
+  (an agent that cannot enumerate the files cannot check them; the benign lists keep
+  their cap), and a project whose *every* configured schema path resolves to nothing
+  structural now reports **not measured** instead of score 100 with zero tables —
+  without that widening this very fix would have made a seed-only glob look like a
+  clean audit. This supersedes [ADR 0044](docs/decisions/0044-source-bytes-become-text-and-an-unread-source-is-declared.md)
+  §2.5's declared over-report for the DML/permission family. See
+  [ADR 0068](docs/decisions/0068-a-negative-claim-needs-positive-evidence-the-statement-census-and-the-measured-budget.md).
+- **`codefit-scan-all` told an agent its response fit a byte budget the response
+  measurably exceeded.** The budget note derived its fit claim from the *withheld
+  endpoint count* rather than from the response's size: with nothing withheld it
+  returned "the complete endpoint list fit within this response's 40000-byte budget:
+  NOTHING was withheld" without consulting the over-budget result `fitToBudget` had
+  already computed by serializing the response. The reachable shape is ordinary — a
+  project with a database and no security provider has zero endpoints and a large
+  `db.surface` — and it exceeded the budget while affirming it fit. The note now
+  states that the response does not fit and names *which* of the two reasons nothing
+  could be withheld (no endpoints at all, or every endpoint pinned by a deterministic
+  finding codefit refuses to hide). No behaviour change to the baseline write gate:
+  the over-budget condition already blocked the write ([ADR 0061](docs/decisions/0061-the-baseline-write-is-gated-on-every-check-codefit-can-perform.md));
+  only the prose lied. The structural per-bucket cap for `db.surface` — the only real
+  lever for a DB-heavy response — stays open and is declared in the note itself.
 - **`codefit-scan-security` and `codefit-surface-authz` hard-failed on any Go project
   containing an HTTP handler** — a regression shipped hours earlier in the same
   `[Unreleased]` window that first exposed Go (above): `internal/providers/golang/surface.go`

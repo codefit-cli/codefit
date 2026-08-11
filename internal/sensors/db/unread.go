@@ -33,12 +33,13 @@ import (
 
 // unreadReason is the CLOSED vocabulary of why a configured schema source
 // contributed nothing (ADR 0034 §2.8's measurement/diagnostics boundary: the
-// note states the FACT and what it cost, never which regex missed). The three
-// values answer three different questions and must not be collapsed:
-// reasonNotText and reasonNothingRecognized are the DEFECT (codefit was blind
-// over content that exists); reasonNoDeclarations is LEGITIMATE (there was
-// nothing to read), and is recorded anyway only so that "0 tables" is never
-// ambiguous.
+// note states the FACT and what it cost, never which regex missed). The values
+// answer different questions and must not be collapsed: reasonNotText and
+// reasonNothingRecognized are the DEFECT (codefit was blind over content that
+// exists); reasonNoDeclarations, reasonAlreadySatisfied and
+// reasonDeclaresNoSchema are LEGITIMATE (there was nothing to read, or reading
+// it correctly produced nothing), and are recorded anyway only so that "0
+// tables" is never ambiguous.
 type unreadReason string
 
 const (
@@ -58,11 +59,33 @@ const (
 	// reasonNoDeclarations: benign. Outside whitespace and comments the file is
 	// empty, so there was nothing to recognize.
 	reasonNoDeclarations unreadReason = "it declares nothing outside whitespace and comments"
+	// reasonAlreadySatisfied: benign, and the reason this whole classification
+	// exists. Every statement in the file was READ and reduced correctly, and
+	// the correct reduction of each was to add nothing, because the schema they
+	// declare is already in the model from another source. A file like this
+	// cannot leave a position BY DEFINITION, which is why its absence from the
+	// model was never evidence of blindness.
+	reasonAlreadySatisfied unreadReason = "they declare only schema another source already declares — " +
+		"every statement in them was read and correctly contributed nothing (an `ADD COLUMN IF NOT EXISTS` " +
+		"on a column that already exists, a repeated `CREATE TABLE IF NOT EXISTS`), so they are fully " +
+		"accounted for and nothing in them is unseen"
+	// reasonDeclaresNoSchema: benign. Every statement was recognized as
+	// declaring no schema at all. codefit read the file; there was no structure
+	// in it to read.
+	reasonDeclaresNoSchema unreadReason = "they declare no schema at all — every statement in them is " +
+		"data or permissions (INSERT/UPDATE/DELETE/MERGE/TRUNCATE/GRANT/REVOKE), so there was no " +
+		"structure to read"
 )
 
 // defect reports whether this reason means codefit was BLIND over content that
-// exists — the two reasons that make "audited, 0 findings" a lie.
-func (r unreadReason) defect() bool { return r != reasonNoDeclarations }
+// exists — the reasons that make "audited, 0 findings" a lie.
+//
+// It is an ENUMERATION OF THE DEFECT, not of the benign cases, and the direction
+// is load-bearing: a reason nobody added to this list is treated as a defect, so
+// forgetting to classify something produces noise, never a false all-clear.
+func (r unreadReason) defect() bool {
+	return r == reasonNotText || r == reasonNothingRecognized
+}
 
 // unreadSource is one configured schema file that reached no rule.
 type unreadSource struct {
@@ -88,22 +111,60 @@ func unreadSources(sources []providers.SourceFile, schema *coredb.Schema) []unre
 		if contributed[src.Path] {
 			continue
 		}
-		out = append(out, unreadSource{Path: src.Path, Reason: reasonFor(src.Content)})
+		out = append(out, unreadSource{Path: src.Path, Reason: reasonFor(src.Content, censusOf(schema, src.Path))})
 	}
 	return out
 }
 
-// reasonFor classifies a source that contributed nothing. Order matters: a file
-// that is not text at all must never be described by what its "comments" look
-// like, because in a UTF-16 file they are not comments.
-func reasonFor(content []byte) unreadReason {
+// censusOf returns the parser's statement census for path, or the zero census
+// when the parser filled none. The zero value is NOT "nothing to account for" —
+// it is "nothing was accounted", which reasonFor treats as blindness.
+func censusOf(s *coredb.Schema, path string) coredb.SourceStatements {
+	if s == nil {
+		return coredb.SourceStatements{}
+	}
+	return s.Sources[path]
+}
+
+// reasonFor classifies a source that contributed nothing, from the file's own
+// bytes and from the parser's statement census for it.
+//
+// THE RULE THIS FUNCTION OBEYS: a negative claim — "codefit did not see what
+// this file declares" — may only be made from evidence that ESTABLISHES it,
+// never from a proxy that also has innocent causes. "No position names this
+// file" is exactly such a proxy: it is equally true of a file codefit could not
+// read, of a correct no-op, and of a file of pure data. The census is what tells
+// those apart, because it counts statements the reducer POSITIVELY explained.
+//
+// Order matters throughout:
+//
+//  1. Not text at all must never be described by what its "comments" look like —
+//     in a UTF-16 file they are not comments.
+//  2. Nothing outside whitespace and comments: there was nothing to recognize.
+//  3. NO CENSUS AT ALL is BLINDNESS, and this guard is the fail-closed hinge of
+//     the whole change. A parser that does not fill db.Schema.Sources (the
+//     Prisma parser today) leaves every census zero, and a zero census must
+//     degrade to exactly what codefit reported before the census existed —
+//     noisy, never a false all-clear. Removing this case would make every
+//     traceless file under such a parser fall through to "declares no schema".
+//  4. At least one statement neither in the schema NOR explained: BLINDNESS,
+//     with wording unchanged from before this classification existed.
+//  5. Everything explained, and something was an idempotent re-declaration.
+//  6. Everything explained, and it was all data or permissions.
+func reasonFor(content []byte, census coredb.SourceStatements) unreadReason {
 	switch {
 	case sourcetext.ContainsNUL(content):
 		return reasonNotText
 	case !declaresSomething(content):
 		return reasonNoDeclarations
-	default:
+	case census.Total == 0:
 		return reasonNothingRecognized
+	case census.Unaccounted() > 0:
+		return reasonNothingRecognized
+	case census.Accounted[coredb.OutcomeAlreadySatisfied] > 0:
+		return reasonAlreadySatisfied
+	default:
+		return reasonDeclaresNoSchema
 	}
 }
 
@@ -232,7 +293,20 @@ func unreadNote(unread []unreadSource, total int) string {
 		}
 		paths := byReason[reason]
 		shown, suffix := paths, ""
-		if len(paths) > completenessInventoryTableCap {
+		// The BLIND list is enumerated in FULL; the benign lists keep the cap.
+		//
+		// The two are bounded by different things. A benign list can be a
+		// 200-file seed directory, and naming all 200 would bury the sentence
+		// that matters under information nobody can act on. The blind list is
+		// bounded by the CONFIGURED source list (ADR 0044 §2.3) and every entry
+		// in it is a file the agent must go and check — a truncated blind list
+		// is a instruction the agent cannot follow.
+		//
+		// The interlock with the response budget is deliberate rather than
+		// incidental: uncapping this list is only safe because a response pushed
+		// over its budget by a long note now SAYS it is over instead of claiming
+		// the complete list fit.
+		if !reason.defect() && len(paths) > completenessInventoryTableCap {
 			shown = paths[:completenessInventoryTableCap]
 			suffix = fmt.Sprintf(" (+%d more)", len(paths)-completenessInventoryTableCap)
 		}
@@ -254,8 +328,9 @@ func unreadNote(unread []unreadSource, total int) string {
 	return strings.Join(parts, " ")
 }
 
-// wholeScanBlind reports whether EVERY configured source went unread for a
-// defect reason — the case where Measured must be false.
+// wholeScanUnproductive reports whether EVERY configured source contributed
+// nothing to the model — WHATEVER the reason — the case where Measured must be
+// false.
 //
 // Result.Measured already carries exactly this doctrine ("Measured=false with a
 // Note is the honest 'not audited' state ... distinct from 'audited, 0
@@ -263,14 +338,21 @@ func unreadNote(unread []unreadSource, total int) string {
 // read. A PARTIAL failure keeps Measured=true, because codefit did audit the
 // sources it could read and the note names the ones it could not — reporting
 // the whole scan as unmeasured there would throw away real findings.
-func wholeScanBlind(unread []unreadSource, total int) bool {
-	if total == 0 || len(unread) != total {
-		return false
-	}
-	for _, u := range unread {
-		if u.Reason.defect() {
-			return true
-		}
-	}
-	return false
+//
+// IT DOES NOT CONSULT defect(), and that is the whole point of the rename. Its
+// predecessor did, which was sound only while every traceless file was a defect.
+// The moment a resolved no-op or a pure-data file stopped being one, a
+// `schema_paths` glob matching only seed files would have reported Measured=true,
+// score 100 and zero tables — byte-for-byte the shape of a clean audit, the
+// single failure this whole floor exists to make impossible (invariant I2: not
+// measured is never clean). So the widening is not a bonus; it is what keeps the
+// classification from introducing the defect it was written to remove. It also
+// closes the same pre-existing hole for a comment-only source set.
+//
+// DECLARED COST, of the same class as ADR 0044's: a project whose configured
+// schema_paths genuinely resolve to nothing structural loses its db score
+// instead of scoring 100. Losing a score for a schema nobody read is the correct
+// direction; the note says exactly which files and why.
+func wholeScanUnproductive(unread []unreadSource, total int) bool {
+	return total > 0 && len(unread) == total
 }
