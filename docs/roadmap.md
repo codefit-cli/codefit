@@ -254,6 +254,54 @@ delivery acknowledgement, so this is a mitigation of the reachable instance, not
 vs. the client's tokens, still P0-4); and `codefit-baseline-prune`'s same-shaped
 compute-then-save-before-returning, on its own human-triggered path — recorded, not fixed.
 
+### P0-7 — CLOSED (`response-asserts-only-what-it-established`) — the response asserted two negatives it had never measured
+
+Found by dogfooding codefit against a real 45-migration Flyway project. Two defects that look
+unrelated and are the same law broken twice: **a response may assert a negative claim only when
+that claim was ESTABLISHED by measurement, never inferred from a proxy that also has innocent
+causes.**
+
+*The unread-schema note (D2).* ADR 0044's floor inferred "codefit did not see what this file
+declares" from "no position in the model names this file". That absence is also produced by a
+migration whose every statement is a guarded re-declaration of schema another migration already
+declares — reduced correctly, and the correct reduction adds nothing, so it *cannot* leave a
+position — and by a file of pure `INSERT`/`GRANT`. Measured, before and after, by running the
+real sensor over a copy of the real project and the "before" case on a detached worktree at the
+pre-change commit:
+
+```
+before   13 of 45 migrations under "codefit read NOTHING from this file"   37 tables
+after     3 of 45                                                          37 tables
+```
+
+The identical table count is the control: the fix reclassifies, it does not change the model.
+The 3 that remain are genuinely unseen content (`ALTER COLUMN … TYPE`, `SET DEFAULT` +
+`DROP NOT NULL`, and one CTE-prefixed statement).
+
+*The budget note (D3).* `budgetNote` derived its fit claim from the *withheld endpoint count*,
+not from the response's size — which `fitToBudget` had already measured by serializing the
+response and passed in as an argument the zero-withheld branch returned before reading. A
+project with a database and no security provider (zero endpoints, large `db.surface`) exceeded
+its 40 000-byte budget while asserting it fit.
+
+Fixed: a per-source **statement census** in the neutral model (`db.Schema.Sources`) gives the
+sensor measured evidence instead of silence, fail-closed for any parser that does not fill it;
+the blind-file list is enumerated in full while the benign lists stay capped; `Measured` goes
+false when every configured source is traceless *whatever the reason* (without that widening the
+fix would have made a seed-only glob look like a clean audit); and the budget note reads the
+measurement it was already handed. See
+[ADR 0068](decisions/0068-a-negative-claim-needs-positive-evidence-the-statement-census-and-the-measured-budget.md),
+which supersedes ADR 0044 §2.5's declared over-report for the DML/permission family.
+
+**Explicitly NOT done here:** the structural per-bucket cap for `db.surface` — **still P0-4's
+remaining half**. The budget governs the endpoint lists only, so a DB-heavy response exceeds it
+with nothing to withhold; extending withholding there needs a stable ranking for db surface
+items, a "fetch the rest" tool for a named db item, and a per-bucket count/withheld contract.
+The note now declares that limit instead of hiding it, which is a mitigation, not the cure.
+Also untouched, each its own change: `summary` counting security only; `codefit init`'s
+detection message; the unbudgeted `codefit-coverage` response; Go's `looksSecret` false
+positives on enum constants.
+
 ---
 
 ## P1 — the user cannot tell how far codefit reaches
