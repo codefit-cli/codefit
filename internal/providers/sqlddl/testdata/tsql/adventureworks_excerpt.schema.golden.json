@@ -265,5 +265,11 @@
   "Procedures": null,
   "Triggers": null,
   "Unreduced": null,
-  "Withheld": null
+  "Withheld": null,
+  "Sources": {
+    "tsql/adventureworks_excerpt.sql": {
+      "Total": 4,
+      "Accounted": null
+    }
+  }
 }

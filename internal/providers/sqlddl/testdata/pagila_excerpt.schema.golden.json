@@ -886,5 +886,11 @@
     }
   ],
   "Unreduced": null,
-  "Withheld": null
+  "Withheld": null,
+  "Sources": {
+    "pagila_excerpt.sql": {
+      "Total": 19,
+      "Accounted": null
+    }
+  }
 }

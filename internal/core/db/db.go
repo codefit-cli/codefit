@@ -34,6 +34,113 @@ type Schema struct {
 	// It gates nothing per-table — there is no table to gate, because the
 	// withheld declaration never entered the model.
 	Withheld []Withheld
+
+	// Sources is the per-source STATEMENT CENSUS: for each source path, how
+	// many statements the parser met in it and how many of those it accounted
+	// for with a positive outcome (see SourceStatements).
+	//
+	// It exists because every other carrier in this model records a POSITION,
+	// and a position is exactly what the two innocent causes of "this file left
+	// no trace" cannot produce. A file whose every statement is `ALTER TABLE …
+	// ADD COLUMN IF NOT EXISTS <a column another file already declares>` is read
+	// correctly, reduced correctly, and contributes no Pos — by definition, not
+	// by failure. Same for a file of pure INSERT/GRANT. Without this census a
+	// consumer can only observe the ABSENCE of a position and must infer
+	// blindness from it, which is the layering law violated: a negative claim
+	// asserted from a proxy that also has innocent causes.
+	//
+	// FAIL-CLOSED DEGRADATION, and it is the whole reason this is a struct field
+	// rather than a SchemaParser method (ADR 0015 / ADR 0044 §2.3): a parser that
+	// never fills Sources — the Prisma parser today — leaves it nil, and a nil or
+	// absent entry means EXACTLY what codefit reported before this carrier
+	// existed. The degradation direction is noisy-but-honest (a benign file keeps
+	// being reported as blindness), never a false all-clear. A consumer MUST
+	// therefore treat a missing entry as "nothing accounted for", never as
+	// "nothing to account for".
+	//
+	// It is deliberately NOT Withheld with a new reason. Withheld means "codefit
+	// read this declaration and it does not belong in the schema"; a statement
+	// counted here either already IS in the schema (another source declares it)
+	// or declares no schema anywhere. It is also not Unreduced, which means the
+	// opposite of what this records: Unreduced is a failure, every outcome here
+	// is a success.
+	//
+	// Keyed by the same source path the parser stamps into every Pos.File, so the
+	// two are directly comparable.
+	Sources map[string]SourceStatements
+}
+
+// StatementOutcome is the CLOSED vocabulary of the POSITIVE reasons a statement
+// the parser fully understood added nothing to the schema (ADR 0034 §2.8's
+// measurement/diagnostics boundary: terse core-owned tokens, never prose, never
+// a parser internal).
+//
+// It is closed, and a value must only ever be recorded from a branch that
+// RECOGNIZED the statement. A residual "everything else" dispatch branch is not
+// a recognition — it also swallows the forms nobody has written a branch for —
+// and recording an outcome from one would convert real blindness into a
+// reassuring sentence, which is worse than the silence it replaced. Being a
+// closed vocabulary rather than a bool is what lets a later change ACCOUNT for
+// one more recognized form without re-deriving what the existing ones meant.
+type StatementOutcome string
+
+const (
+	// OutcomeAlreadySatisfied: the statement declares schema that the model
+	// ALREADY carries, so reducing it correctly produced no new element —
+	// an idempotent re-declaration (`ADD COLUMN IF NOT EXISTS` on a column
+	// another source declares, a second `CREATE TABLE IF NOT EXISTS`). The
+	// schema it names IS audited; it is simply anchored to the source that
+	// first declared it.
+	OutcomeAlreadySatisfied StatementOutcome = "already-satisfied"
+	// OutcomeDeclaresNoSchema: the statement was recognized as declaring no
+	// schema at all — data or permissions (INSERT/UPDATE/DELETE/MERGE/
+	// TRUNCATE/GRANT/REVOKE). There was no structure in it to read.
+	OutcomeDeclaresNoSchema StatementOutcome = "declares-no-schema"
+)
+
+// SourceStatements is one source file's statement census.
+//
+// The two numbers answer two different questions and the DIFFERENCE between
+// them is the load-bearing quantity: Total is how many statements the parser
+// met, Accounted is how many it can positively explain away. `Total - ΣAccounted
+// > 0` means at least one statement in this file is neither in the schema nor
+// explained — the only evidence that justifies calling a traceless file BLIND.
+//
+// Accounting is PER STATEMENT, never per item. A single `ALTER TABLE t ADD
+// COLUMN IF NOT EXISTS a, DROP COLUMN c` is one statement, and it is accounted
+// only if EVERY one of its parts was: counting the idempotent add alone would
+// report a real column drop as "already satisfied".
+type SourceStatements struct {
+	// Total is how many statements the parser met in this source.
+	Total int
+	// Accounted maps each outcome to how many of those Total statements it
+	// explains. Nil or missing keys mean zero — never "unknown".
+	Accounted map[StatementOutcome]int
+}
+
+// AccountedTotal is the number of statements in this source the parser
+// positively explained, summed over every outcome.
+func (s SourceStatements) AccountedTotal() int {
+	n := 0
+	for _, c := range s.Accounted {
+		n += c
+	}
+	return n
+}
+
+// Unaccounted is how many statements in this source the parser met and can
+// NEITHER point to in the schema NOR explain away. It is the blindness
+// quantity: > 0 over a source that left no position in the model is the direct
+// measurement that source was not read, as opposed to the absence of a position,
+// which has innocent causes.
+//
+// It never returns a negative number even if a caller over-accounts, so a
+// counting bug degrades toward reporting blindness rather than toward silence.
+func (s SourceStatements) Unaccounted() int {
+	if n := s.Total - s.AccountedTotal(); n > 0 {
+		return n
+	}
+	return 0
 }
 
 // Withheld is one declaration the parser read and deliberately left out of the

@@ -288,5 +288,11 @@
   "Procedures": null,
   "Triggers": null,
   "Unreduced": null,
-  "Withheld": null
+  "Withheld": null,
+  "Sources": {
+    "mysql/sakila_excerpt.sql": {
+      "Total": 5,
+      "Accounted": null
+    }
+  }
 }
