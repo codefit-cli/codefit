@@ -306,9 +306,46 @@ remaining half**. The budget governs the endpoint lists only, so a DB-heavy resp
 with nothing to withhold; extending withholding there needs a stable ranking for db surface
 items, a "fetch the rest" tool for a named db item, and a per-bucket count/withheld contract.
 The note now declares that limit instead of hiding it, which is a mitigation, not the cure.
-Also untouched, each its own change: `summary` counting security only; `codefit init`'s
-detection message; the unbudgeted `codefit-coverage` response; Go's `looksSecret` false
-positives on enum constants.
+Also untouched, each its own change: `codefit init`'s detection message; the unbudgeted
+`codefit-coverage` response; Go's `looksSecret` false positives on enum constants.
+(`summary` counting security only was the fourth item on that list; it is now **P0-8**,
+below.)
+
+### P0-8 — CLOSED (`summary-counts-every-dimension`) — the summary counted one dimension and called itself the summary
+
+`codefit-scan-all`'s `summary` carried four unqualified counts — `endpoints`,
+`deterministic_findings`, `surface_items`, `certain_concerns` — every one of them computed
+from the **security** sensor's result. Nothing in the response, the tool description or the
+generated skill said so. An agent that skims the summary first (which is what a summary is
+for) read a project-wide zero over evidence the same response was carrying.
+
+Two facts make it a false all-clear rather than an incomplete one. A project whose language
+has no registered security provider gets zero from `secRes` while the DB dimension runs
+anyway — its parser is chosen by the schema file's shape, not by the language. And every
+DW-0xx rule is surface-only while the score counts deterministic affirmations only, so a
+warehouse schema yields `by_dimension.db` high **and** `summary.surface_items: 0`. Two
+independent all-clears over the same schema. Found in dogfood: `summary.surface_items: 0`
+beside 62 mapped DB surface items.
+
+It was a CLASS, not a field — all four counts had the identical defect — and it is
+invariant **I4** (`docs/specs/audit-protocol.md`): a partial result must declare itself
+partial. The harm is **I2**: a zero that means nobody looked.
+
+What landed: `summary` is per dimension (`summary.security`, `summary.db`, a derived
+`summary.totals`, and a `summary.note`), each count declaring which dimension it counted, a
+`null` sub-block for a dimension nobody measured, and both agent-facing surfaces teaching the
+shape. Breaking — `summary.security.*` carries the old values verbatim. See
+[ADR 0069](decisions/0069-the-scan-all-summary-declares-the-dimension-of-every-count.md)
+and `CHANGELOG.md`.
+
+**Named, not built:** invariant I4 has **no registered control** in this repository. Nothing
+asserts that a response's summary covers every dimension that same response reports as
+measured. That is why this defect had room to exist, and the invariant → control registry
+that would close it is its own, larger change.
+
+**Still open, unchanged by this:** the structural per-bucket cap for `db.surface` (P0-4's
+remaining half). A correct `summary.db.surface_items` makes a DB-heavy response's size
+problem more visible; it neither causes nor fixes it.
 
 ---
 
