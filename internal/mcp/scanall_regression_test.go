@@ -118,6 +118,18 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reading pre-change golden %s: %v", tc.golden, err)
 			}
+
+			// Anti-recapture guard, same helper TestScanAll_ThePreChangeGoldenTestifiesToTheUndercount
+			// uses on scanall_ts_withdb_prechange.json. Without it, a golden here
+			// regenerated from the fixed build (nested summary, every flat field
+			// reading as its zero value) would pass strip()'s byte comparison
+			// trivially, because "summary" is one of the stripped keys below —
+			// the exact vacuity CRITICAL-1 fixed on the sibling golden, left open
+			// on this one. Both cases go through it: no-db has no other coverage
+			// of this file's shape at all, and with-db gets a second, redundant
+			// check (harmless — it is already covered by the test above).
+			assertGoldenSummaryIsThePreChangeFlatZero(t, golden, tc.golden)
+
 			live, err := json.Marshal(resp)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
