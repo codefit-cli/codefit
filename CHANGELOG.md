@@ -57,8 +57,11 @@ All notable changes to codefit are documented here. The format is based on
 
   Both agent-facing surfaces teach the new shape in the same change:
   `codefit-scan-all`'s tool description and the generated skill. The response
-  floor grew ~380 bytes (the always-present `summary.note`), about 1% of the
-  40 000-byte budget — declared, not free. See
+  floor grew 530 bytes (measured over the budget fixture: withheld-everything
+  floor 4 016 → 4 546, full response 4 747 → 5 277, serialized `summary` block
+  83 → 613 — the same delta three times, because the whole growth is the summary
+  block: 440 bytes of always-present `note` plus 90 of per-dimension nesting),
+  about 1.3% of the 40 000-byte budget — declared, not free. See
   [ADR 0069](docs/decisions/0069-the-scan-all-summary-declares-the-dimension-of-every-count.md).
 
 ### Added

@@ -198,10 +198,24 @@ sentence in a changelog.
 - **Breaking.** Any consumer reading `summary.deterministic_findings` now reads
   `summary.security.deterministic_findings` (identical value) or
   `summary.totals.deterministic_findings` (the cross-dimension number).
-- **The response floor grew ~380 bytes** — the always-present `summary.note`,
-  paid once per response, about 1% of the 40 000-byte budget. Measured over the
-  budget fixture: the withheld-everything floor moved from under 4 000 to 4 530.
-  Not free; declared.
+- **The response floor grew 530 bytes**, paid once per response — about 1.3% of
+  the 40 000-byte budget. Measured over the budget fixture with
+  `len(json.Marshal(resp))` (the length `fitsBudget` itself uses), both trees read
+  at the same budget so the digits of the number embedded in `budget.note` cannot
+  move the result: the withheld-everything floor went **4 016 → 4 546**, the full
+  response **4 747 → 5 277**, and the serialized `summary` block **83 → 613**.
+  The three deltas are the same 530 because the whole growth is the summary
+  block: 440 bytes of always-present `note` prose (438 runes) plus 90 bytes of
+  per-dimension nesting. Not free; declared.
+
+  Two figures in the first drafted version of this ADR (commit `ca25809`, on the
+  PR branch, never merged) were wrong. They are corrected in place, before this
+  ADR lands, and the error is recorded rather than quietly dropped: the cost was
+  stated as "~380 bytes" — the note alone is 440 and the total is 530 — and the
+  floor was said to have moved "from under 4 000 to 4 530". It did not. On `main`
+  a 4 000-byte budget FIT, at exactly 4 000 bytes with 2 endpoints rendered, and
+  4 530 is the size at a 4 530-byte budget, not the floor. A measured number in an
+  ADR is an assertion; these two did not match the measurement.
 - **A DB-heavy response's size problem becomes more visible.** A correct
   `summary.db.surface_items` neither causes nor fixes it. The structural
   per-bucket cap for `db.surface` remains roadmap P0-4's declared remaining half.

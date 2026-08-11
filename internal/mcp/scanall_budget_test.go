@@ -459,15 +459,35 @@ func TestScanAllBudget_WithholdingIsDeclaredNeverSilent(t *testing.T) {
 	}
 	// Below the fixture's full size, above its withheld-everything FLOOR. The
 	// floor is not a constant of the fixture: it is the size of a response with
-	// every endpoint withheld, so every always-present block counts against it.
-	// It moved from under 4000 to 4530 when `summary` gained its per-dimension
-	// shape and its always-present note (~380 bytes) — a real, declared cost of
-	// that change, paid once per response and roughly 1% of the 40 000-byte
-	// budget. Measured over this fixture: floor 4530 (2 endpoints, the affirmed
-	// ones R2 pins), full 5277. 4800 sits inside that window and restores this
-	// test's intent — PARTIAL withholding, not the impossible-budget case the
-	// block at the end of this test covers. The guards immediately below fail
-	// loudly if this number ever stops producing partial withholding.
+	// every droppable endpoint withheld, so every always-present block counts
+	// against it.
+	//
+	// Measured over this fixture, len(json.Marshal(resp)) — the same length
+	// fitsBudget uses — with the two trees read at the same budget so the digit
+	// count of the number embedded in budget.note cannot move the result:
+	//
+	//	                       origin/main    this change    delta
+	//	floor (all droppable
+	//	withheld, 1 endpoint)         4016           4546     +530
+	//	full response                 4747           5277     +530
+	//	serialized `summary`            83            613     +530
+	//
+	// The floor grew 530 bytes, and the three deltas agreeing is the point: the
+	// whole growth IS the summary block. Of those 530, the always-present note
+	// prose costs 440 (438 runes) and the per-dimension nesting the remaining 90.
+	// About 1.3% of the 40 000-byte budget — a real, declared cost, paid once per
+	// response.
+	//
+	// So 4000 stopped working for this test not "because the floor moved from
+	// under 4000": on origin/main a 4000-byte budget FIT, at exactly 4000 bytes
+	// with 2 endpoints rendered. At HEAD the smallest response this fixture can
+	// produce is 4546, so a 4000-byte budget lands in the impossible-budget case
+	// instead of the partial-withholding one this test is about. 4800 sits inside
+	// the [4546, 5277] window: it renders 3 of 8 endpoints at 4774 bytes.
+	// (4530 is NOT the floor — it is the size at a 4530-byte budget, where 2
+	// endpoints fit; an earlier revision of this comment called it the floor.)
+	// The guards immediately below fail loudly if this number ever stops
+	// producing partial withholding.
 	const tightBudget = 4800
 	tight := runBudgeted(t, root, tightBudget)
 	rendered := len(tight.Actionable.Endpoints) + len(tight.ResolvedClean.Endpoints) + len(tight.FrontierPending.Endpoints)
@@ -709,13 +729,17 @@ func TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding(t *testing.
 
 // dbCarryingFixture is a SIBLING of budgetFixture, never an edit to it.
 //
-// budgetFixture has nine call sites across this file and scanall_writegate_test.go,
-// and two goldens captured at 79e34b0 that testdata/README.md forbids regenerating.
-// Giving it a schema would move EVERY field of scanall_prechange_invariant.json —
-// summary, score.by_dimension.db (null -> a number), baseline.new,
-// scope.audited/auditable_total — and there is no pre-change tree left to
-// re-capture from. budgetFixture writes no .codefit.yaml at all, so a sibling that
-// does is purely additive: zero effect on those nine call sites.
+// budgetFixture has TEN pre-existing call sites — seven in this file and three in
+// scanall_writegate_test.go, counted with `git grep -c 'budgetFixture(t, root)'
+// origin/main -- internal/mcp/`, not from memory; the design and tasks artifacts
+// said nine and were wrong — and two goldens captured at 79e34b0 that
+// testdata/README.md forbids regenerating. Giving it a schema would move EVERY
+// field of scanall_prechange_invariant.json — summary, score.by_dimension.db
+// (null -> a number), baseline.new, scope.audited/auditable_total — and there is
+// no pre-change tree left to re-capture from. budgetFixture writes no
+// .codefit.yaml at all, so a sibling that does is purely additive: zero effect on
+// those ten call sites. This function is the eleventh, and the only one this
+// change added.
 //
 // The shape is the same MIXED shape, plus a Prisma schema chosen to produce BOTH
 // kinds of db output — a table with no primary key (DB-050, a deterministic
