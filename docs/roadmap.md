@@ -490,6 +490,38 @@ tried, removing only the first `N+1` mention, did **not** fail, because the same
 recurs later in the same bullet's unrelated prose about item ordering — a disclosed,
 narrow false-negative surface specific to this wider block, not fixed here).
 
+### P1-7 — `codefit-surface-*` silently ignores every project-registered authz helper, for every language
+
+`internal/mcp/surface.go:200`'s `providerFor` resolves the language provider for the
+`codefit-surface-*` family (`codefit-surface-authz`, `codefit-surface-idor`, etc.) with
+`e.New(nil)` — no helpers, always, regardless of what the project has registered via
+`codefit-baseline-register-authz-helper`. `internal/mcp/scanall.go`'s
+`providerForLanguage` and `internal/mcp/scan.go` both thread the real
+`recognizedHelpers(root, language)` list through to `e.New(authzHelpers)`; only the
+surface-tools call site discards it. This is not TypeScript- or Go-specific — it is the
+one resolver in the registry-driven trio (ADR 0064, P1-1b) that never receives the
+parameter at all, for any exposed language.
+
+**User impact.** A user registers a helper, the agent tells them (per
+`internal/mcp/baseline.go`'s own response text) to "re-run `codefit-scan-all` so items
+using it reflect `known_authz_detected=true`" — and that promise holds, scoped to
+`scan-all`/`scan-security`. But a user or agent that calls `codefit-surface-authz`
+directly on the same project, expecting the same registered helper to apply, silently
+gets `known_authz_detected` computed against an empty helper set instead — the same
+vacuous-false shape [ADR 0067](decisions/0067-every-surface-producer-emits-non-nil-structural-facts.md)
+just spent an entire change eliminating for Go's *default* (no-helper) case, except this
+one is present *even when the project configured a helper*, because the parameter never
+reaches the provider. Nothing in the tool's own output states that `codefit-surface-*`
+does not see registered helpers — the gap is real, silent, and per this document's own
+ordering criterion, exactly the kind of thing that costs a user their trust: not knowing
+how far the tool they are calling actually reaches.
+
+**Why it is not fixed here.** Found and disclosed by ADR 0067
+(`sdd/go-surface-structural-facts`, PR #127) while wiring the equivalent parameter for Go
+elsewhere in the same registry trio — this exact call site is pre-existing (predates that
+PR), cross-provider (not Go-specific, not introduced by that fix), and explicitly out of
+that change's scope (its design decision D3). Filed here, not fixed there.
+
 ---
 
 ## P2 — finish Phase 3
