@@ -254,7 +254,13 @@ delivery acknowledgement, so this is a mitigation of the reachable instance, not
 vs. the client's tokens, still P0-4); and `codefit-baseline-prune`'s same-shaped
 compute-then-save-before-returning, on its own human-triggered path — recorded, not fixed.
 
-### P0-7 — CLOSED (`response-asserts-only-what-it-established`) — the response asserted two negatives it had never measured
+### P0-7 — the response asserted two negatives it had never measured
+
+**Written, open, not on `main`.** The fix lives on `fix/response-asserts-only-what-it-established`
+(`response-asserts-only-what-it-established`, PR #128) and is **not merged**, so nothing described
+below is reachable from `main` — and this document describes what `main` does. The entry becomes
+CLOSED when that PR lands; until it does, both defects are still live for anyone who downloads
+codefit today.
 
 Found by dogfooding codefit against a real 45-migration Flyway project. Two defects that look
 unrelated and are the same law broken twice: **a response may assert a negative claim only when
@@ -284,8 +290,10 @@ response and passed in as an argument the zero-withheld branch returned before r
 project with a database and no security provider (zero endpoints, large `db.surface`) exceeded
 its 40 000-byte budget while asserting it fit.
 
-Fixed: a per-source **statement census** in the neutral model (`db.Schema.Sources`) gives the
-sensor measured evidence instead of silence, fail-closed for any parser that does not fill it;
+What the branch does: a per-source **statement census** in the neutral model
+(`db.Schema.Sources`) gives the sensor measured evidence instead of silence, fail-closed for any
+parser that does not fill it — a guard the branch locks with its own test, because an invariant
+with no mechanical control is an intention, not an invariant;
 the blind-file list is enumerated in full while the benign lists stay capped; `Measured` goes
 false when every configured source is traceless *whatever the reason* (without that widening the
 fix would have made a seed-only glob look like a clean audit); and the budget note reads the
