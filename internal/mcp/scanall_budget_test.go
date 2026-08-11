@@ -322,6 +322,16 @@ func TestScanAllBudget_NamesEveryEndpointItUsedToDetail(t *testing.T) {
 // A deterministic finding is a fact codefit already concluded, not a question. It
 // stays in the response IN FULL — id, title, description, fingerprint — and is
 // never demoted to a name the agent has to spend a second call to read.
+//
+// The equality below is ENDPOINT-ANCHORED and now says so: it counts concerns
+// attached to endpoints, so it can only ever be compared against the SECURITY
+// dimension's count. It used to read the unqualified summary.deterministic_findings
+// and survived purely because budgetFixture configures no database — the moment a
+// db finding existed, that number would have exceeded the endpoint-attached
+// concerns and this test would have failed for a reason that had nothing to do
+// with what it locks. It reads .Summary.Security explicitly now, and
+// TestScanAllBudget_TotalsBreakTheEndpointAnchoredEqualityOverADBProject arms the
+// trap: over a DB-carrying project, pointing this same equality at totals fails.
 func TestScanAllBudget_DeterministicFindingIsNeverDemotedToAName(t *testing.T) {
 	root := t.TempDir()
 	budgetFixture(t, root)
@@ -692,6 +702,231 @@ func TestScanAllBudget_HonestyPersistsWhenTheBudgetForcesWithholding(t *testing.
 	}
 	if !strings.Contains(strings.ToLower(resp.Budget.Note), "withheld") {
 		t.Errorf("Budget.Note must say endpoints were withheld, got %q", resp.Budget.Note)
+	}
+}
+
+// --- summary covers every measured dimension (I4) ------------------------------
+
+// dbCarryingFixture is a SIBLING of budgetFixture, never an edit to it.
+//
+// budgetFixture has nine call sites across this file and scanall_writegate_test.go,
+// and two goldens captured at 79e34b0 that testdata/README.md forbids regenerating.
+// Giving it a schema would move EVERY field of scanall_prechange_invariant.json —
+// summary, score.by_dimension.db (null -> a number), baseline.new,
+// scope.audited/auditable_total — and there is no pre-change tree left to
+// re-capture from. budgetFixture writes no .codefit.yaml at all, so a sibling that
+// does is purely additive: zero effect on those nine call sites.
+//
+// The shape is the same MIXED shape, plus a Prisma schema chosen to produce BOTH
+// kinds of db output — a table with no primary key (DB-050, a deterministic
+// affirmation) and a table with no audit timestamps (db-no-timestamps, a surface
+// question). assertDBCarryingFixtureProducesBoth verifies that by CONTENT: a
+// fixture is verified by what it produces, never by its name.
+func dbCarryingFixture(t *testing.T, root string) {
+	t.Helper()
+	budgetFixture(t, root)
+	files := map[string]string{
+		".codefit.yaml": `version: "1"
+project:
+  name: t
+  language: typescript
+  framework: next
+database:
+  type: postgresql
+  schema_paths:
+    - prisma/schema.prisma
+`,
+		"prisma/schema.prisma": `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model NoKey {
+  name String
+}
+`,
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// assertDBCarryingFixtureProducesBoth is the CONTENT verification of
+// dbCarryingFixture. Every control in this section reasons about a db finding and
+// a db surface item reaching the summary; if the fixture stopped producing either
+// one, those controls would go green over nothing at all — the exact
+// passes-for-the-wrong-reason failure this whole change exists to eliminate. So
+// this is a Fatal, and it is called first in every test that depends on it.
+func assertDBCarryingFixtureProducesBoth(t *testing.T, resp ScanAllResponse) {
+	t.Helper()
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("dbCarryingFixture must produce a MEASURED db section, got %+v", resp.DB)
+	}
+	if resp.Summary.DB == nil {
+		t.Fatal("dbCarryingFixture measured the db dimension but summary.db is null")
+	}
+	if resp.Summary.DB.DeterministicFindings < 1 {
+		t.Fatalf("dbCarryingFixture must produce at least one DB FINDING; summary.db says %d — every "+
+			"assertion in this section would otherwise pass over nothing",
+			resp.Summary.DB.DeterministicFindings)
+	}
+	if resp.Summary.DB.SurfaceItems < 1 {
+		t.Fatalf("dbCarryingFixture must produce at least one DB SURFACE item; summary.db says %d — every "+
+			"assertion in this section would otherwise pass over nothing", resp.Summary.DB.SurfaceItems)
+	}
+	if resp.Summary.Security == nil || resp.Summary.Security.Endpoints == 0 {
+		t.Fatalf("dbCarryingFixture must keep budgetFixture's endpoints — the point is a project where BOTH "+
+			"dimensions have something to say, got %+v", resp.Summary.Security)
+	}
+}
+
+// TestScanAllBudget_SummaryCountsTheDBDimensionOverADBCarryingProject is the
+// per-dimension count control, driven through the real handler over a project
+// where both dimensions produce output.
+//
+// Mutation that MUST turn it red: make summary.db read secRes instead of dbRes.
+func TestScanAllBudget_SummaryCountsTheDBDimensionOverADBCarryingProject(t *testing.T) {
+	root := t.TempDir()
+	dbCarryingFixture(t, root)
+	resp := runBudgeted(t, root, ResponseBudgetBytes)
+	assertDBCarryingFixtureProducesBoth(t, resp)
+
+	// Each sub-block counts ITS OWN dimension's raw result and nothing else.
+	if got, want := resp.Summary.DB.DeterministicFindings, len(resp.DB.Findings); got != want {
+		t.Errorf("summary.db.deterministic_findings = %d, the db section holds %d finding(s)", got, want)
+	}
+	if got, want := resp.Summary.DB.SurfaceItems, len(resp.DB.Surface); got != want {
+		t.Errorf("summary.db.surface_items = %d, the db section holds %d surface item(s)", got, want)
+	}
+	// The sharpest form of the mutation this catches: if summary.db were fed
+	// secRes, its counts would equal the security ones. Over this fixture they
+	// are different numbers, so equality is the tell.
+	if resp.Summary.DB.DeterministicFindings == resp.Summary.Security.DeterministicFindings &&
+		resp.Summary.DB.SurfaceItems == resp.Summary.Security.SurfaceItems {
+		t.Errorf("summary.db is identical to summary.security (%+v) — it is being fed the security result",
+			resp.Summary.DB)
+	}
+	// schema_sources is the db dimension's own scale unit: the one configured
+	// schema this pass read, shared with the scope census.
+	if resp.Summary.DB.SchemaSources != 1 {
+		t.Errorf("summary.db.schema_sources = %d, want 1 (the single configured schema)", resp.Summary.DB.SchemaSources)
+	}
+	// totals is derived and strictly larger than either dimension alone.
+	wantDet := resp.Summary.Security.DeterministicFindings + resp.Summary.DB.DeterministicFindings
+	wantSurf := resp.Summary.Security.SurfaceItems + resp.Summary.DB.SurfaceItems
+	if resp.Summary.Totals.DeterministicFindings != wantDet || resp.Summary.Totals.SurfaceItems != wantSurf {
+		t.Errorf("totals = %+v, want {deterministic_findings:%d surface_items:%d} — totals is not derived "+
+			"from the sub-blocks", resp.Summary.Totals, wantDet, wantSurf)
+	}
+	if resp.Summary.Totals.SurfaceItems <= resp.Summary.Security.SurfaceItems {
+		t.Errorf("totals.surface_items (%d) does not exceed the security count (%d) — the db surface is "+
+			"still invisible in the roll-up", resp.Summary.Totals.SurfaceItems, resp.Summary.Security.SurfaceItems)
+	}
+}
+
+// TestScanAllBudget_TotalsBreakTheEndpointAnchoredEqualityOverADBProject ARMS
+// the trap that TestScanAllBudget_DeterministicFindingIsNeverDemotedToAName
+// survived by accident.
+//
+// That test asserts "every deterministic finding is carried in full on an
+// endpoint" as an equality between endpoint-attached concerns and a summary
+// count. Endpoint-attached concerns are security by definition — a table has no
+// route — so the equality is only ever true against the SECURITY sub-block. Over
+// a DB-carrying project the unqualified/rolled-up number is strictly larger, and
+// this test proves it: it evaluates the same equality against totals and requires
+// it to FAIL. Without this, the fix would have preserved the accidental survival
+// (a fixture with no database) instead of removing it.
+func TestScanAllBudget_TotalsBreakTheEndpointAnchoredEqualityOverADBProject(t *testing.T) {
+	root := t.TempDir()
+	dbCarryingFixture(t, root)
+	resp := runBudgeted(t, root, ResponseBudgetBytes)
+	assertDBCarryingFixtureProducesBoth(t, resp)
+
+	endpointAttached := 0
+	for _, ep := range resp.Actionable.Endpoints {
+		endpointAttached += len(ep.Deterministic)
+	}
+
+	// The equality as it must be written: against the security sub-block. The
+	// message names BOTH candidate right-hand sides, so a mutation that points
+	// this at totals produces a transcript a reader can act on.
+	if endpointAttached != resp.Summary.Security.DeterministicFindings {
+		t.Fatalf("the endpoint-anchored equality must hold against summary.security and ONLY there: "+
+			"%d endpoint-attached deterministic concern(s); summary.security says %d, summary.totals says %d",
+			endpointAttached, resp.Summary.Security.DeterministicFindings, resp.Summary.Totals.DeterministicFindings)
+	}
+	// The same equality pointed at totals must BREAK here. If it does not, this
+	// project is not exercising the trap and every claim above is untested.
+	if endpointAttached == resp.Summary.Totals.DeterministicFindings {
+		t.Fatalf("the endpoint-anchored equality still holds against summary.totals (%d == %d) — this "+
+			"fixture is not DB-carrying enough to arm the trap, so the accidental survival is preserved "+
+			"rather than fixed", endpointAttached, resp.Summary.Totals.DeterministicFindings)
+	}
+	if resp.Summary.Totals.DeterministicFindings <= endpointAttached {
+		t.Errorf("totals.deterministic_findings (%d) must EXCEED the endpoint-attached count (%d): the "+
+			"difference is exactly the db dimension's affirmations, which have no endpoint to attach to",
+			resp.Summary.Totals.DeterministicFindings, endpointAttached)
+	}
+}
+
+// TestScanAllBudget_ConclusionsAreComputedOverTheCompleteAnalysis_DBCarrying
+// extends R4's full-vs-starved lock over a project where the db dimension has
+// something to say, so its `Summary` field covers BOTH dimensions instead of
+// silently covering one.
+//
+// What this adds and what it does not: R4's axis is complete-analysis vs
+// rendered-subset, and both runs it compares share whatever blindness the code
+// has — so it cannot, alone, prove the summary covers every measured dimension
+// (that is TestScanAllBudget_SummaryCountsTheDBDimensionOverADBCarryingProject's
+// job). What it adds is that summary.db is a CONCLUSION, not a rendering
+// artifact: withholding endpoints must not move it.
+//
+// There is deliberately no pre-change golden here. None exists for a DB-carrying
+// fixture and none can be created — the pre-change trees are gone. So this
+// covers the full-vs-starved axis only, and says so rather than implying a
+// "nothing moved" guarantee it cannot give.
+func TestScanAllBudget_ConclusionsAreComputedOverTheCompleteAnalysis_DBCarrying(t *testing.T) {
+	root := t.TempDir()
+	dbCarryingFixture(t, root)
+
+	full := runBudgeted(t, root, ResponseBudgetBytes)
+	assertDBCarryingFixtureProducesBoth(t, full)
+
+	starved := runBudgeted(t, root, 1)
+	if len(starved.ResolvedClean.Endpoints) != 0 || len(starved.FrontierPending.Endpoints) != 0 {
+		t.Fatalf("a budget of 1 byte still rendered %d clean / %d frontier endpoint(s) — this comparison is "+
+			"not measuring a starved response",
+			len(starved.ResolvedClean.Endpoints), len(starved.FrontierPending.Endpoints))
+	}
+	if len(starved.Actionable.Endpoints) >= len(full.Actionable.Endpoints) {
+		t.Fatalf("the starved run rendered %d actionable endpoint(s) and the full run %d — nothing was withheld",
+			len(starved.Actionable.Endpoints), len(full.Actionable.Endpoints))
+	}
+	if got, w := mustJSON(t, invariantOf(starved)), mustJSON(t, invariantOf(full)); got != w {
+		t.Errorf("withholding endpoints changed what codefit concluded over a DB-carrying project — "+
+			"something is computed over the RENDERED subset instead of the complete analysis.\n"+
+			"full budget: %s\nstarved:     %s", w, got)
+	}
+	// Read THROUGH invariantOf, deliberately, not off the responses. Reading
+	// full.Summary.DB directly would be a different control: it would still pass
+	// with Summary.DB dropped from responseInvariant, leaving this lock quietly
+	// reduced to the security-only one it used to be while looking green. Going
+	// through the projection is what makes "the invariant covers the db
+	// dimension" the thing actually asserted.
+	fullInv, starvedInv := invariantOf(full), invariantOf(starved)
+	if fullInv.Summary.DB == nil || starvedInv.Summary.DB == nil {
+		t.Fatalf("responseInvariant does not carry summary.db over a project whose db dimension ran "+
+			"(full=%v starved=%v) — the R4 lock has been reduced to a security-only one, and a db count "+
+			"could drift between budgets unnoticed", fullInv.Summary.DB, starvedInv.Summary.DB)
+	}
+	if a, b := mustJSON(t, fullInv.Summary.DB), mustJSON(t, starvedInv.Summary.DB); a != b {
+		t.Errorf("summary.db differs between a full and a starved budget: full %s, starved %s", a, b)
 	}
 }
 
