@@ -27,7 +27,12 @@ func NewServer() *mcpsdk.Server {
 			"Pass changed_files (project-relative paths) to audit ONLY the files you touched — codefit never asks git, you already know what you changed; omit it (or pass an empty list) for a full audit. "+
 			"A partial run declares itself in the `scope` block (mode/audited/auditable_total/unmatched, and findings, score and `blocked` then describe only those files), never proposes pruning a baseline "+
 			"item in a file it did not open, and leaves the db dimension NOT MEASURED (by_dimension.db null) unless a configured schema path is in scope. "+
-			"When no security provider resolves for `language`, `by_dimension.security` is also null and the `security` section (Measured/note) explains why — the db dimension may still be measured on its own.",
+			"When no security provider resolves for `language`, `by_dimension.security` is also null and the `security` section (Measured/note) explains why — the db dimension may still be measured on its own. "+
+			"`summary` is PER DIMENSION and every count declares which dimension it counted: `summary.security` (endpoints, deterministic_findings, surface_items, certain_concerns) and `summary.db` "+
+			"(schema_sources, deterministic_findings, surface_items), plus `summary.totals` — the cross-dimension roll-up of only the units that mean the same thing in both (deterministic_findings, "+
+			"surface_items; never endpoints, a table has no route). A sub-block is `null` when that dimension was NOT MEASURED — null is not zero: zero means codefit looked and found nothing, null "+
+			"means nobody looked. Never read `summary.security` as the state of the project: a schema-heavy project can show `summary.security.surface_items: 0` with dozens of open questions under "+
+			"`summary.db`. The counts are the RAW population, taken before the baseline filter, so they can exceed what the buckets and `db.surface` list; `summary.note` says so.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",
