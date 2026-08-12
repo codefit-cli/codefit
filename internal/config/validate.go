@@ -68,11 +68,6 @@ func validate(cfg *Config, root *yaml.Node, src string) error {
 	// they asked while codefit did something else — a config that parses and
 	// lies. TestSeverityMode's fallback covers only hand-built Configs, which
 	// never pass through here.
-	// An unrecognised test_severity STOPS the load. Resolving it to the default
-	// would leave the developer believing test findings were re-weighted the way
-	// they asked while codefit did something else — a config that parses and
-	// lies. TestSeverityMode's fallback covers only hand-built Configs, which
-	// never pass through here.
 	if ts := cfg.Sensors.Security.TestSeverity; ts != "" && !slices.Contains(allowedTestSeverities, ts) {
 		add(fmt.Sprintf("invalid sensors.security.test_severity %q (allowed: %s)",
 			ts, strings.Join(allowedTestSeverities, ", ")),
