@@ -59,5 +59,6 @@ rules:
 ```
 
 Severity is the rule's *natural* severity; the sensor adjusts it by
-`path_criticality` (a finding in a test file is downgraded), so rules never
-encode path context.
+`path_criticality` (a finding in a test file is re-weighted by
+`sensors.security.test_severity` — forced to `info` by default, RF-10), so rules
+never encode path context.

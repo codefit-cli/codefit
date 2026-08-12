@@ -187,7 +187,7 @@ type LanguageProvider interface {
 	Capability() Capability
 
 	// DefaultPathCriticality returns sensible production/test/example defaults
-	// for this ecosystem (RF-11), overridable in .codefit.yaml.
+	// for this ecosystem (RF-10), overridable in .codefit.yaml.
 	DefaultPathCriticality() config.PathCriticality
 
 	// AnalyzeSecurity runs the provider's language-specific static security

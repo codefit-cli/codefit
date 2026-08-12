@@ -343,6 +343,45 @@ problem more visible; it neither causes nor fixes it.
 
 ---
 
+### P0-9 — CLOSED (`implement-rf-10-test-severity`) — the PRD promised a configurable test severity; the code hardcoded one mode and it was not the default
+
+RF-10 has stated since PRD v1.3 that "findings de seguridad en archivos de test se degradan
+a `info` (configurable)", and §14 spelled out what configurable meant:
+`sensors.security.test_severity: info | downgrade | keep`. The code shipped neither half. It
+hardcoded `downgrade` — critical→high, high→medium, and so on — and the key `test_severity`
+existed in **zero** Go files. `CLAUDE.md` restated RF-10 faithfully, so the doctrine file and
+the PRD both described behaviour the binary did not have.
+
+It is a lie of the mild kind and that is exactly why it sat: `downgrade` is one of the PRD's
+own three sanctioned modes, so the code was not doing something arbitrary — it was doing one
+real mode, permanently, and not the one the requirement chose as the default. Blocking was
+identical under either reading (nothing maps back up to critical), so no gate ever caught it.
+What differed was the SCORE: a critical secret in a test cost the security dimension 10
+points that RF-10 says it should not cost. And nothing was configurable at all.
+
+No ADR had ever revised the requirement. The deviation was undecided drift, not a deliberate
+decision, which is what made correcting the documents the wrong repair: it would have
+enshrined the bug in three places and contradicted the PRD that `CLAUDE.md` itself names the
+source of truth.
+
+What landed: the full enum with `info` as the default, validated with a located error;
+`keep` accepted (refusing a PRD-named mode would override the developer) with its
+blocking consequence stated by one warning per run, at materialisation, only when a finding
+actually survived at critical; the key on a security-specific config type so the other five
+sensors cannot silently accept it, with a reflection lock naming them if that regresses; and
+an AST census tripwire over `Report.IncludeInfo`, whose being unread is what makes forcing
+findings to `info` safe. Nine RF citations corrected in the same change (seven RF-11→RF-10,
+two RF-10→RF-08). See
+[ADR 0070](decisions/0070-path-criticality-is-configurable-and-reaches-only-the-security-sensor.md)
+and `CHANGELOG.md`.
+
+**Named, not built:** RF-10 says criticality weights "cada finding", and only the security
+sensor applies it. The DB sensor does not, because a project-relative path glob classifies a
+schema FILE rather than the table a finding is about, and "a test table" is not a question
+RF-10 answers. Declared in ADR 0070 and in `internal/sensors/db/doc.go`; open.
+
+---
+
 ## P1 — the user cannot tell how far codefit reaches
 
 ### P1-1a — CLOSED (`readme-per-dimension-reach`) — say in the README, before install, how far codefit reaches per language
