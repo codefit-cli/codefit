@@ -11,7 +11,14 @@ import (
 
 // Allowed enum values for validated config fields.
 var (
-	allowedLanguages  = []string{"typescript", "java", "python", "go"}
+	// LanguageUndetected is IN the list, and "" deliberately is not. `codefit
+	// init` writes the sentinel when no marker file resolved an auditable
+	// provider, and writeConfig re-loads what it just wrote — so rejecting it
+	// here would make init fail on exactly the projects it now exists to serve.
+	// Leaving the field optional instead was rejected: an absent language is
+	// ambiguous between an old config, a hand-deleted key and a real
+	// non-detection, and that ambiguity is what the sentinel removes.
+	allowedLanguages  = []string{"typescript", "java", "python", "go", LanguageUndetected}
 	allowedFrameworks = []string{"react", "next", "express", "spring", "fastapi", "django"}
 	allowedParadigms  = []string{"oltp", "olap", "mixed", "auto"}
 	// "sqlserver" (not "mssql") is the resolved config value for T-SQL — matches

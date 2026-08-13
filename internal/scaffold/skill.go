@@ -76,7 +76,7 @@ description: Audit AI-generated code for security flaws agents miss{{if .Surface
 ---
 
 # codefit — audit AI-generated code
-
+{{if .Detected}}
 To audit code you MUST call ` + "`codefit-scan-all`" + ` FIRST. Do NOT audit by reading files
 manually — codefit maps the surface{{if .SurfaceClause}} ({{.SurfaceClause}}){{end}} and your
 job is to REASON over its output, not to replace it. It does NOT call an LLM — you do the
@@ -221,25 +221,80 @@ accepting one. Registering changes a FACT ("this helper is present"), not a verd
 clears the AUTHZ gap (permission){{if .HasIDOR}}, NOT the IDOR/ownership gap. An IDOR endpoint stays
 actionable — the helper proves "is the caller permitted?", never "does the caller own
 THIS resource?". Keep reviewing those.{{else}} only. Keep reviewing anything else this project's surface maps.{{end}}
-`))
+{{else}}
+codefit found no language provider it can audit in this project. ` + "`codefit init`" + ` looks
+for {{.Markers}}
+directly under the project root, and none of them resolved one here.
+
+**Read this as a declared gap, not a clean result.** ` + "`codefit-scan-security`" + `,
+` + "`codefit-scan-all`" + ` and the ` + "`codefit-surface-*`" + ` tools resolve NO provider for this project,
+so no code here is scanned at all. Nobody looked — that is not the same as looked and
+found nothing. NEVER report this project as audited on the strength of codefit having run.
+
+Two things a human can do about it, which are theirs to decide, not yours:
+- If codefit does register this project's language, ` + "`.codefit.yaml`" + `'s ` + "`project.language`" + `
+  is the editing surface — set it and re-run.
+- In a monorepo, run ` + "`codefit init`" + ` again per sub-project root. Detection is a plain check
+  of the root directory; it does not recurse.
+
+## What DOES still audit this project: the database schema
+Call ` + "`codefit-scan-db`" + ` with ` + "`{root}`" + `. The schema parser resolves from the INPUT's shape —
+a Prisma ` + "`schema.prisma`" + ` OR a directory of SQL-DDL/Flyway migrations (PostgreSQL, MySQL,
+SQL Server) — never from the project's language, which is why this dimension reaches a
+project no code provider does.
+
+It reads exactly what ` + "`database.schema_paths`" + ` names in ` + "`.codefit.yaml`" + `. Generated configs
+for a project like this carry NO such key, so as written nothing is audited. Adding it is
+what turns the dimension on:
+
+    database:
+      schema_paths:
+        - "db/migrations"
+
+- A table with no primary key is deterministic. Everything else — foreign keys with no
+  covering index, duplicate/redundant indexes, sensitive columns in the clear, risks in
+  procedure/trigger bodies — is SURFACE: yours to reason about, not codefit's to decide.
+- ` + "`measured: false`" + ` means codefit could NOT read the schema (none configured, no parser for
+  it, or every source unreadable). That is NOT clean — read the ` + "`note`" + `, fix the config, re-run.
+
+## Dependencies
+` + "`codefit-check-cves`" + ` ` + "`{root}`" + ` — known CVEs in dependencies via OSV.dev, read from exact
+lockfile versions. It resolves no language provider either, so it works here too.
+
+## When you report
+Name which dimensions were measured and which were not. The honest summary for this
+project is "codefit audited the schema; it scanned no code, because it resolves no
+provider for this language" — never a bare "codefit found no issues".
+{{end}}`))
 
 // RenderSkill renders codefit's SKILL.md for the detected project, baking in the
 // language so the example commands are exact. The DERIVED slot (surface
 // category phrases) is read from the registry's real Capability() for this
 // language — never a hardcoded per-language string (D5); an unregistered
-// language (should not occur from scaffold.Detect, but handled defensively)
-// declares no categories, so the clause is omitted whole.
+// language declares no categories, so the clause is omitted whole.
+//
+// There is NO language fallback. This function used to bake
+// language: "typescript" whenever Language was empty, which fabricated a
+// language in the FIRST artifact an agent reads — its examples are copy-paste
+// instructions, so the agent would be told to scan a Java repository as
+// TypeScript. When no language was detected the skill renders its undetected
+// body instead: what codefit looked for, what therefore does not run, and the
+// one dimension that still does.
+//
+// The frontmatter description is deliberately NOT gated. Progressive disclosure
+// loads the skill from the description alone, and it already names the database
+// and schema triggers; narrowing it for an undetected project would mean a
+// schema task never loads the skill at all — the agent would not see a smaller
+// skill, it would see none.
 func RenderSkill(info ProjectInfo) ([]byte, error) {
-	lang := info.Language
-	if lang == "" {
-		lang = "typescript"
-	}
 	var declared []surface.Category
-	if e, ok := registry.ByName(lang); ok {
+	if e, ok := registry.ByName(info.Language); ok {
 		declared = e.New(nil).Capability().Surface
 	}
 	data := struct {
 		Language      string
+		Detected      bool
+		Markers       string
 		SurfaceClause string
 		HasIDOR       bool
 		// SurfaceReach is R4/"Also in scope"
@@ -250,7 +305,9 @@ func RenderSkill(info ProjectInfo) ([]byte, error) {
 		// never a hardcoded per-language sentence.
 		SurfaceReach string
 	}{
-		Language:      lang,
+		Language:      info.Language,
+		Detected:      info.Detected(),
+		Markers:       markerList(),
 		SurfaceClause: surfaceClause(declared),
 		HasIDOR:       hasCategory(declared, surface.CategoryIDOR),
 		SurfaceReach:  surface.DeriveCoverage(declared).Note,

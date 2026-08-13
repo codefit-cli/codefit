@@ -28,6 +28,24 @@ type ProjectInfo struct {
 	PathCriticality config.PathCriticality
 }
 
+// Detected reports whether Detect resolved a real auditable language provider
+// for this project, i.e. whether Language names a language rather than
+// config.LanguageUndetected.
+//
+// It is a METHOD over Language, deliberately not a `Detected bool` field: a
+// field would be a second source of truth that can disagree with Language, and
+// every renderer branches on this one predicate rather than comparing against a
+// string literal it could misspell.
+//
+// The empty string counts as not detected too. Detect itself never produces it,
+// but ProjectInfo is exported and RenderSkill/RenderConfig are exported, so a
+// zero-valued struct reaches them. Rendering the code-scanning artifacts with
+// `language: ""` baked into every copy-paste example is the same fabrication as
+// the `"" → typescript` fallback this replaced, one shade quieter.
+func (i ProjectInfo) Detected() bool {
+	return i.Language != "" && i.Language != config.LanguageUndetected
+}
+
 // dirsToSkip are never walked when counting route handlers — vendored or built
 // output, not the project's own source.
 var dirsToSkip = map[string]bool{
@@ -36,21 +54,36 @@ var dirsToSkip = map[string]bool{
 }
 
 // Detect inspects root and infers the project's language and stack from marker
-// files. It returns an error when no supported language can be identified — init
-// must not write a config it cannot stand behind.
+// files.
+//
+// It NEVER refuses over language. When no marker file resolves an auditable
+// provider it returns config.LanguageUndetected with an EMPTY PathCriticality,
+// and the caller declares that gap — it does not withhold the config. codefit
+// informs; the developer decides. The refusal this replaced took a decision
+// away over a field no sensor reads, and its message named four manifests that
+// cannot resolve anything while omitting tsconfig.json, which can: it told a
+// project holding a Java manifest to create that same Java manifest.
+//
+// Errors survive ONLY for genuine path/IO failures, and such an error must
+// never name marker files — a list of manifests to create is unactionable when
+// the real problem is the path.
+//
+// path_criticality is left empty rather than borrowed from some provider's
+// defaults. Empty is the safe direction: nothing is classified "test", so
+// RF-10's test-path re-weighting never fires and every finding keeps its
+// natural severity. Inventing globs would silently downgrade findings in a tree
+// codefit never inspected.
 func Detect(root string) (ProjectInfo, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return ProjectInfo{}, fmt.Errorf("resolving project root %q: %w", root, err)
 	}
 
-	info := ProjectInfo{Name: filepath.Base(abs)}
+	info := ProjectInfo{Name: filepath.Base(abs), Language: config.LanguageUndetected}
 
 	provider := detectLanguage(root)
 	if provider == nil {
-		return ProjectInfo{}, fmt.Errorf(
-			"no supported language detected in %q: expected one of go.mod, package.json, "+
-				"pyproject.toml/requirements.txt, or pom.xml/build.gradle", root)
+		return info, nil
 	}
 	info.Language = provider.Language()
 	info.PathCriticality = provider.DefaultPathCriticality()

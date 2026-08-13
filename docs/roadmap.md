@@ -300,10 +300,11 @@ remaining half**. The budget governs the endpoint lists only, so a DB-heavy resp
 with nothing to withhold; extending withholding there needs a stable ranking for db surface
 items, a "fetch the rest" tool for a named db item, and a per-bucket count/withheld contract.
 The note now declares that limit instead of hiding it, which is a mitigation, not the cure.
-Also untouched, each its own change: `codefit init`'s detection message; the unbudgeted
-`codefit-coverage` response; Go's `looksSecret` false positives on enum constants.
-(`summary` counting security only was the fourth item on that list; it is now **P0-8**,
-below.)
+Also untouched, each its own change: the unbudgeted `codefit-coverage` response; Go's
+`looksSecret` false positives on enum constants. (`summary` counting security only was the
+fourth item on that list; it is now **P0-8**, below. `codefit init`'s detection message was
+the fifth; it is now **P0-10**, below — and the message turned out to be the symptom of the
+refusal itself.)
 
 ### P0-8 — CLOSED (`summary-counts-every-dimension`) — the summary counted one dimension and called itself the summary
 
@@ -379,6 +380,48 @@ and `CHANGELOG.md`.
 sensor applies it. The DB sensor does not, because a project-relative path glob classifies a
 schema FILE rather than the table a finding is about, and "a test table" is not a question
 RF-10 answers. Declared in ADR 0070 and in `internal/sensors/db/doc.go`; open.
+
+### P0-10 — CLOSED (`init-never-refuses-always-declares`) — init refused a project over a field the audit never reads, with a message naming files that cannot help
+
+`codefit init` exited non-zero and wrote nothing when no marker file resolved a provider,
+with a message listing `go.mod, package.json, pyproject.toml/requirements.txt,
+pom.xml/build.gradle`. That list is `config.allowedLanguages` (four languages), not the
+provider registry (two). Only `go.mod` and `package.json` could ever succeed; `tsconfig.json`
+can too and is **not named**; the other four are named and **cannot help** — creating one
+changes nothing. A Java project holding a `pom.xml` was told to create a `pom.xml`.
+Reproduced with the real binary on three fixtures before the fix.
+
+The message was the symptom. The refusal was the defect: `project.language` is validated and
+then read by no production sensor or handler, and a Python project declaring
+`database.schema_paths` is already fully audited (P0-5, committed as
+`internal/mcp/scanall_dbonly_test.go`). So init withheld a config over a field the audit
+never reads, on a project the DB dimension could have audited — the same invariant-I2 shape
+P0-5 closed in `scan-all`, still live in `init`, against `CLAUDE.md`'s autonomy principle.
+
+Three releases of drift went unnoticed because the only lock asserted `err != nil` and
+nothing about the message.
+
+What landed: `config.LanguageUndetected`, admitted by validation (`""` still rejected);
+`Detect` returning it with an EMPTY `path_criticality` rather than borrowed globs, so no path
+is classified and RF-10's re-weighting never fires; `registry.InitDetectMarkerFiles()`, so no
+user-facing text spells a marker name by hand; one shared db-only clause interpolated by both
+the undetected and the registered-but-unexposed statements; and the deletion of
+`RenderSkill`'s `"" → typescript` fallback, which fabricated a language in the FIRST artifact
+an agent reads. `internal/mcp`'s Lock C was derived from a hardcoded marker map that has no
+entry for the ABSENCE of a marker — it would have stayed green while covering nothing — and
+is now driven from `registry.All()` plus a no-marker root. See
+[ADR 0071](decisions/0071-init-never-refuses-over-language-it-declares.md) and `CHANGELOG.md`.
+
+**Rejected, and not re-openable:** adding Java and Python to the registry. It moves the line
+without removing it — Ruby, PHP, C#, Rust and every future language stay refused.
+
+**Named, DECLARED, not built — the second gap.** `internal/scaffold/config.go` gates the whole
+`database:` block, `schema_paths` included, behind a detected ORM, and `SchemaPaths` is only
+ever populated from a Prisma schema. There is **no detection of a SQL migration directory**,
+so a Flyway project still receives a config that audits nothing. Declared in the generated
+config, the init report and the README, in all three cases whenever **no ORM** was detected
+(a TypeScript project without Prisma has the identical gap). Open; it is the follow-up to
+this change.
 
 ---
 

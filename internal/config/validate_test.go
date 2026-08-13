@@ -54,6 +54,43 @@ project:
 	}
 }
 
+// TestLoadAcceptsUndetectedSentinel locks the ONE value codefit itself writes
+// when `codefit init` resolved no auditable language provider. The sentinel is
+// a statement about codefit's DETECTION, not about the project, and it must
+// round-trip through the same validation every hand-written config faces —
+// otherwise init would write a file it cannot load, which writeConfig's own
+// backstop turns into a hard failure.
+func TestLoadAcceptsUndetectedSentinel(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "` + config.LanguageUndetected + `"
+`
+	if _, err := config.Load(writeConfig(t, body)); err != nil {
+		t.Fatalf("Load rejected the undetected sentinel: %v", err)
+	}
+}
+
+// TestLoadStillRejectsEmptyLanguage is the other half of the sentinel
+// decision: admitting `undetected` must NOT be implemented by making the field
+// optional. An absent/empty language is ambiguous between "old config",
+// "hand-deleted" and "codefit detected nothing" — the sentinel exists exactly
+// to remove that ambiguity, so "" stays a hard error.
+func TestLoadStillRejectsEmptyLanguage(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: ""
+`
+	_, err := config.Load(writeConfig(t, body))
+	if err == nil {
+		t.Fatal("Load accepted an empty language, want error")
+	}
+	if !strings.Contains(err.Error(), "language is required") {
+		t.Errorf("error %q should say the language is required", err)
+	}
+}
+
 func TestLoadRejectsMissingName(t *testing.T) {
 	body := `version: "1"
 project:

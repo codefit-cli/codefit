@@ -35,11 +35,13 @@ func TestCommittedSkillMatchesRenderedSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect(%s): %v", root, err)
 	}
-	// Guard the probe itself: RenderSkill defaults an empty language to
-	// "typescript", so a Detect that silently returned nothing would compare this
-	// Go repository's skill against a TypeScript render and call the mismatch drift.
-	if info.Language == "" {
-		t.Fatalf("Detect(%s) returned no language — the probe is broken, not the skill", root)
+	// Guard the probe itself. Detect no longer refuses when nothing resolves —
+	// it returns the undetected sentinel — so a Detect that silently stopped
+	// recognizing go.mod would render this Go repository's committed skill
+	// against the DB-only undetected body and report the mismatch as template
+	// drift. The probe fails loudly instead.
+	if !info.Detected() {
+		t.Fatalf("Detect(%s) resolved no language (%q) — the probe is broken, not the skill", root, info.Language)
 	}
 
 	want, err := scaffold.RenderSkill(info)

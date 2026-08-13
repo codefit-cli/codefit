@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
@@ -203,6 +204,114 @@ func TestInitCommandStatesRealGoCapability(t *testing.T) {
 	}
 	if !strings.Contains(low, "1 of 4") {
 		t.Errorf("init output for a Go project must name its 1-of-4 surface category reach, got:\n%s", out)
+	}
+}
+
+// TestFormatReport_UndetectedDeclaresGap is the report half of the three-place
+// declaration (generated config, init report, README).
+//
+// The report is what the developer actually reads. It must name the markers
+// codefit looked for — derived, so it cannot repeat the deleted message's
+// defect of listing manifests that resolve nothing — and it must state the
+// consequence rather than leaving init looking like a success.
+func TestFormatReport_UndetectedDeclaresGap(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "pom.xml"), []byte("<project/>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := scaffold.Generate(scaffold.Options{Root: root})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	out := formatReport(res)
+	low := strings.ToLower(out)
+
+	markers := registry.InitDetectMarkerFiles()
+	if len(markers) == 0 {
+		t.Fatal("no InitDetect markers registered; the loop below would pass vacuously")
+	}
+	for _, m := range markers {
+		if !strings.Contains(out, m) {
+			t.Errorf("the report must name the marker %q codefit looks for\n---\n%s", m, out)
+		}
+	}
+	// The counter-probe carries the SAME four manifests its two siblings do
+	// (scaffold's TestRenderConfig_UndetectedNamesTheMarkersItLooksFor and
+	// TestCapabilityStatement_Undetected). pom.xml is not optional here just
+	// because it is the fixture's own file: the report never echoes the fixture,
+	// and omitting it left a hole — under a mutation that made
+	// InitDetectMarkerFiles also return pom.xml, this test stayed GREEN while
+	// both siblings went RED. The three declaration sites must move together, or
+	// the one a developer actually reads is the one left unguarded.
+	for _, cannotHelp := range []string{"pyproject.toml", "requirements.txt", "pom.xml", "build.gradle"} {
+		if strings.Contains(out, cannotHelp) {
+			t.Errorf("the report names %q, which resolves no provider — the original defect\n---\n%s", cannotHelp, out)
+		}
+	}
+	if !strings.Contains(out, "schema_paths") {
+		t.Errorf("the report must say the DB dimension still audits a configured schema\n---\n%s", out)
+	}
+	if !strings.Contains(low, "migration") {
+		t.Errorf("the report must declare that SQL migration directories are NOT detected\n---\n%s", out)
+	}
+	if !strings.Contains(low, "scan-all") {
+		t.Errorf("the report must name the consequence for the next codefit-scan-all\n---\n%s", out)
+	}
+}
+
+// TestFormatReport_SchemaGapDeclaredWheneverNoORM: the gap is not specific to
+// the undetected case. A TypeScript project with no Prisma schema gets the same
+// config that audits no schema, so it gets the same declaration — and a project
+// that DOES have a detected ORM must not be handed a warning that does not
+// apply to it.
+func TestFormatReport_SchemaGapDeclaredWheneverNoORM(t *testing.T) {
+	noORM := formatReport(scaffold.Result{
+		Info:         scaffold.ProjectInfo{Name: "x", Language: "typescript", Framework: "next"},
+		ConfigPath:   ".codefit.yaml",
+		ConfigAction: scaffold.ConfigCreated,
+		UsedFallback: true,
+		Skills:       []scaffold.SkillWrite{{Agent: "standard location", Path: ".agents/skills/codefit/SKILL.md"}},
+	})
+	if !strings.Contains(strings.ToLower(noORM), "migration") {
+		t.Errorf("a detected project with no ORM has the identical schema gap and must be told\n---\n%s", noORM)
+	}
+
+	withORM := formatReport(scaffold.Result{
+		Info: scaffold.ProjectInfo{
+			Name: "x", Language: "typescript", ORM: "prisma", DBType: "postgresql",
+			SchemaPaths: []string{filepath.FromSlash("prisma/schema.prisma")},
+		},
+		ConfigPath:   ".codefit.yaml",
+		ConfigAction: scaffold.ConfigCreated,
+		UsedFallback: true,
+		Skills:       []scaffold.SkillWrite{{Agent: "standard location", Path: ".agents/skills/codefit/SKILL.md"}},
+	})
+	if strings.Contains(strings.ToLower(withORM), "migration") {
+		t.Errorf("a project with a detected ORM must not be handed the no-schema warning\n---\n%s", withORM)
+	}
+}
+
+// TestInitCommandOnUnregisteredStackExits0 is the end-to-end replacement for
+// the behaviour this change removed: the command used to exit non-zero and
+// write nothing.
+func TestInitCommandOnUnregisteredStackExits0(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "pom.xml"), []byte("<project/>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runInit(t, root, "", "--non-interactive")
+	if err != nil {
+		t.Fatalf("init on an unregistered stack must succeed, got: %v\n%s", err, out)
+	}
+	if !fileThere(filepath.Join(root, ".codefit.yaml")) {
+		t.Errorf(".codefit.yaml not created:\n%s", out)
+	}
+	if !fileThere(filepath.Join(root, ".agents/skills/codefit/SKILL.md")) {
+		t.Errorf("skill not placed:\n%s", out)
+	}
+	if strings.Contains(out, "not a registered language") {
+		t.Errorf("init rendered the unregistered-language fallback:\n%s", out)
 	}
 }
 

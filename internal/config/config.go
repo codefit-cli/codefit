@@ -81,6 +81,28 @@ type SensorToggle struct {
 	Enabled *bool `yaml:"enabled,omitempty"`
 }
 
+// LanguageUndetected is the value `codefit init` writes into project.language
+// when no marker file under the project root resolved an auditable language
+// provider.
+//
+// It is a statement about codefit's DETECTION, never about the project. A Java
+// or Rust repository has a language; codefit simply registers no provider that
+// can audit its code, so it says so in the one place every later reader looks
+// instead of refusing to write a config at all. Rendering it as "this project
+// has no language" would be a lie.
+//
+// It lives here, beside allowedLanguages, for two reasons. internal/scaffold
+// already imports internal/config, so housing it there would invert the
+// dependency; and internal/providers/registry is the wrong home because the
+// sentinel is precisely the ABSENCE of a registered entry — a constant there
+// invites someone to add a matching fake table row.
+//
+// Every consumer of Project.Language must read it as "resolve no provider", not
+// as a language name. No production sensor or handler reads the field today
+// (validation is its only consumer), so the sentinel resolves nothing anywhere
+// by construction — internal/mcp's Lock A asserts exactly that.
+const LanguageUndetected = "undetected"
+
 // Test-path severity modes (RF-10). They govern what happens to a security
 // finding whose file is classified "test" by path_criticality:
 //

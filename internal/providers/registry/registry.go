@@ -127,6 +127,28 @@ func ByMarkerFile(root string) (Entry, bool) {
 	return Entry{}, false
 }
 
+// InitDetectMarkerFiles returns every marker file that can actually make
+// ByMarkerFile resolve — the MarkerFiles of the InitDetect-eligible entries, in
+// table order, entry order preserved within each entry.
+//
+// It exists so that no user-facing text ever spells a marker name by hand.
+// `codefit init`'s deleted refusal message was written against
+// config.allowedLanguages instead of against this table: it named four
+// manifests that resolve nothing (creating one changed nothing) and omitted
+// tsconfig.json, which resolves TypeScript. The table's owner owns the query,
+// exactly as ExposedForSecurity/ExposedForSurfaceTools already do for their own
+// consumers.
+func InitDetectMarkerFiles() []string {
+	var out []string
+	for _, e := range table {
+		if !e.Exposure.InitDetect {
+			continue
+		}
+		out = append(out, e.MarkerFiles...)
+	}
+	return out
+}
+
 // ExposedForSecurity returns the entries whose Exposure.SecurityScan is true,
 // in table order — the set internal/mcp's providerForLanguage/
 // SupportedLanguageNames resolve a security provider for.

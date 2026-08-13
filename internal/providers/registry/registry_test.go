@@ -3,6 +3,7 @@ package registry_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/providers/registry"
@@ -108,6 +109,61 @@ func TestByMarkerFile_NoMarkersFound(t *testing.T) {
 	root := t.TempDir()
 	if _, ok := registry.ByMarkerFile(root); ok {
 		t.Error("ByMarkerFile must return false when no marker file exists")
+	}
+}
+
+// TestInitDetectMarkerFiles_DerivedFromTheTable is the query that makes the
+// original defect unrepeatable: `codefit init`'s refusal message was written by
+// hand against config.allowedLanguages (four languages) instead of against the
+// registry (two), so it named four manifests that CANNOT resolve a provider and
+// omitted tsconfig.json, which can. Every marker name in user-facing text now
+// comes from here.
+//
+// The assertion is derived, not retyped: it walks All() and collects the marker
+// files of the InitDetect-eligible entries itself, so flipping an Exposure bit
+// or editing a MarkerFiles slice moves BOTH sides together. The literal check
+// below it is the separate, deliberate snapshot of today's answer.
+func TestInitDetectMarkerFiles_DerivedFromTheTable(t *testing.T) {
+	var want []string
+	for _, e := range registry.All() {
+		if !e.Exposure.InitDetect {
+			continue
+		}
+		want = append(want, e.MarkerFiles...)
+	}
+	got := registry.InitDetectMarkerFiles()
+	if !slices.Equal(got, want) {
+		t.Errorf("InitDetectMarkerFiles() = %v, want %v (table order, InitDetect entries only)", got, want)
+	}
+}
+
+// TestInitDetectMarkerFiles_NamesOnlyMarkersThatCanResolve is the positive
+// probe for the defect's exact shape: every name the query returns must, on its
+// own in an otherwise empty root, actually make ByMarkerFile resolve. A manifest
+// that cannot help a developer must never appear in this list again.
+func TestInitDetectMarkerFiles_NamesOnlyMarkersThatCanResolve(t *testing.T) {
+	markers := registry.InitDetectMarkerFiles()
+	if len(markers) == 0 {
+		t.Fatal("InitDetectMarkerFiles() is empty; the probe below would pass vacuously")
+	}
+	for _, m := range markers {
+		t.Run(m, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, m), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := registry.ByMarkerFile(root); !ok {
+				t.Errorf("InitDetectMarkerFiles() names %q, but a root holding only %q resolves no entry", m, m)
+			}
+		})
+	}
+
+	// The counter-probe: the four manifests the deleted message named that
+	// CANNOT resolve anything must not be in the list.
+	for _, cannotHelp := range []string{"pyproject.toml", "requirements.txt", "pom.xml", "build.gradle"} {
+		if slices.Contains(markers, cannotHelp) {
+			t.Errorf("InitDetectMarkerFiles() names %q, which resolves no provider — that is the original defect", cannotHelp)
+		}
 	}
 }
 

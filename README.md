@@ -140,7 +140,16 @@ the full per-language, per-dimension breakdown.
   machine, not a speed codefit promises — read them, with their limits, under
   [What has actually been measured](#what-has-actually-been-measured).
 - **`codefit init`** — detects the stack, writes `.codefit.yaml`, and installs
-  codefit's own thin skill for each detected agent.
+  codefit's own thin skill for each detected agent. It **never refuses over
+  language**: on a root where no marker file (`go.mod`, `package.json`,
+  `tsconfig.json`) resolves a provider it still writes both artifacts and
+  declares the gap — which markers it looked for, that no code is scanned here,
+  and that the DB dimension still audits the schema once `database.schema_paths`
+  is set. It also declares, whenever no ORM was detected, that it writes **no**
+  `database:` section: schema detection reads a Prisma `schema.prisma` only, so a
+  Flyway/SQL-migration project must point `database.schema_paths` at its
+  migrations by hand — until it does, that config audits nothing, and codefit
+  says so instead of letting an empty report imply a clean project.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
 - **Database-dimension auditing** — a neutral schema model with two schema parsers,
   **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway migrations, reconstructed
@@ -346,6 +355,20 @@ codefit init
 
 # 3. From your agent, in plain language:
 #    "audit the endpoints in this project for IDOR and broken authorization"
+```
+
+`codefit init` writes a config for **any** root — it exits 0 whether or not it
+recognizes the language. If it recognizes none, read the report: it names the
+markers it looked for, says that no code is scanned in this project, and points
+at the one dimension that still reaches it. If your project's schema lives in SQL
+migrations rather than a Prisma `schema.prisma`, add the path yourself — codefit
+does not detect migration directories yet, and the generated config says so where
+the `database:` section would be:
+
+```yaml
+database:
+  schema_paths:
+    - "db/migrations"
 ```
 
 The agent loads codefit's skill, calls `codefit-scan-all`, reads the three buckets
