@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
@@ -15,13 +16,17 @@ import (
 // SECURITY provider for — the init-welcomes / scan-all-refuses contradiction
 // made a DECLARED gap instead of a silent one. Same shape as
 // deliberatelyNotInSkill (skill_tools_test.go): an entry here is a choice a
-// test enforces, not an oversight nobody noticed. Empty today: roadmap P4-1
-// (docs/specs/declared-partial-language-exposure.md) wired Go in, closing the
-// only entry this map ever carried — kept as a live map, not deleted, so a
-// FUTURE init-detected/scan-all-refused language has a declared landing site
-// again (TestLanguageSource_LockC_InitVsScanAllDivergence fails loudly the
-// moment one appears undeclared).
-var initDetectsButScanAllCannotAudit = map[string]string{}
+// test enforces, not an oversight nobody noticed. Roadmap P4-1
+// (docs/specs/declared-partial-language-exposure.md) wired Go in and emptied
+// this map; `codefit init` no longer refusing over language put one entry back,
+// and this time it is permanent rather than pending a provider.
+var initDetectsButScanAllCannotAudit = map[string]string{
+	config.LanguageUndetected: "init writes this when no marker file resolved an auditable provider. " +
+		"It is not a language and never will be one, so scan-all resolving nothing for it is the " +
+		"CORRECT outcome, not a gap waiting to be closed: a scan-all on such a project reports " +
+		"security as not measured, which is the honest answer. codefit init declares the same thing " +
+		"up front, in the report, the generated config and the generated skill.",
+}
 
 // TestLanguageSource_LockA_ResolvableSetIncludesGo is D4's Lock A, moved
 // (roadmap P4-1, docs/specs/declared-partial-language-exposure.md R3): the
@@ -42,7 +47,11 @@ func TestLanguageSource_LockA_ResolvableSetIncludesGo(t *testing.T) {
 		})
 	}
 
-	doesNotResolve := []string{"python", "java", ""}
+	// The sentinel belongs here for the same reason "" does: it is a value
+	// that reaches this resolver from a real generated .codefit.yaml, and
+	// nothing else proves it resolves no provider. Every declaration codefit
+	// makes about an undetected project rests on that being true.
+	doesNotResolve := []string{"python", "java", "", config.LanguageUndetected}
 	for _, lang := range doesNotResolve {
 		t.Run("nil/"+lang, func(t *testing.T) {
 			if p := providerForLanguage(lang, nil); p != nil {
@@ -98,28 +107,54 @@ func TestLanguageSource_LockB_ProviderForDivergence(t *testing.T) {
 	}
 }
 
-// detectableLanguages runs the REAL scaffold.Detect over minimal marker
-// fixtures for the languages it recognizes today — driven, not
-// re-implemented, so this test tracks scaffold/detect.go's actual switch
-// rather than a copy of it.
+// detectableLanguages runs the REAL scaffold.Detect over one fixture per
+// marker file the registry declares for init detection, PLUS a root with no
+// marker at all — the outcome Detect can now produce and previously could not.
+//
+// The marker set is DERIVED from registry.All(), never listed here. The
+// hardcoded map this replaced named go.mod and package.json only: it never saw
+// tsconfig.json, and — far worse — it could never see the undetected sentinel,
+// because a map of markers has no entry for the absence of one. Lock C would
+// have stayed green while covering nothing, which is precisely the class of
+// silent staleness this change exists to remove. Deriving it is safe: detection
+// is a plain os.Stat of the root, so an empty file at the right name is a
+// faithful fixture.
 func detectableLanguages(t *testing.T) map[string]bool {
 	t.Helper()
-	markers := map[string]string{
-		"go.mod":       "module x\n",
-		"package.json": "{}\n",
-	}
 	out := map[string]bool{}
-	for marker, content := range markers {
-		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, marker), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+
+	detect := func(what, root string) {
+		t.Helper()
 		info, err := scaffold.Detect(root)
 		if err != nil {
-			t.Fatalf("scaffold.Detect(%s marker): %v", marker, err)
+			t.Fatalf("scaffold.Detect(%s): %v", what, err)
 		}
 		out[info.Language] = true
 	}
+
+	markers := 0
+	for _, e := range registry.All() {
+		if !e.Exposure.InitDetect {
+			continue
+		}
+		for _, marker := range e.MarkerFiles {
+			root := t.TempDir()
+			// "{}" is valid for the JSON markers and irrelevant to the
+			// others: Detect resolves the provider by os.Stat alone.
+			if err := os.WriteFile(filepath.Join(root, marker), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			detect(marker+" marker", root)
+			markers++
+		}
+	}
+	if markers == 0 {
+		t.Fatal("no InitDetect marker files in the registry — this helper would report only the undetected case")
+	}
+
+	// The no-marker root. Without it the map is not DRIVEN by what Detect can
+	// return, only by what someone remembered to list.
+	detect("root with no marker file", t.TempDir())
 	return out
 }
 

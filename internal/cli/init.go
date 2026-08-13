@@ -129,8 +129,40 @@ func formatReport(res scaffold.Result) string {
 		}
 	}
 
+	writeSchemaGap(&b, info)
+
 	fmt.Fprintln(&b, "\nNext: connect codefit over MCP (see README → \"Connect codefit\").")
 	return b.String()
+}
+
+// writeSchemaGap declares, in the report the developer actually reads, that the
+// config just written audits no database schema.
+//
+// The condition is ORM == "", NOT "the language was undetected". The whole
+// `database:` block is gated behind a detected ORM, and SchemaPaths is only
+// ever populated from a Prisma schema — there is no detection of a SQL
+// migration directory at all. A TypeScript project without Prisma therefore has
+// exactly the same gap as a Java one, and declaring it only in the case that
+// happens to be new would be the over-promise this project exists to prevent.
+//
+// The consequence is spelled out rather than implied: with no schema configured
+// AND no security provider, the next codefit-scan-all has nothing to measure
+// and says so. That is honest, and it is precisely why detecting SQL migration
+// directories is the follow-up work.
+func writeSchemaGap(b *strings.Builder, info scaffold.ProjectInfo) {
+	if info.ORM != "" {
+		return
+	}
+	fmt.Fprintln(b, "\nNot configured — database schema:")
+	fmt.Fprintln(b, "  codefit detects a schema only from a Prisma schema.prisma. SQL migration")
+	fmt.Fprintln(b, "  directories (Flyway, golang-migrate, plain .sql DDL) are NOT detected, so no")
+	fmt.Fprintln(b, "  database.schema_paths was written and the DB dimension audits nothing here.")
+	fmt.Fprintln(b, "  If this project has a schema, add it by hand — the commented block in")
+	fmt.Fprintln(b, "  .codefit.yaml shows how — and the DB dimension runs on the next scan.")
+	if !info.Detected() {
+		fmt.Fprintln(b, "  Until then codefit-scan-all has nothing to measure on this project and will")
+		fmt.Fprintln(b, "  say so rather than report it clean: no security provider resolves either.")
+	}
 }
 
 // reportPath renders a path the way codefit spells the paths it emits: with

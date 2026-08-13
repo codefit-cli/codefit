@@ -4,8 +4,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/config"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
@@ -117,6 +119,117 @@ func TestConfigExists(t *testing.T) {
 	}
 	if !scaffold.ConfigExists(root) {
 		t.Errorf("ConfigExists = false after writing .codefit.yaml")
+	}
+}
+
+// TestGenerate_UndetectedRoundTrips drives the WHOLE init path on a root
+// holding only a build manifest codefit registers no provider for, and then
+// re-reads the file that landed on disk.
+//
+// The round trip is not ceremony: writeConfig itself re-loads what it just
+// wrote and turns a validation failure into a hard error, so a sentinel the
+// validator rejected would make init fail on exactly the projects it now exists
+// to serve.
+//
+// PathCriticalityFor is asserted through the REAL written file rather than
+// through the in-memory ProjectInfo. A struct assertion would still pass if the
+// template silently emitted globs of its own; only the file the developer keeps
+// proves nothing was invented.
+func TestGenerate_UndetectedRoundTrips(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pom.xml", "<project/>\n")
+
+	res, err := scaffold.Generate(scaffold.Options{Root: root})
+	if err != nil {
+		t.Fatalf("Generate on an unregistered stack must not refuse, got: %v", err)
+	}
+	if res.Info.Detected() {
+		t.Fatalf("fixture is not the undetected case: language = %q", res.Info.Language)
+	}
+	if res.ConfigAction != scaffold.ConfigCreated {
+		t.Errorf("config action = %q, want created", res.ConfigAction)
+	}
+
+	cfg, err := config.Load(filepath.Join(root, scaffold.ConfigName))
+	if err != nil {
+		t.Fatalf("the config init wrote does not load: %v", err)
+	}
+	if cfg.Project.Language != config.LanguageUndetected {
+		t.Errorf("language = %q, want %q", cfg.Project.Language, config.LanguageUndetected)
+	}
+	for _, path := range []string{"src/x_test.go", "src/main.go", "examples/demo.go"} {
+		if got := cfg.PathCriticalityFor(path); got != "" {
+			t.Errorf("PathCriticalityFor(%q) = %q through the real written config, want \"\" — "+
+				"codefit classified a path it invented globs for", path, got)
+		}
+	}
+
+	// The skill landed, and it is the undetected one.
+	if len(res.Skills) != 1 {
+		t.Fatalf("skills written = %d, want 1 fallback", len(res.Skills))
+	}
+	skill, err := os.ReadFile(filepath.Join(root, res.Skills[0].Path))
+	if err != nil {
+		t.Fatalf("reading the written skill: %v", err)
+	}
+	if strings.Contains(string(skill), `"`+config.LanguageUndetected+`"`) {
+		t.Errorf("the written skill passes the sentinel as a tool argument:\n%s", skill)
+	}
+}
+
+// TestGenerate_UndetectedWritesNothingElse pins the write set on the new path.
+// codefit generates its own skill and NEVER touches the user's CLAUDE.md /
+// AGENTS.md — agents.go uses CLAUDE.md purely as an os.Stat marker and never
+// opens it. Adding a whole new branch to Generate is exactly when that boundary
+// could slip unnoticed.
+func TestGenerate_UndetectedWritesNothingElse(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pom.xml", "<project/>\n")
+	const sentinelText = "PRE-EXISTING CONTENT, CODEFIT MUST NOT TOUCH THIS\n"
+	writeFile(t, root, "CLAUDE.md", sentinelText)
+
+	res, err := scaffold.Generate(scaffold.Options{Root: root})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	want := map[string]bool{
+		"pom.xml":           true,
+		"CLAUDE.md":         true,
+		scaffold.ConfigName: true,
+		res.Skills[0].Path:  true,
+	}
+	var got []string
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		got = append(got, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the generated tree: %v", err)
+	}
+	for _, rel := range got {
+		if !want[rel] {
+			t.Errorf("Generate wrote an unexpected file %q; the write set is %s plus the skill", rel, scaffold.ConfigName)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("files on disk = %v, want exactly %d entries", got, len(want))
+	}
+
+	// CLAUDE.md is a detection MARKER, never an artifact codefit edits.
+	after, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("reading CLAUDE.md back: %v", err)
+	}
+	if string(after) != sentinelText {
+		t.Errorf("codefit modified the user's CLAUDE.md:\n%s", after)
 	}
 }
 

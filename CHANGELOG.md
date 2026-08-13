@@ -171,6 +171,62 @@ All notable changes to codefit are documented here. The format is based on
   shipping without one.
 
 ### Fixed
+- ⚠️ **`codefit init` no longer refuses a project whose language it does not
+  recognize — and the message it refused with named files that could not help.**
+  On a root with no `go.mod`, `package.json` or `tsconfig.json`, init exited
+  non-zero and wrote nothing, with:
+
+  ```
+  no supported language detected in %q: expected one of go.mod, package.json,
+  pyproject.toml/requirements.txt, or pom.xml/build.gradle
+  ```
+
+  That list is `config.allowedLanguages` (four languages), not the provider
+  registry (two). Only `go.mod` and `package.json` could ever make detection
+  succeed; `tsconfig.json` can too and is not named; `pyproject.toml`,
+  `requirements.txt`, `pom.xml` and `build.gradle` are named and **cannot help** —
+  creating one changes nothing. A Java project holding a `pom.xml` was told to
+  create a `pom.xml`. Reproduced with the real binary before the fix.
+
+  The refusal was the deeper defect. `project.language` is validated and then
+  read by no production sensor, and a Python project with `database.schema_paths`
+  is already fully audited by `codefit-scan-all` — so init withheld a config over
+  a field the audit never reads, on a project the DB dimension could have
+  audited.
+
+  **Now:** init exits 0 on any root. It writes `.codefit.yaml` and the skill, and
+  declares what it did not find in three places — the generated config, the init
+  report and the README: which markers it looked for (derived from the registry,
+  so the list can no longer drift), that no code is scanned here, and that the DB
+  dimension still audits the schema once `database.schema_paths` is set.
+
+  **Migration:** none for a project init already recognized — language,
+  framework, ORM, schema paths and the capability statement are unchanged, and
+  the generated skill for a detected language is byte-identical. A previously
+  refused project now receives `project.language: "undetected"`, a value
+  `config.Load` accepts. `""` is still rejected.
+
+  `path_criticality` is omitted **whole** for such a project rather than emitted
+  empty (an empty key renders YAML `null`, which reads as classified-and-empty),
+  and the comment in its place states the consequence: no path is classified, so
+  the RF-10 test-path re-weighting never fires and every finding keeps its
+  natural severity.
+
+  Adding Java and Python to the registry was rejected: it moves the line without
+  removing it, since Ruby, PHP, C#, Rust and every future language stay refused.
+  See
+  [ADR 0071](docs/decisions/0071-init-never-refuses-over-language-it-declares.md).
+- **The generated config's schema gap is now declared instead of discovered from
+  an empty report.** `codefit init` writes a `database:` section only when it
+  detects an ORM, and it detects a schema **only** from a Prisma
+  `schema.prisma` — SQL migration directories (Flyway, golang-migrate, plain
+  `.sql` DDL) are not detected at all. So a Flyway project's generated config
+  audits nothing. The init report and the generated config now say so, and show
+  how to point `database.schema_paths` at the migrations by hand. The
+  declaration fires whenever **no ORM** was detected, not only when the language
+  was undetected — a TypeScript project without Prisma has the identical gap.
+  Detecting migration directories is follow-up work; this release declares the
+  gap, it does not close it.
 - **The db dimension reported files it had read and resolved correctly as files it
   was blind over.** The unread-schema floor asked the neutral model one question —
   "does any position name this file?" — and read "no" as "codefit did not see what
