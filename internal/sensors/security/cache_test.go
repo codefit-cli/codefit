@@ -270,12 +270,18 @@ func TestCache_PathCriticalityAppliesOnAWarmCache(t *testing.T) {
 			"the entry holds the analysis, not the weighting", warm.calls())
 	}
 	got := findingIn(t, warmRes.Findings, "src/secrets.ts", "SEC-001")
-	if got.Severity != findings.SeverityHigh {
-		t.Errorf("warm severity = %q, want high (critical downgraded one level for a test path) — "+
-			"the cache served a severity computed under the OLD config", got.Severity)
+	// EXACT, and deliberately different from the cold severity asserted above.
+	// The delta IS the proof: a severity-agnostic assertion would pass just as
+	// happily on a cache that replayed the old weighting, which is the failure
+	// this test exists to catch. info is the RF-10 default mode
+	// (sensors.security.test_severity unset in cacheConfig).
+	if got.Severity != findings.SeverityInfo {
+		t.Errorf("warm severity = %q, want info (a test path is forced to info under the default "+
+			"test_severity mode) — the cache served a severity computed under the OLD config", got.Severity)
 	}
 	if got.RequiresConsent {
-		t.Error("a downgraded finding must no longer require consent; the cache served the old flag")
+		t.Error("a re-weighted finding is no longer critical and must no longer require consent; " +
+			"the cache served the old flag")
 	}
 }
 

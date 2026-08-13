@@ -9,6 +9,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/golang"
@@ -27,7 +28,18 @@ func writeFile(t *testing.T, root, rel, content string) {
 	}
 }
 
+// runSensor runs the real sensor with NO sensors.security.test_severity set —
+// the ordinary state of a project, and therefore the RF-10 default (info).
 func runSensor(t *testing.T, root string) findings.SensorResult {
+	t.Helper()
+	return runSensorMode(t, root, "")
+}
+
+// runSensorMode runs the real sensor with an explicit test_severity mode ("" =
+// key absent). Every severity assertion in this file goes through the real
+// walk, the real provider and the real criticality pass — a hand-built
+// findings.Finding would lock a severity the production path may never produce.
+func runSensorMode(t *testing.T, root, mode string) findings.SensorResult {
 	t.Helper()
 	cfg := &config.Config{Project: config.Project{
 		Language: "go",
@@ -37,6 +49,7 @@ func runSensor(t *testing.T, root string) findings.SensorResult {
 			Example:    []string{"examples/**"},
 		},
 	}}
+	cfg.Sensors.Security.TestSeverity = mode
 	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "go", Config: cfg}
 	res, err := security.New(golang.New()).Run(ctx)
 	if err != nil {
@@ -257,21 +270,85 @@ var k = "sk-ant-api03-AbCdEf1234567890"
 	}
 }
 
-func TestSensorDowngradesInTestFiles(t *testing.T) {
+// testFileSecret writes the canonical fixture for the RF-10 modes: a
+// credential-shaped literal in a *_test.go, which layer 1 reports as a CRITICAL
+// SEC-001 before any weighting. Every mode test starts from the same natural
+// severity, so the mode is the only variable.
+func testFileSecret(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	writeFile(t, root, "config_test.go", `package x
 var k = "sk-ant-api03-AbCdEf1234567890"
 `)
-	res := runSensor(t, root)
+	return root
+}
+
+// TestSensorDefaultModeIsInfo is RF-10's headline promise: with no
+// sensors.security.test_severity configured, a security finding on a
+// test-classified path is forced to info. A secret in a test does not weigh
+// what a secret in production weighs, so it costs the security score nothing.
+//
+// This is what the PRD said since v1.3 and what the code did not do: it
+// hardcoded the "downgrade" mode, which is one of the PRD's own three modes but
+// not the one the PRD chose as the default.
+func TestSensorDefaultModeIsInfo(t *testing.T) {
+	res := runSensor(t, testFileSecret(t))
+
 	f := find(res.Findings, "config_test.go", "SEC-001")
 	if f == nil {
 		t.Fatal("expected a finding in the test file")
 	}
-	if f.Severity == findings.SeverityCritical {
-		t.Error("critical finding in a test file should be downgraded")
+	if f.Severity != findings.SeverityInfo {
+		t.Errorf("the default test_severity mode must force a test-path finding to info, got %q", f.Severity)
+	}
+	if f.RequiresConsent {
+		t.Error("an info finding must not require consent; RequiresConsent was not recomputed after the adjustment")
+	}
+}
+
+// TestSensorDowngradeModeKeepsOneLevel is the OLD hardcoded behaviour, now
+// reachable only by asking for it. It was named TestSensorDowngradesInTestFiles
+// and ran on the default config; under RF-10's default that name no longer
+// describes anything, so the test states its mode explicitly instead of
+// describing the whole sensor.
+func TestSensorDowngradeModeKeepsOneLevel(t *testing.T) {
+	res := runSensorMode(t, testFileSecret(t), config.TestSeverityDowngrade)
+
+	f := find(res.Findings, "config_test.go", "SEC-001")
+	if f == nil {
+		t.Fatal("expected a finding in the test file")
 	}
 	if f.Severity != findings.SeverityHigh {
-		t.Errorf("critical should downgrade to high in tests, got %q", f.Severity)
+		t.Errorf("downgrade mode lowers critical exactly one level, want high, got %q", f.Severity)
+	}
+	if f.RequiresConsent {
+		t.Error("a downgraded finding is no longer critical and must not require consent")
+	}
+}
+
+// TestSensorKeepModePreservesCriticalAndBlocks locks the WHOLE consequence of
+// "keep", not just its severity. It is the only one of the three modes that can
+// leave a critical security finding standing on a test path, and severity is
+// not the interesting part: RequiresConsent and scoring.IsBlocked follow from
+// it, so a project choosing keep is choosing to be blocked by its own test
+// fixtures. Asserting only the severity would let the consent/blocking half
+// regress silently.
+func TestSensorKeepModePreservesCriticalAndBlocks(t *testing.T) {
+	res := runSensorMode(t, testFileSecret(t), config.TestSeverityKeep)
+
+	f := find(res.Findings, "config_test.go", "SEC-001")
+	if f == nil {
+		t.Fatal("expected a finding in the test file")
+	}
+	if f.Severity != findings.SeverityCritical {
+		t.Errorf("keep mode applies NO adjustment: want the natural critical, got %q", f.Severity)
+	}
+	if !f.RequiresConsent {
+		t.Error("a critical security finding requires consent, whatever path it lives on")
+	}
+	if !scoring.IsBlocked(res.Findings) {
+		t.Error("keep mode leaves a critical security finding unconsented, so the project IS blocked — " +
+			"this is the consequence the mode's documentation and the run warning must state")
 	}
 }
 

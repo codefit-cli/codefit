@@ -8,7 +8,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// Path-criticality classes (RF-11).
+// Path-criticality classes (RF-10).
 const (
 	CriticalityProduction = "production"
 	CriticalityTest       = "test"
@@ -34,6 +34,34 @@ func (c *Config) PathCriticalityFor(file string) string {
 		return CriticalityProduction
 	default:
 		return ""
+	}
+}
+
+// TestSeverityMode resolves sensors.security.test_severity into the mode the
+// security sensor must apply to a test-classified path (RF-10).
+//
+// It is the SINGLE place the default is decided. Unset ("") means
+// TestSeverityInfo — the PRD's default — and so does a nil Config, which is the
+// ordinary state of a project with no .codefit.yaml. A value outside the enum
+// cannot survive Load (validate rejects it with a located error), so reaching
+// this function it can only come from a hand-built Config; the resolver refuses
+// to invent a fourth mode and falls back to the default rather than silently
+// leaving severities unweighted.
+//
+// Callers ask for the mode; they never read Sensors.Security.TestSeverity raw.
+// A sensor that re-implemented the "" → info rule locally is exactly how two
+// defaults drift apart, which is the same reason PathCriticalityFor lives here.
+func (c *Config) TestSeverityMode() string {
+	if c == nil {
+		return TestSeverityInfo
+	}
+	switch c.Sensors.Security.TestSeverity {
+	case TestSeverityDowngrade:
+		return TestSeverityDowngrade
+	case TestSeverityKeep:
+		return TestSeverityKeep
+	default:
+		return TestSeverityInfo
 	}
 }
 

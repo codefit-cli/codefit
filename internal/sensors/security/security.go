@@ -2,7 +2,7 @@
 // filtering pyramid — a language-agnostic regex layer for obvious secrets and
 // the active provider's AST analysis (deterministic findings plus mapped
 // surface) — and adjusts each finding's severity by the file's path criticality
-// (RF-11). codefit runs no LLM layer: the surface is returned to the agent,
+// (RF-10). codefit runs no LLM layer: the surface is returned to the agent,
 // which reasons over it with its own model.
 package security
 
@@ -91,6 +91,9 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	var surface []findings.SurfaceItem
 	var audited []string
 	auditable := 0
+	// Counted across the whole walk so the "keep" consequence is stated ONCE per
+	// run, not once per file.
+	keptCritical := 0
 	walkErr := filepath.WalkDir(ctx.ProjectRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -141,7 +144,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		// as to a fresh one: what is cached is the analysis, not its weighting.
 		// An edit to path_criticality therefore re-weights the next scan without
 		// invalidating a single entry.
-		applyCriticality(ctx.Config, rel, fileFindings)
+		keptCritical += applyCriticality(ctx.Config, rel, fileFindings)
 		all = append(all, fileFindings...)
 		surface = append(surface, fileSurface...)
 		return nil
@@ -150,6 +153,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		return findings.SensorResult{Sensor: s.Name(), Error: walkErr.Error()}, walkErr
 	}
 	sort.Strings(audited)
+	warnKeepModeLeftCriticals(ctx.Config, keptCritical)
 
 	return findings.SensorResult{
 		Sensor:         s.Name(),
@@ -406,28 +410,82 @@ func nonEmptyLines(content []byte) []sourceLine {
 }
 
 // applyCriticality adjusts each finding's severity by the file's path
-// criticality: test downgrades one level, example forces info (RF-11).
-func applyCriticality(cfg *config.Config, rel string, fs []findings.Finding) {
+// criticality (RF-10): a test path is re-weighted by the configured
+// sensors.security.test_severity mode, an example path is forced to info.
+// RequiresConsent is recomputed from the ADJUSTED severity, never the natural
+// one.
+//
+// It returns how many SECURITY findings this file kept at critical on a TEST
+// path — which only config.TestSeverityKeep can produce, and which the caller
+// turns into one warning per run.
+//
+// DECLARED REACH (ADR 0070): RF-10 says criticality weights "cada finding", but
+// this is the only place it is applied and the security sensor is its only
+// caller. The DB sensor never applies path criticality — its findings are
+// schema-scoped, so a project-relative production/test/example glob does not
+// classify them. That gap is deliberate and out of scope here; see
+// docs/decisions/0070-*.md and internal/sensors/db/doc.go.
+func applyCriticality(cfg *config.Config, rel string, fs []findings.Finding) int {
 	if cfg == nil {
-		return
+		return 0
 	}
 	criticality := cfg.PathCriticalityFor(rel)
+	mode := cfg.TestSeverityMode()
+	keptCritical := 0
 	for i := range fs {
-		fs[i].Severity = adjustSeverity(fs[i].Severity, criticality)
+		fs[i].Severity = adjustSeverity(fs[i].Severity, criticality, mode)
 		fs[i].RequiresConsent = fs[i].Dimension == findings.DimensionSecurity &&
 			fs[i].Severity == findings.SeverityCritical
+		if criticality == config.CriticalityTest && fs[i].RequiresConsent {
+			keptCritical++
+		}
 	}
+	return keptCritical
 }
 
-func adjustSeverity(sev findings.Severity, criticality string) findings.Severity {
+// adjustSeverity re-weights one finding's severity for its path class (RF-10).
+//
+// The test arm is the configurable one, and mode is already resolved by
+// Config.TestSeverityMode — the sensor never re-decides what an unset key means.
+// The example arm stays hardcoded to info: the PRD promises no key for it, and
+// codefit does not invent config the PRD never named.
+func adjustSeverity(sev findings.Severity, criticality, mode string) findings.Severity {
 	switch criticality {
 	case config.CriticalityTest:
-		return downgrade(sev)
+		switch mode {
+		case config.TestSeverityDowngrade:
+			return downgrade(sev)
+		case config.TestSeverityKeep:
+			return sev
+		default: // config.TestSeverityInfo — the RF-10 default
+			return findings.SeverityInfo
+		}
 	case config.CriticalityExample:
 		return findings.SeverityInfo
 	default:
 		return sev
 	}
+}
+
+// warnKeepModeLeftCriticals informs, exactly once per run, that
+// test_severity: "keep" left security findings at critical on test paths — and
+// therefore that scoring.IsBlocked will report this project as blocked from its
+// own test files.
+//
+// It fires HERE, at materialisation, and nowhere else. Refusing "keep" in
+// validate() would be codefit overriding a decision the PRD hands to the
+// developer; warning at load would fire on every run of every project that set
+// the mode, including the ones where no test finding exists and nothing is
+// blocked. The consequence is only real once a finding survives, so that is
+// when it is stated.
+func warnKeepModeLeftCriticals(cfg *config.Config, n int) {
+	if n == 0 || cfg.TestSeverityMode() != config.TestSeverityKeep {
+		return
+	}
+	slog.Warn("sensors.security.test_severity is \"keep\", so critical security findings on test "+
+		"paths were NOT re-weighted; they still require consent and this project is reported as "+
+		"blocked. Set test_severity to \"info\" (the default) or \"downgrade\" to change that",
+		"critical_findings_on_test_paths", n)
 }
 
 func downgrade(sev findings.Severity) findings.Severity {

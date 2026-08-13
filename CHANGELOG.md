@@ -15,6 +15,44 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed — BREAKING
+- ⚠️ **A security finding in a test file is now `info` by default, not one
+  severity level down (RF-10).** PRD v1.4 RF-10 has said since v1.3 that
+  "findings de seguridad en archivos de test se degradan a `info`
+  (configurable)", and §14 spelled out what configurable meant:
+  `sensors.security.test_severity: info | downgrade | keep`. The code shipped
+  neither half — it hardcoded the `downgrade` mode (critical→high, high→medium,
+  …) and the key existed in zero Go files. `downgrade` is one of the PRD's own
+  three modes, so the defect was the wrong default plus a missing key, not an
+  invented behaviour. No ADR ever revised the requirement.
+
+  **Migration.** A project that wants the previous behaviour asks for it:
+
+  ```yaml
+  sensors:
+    security:
+      test_severity: "downgrade"   # info (default) | downgrade | keep
+  ```
+
+  What changes without that key: test-path security findings report as `info`
+  and cost the security dimension nothing (severity penalty 10→0 for a
+  critical), so the security score RISES wherever such findings exist. Blocking
+  is unaffected — under both `info` and `downgrade` a test path could never
+  produce a blocking finding.
+
+  `keep` applies no adjustment at all and is the only mode that can leave a
+  critical security finding standing on a test path — which means it is the only
+  one that can make a project block itself from its own fixtures. codefit
+  accepts it (refusing a PRD-named mode would override the developer) and
+  informs the consequence with one warning per run, emitted only when `keep`
+  actually left a finding at critical. An unrecognised value fails `Load` with a
+  located `path:line` error naming all three modes.
+
+  `codefit init` deliberately does **not** emit the key: writing today's default
+  into every generated project would mean a future change of the default never
+  reaches them. Path criticality is still applied by the security sensor only —
+  the DB sensor does not weight by path, and that gap is now declared rather
+  than silent. See
+  [ADR 0070](docs/decisions/0070-path-criticality-is-configurable-and-reaches-only-the-security-sensor.md).
 - ⚠️ **`codefit-scan-all`'s `summary` is now PER DIMENSION.** The four
   unqualified counts (`endpoints`, `deterministic_findings`, `surface_items`,
   `certain_concerns`) were all computed from the **security** sensor's result

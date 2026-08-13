@@ -146,3 +146,76 @@ project:
 		t.Fatalf("Load should reject an unknown framework, got: %v", err)
 	}
 }
+
+// TestLoadRejectsUnknownTestSeverity — an unrecognised
+// sensors.security.test_severity must STOP the load, not be quietly resolved to
+// the default. Silently accepting "silence" would leave the developer believing
+// test findings were suppressed while they were still being reported: a config
+// that parses and lies is worse than one that fails.
+//
+// The message must name the key, the offending value and all three modes, and
+// carry path:line so the developer can jump to it — the same shape as framework
+// and paradigm.
+func TestLoadRejectsUnknownTestSeverity(t *testing.T) {
+	body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+sensors:
+  security:
+    test_severity: "silence"
+`
+	cfg, err := config.Load(writeConfig(t, body))
+	if err == nil {
+		t.Fatal("Load accepted an unknown sensors.security.test_severity, want error")
+	}
+	if cfg != nil {
+		t.Errorf("an invalid config must not return a usable *Config, got %+v", cfg)
+	}
+	msg := err.Error()
+	for _, want := range []string{"test_severity", "silence", "info", "downgrade", "keep"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error must name the key, the bad value and the three allowed modes; missing %q in: %s", want, msg)
+		}
+	}
+	// Located error: test_severity is on line 7 of the body.
+	if !strings.Contains(msg, ":7:") {
+		t.Errorf("error %q should point to line 7 (the test_severity key)", msg)
+	}
+}
+
+// TestLoadAcceptsEveryTestSeverityMode triangulates the enum arm: all three
+// PRD-named modes load, and an unset key loads too. codefit never refuses a
+// mode the PRD sanctions — including "keep", whose consequence it warns about
+// at materialisation instead (developer autonomy: codefit informs, the
+// developer decides).
+func TestLoadAcceptsEveryTestSeverityMode(t *testing.T) {
+	for _, mode := range []string{"info", "downgrade", "keep"} {
+		t.Run(mode, func(t *testing.T) {
+			body := `version: "1"
+project:
+  name: "demo"
+  language: "go"
+sensors:
+  security:
+    test_severity: "` + mode + `"
+`
+			cfg, err := config.Load(writeConfig(t, body))
+			if err != nil {
+				t.Fatalf("Load rejected the PRD-named mode %q: %v", mode, err)
+			}
+			if got := cfg.TestSeverityMode(); got != mode {
+				t.Errorf("TestSeverityMode() = %q, want %q", got, mode)
+			}
+		})
+	}
+	t.Run("unset", func(t *testing.T) {
+		cfg, err := config.Load(writeConfig(t, validBody))
+		if err != nil {
+			t.Fatalf("Load rejected a config with no test_severity: %v", err)
+		}
+		if got := cfg.TestSeverityMode(); got != config.TestSeverityInfo {
+			t.Errorf("an absent test_severity must resolve to %q, got %q", config.TestSeverityInfo, got)
+		}
+	})
+}

@@ -66,3 +66,41 @@ func TestExpandGlobs(t *testing.T) {
 		t.Errorf("ExpandGlobs = %v, want %v", got, want)
 	}
 }
+
+// TestTestSeverityMode pins the ONE place that resolves an absent
+// sensors.security.test_severity into a mode (RF-10). Every caller asks the
+// Config, so the default lives here and nowhere else — a sensor that repeated
+// the "" → info rule locally is how two defaults drift apart.
+//
+// The nil-Config case is not hypothetical: AuditContext.Config is nil whenever
+// a project has no .codefit.yaml at all, and applyCriticality is reached with
+// it.
+func TestTestSeverityMode(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{"nil config defaults to info", nil, config.TestSeverityInfo},
+		{"unset defaults to info", withTestSeverity(""), config.TestSeverityInfo},
+		{"explicit info", withTestSeverity("info"), config.TestSeverityInfo},
+		{"explicit downgrade", withTestSeverity("downgrade"), config.TestSeverityDowngrade},
+		{"explicit keep", withTestSeverity("keep"), config.TestSeverityKeep},
+		// validate() rejects this at Load; a hand-built Config can still carry it.
+		// The resolver never invents a fourth mode — it falls back to the default.
+		{"unrecognised falls back to info", withTestSeverity("silence"), config.TestSeverityInfo},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.cfg.TestSeverityMode(); got != c.want {
+				t.Errorf("TestSeverityMode() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func withTestSeverity(mode string) *config.Config {
+	cfg := criticalityFixture()
+	cfg.Sensors.Security.TestSeverity = mode
+	return cfg
+}

@@ -6,7 +6,7 @@ project:
   name: "codefit"
   language: "go"
   description: "AI-generated code auditor"
-  # Path criticality weights finding severity by location (RF-11).
+  # Path criticality weights finding severity by location (RF-10).
   path_criticality:
     production:
       - "internal/**"

@@ -47,7 +47,7 @@ type AuditReport struct {
 }
 
 // BaselineSummary reports how many findings were new vs. recorded as historical
-// debt when a baseline is active (RF-10).
+// debt when a baseline is active (RF-08).
 type BaselineSummary struct {
 	Active            bool `json:"active"`
 	NewFindings       int  `json:"new_findings"`

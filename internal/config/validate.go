@@ -19,6 +19,13 @@ var (
 	// config vocabulary stays consistent with the descriptor naming (design §5,
 	// H1 decision).
 	allowedDBTypes = []string{"postgresql", "mysql", "sqlserver", "sqlite", "none"}
+	// The three RF-10 test-path severity modes. "keep" is deliberately IN the
+	// list: refusing a mode the PRD names would be codefit overriding the
+	// developer's decision, which the autonomy principle forbids. Its
+	// consequence (a critical security finding can survive on a test path and
+	// block) is informed at materialisation by the security sensor, not by a
+	// validation error here.
+	allowedTestSeverities = []string{TestSeverityInfo, TestSeverityDowngrade, TestSeverityKeep}
 )
 
 // validate checks required fields and enum values, returning located
@@ -55,6 +62,16 @@ func validate(cfg *Config, root *yaml.Node, src string) error {
 		add(fmt.Sprintf("invalid database type %q (allowed: %s)",
 			dt, strings.Join(allowedDBTypes, ", ")),
 			"database", "type")
+	}
+	// An unrecognised test_severity STOPS the load. Resolving it to the default
+	// would leave the developer believing test findings were re-weighted the way
+	// they asked while codefit did something else — a config that parses and
+	// lies. TestSeverityMode's fallback covers only hand-built Configs, which
+	// never pass through here.
+	if ts := cfg.Sensors.Security.TestSeverity; ts != "" && !slices.Contains(allowedTestSeverities, ts) {
+		add(fmt.Sprintf("invalid sensors.security.test_severity %q (allowed: %s)",
+			ts, strings.Join(allowedTestSeverities, ", ")),
+			"sensors", "security", "test_severity")
 	}
 	// The sum-to-100 rule stays even though a PARTIAL map is a real,
 	// supported case since roadmap P1-2 (scoring.ResolveWeights uses exactly
