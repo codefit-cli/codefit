@@ -279,6 +279,27 @@ ADRs no se cargan solos en sesión — leerlos explícitamente antes de empezar.
   `codefit-surface-*` para el mapeo de superficie.
 - **Commits:** conventional commits (`feat:`, `fix:`, `test:`, `docs:`,
   `refactor:`). Sin atribución de IA ni `Co-Authored-By`.
+- **Sin atribución de IA en NINGÚN artefacto que sale del repo** — no solo en los
+  commits: **el cuerpo del PR también**, más descripciones de release, ADRs y
+  comentarios. La regla es la misma; lo que cambia es dónde se verifica.
+  **El cuerpo de un PR no está en el diff**, así que ninguna sonda sobre los
+  commits ni sobre el diff lo alcanza — se chequea aparte, contra la API, antes
+  de mergear:
+
+  ```bash
+  gh pr view <N> --json body -q .body | rg -q 'Generated with|Co-Authored|🤖|Claude Code'
+  echo "attribution-exit=$?"   # 1 = limpio
+  ```
+
+  Con **control positivo** — un patrón que sí esté en ese cuerpo — porque si no
+  un `exit=1` puede significar "no hay atribución" o "la búsqueda está rota", y
+  son indistinguibles.
+
+  **Origen:** en el PR #132 la línea se coló solo en el cuerpo del PR. Los seis
+  PR anteriores y todos los commits estaban limpios. No fue descuido de la regla:
+  las sondas existentes miraban los commits y el diff, y ahí nunca estuvo. Es el
+  mismo punto ciego que la regla de dogfood sobre proyectos ajenos ya declara
+  para el cuerpo del PR — dos fugas distintas por el mismo agujero.
 
 ---
 
