@@ -235,7 +235,15 @@ func TestFormatReport_UndetectedDeclaresGap(t *testing.T) {
 			t.Errorf("the report must name the marker %q codefit looks for\n---\n%s", m, out)
 		}
 	}
-	for _, cannotHelp := range []string{"pyproject.toml", "requirements.txt", "build.gradle"} {
+	// The counter-probe carries the SAME four manifests its two siblings do
+	// (scaffold's TestRenderConfig_UndetectedNamesTheMarkersItLooksFor and
+	// TestCapabilityStatement_Undetected). pom.xml is not optional here just
+	// because it is the fixture's own file: the report never echoes the fixture,
+	// and omitting it left a hole — under a mutation that made
+	// InitDetectMarkerFiles also return pom.xml, this test stayed GREEN while
+	// both siblings went RED. The three declaration sites must move together, or
+	// the one a developer actually reads is the one left unguarded.
+	for _, cannotHelp := range []string{"pyproject.toml", "requirements.txt", "pom.xml", "build.gradle"} {
 		if strings.Contains(out, cannotHelp) {
 			t.Errorf("the report names %q, which resolves no provider — the original defect\n---\n%s", cannotHelp, out)
 		}
