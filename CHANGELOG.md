@@ -196,9 +196,22 @@ All notable changes to codefit are documented here. The format is based on
 
   **Now:** init exits 0 on any root. It writes `.codefit.yaml` and the skill, and
   declares what it did not find in three places — the generated config, the init
-  report and the README: which markers it looked for (derived from the registry,
-  so the list can no longer drift), that no code is scanned here, and that the DB
-  dimension still audits the schema once `database.schema_paths` is set.
+  report and the README: which markers it looked for, that no code is scanned
+  here, and that the DB dimension still audits the schema once
+  `database.schema_paths` is set.
+
+  The list cannot drift again, and each of the three places is held by a
+  different mechanism rather than by one claim covering all of them. The config
+  and the report **interpolate** the names from the registry
+  (`registry.InitDetectMarkerFiles()`). README is prose and cannot interpolate
+  anything, so its list is **locked against the registry by a test** that fails
+  in **both** directions: a marker added to the registry and missing from README,
+  and a marker README names that the registry does not have. And a hardcoded
+  marker list in the code that renders those artifacts is now forbidden
+  **structurally**, by a `go/ast` census of every production string literal in
+  `internal/scaffold` and `internal/cli` with a per-literal allowlist that
+  requires a stated reason — because a list typed today is byte-identical to the
+  derived one today, and starts lying only at the next registry change.
 
   **Migration:** none for a project init already recognized — language,
   framework, ORM, schema paths and the capability statement are unchanged, and
