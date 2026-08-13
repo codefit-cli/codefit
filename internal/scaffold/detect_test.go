@@ -3,8 +3,11 @@ package scaffold_test
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/config"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
@@ -72,10 +75,105 @@ func TestDetectGoProject(t *testing.T) {
 	}
 }
 
-func TestDetectUnknownProjectErrors(t *testing.T) {
-	dir := t.TempDir() // empty: no marker files
-	if _, err := scaffold.Detect(dir); err == nil {
-		t.Errorf("Detect on a dir with no markers must return an error, got nil")
+// TestDetectUnregisteredStackSucceeds replaces TestDetectUnknownProjectErrors,
+// which asserted only that SOME error came back. That content-blindness is
+// exactly how the refusal message drifted: it named four manifests that cannot
+// resolve a provider and omitted the one that can, and no test noticed for
+// three releases.
+//
+// Detect no longer refuses. A root whose only manifest is one codefit registers
+// no provider for is a real, common project — codefit simply cannot audit its
+// CODE, which is a declaration to make, not a reason to withhold a config the
+// DB dimension can still use.
+//
+// The fixture drives the real Detect over a real directory rather than building
+// a ProjectInfo by hand, so it exercises the same os.Stat path production takes.
+func TestDetectUnregisteredStackSucceeds(t *testing.T) {
+	// A build manifest for a stack the registry does not carry. Named by
+	// SHAPE — any manifest outside registry.InitDetectMarkerFiles() behaves
+	// identically; the probe below proves this one really is outside it.
+	const unregisteredManifest = "pom.xml"
+	if slices.Contains(registry.InitDetectMarkerFiles(), unregisteredManifest) {
+		t.Fatalf("%q is now a registered marker; this fixture no longer exercises the undetected path",
+			unregisteredManifest)
+	}
+
+	root := t.TempDir()
+	writeFile(t, root, unregisteredManifest, "<project/>\n")
+
+	info, err := scaffold.Detect(root)
+	if err != nil {
+		t.Fatalf("Detect on an unregistered stack must not refuse, got: %v", err)
+	}
+	if info.Language != config.LanguageUndetected {
+		t.Errorf("language = %q, want %q", info.Language, config.LanguageUndetected)
+	}
+	if info.Detected() {
+		t.Errorf("Detected() = true for the sentinel language %q", info.Language)
+	}
+	// No provider supplied defaults, so codefit invents no globs. Empty is the
+	// safe direction: nothing is classified "test", so RF-10's test-path
+	// re-weighting never fires and every finding keeps its natural severity.
+	pc := info.PathCriticality
+	if len(pc.Production) != 0 || len(pc.Test) != 0 || len(pc.Example) != 0 {
+		t.Errorf("path_criticality must be empty when no provider supplied defaults, got %+v", pc)
+	}
+	if info.Name != filepath.Base(root) {
+		t.Errorf("name = %q, want the project dir name %q", info.Name, filepath.Base(root))
+	}
+}
+
+// TestDetectEmptyDirSucceeds pins that "no files at all" is NOT a special case.
+// Any definition of "empty" would be arbitrary (does a README count? a
+// .gitignore?), so a directory with nothing in it takes exactly the same path
+// as a directory full of files codefit does not recognize.
+func TestDetectEmptyDirSucceeds(t *testing.T) {
+	root := t.TempDir() // no marker files, no files at all
+
+	info, err := scaffold.Detect(root)
+	if err != nil {
+		t.Fatalf("Detect on an empty dir must not refuse, got: %v", err)
+	}
+	if info.Language != config.LanguageUndetected {
+		t.Errorf("language = %q, want %q", info.Language, config.LanguageUndetected)
+	}
+	if info.Detected() {
+		t.Errorf("Detected() = true on an empty dir")
+	}
+}
+
+// TestDetectedIsTrueForARealLanguage is the other arm of Detected(): the
+// predicate must not be stuck false. It drives a real registered marker rather
+// than asserting against a literal, so it tracks the registry.
+func TestDetectedIsTrueForARealLanguage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module x\n")
+	info, err := scaffold.Detect(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Detected() {
+		t.Errorf("Detected() = false for a detected language %q", info.Language)
+	}
+}
+
+// TestDetectErrorsDoNotNameMarkerFiles guards the direction the deleted message
+// failed in. Detect still errors on a genuine path failure, and that error must
+// stay about the path — never a list of manifests to create, which is what made
+// the old message unactionable.
+func TestDetectErrorsDoNotNameMarkerFiles(t *testing.T) {
+	// A NUL byte cannot appear in a path on any supported OS, so Abs/Stat
+	// fails for a reason that has nothing to do with markers.
+	_, err := scaffold.Detect("bad\x00path")
+	if err == nil {
+		t.Skip("this platform accepts a NUL byte in a path; no genuine I/O failure to assert on")
+	}
+	msg := err.Error()
+	for _, marker := range append(registry.InitDetectMarkerFiles(),
+		"pyproject.toml", "requirements.txt", "pom.xml", "build.gradle") {
+		if strings.Contains(msg, marker) {
+			t.Errorf("a genuine I/O error must not name marker file %q; got: %s", marker, msg)
+		}
 	}
 }
 
