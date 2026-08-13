@@ -132,9 +132,31 @@ func TestConfigExists(t *testing.T) {
 // to serve.
 //
 // PathCriticalityFor is asserted through the REAL written file rather than
-// through the in-memory ProjectInfo. A struct assertion would still pass if the
-// template silently emitted globs of its own; only the file the developer keeps
-// proves nothing was invented.
+// through the in-memory ProjectInfo: this test's subject is the artifact the
+// developer keeps, so what it proves is that the file ON DISK loads, carries the
+// sentinel, and classifies no path — and that the skill written beside it never
+// passes the sentinel as a tool argument.
+//
+// What it does NOT prove on its own, stated because a test comment that
+// overstates its reach is how a gap goes unnoticed: it is BLIND to globs that
+// exist only in ProjectInfo. The config template gates the whole
+// path_criticality block behind {{if .Detected}}, so invented globs never reach
+// the file this test reads. Measured, not assumed — a mutation making Detect
+// invent globs for the undetected case (go vet 0) left this test GREEN and
+// reddened only TestDetectUnregisteredStackSucceeds.
+//
+// The behaviour is locked by the three tests together, each on a different
+// surface:
+//   - TestDetectUnregisteredStackSucceeds — the SOURCE: Detect invents no globs
+//     when no provider supplied defaults (the mutation above).
+//   - TestRenderConfig_UndetectedOmitsPathCriticalityWhole — the RENDERING: the
+//     key is omitted whole rather than emitted empty (a mutation removing the
+//     template's Detected gate reddens it, and this test stays GREEN).
+//   - this test — the ROUND TRIP: what landed on disk re-loads through the very
+//     validator writeConfig runs, and PathCriticalityFor returns "" for it.
+//
+// Only their composition rules out both directions; none of the three replaces
+// the other two.
 func TestGenerate_UndetectedRoundTrips(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pom.xml", "<project/>\n")
