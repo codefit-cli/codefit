@@ -39,10 +39,22 @@ version: "1"
 
 project:
   name: {{q .Name}}
+{{- if not .Detected}}
+  # codefit found no language provider it can audit in this project root.
+  # It looks for {{.Markers}}
+  # directly under the root, so a monorepo should run ` + "`codefit init`" + ` per
+  # sub-project root instead.
+  #
+  # The value below records THAT — codefit's detection result — and is never a
+  # claim about your project: your code has a language, codefit just registers
+  # no provider that can audit it. Nothing here scans code; see the note where
+  # ` + "`database:`" + ` would be for what still runs.
+{{- end}}
   language: {{q .Language}}
 {{- if .Framework}}
   framework: {{q .Framework}}
 {{- end}}
+{{- if .Detected}}
   # path_criticality weights finding severity by location: a secret in a test is
   # noise; in production it is critical. Globs are project-relative.
   path_criticality:
@@ -62,6 +74,24 @@ project:
       - {{q .}}
 {{- end}}
 {{- end}}
+{{- else}}
+  # path_criticality is absent on purpose, not left empty. No language provider
+  # resolved, so codefit has no defaults for this project and invents none —
+  # globs guessed for a tree codefit never inspected would silently reclassify
+  # your files.
+  #
+  # CONSEQUENCE: no path is classified, so the test-path re-weighting never
+  # fires and every finding keeps its natural severity. Nothing is downgraded
+  # behind your back; nothing in a test file is quieted either.
+  #
+  # Add it yourself to get that weighting. Globs are project-relative:
+  #
+  #   path_criticality:
+  #     production:
+  #       - "src/**"
+  #     test:
+  #       - "**/*_test.*"
+{{- end}}
 {{- if .ORM}}
 
 database:
@@ -78,12 +108,31 @@ database:
     - {{q .}}
 {{- end}}
 {{- end}}
+{{- else}}
+
+# No ` + "`database:`" + ` section was written, and codefit is telling you rather than
+# letting you find out from an empty report: it detects a schema ONLY from a
+# Prisma schema.prisma. SQL migration directories — Flyway, golang-migrate,
+# plain .sql DDL — are NOT detected yet.
+#
+# So AS WRITTEN this config audits no schema. If this project has one, point
+# codefit at it by hand and the DB dimension runs on the next scan:
+#
+#   database:
+#     schema_paths:
+#       - "db/migrations"
 {{- end}}
 `))
 
 // configView is the flattened, slash-normalized data the config template needs.
 type configView struct {
 	Name, Language, Framework string
+	// Detected mirrors ProjectInfo.Detected(): whether a real language provider
+	// resolved. The template branches on this, never on the sentinel spelling.
+	Detected bool
+	// Markers is the prose list of the marker files codefit looks for, derived
+	// from the registry. The template must never spell a marker name itself.
+	Markers                   string
 	Production, Test, Example []string
 	ORM, DBType, DBParadigm   string
 	SchemaPaths               []string
@@ -95,6 +144,8 @@ func RenderConfig(info ProjectInfo) ([]byte, error) {
 	view := configView{
 		Name:        info.Name,
 		Language:    info.Language,
+		Detected:    info.Detected(),
+		Markers:     markerList(),
 		Framework:   info.Framework,
 		Production:  toSlashAll(info.PathCriticality.Production),
 		Test:        toSlashAll(info.PathCriticality.Test),

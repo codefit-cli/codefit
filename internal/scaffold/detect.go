@@ -36,8 +36,14 @@ type ProjectInfo struct {
 // field would be a second source of truth that can disagree with Language, and
 // every renderer branches on this one predicate rather than comparing against a
 // string literal it could misspell.
+//
+// The empty string counts as not detected too. Detect itself never produces it,
+// but ProjectInfo is exported and RenderSkill/RenderConfig are exported, so a
+// zero-valued struct reaches them. Rendering the code-scanning artifacts with
+// `language: ""` baked into every copy-paste example is the same fabrication as
+// the `"" → typescript` fallback this replaced, one shade quieter.
 func (i ProjectInfo) Detected() bool {
-	return i.Language != config.LanguageUndetected
+	return i.Language != "" && i.Language != config.LanguageUndetected
 }
 
 // dirsToSkip are never walked when counting route handlers — vendored or built

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/config"
+	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/scaffold"
 	"gopkg.in/yaml.v3"
 )
@@ -224,12 +226,92 @@ func TestSkillStatesSurfaceReachBeforeInstalling(t *testing.T) {
 	}
 }
 
-// RenderSkill is exported and may be called with no detected language; it must
-// still produce valid, exact commands (defaulting the baked language).
-func TestSkillEmptyLanguageDefaults(t *testing.T) {
-	_, body := renderSkill(t, scaffold.ProjectInfo{Name: "x"})
-	if !strings.Contains(body, `"typescript"`) {
-		t.Errorf("empty language must default the baked command language, got:\n%s", body)
+// TestSkillNeverFabricatesALanguage replaces TestSkillEmptyLanguageDefaults,
+// which PINNED the defect: RenderSkill silently baked `language: "typescript"`
+// whenever Language was empty.
+//
+// The skill is the FIRST artifact an agent reads, before any tool description,
+// and its examples are copy-paste instructions. Baking a language codefit never
+// detected tells the agent to scan a Java repository as TypeScript — a
+// fabrication in the one file whose whole job is to be trusted verbatim.
+//
+// Both inputs a caller can supply for "no language" are covered: the sentinel
+// Detect really returns, and the zero value an external caller can still pass.
+func TestSkillNeverFabricatesALanguage(t *testing.T) {
+	for _, lang := range []string{config.LanguageUndetected, ""} {
+		t.Run("language="+lang, func(t *testing.T) {
+			_, body := renderSkill(t, scaffold.ProjectInfo{Name: "x", Language: lang})
+			for _, fabricated := range []string{"typescript", "go", "java", "python"} {
+				if strings.Contains(body, `"`+fabricated+`"`) {
+					t.Errorf("skill baked language %q for an undetected project — codefit never detected it, got:\n%s",
+						fabricated, body)
+				}
+			}
+			if strings.Contains(body, `"`+config.LanguageUndetected+`"`) {
+				t.Errorf("skill passes the sentinel as a tool argument; it resolves no provider, got:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestSkillUndetectedStatesTheDBOnlyScope: an agent must not be left to guess
+// why the language examples are missing. The skill states that no language
+// provider resolved, that code scanning does not run, and that the DB dimension
+// still applies — with the marker names taken from the registry.
+// Both spellings of "no language" are covered. The sentinel is what Detect
+// returns; "" is what an external caller can still pass, and it is the input the
+// deleted fallback existed to paper over — rendering the code-scanning body with
+// `language: ""` baked into every example would just be a different fabrication.
+func TestSkillUndetectedStatesTheDBOnlyScope(t *testing.T) {
+	for _, lang := range []string{config.LanguageUndetected, ""} {
+		t.Run("language="+lang, func(t *testing.T) {
+			_, body := renderSkill(t, scaffold.ProjectInfo{Name: "x", Language: lang})
+			low := strings.ToLower(body)
+
+			if !strings.Contains(body, "codefit-scan-db") || !strings.Contains(body, "schema_paths") {
+				t.Errorf("the undetected skill must still teach the DB dimension and how to turn it on, got:\n%s", body)
+			}
+			if !strings.Contains(low, "no language provider") && !strings.Contains(low, "did not detect") {
+				t.Errorf("the undetected skill must state that no language provider resolved, got:\n%s", body)
+			}
+			markers := registry.InitDetectMarkerFiles()
+			if len(markers) == 0 {
+				t.Fatal("no InitDetect markers registered; the loop below would pass vacuously")
+			}
+			for _, m := range markers {
+				if !strings.Contains(body, m) {
+					t.Errorf("the undetected skill must name the marker %q codefit looks for, got:\n%s", m, body)
+				}
+			}
+			// A code-scanning instruction the agent cannot carry out is
+			// worse than its absence: it would call the tool, get a null
+			// security dimension, and have to work out why.
+			if strings.Contains(body, "codefit-scan-endpoint") {
+				t.Errorf("the undetected skill must not instruct the agent to scan endpoints; no provider resolves, got:\n%s", body)
+			}
+			if strings.Contains(body, "language`: ") || strings.Contains(body, "language: \"") {
+				t.Errorf("the undetected skill must not spell a `language` argument at all, got:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestSkillDescriptionSurvivesUndetection guards the one thing that must NOT be
+// gated. Progressive disclosure loads the skill from the frontmatter alone: if
+// the description stopped naming database and schema triggers for an undetected
+// project, a schema task would never load the skill at all. The agent would not
+// see a narrower skill — it would see none.
+func TestSkillDescriptionSurvivesUndetection(t *testing.T) {
+	front, _ := renderSkill(t, scaffold.ProjectInfo{Name: "x", Language: config.LanguageUndetected})
+	desc, _ := front["description"].(string)
+	if desc == "" {
+		t.Fatal("frontmatter description is required and must be non-empty")
+	}
+	low := strings.ToLower(desc)
+	for _, trigger := range []string{"database", "schema", "audit"} {
+		if !strings.Contains(low, trigger) {
+			t.Errorf("the description must keep trigger %q even when no language was detected, got %q", trigger, desc)
+		}
 	}
 }
 
