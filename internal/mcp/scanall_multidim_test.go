@@ -149,7 +149,7 @@ const mysqlNoPKSchema = "CREATE TABLE `no_key` (\n  `status` ENUM('a','b') NOT N
 // dbType→dialect plumbing (H6, H7): the fixture is dialect-neutral, and
 // sqlddl.New()'s default dialect is Postgres, so this test would still pass
 // even if cfg.Database.Type were dropped/hardcoded to "" before reaching
-// schemaParserForPaths. TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn
+// schemasource.ParserForPaths. TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn
 // (below) is the test that actually locks the plumbing, via a dialect
 // -exclusive fixture that Postgres cannot parse correctly.
 func TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged(t *testing.T) {
@@ -178,7 +178,7 @@ func TestScanAll_WithDB_PostgresSQLDDL_DimensionUnchanged(t *testing.T) {
 
 // TestScanAll_WithDB_MySQLSQLDDL_DialectPlumbingLocksIn is the discriminating
 // H8 DoD closure: it proves cfg.Database.Type actually reaches
-// schemaParserForPaths → sqlDialectParser and binds the MySQL dialect
+// schemasource.ParserForPaths → sqlDialectParser and binds the MySQL dialect
 // descriptor. The fixture (mysqlNoPKSchema) uses backtick-quoted identifiers,
 // a MySQL-exclusive construct: under the WRONG dialect (e.g. Postgres, which
 // is sqlddl.New()'s default) the backtick-quoted table does not canonicalize
