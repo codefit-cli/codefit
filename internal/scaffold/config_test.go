@@ -178,51 +178,273 @@ func TestRenderConfig_UndetectedNamesTheMarkersItLooksFor(t *testing.T) {
 	}
 }
 
-// TestRenderConfig_DeclaresTheSchemaGapWheneverNoORM is the PR-B declaration.
+// configGapClaim anchors the sentence the generated config's else-branch makes
+// about detection. Anchoring on the CLAIM rather than on a loose word keeps the
+// counter-cases below from being satisfied by any other mention of a schema.
+const configGapClaim = "NOT detected"
+
+func renderOrFail(t *testing.T, info scaffold.ProjectInfo) string {
+	t.Helper()
+	data, err := scaffold.RenderConfig(info)
+	if err != nil {
+		t.Fatalf("RenderConfig: %v", err)
+	}
+	return string(data)
+}
+
+// TestRenderConfig_DeclaresTheSchemaGapWheneverNoSchemaPaths is R2's config half,
+// and it REPLACES TestRenderConfig_DeclaresTheSchemaGapWheneverNoORM rather than
+// sitting beside it.
 //
-// The whole `database:` block — schema_paths included — is gated behind an ORM,
-// and SchemaPaths is only ever populated from a Prisma schema. There is no
-// detection of a SQL-migration directory. So a Flyway project receives a config
-// with no database section: a config that audits NOTHING.
+// The old test's counter-case set ORM *and* SchemaPaths at once, so the two
+// candidate predicates — `.ORM` and `len(.SchemaPaths) > 0` — were true together
+// in every case it had. It could not see the difference between them, which means
+// it locked nothing about the gate. Retargeting that counter-case is the fix; a
+// third case added next to it would have left the hole exactly where it was.
 //
-// The condition is ORM == "", not "undetected". A TypeScript project with no
-// Prisma schema has the identical gap, and it would be dishonest to declare it
-// only in the case that happens to be new.
-func TestRenderConfig_DeclaresTheSchemaGapWheneverNoORM(t *testing.T) {
-	cases := map[string]scaffold.ProjectInfo{
+// schema_paths is the only DB field any sensor reads, so it is the only one that
+// can decide whether this config audits a schema.
+func TestRenderConfig_DeclaresTheSchemaGapWheneverNoSchemaPaths(t *testing.T) {
+	declared := map[string]scaffold.ProjectInfo{
 		"undetected":          undetectedInfo(t),
 		"detected but no orm": {Name: "x", Language: "go"},
 		"typescript without orm": {Name: "x", Language: "typescript",
 			PathCriticality: config.PathCriticality{Production: []string{"src/**"}}},
+		// The drizzle/typeorm shape, reachable today through real detection. Under
+		// the ORM-keyed gate it received a `database:` block holding nothing but
+		// `orm: drizzle` — configuring nothing any sensor reads — and, because the
+		// block was present, no declaration that its schema was unaudited.
+		"orm detected but no schema": {Name: "x", Language: "typescript", ORM: "drizzle",
+			PathCriticality: config.PathCriticality{Production: []string{"src/**"}}},
 	}
-	for name, info := range cases {
+	for name, info := range declared {
 		t.Run(name, func(t *testing.T) {
-			data, err := scaffold.RenderConfig(info)
-			if err != nil {
-				t.Fatalf("RenderConfig: %v", err)
+			out := renderOrFail(t, info)
+			if liveYAMLKeyPresent(out, "database") {
+				t.Errorf("no schema source was detected, so no live `database:` block may be "+
+					"written\n---\n%s", out)
 			}
-			out := string(data)
 			if !strings.Contains(out, "schema_paths") {
-				t.Errorf("a config with no ORM must tell the developer schema_paths is how the DB dimension turns on\n---\n%s", out)
+				t.Errorf("a config auditing no schema must tell the developer schema_paths is how the "+
+					"DB dimension turns on\n---\n%s", out)
 			}
-			low := strings.ToLower(out)
-			if !strings.Contains(low, "migration") {
-				t.Errorf("the declaration must say SQL migration directories are NOT detected — the gap that leaves this config auditing nothing\n---\n%s", out)
+			if !strings.Contains(out, configGapClaim) {
+				t.Errorf("the declaration must say SQL migration directories are %s — the gap that "+
+					"leaves this config auditing nothing\n---\n%s", configGapClaim, out)
+			}
+			if !strings.Contains(strings.ToLower(out), "migration") {
+				t.Errorf("the declaration must name what is not detected: SQL migration "+
+					"directories\n---\n%s", out)
 			}
 		})
 	}
 
-	// The counter-case: a project WITH an ORM already has a real database
-	// block, so the gap declaration must not appear and confuse it.
-	withORM, err := scaffold.RenderConfig(scaffold.ProjectInfo{
-		Name: "x", Language: "typescript", ORM: "prisma",
+	notDeclared := map[string]scaffold.ProjectInfo{
+		"orm and schema": {Name: "x", Language: "typescript", ORM: "prisma",
+			SchemaPaths: []string{"prisma/schema.prisma"}},
+		// HAND-BUILT ON PURPOSE, and it is the discriminating case: no detection
+		// path produces SchemaPaths without an ORM today. That is exactly the shape
+		// this change stops mis-handling and the shape SQL migration detection will
+		// make real. This project prefers fixtures driven through the real parser;
+		// there is no real path to drive here, and leaving the predicate unlocked
+		// would be the worse trade.
+		"schema without orm": {Name: "x", Language: "typescript",
+			SchemaPaths: []string{"db/migrations"}},
+	}
+	for name, info := range notDeclared {
+		t.Run(name, func(t *testing.T) {
+			out := renderOrFail(t, info)
+			if !liveYAMLKeyPresent(out, "schema_paths") {
+				t.Errorf("a detected schema source must be written as a LIVE schema_paths key, not "+
+					"discussed in a comment\n---\n%s", out)
+			}
+			if strings.Contains(out, configGapClaim) {
+				t.Errorf("this config names a schema source, so it must not also claim schemas are "+
+					"%s\n---\n%s", configGapClaim, out)
+			}
+		})
+	}
+}
+
+// TestRenderConfig_OrmDeclaresThatNothingReadsIt is R4. `orm:` round-trips and is
+// user-visible, so it stays — but an unread field printed beside read ones invites
+// the belief that setting it does something. codefit informs the consequence
+// rather than deleting a committed key or leaving the impression standing.
+func TestRenderConfig_OrmDeclaresThatNothingReadsIt(t *testing.T) {
+	out := renderOrFail(t, scaffold.ProjectInfo{
+		Name: "x", Language: "typescript", ORM: "prisma", DBType: "postgresql",
 		SchemaPaths: []string{"prisma/schema.prisma"},
 	})
-	if err != nil {
-		t.Fatalf("RenderConfig: %v", err)
+	if !liveYAMLKeyPresent(out, "orm") {
+		t.Fatalf("orm: must still be emitted for a project that has one\n---\n%s", out)
 	}
-	if strings.Contains(strings.ToLower(string(withORM)), "migration") {
-		t.Errorf("a config with a detected ORM must not carry the no-ORM gap declaration\n---\n%s", withORM)
+
+	// The statement lives in a comment, so it must be found in the COMMENTS, not
+	// anywhere in the file: a live key spelling these words would be a different
+	// (and broken) artifact.
+	comments := configComments(out)
+	low := strings.ToLower(comments)
+	if !strings.Contains(low, "no sensor reads") {
+		t.Errorf("the config must state that no sensor reads orm:, or a developer will believe "+
+			"setting it turns something on\n--- comments ---\n%s", comments)
+	}
+	if !strings.Contains(comments, "schema_paths") {
+		t.Errorf("the same statement must name schema_paths as what actually turns the DB dimension "+
+			"on\n--- comments ---\n%s", comments)
+	}
+}
+
+// TestRenderConfig_CommentedExampleNamesTypeAndItsConsequence is R5.
+//
+// The commented example is not decoration: it is the instruction a developer with
+// a SQL migration directory follows by hand, and it is the ONLY reachable route
+// into sqlDialectParser today. Showing schema_paths alone steers a MySQL or SQL
+// Server user straight into the "" branch, which parses their DDL as PostgreSQL
+// and says nothing — a silently wrong reconstructed schema that every DB rule
+// then reasons over.
+//
+// `type:` is NOT made required by this change; "" remains valid to the loader.
+// The defect is the instruction, so the instruction is what gets fixed: name the
+// key, and name what happens when it is left out.
+func TestRenderConfig_CommentedExampleNamesTypeAndItsConsequence(t *testing.T) {
+	comments := configComments(renderOrFail(t, undetectedInfo(t)))
+	low := strings.ToLower(comments)
+
+	if !strings.Contains(comments, "type:") {
+		t.Errorf("the commented example must show `type:` beside schema_paths, or it instructs the "+
+			"reader into the silent PostgreSQL default\n--- comments ---\n%s", comments)
+	}
+	if !strings.Contains(comments, "schema_paths") {
+		t.Errorf("the commented example must still show schema_paths — it is what turns the DB "+
+			"dimension on\n--- comments ---\n%s", comments)
+	}
+
+	// The CONSEQUENCE, not just the key. A `type:` line with no explanation reads
+	// as optional garnish and gets left out by exactly the reader it protects.
+	for _, want := range []string{"postgresql", "mysql", "sqlserver"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("the comment must name %q so the reader can recognise their own dialect\n"+
+				"--- comments ---\n%s", want, comments)
+		}
+	}
+	if !strings.Contains(low, "silently") {
+		t.Errorf("the comment must state that omitting type: mis-parses SILENTLY — a wrong parse "+
+			"the developer is never told about is the whole risk\n--- comments ---\n%s", comments)
+	}
+	if !strings.Contains(low, "sqlite") {
+		t.Errorf("the comment must name sqlite, which is REFUSED rather than guessed — the one "+
+			"dialect that fails loudly instead of quietly\n--- comments ---\n%s", comments)
+	}
+
+	// R5's second scenario: naming type: must not cost the honesty about
+	// detection that already lives here.
+	if !strings.Contains(comments, configGapClaim) || !strings.Contains(low, "migration") {
+		t.Errorf("the comment must still state that SQL migration directories are %s\n"+
+			"--- comments ---\n%s", configGapClaim, comments)
+	}
+}
+
+// configComments returns only the comment lines of a rendered config.
+func configComments(raw string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// liveConfigLines returns the config's non-comment, non-blank lines VERBATIM, in
+// order. Comments are dropped because the change this test guards adds prose; the
+// order is preserved because a reordering of live keys is exactly what a
+// structural comparison of the LOADED config would normalise away.
+func liveConfigLines(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		out = append(out, strings.TrimRight(line, "\r"))
+	}
+	return out
+}
+
+// TestGenerate_PrismaConfigParity is R3, and it is a REGRESSION LOCK, not a RED
+// step: it was written and seen green against the unmodified tree before the
+// predicate move, so what it pins is today's output, not tomorrow's intention.
+//
+// The subject is the file `codefit init` really writes — Generate over a copy of
+// the real Prisma fixture — because a Prisma project is the one shape that must
+// come through the gate move byte-for-byte in its LIVE content.
+//
+// Two halves, and neither replaces the other:
+//   - the loaded config.Database catches a DROPPED key (Q1's rejected
+//     alternative deletes `orm:`, and config.Load would happily accept that);
+//   - the ordered line golden catches a REORDERING or a re-indentation, which
+//     config.Load normalises away into an identical struct.
+func TestGenerate_PrismaConfigParity(t *testing.T) {
+	root := copyTreeInto(t, sampleNext, filepath.Join(t.TempDir(), "sample-next"))
+	if _, err := scaffold.Generate(scaffold.Options{Root: root}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	written := filepath.Join(root, scaffold.ConfigName)
+	raw, err := os.ReadFile(written)
+	if err != nil {
+		t.Fatalf("reading the config init wrote: %v", err)
+	}
+
+	cfg, err := config.Load(written)
+	if err != nil {
+		t.Fatalf("the config init wrote does not load: %v\n--- yaml ---\n%s", err, raw)
+	}
+	if cfg.Database.ORM != "prisma" {
+		t.Errorf("database.orm = %q, want prisma — a Prisma project must keep every key it has today", cfg.Database.ORM)
+	}
+	if cfg.Database.Type != "postgresql" {
+		t.Errorf("database.type = %q, want postgresql", cfg.Database.Type)
+	}
+	if cfg.Database.Paradigm != "auto" {
+		t.Errorf("database.paradigm = %q, want auto", cfg.Database.Paradigm)
+	}
+	if !slices.Equal(cfg.Database.SchemaPaths, []string{"prisma/schema.prisma"}) {
+		t.Errorf("database.schema_paths = %v, want [prisma/schema.prisma]", cfg.Database.SchemaPaths)
+	}
+
+	// The golden is small and lives in the test on purpose: a reviewer reading
+	// the diff must be able to see the whole live surface of the artifact,
+	// without opening a second file.
+	want := []string{
+		`version: "1"`,
+		`project:`,
+		`  name: sample-next`,
+		`  language: typescript`,
+		`  framework: next`,
+		`  path_criticality:`,
+		`    production:`,
+		`      - app/**`,
+		`      - src/**`,
+		`    test:`,
+		`      - '**/*.test.ts'`,
+		`      - '**/*.test.tsx'`,
+		`      - '**/*.spec.ts'`,
+		`      - '**/*.spec.tsx'`,
+		`    example:`,
+		`      - examples/**`,
+		`      - docs/**`,
+		`database:`,
+		`  orm: prisma`,
+		`  type: postgresql`,
+		`  paradigm: auto`,
+		`  schema_paths:`,
+		`    - prisma/schema.prisma`,
+	}
+	got := liveConfigLines(string(raw))
+	if !slices.Equal(got, want) {
+		t.Errorf("the live (non-comment) lines of a Prisma config changed.\n got: %q\nwant: %q\n--- yaml ---\n%s",
+			got, want, raw)
 	}
 }
 

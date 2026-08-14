@@ -259,35 +259,155 @@ func TestFormatReport_UndetectedDeclaresGap(t *testing.T) {
 	}
 }
 
-// TestFormatReport_SchemaGapDeclaredWheneverNoORM: the gap is not specific to
-// the undetected case. A TypeScript project with no Prisma schema gets the same
-// config that audits no schema, so it gets the same declaration — and a project
-// that DOES have a detected ORM must not be handed a warning that does not
-// apply to it.
-func TestFormatReport_SchemaGapDeclaredWheneverNoORM(t *testing.T) {
-	noORM := formatReport(scaffold.Result{
-		Info:         scaffold.ProjectInfo{Name: "x", Language: "typescript", Framework: "next"},
+// reportFor renders the report for an info, with the surrounding Result fields
+// held constant so the only thing varying between cases is the DB detection.
+func reportFor(info scaffold.ProjectInfo) string {
+	return formatReport(scaffold.Result{
+		Info:         info,
 		ConfigPath:   ".codefit.yaml",
 		ConfigAction: scaffold.ConfigCreated,
 		UsedFallback: true,
 		Skills:       []scaffold.SkillWrite{{Agent: "standard location", Path: ".agents/skills/codefit/SKILL.md"}},
 	})
-	if !strings.Contains(strings.ToLower(noORM), "migration") {
-		t.Errorf("a detected project with no ORM has the identical schema gap and must be told\n---\n%s", noORM)
+}
+
+// TestFormatReport_SchemaGapDeclaredWheneverNoSchemaPaths is R2's report half,
+// and it REPLACES TestFormatReport_SchemaGapDeclaredWheneverNoORM rather than
+// sitting beside it.
+//
+// The old test could not tell the two predicates apart. Its counter-case set ORM
+// *and* SchemaPaths at once, so `info.ORM != ""` and `len(info.SchemaPaths) > 0`
+// were true together in every case it had; the whole predicate move was invisible
+// to it. Retargeting the counter-case — not adding a third one next to it — is
+// what makes the suite able to see the change at all.
+//
+// The gap declaration follows the field the audit actually reads: schema_paths is
+// the only DB field any sensor consumes, so it is the only one that can decide
+// whether this config audits a schema.
+func TestFormatReport_SchemaGapDeclaredWheneverNoSchemaPaths(t *testing.T) {
+	declared := map[string]scaffold.ProjectInfo{
+		"detected, no orm, no schema": {Name: "x", Language: "typescript", Framework: "next"},
+		// The drizzle/typeorm shape, reachable today through real detection: an
+		// ORM is named, no schema source is. Under the ORM-keyed predicate this
+		// was the one case that got NO declaration while having the full gap.
+		"orm detected but no schema": {Name: "x", Language: "typescript", ORM: "drizzle"},
+	}
+	for name, info := range declared {
+		t.Run(name, func(t *testing.T) {
+			out := reportFor(info)
+			if !strings.Contains(out, schemaGapHeading) {
+				t.Errorf("this config audits no schema, so the report must declare it\n---\n%s", out)
+			}
+		})
 	}
 
-	withORM := formatReport(scaffold.Result{
-		Info: scaffold.ProjectInfo{
+	// The counter-cases: a config that DOES name a schema source must not be
+	// handed a warning that does not apply to it.
+	notDeclared := map[string]scaffold.ProjectInfo{
+		"orm and schema": {
 			Name: "x", Language: "typescript", ORM: "prisma", DBType: "postgresql",
 			SchemaPaths: []string{filepath.FromSlash("prisma/schema.prisma")},
 		},
-		ConfigPath:   ".codefit.yaml",
-		ConfigAction: scaffold.ConfigCreated,
-		UsedFallback: true,
-		Skills:       []scaffold.SkillWrite{{Agent: "standard location", Path: ".agents/skills/codefit/SKILL.md"}},
-	})
-	if strings.Contains(strings.ToLower(withORM), "migration") {
-		t.Errorf("a project with a detected ORM must not be handed the no-schema warning\n---\n%s", withORM)
+		// HAND-BUILT ON PURPOSE, and it is the discriminating case. No detection
+		// path produces SchemaPaths without an ORM today — that is precisely the
+		// shape this change exists to stop mis-handling, and the shape SQL
+		// migration detection will make real. This project prefers fixtures driven
+		// through the real parser; here there is no real path to drive, and saying
+		// so is better than pretending the case is unreachable and leaving the
+		// predicate unlocked.
+		//
+		// It also cannot pass on the old predicate BY CONSTRUCTION: writeSchemaGap
+		// was `if info.ORM != "" { return }`, so with ORM == "" the old code had no
+		// path at all that skipped the section.
+		"schema without orm": {
+			Name: "x", Language: "typescript",
+			SchemaPaths: []string{filepath.FromSlash("db/migrations")},
+		},
+	}
+	for name, info := range notDeclared {
+		t.Run(name, func(t *testing.T) {
+			out := reportFor(info)
+			if strings.Contains(out, schemaGapHeading) {
+				t.Errorf("this config names a schema source, so it must not be told none was "+
+					"detected\n---\n%s", out)
+			}
+		})
+	}
+}
+
+// schemaGapHeading anchors the section writeSchemaGap emits. Anchoring on the
+// heading rather than on a loose word keeps "the section is present" from being
+// satisfied by any other sentence that happens to mention a schema.
+const schemaGapHeading = "Not configured — database schema:"
+
+// liveYAMLKeyPresent reports whether raw carries key as a LIVE (non-comment) YAML
+// key. The generated config DISCUSSES `database:` and `schema_paths` in prose for
+// every project that has neither, so a plain substring search would answer "yes"
+// for exactly the case this asks about.
+func liveYAMLKeyPresent(raw, key string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, key+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestInit_DrizzleProjectOmitsDatabaseBlockAndDeclaresGap is R1's live case, and
+// it is deliberately driven through the REAL init command over a REAL project
+// tree rather than a hand-built ProjectInfo — this shape is reachable today, by
+// one of the most common TypeScript ORMs, and the defect it pins was found by
+// running the binary.
+//
+// Drizzle sets ORM and never SchemaPaths (detect.go's enrichTypeScript). Under
+// the old, ORM-keyed gate that produced the worst of both artifacts at once: a
+// `database:` block containing nothing but `orm: drizzle` — a section that
+// configures nothing any sensor reads — AND no schema-gap declaration at all,
+// because writeSchemaGap returned early on a non-empty ORM. A header that looks
+// configured, suppressing the declaration that says it is not.
+//
+// Both halves are asserted together because fixing either alone leaves the
+// contradiction standing.
+func TestInit_DrizzleProjectOmitsDatabaseBlockAndDeclaresGap(t *testing.T) {
+	root := t.TempDir()
+	writeDrizzleProject(t, root)
+
+	out, err := runInit(t, root, "", "--non-interactive")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("reading the config init wrote: %v", err)
+	}
+	cfgText := string(raw)
+
+	// The fixture is verified by its EFFECT, not by its name: if detection did
+	// not actually see drizzle, everything below would pass vacuously.
+	if !strings.Contains(out, "drizzle") {
+		t.Fatalf("the fixture did not make init detect drizzle, so this test proves nothing about "+
+			"the drizzle shape\n---\n%s", out)
+	}
+
+	if liveYAMLKeyPresent(cfgText, "database") {
+		t.Errorf("a drizzle project has no schema source codefit can read, so the config must carry "+
+			"NO live `database:` block. An orm-only block configures nothing any sensor reads while "+
+			"looking configured\n--- config ---\n%s", cfgText)
+	}
+	if !strings.Contains(out, schemaGapHeading) {
+		t.Errorf("the report must declare the schema gap for a drizzle project: the config it just "+
+			"wrote audits no schema\n--- report ---\n%s", out)
+	}
+	// The detection FACT survives the block's removal — the developer meets the
+	// consequence, they are not quietly deprived of what codefit saw.
+	if !strings.Contains(out, "orm") {
+		t.Errorf("the report must still state that an ORM was detected, or removing the block hides "+
+			"a fact instead of explaining it\n---\n%s", out)
 	}
 }
 
@@ -318,6 +438,29 @@ func TestInitCommandOnUnregisteredStackExits0(t *testing.T) {
 func writeGoProject(t *testing.T, root string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeDrizzleProject writes a TypeScript project whose package.json declares
+// drizzle-orm and which has NO prisma/schema.prisma — the shape enrichTypeScript
+// resolves to ORM="drizzle" with SchemaPaths left empty.
+func writeDrizzleProject(t *testing.T, root string) {
+	t.Helper()
+	writeProjectFile(t, root, "package.json",
+		`{"name":"demo","dependencies":{"next":"14.0.0","drizzle-orm":"0.30.0"}}`)
+	writeProjectFile(t, root, "tsconfig.json", `{"compilerOptions":{"strict":true}}`)
+	writeProjectFile(t, root, "app/users/route.ts",
+		"export async function GET() { return Response.json([]); }\n")
+}
+
+func writeProjectFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	full := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
