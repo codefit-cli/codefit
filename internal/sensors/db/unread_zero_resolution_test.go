@@ -8,6 +8,7 @@ import (
 
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/sqlddl"
 )
 
@@ -50,6 +51,8 @@ const (
 	realFilePath  = "db/real/0001_account.sql"
 	realDirPath   = "db/real"
 	singleDirPath = "db/migrations"
+	nestedDirPath = "db/nested"
+	nestedSQLPath = "db/nested/sql/0001_account.sql"
 )
 
 // assertResolvesToNoSQL is the CONTENT guard, and it is the difference between
@@ -61,15 +64,32 @@ const (
 // It is written against the same predicate flywayOrderedSQL applies
 // (case-insensitive .sql extension, subdirectories skipped), not against a
 // guessed one, so a fixture the resolver would accept can never satisfy it.
+//
+// The second half — "and it holds content" — counts a NON-EMPTY SUBDIRECTORY as
+// content, not just a file. That is the minimum that lets the nested fixture be
+// expressed (a directory whose only child is a subdirectory), and it does not
+// blunt the guard: the guarantee being made is that the fixture proves codefit
+// skipped content that EXISTS, and a subdirectory with entries in it is content
+// that exists just as much as a sibling .go file is. An EMPTY subdirectory still
+// fails, so "the directory is bare" — the case this half was written against —
+// remains rejected. The strong half (zero .sql, so the resolver really does get
+// nothing) is untouched.
 func assertResolvesToNoSQL(t *testing.T, dir string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("reading fixture dir %s: %v", dir, err)
 	}
-	sql, other := 0, 0
+	sql, other, filledDirs := 0, 0, 0
 	for _, e := range entries {
 		if e.IsDir() {
+			sub, subErr := os.ReadDir(filepath.Join(dir, e.Name()))
+			if subErr != nil {
+				t.Fatalf("reading fixture subdir %s: %v", filepath.Join(dir, e.Name()), subErr)
+			}
+			if len(sub) > 0 {
+				filledDirs++
+			}
 			continue
 		}
 		if strings.EqualFold(filepath.Ext(e.Name()), ".sql") {
@@ -82,9 +102,9 @@ func assertResolvesToNoSQL(t *testing.T, dir string) {
 		t.Fatalf("fixture %s holds %d .sql file(s), so it does NOT resolve to zero schema files — "+
 			"this test would pass while exercising the opposite case", dir, sql)
 	}
-	if other == 0 {
-		t.Fatalf("fixture %s holds no file at all — an empty directory is a different fixture, and this one "+
-			"must prove codefit skipped CONTENT that exists", dir)
+	if other+filledDirs == 0 {
+		t.Fatalf("fixture %s holds nothing but empty entries — an empty directory is a different fixture, and "+
+			"this one must prove codefit skipped CONTENT that exists", dir)
 	}
 }
 
@@ -143,6 +163,111 @@ func partialResolutionProject(t *testing.T) auditctx.AuditContext {
 	}, realDirPath, emptyDirPath)
 	assertResolvesToNoSQL(t, filepath.Join(ctx.ProjectRoot, filepath.FromSlash(emptyDirPath)))
 	return ctx
+}
+
+// assertUnderTempRoot proves the fixture is being written where a fixture may
+// be written. It is cheap, and the failure it prevents is not: a builder handed
+// a root outside the temp tree would create directories inside a real project.
+func assertUnderTempRoot(t *testing.T, root string) {
+	t.Helper()
+	tmp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		tmp = os.TempDir()
+	}
+	got, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		got = root
+	}
+	if !strings.HasPrefix(filepath.Clean(got)+string(filepath.Separator), filepath.Clean(tmp)+string(filepath.Separator)) {
+		t.Fatalf("fixture root %q is not under the temp root %q — a test must never write into a real tree", got, tmp)
+	}
+}
+
+// assertNestedSQLIsReal is the content guard for the nested fixture, and it
+// guards the failure mode that would make the control below worthless: a nested
+// .sql holding junk would ALSO produce measured=false, so the test would pass
+// while proving nothing about content codefit skipped.
+//
+// It checks the two facts the fixture's claim rests on — the nested file exists
+// and declares a table in text — and then the one that subsumes them: the REAL
+// parser, the same one the sensor is constructed with, turns that text into a
+// table. If the resolver ever reached this file, there would be a schema to
+// measure.
+func assertNestedSQLIsReal(t *testing.T, root string) {
+	t.Helper()
+	abs := filepath.Join(root, filepath.FromSlash(nestedSQLPath))
+	body, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatalf("the nested schema file %s must exist — without it this fixture is an empty directory, "+
+			"a different case entirely: %v", nestedSQLPath, err)
+	}
+	if !strings.Contains(string(body), "CREATE TABLE") {
+		t.Fatalf("the nested schema file %s declares no table, so measured=false would prove nothing about "+
+			"skipped content: %q", nestedSQLPath, string(body))
+	}
+	schema, err := sqlddl.New().ParseSchema([]providers.SourceFile{{Path: nestedSQLPath, Content: body}})
+	if err != nil {
+		t.Fatalf("the nested schema file %s does not parse, so it is junk the sensor would have been right "+
+			"to ignore: %v", nestedSQLPath, err)
+	}
+	if schema == nil || len(schema.Tables) != 1 {
+		t.Fatalf("the real parser gets %+v out of %s; the fixture must hold content that WOULD have been "+
+			"measured had the resolver reached it", schema, nestedSQLPath)
+	}
+}
+
+// nestedResolutionProject is spec R1 scenario 2: ONE configured directory whose
+// only child is a SUBDIRECTORY, and the .sql lives in there. The top level holds
+// no file at all — which is precisely why assertResolvesToNoSQL had to stop
+// demanding one.
+func nestedResolutionProject(t *testing.T) auditctx.AuditContext {
+	t.Helper()
+	ctx := writeDBProject(t, map[string]string{
+		nestedSQLPath: oneTableSchema,
+	}, nestedDirPath)
+	assertUnderTempRoot(t, ctx.ProjectRoot)
+	assertResolvesToNoSQL(t, filepath.Join(ctx.ProjectRoot, filepath.FromSlash(nestedDirPath)))
+	assertNestedSQLIsReal(t, ctx.ProjectRoot)
+	return ctx
+}
+
+// The nested-tree case (spec R1, scenario 2), and this control exists to LOCK a
+// behaviour that is already right rather than to change one. flywayOrderedSQL
+// lists one level deep and says so (sources.go, DECLARED LIMIT); the honest
+// consequence is that a directory whose .sql sits one level down resolves to
+// nothing, is reported not-measured, and gets named.
+//
+// The regression it closes is specific: the day flywayOrderedSQL learns to
+// recurse, this case flips to measured, and it flips SILENTLY — the DECLARED
+// LIMIT paragraph goes stale with nothing red anywhere. That is the mutation
+// this control is proven against, because it is the change someone will
+// actually make.
+func TestSensorDB_NestedOnlySQL_IsNotMeasuredAndNamesThePath(t *testing.T) {
+	ctx := nestedResolutionProject(t)
+
+	res, err := New(sqlddl.New()).Audit(ctx)
+	if err != nil {
+		t.Fatalf("Audit over a directory whose .sql sits one level down must not error: %v", err)
+	}
+	if res.Measured {
+		t.Fatalf("the configured path resolved to zero schema files (its .sql is one level down, which the "+
+			"resolver does not read) and the scan reports Measured=true with score %d — a measurement of "+
+			"content codefit never opened; note: %q", res.Res.Score, res.Note)
+	}
+	if res.Res.Score != 0 {
+		t.Errorf("a not-measured result must publish no score, got %d", res.Res.Score)
+	}
+	if !strings.Contains(res.Note, nestedDirPath) {
+		t.Errorf("the note does not name the configured path %q, so the developer holding a nested migration "+
+			"tree is told nothing they can act on: %q", nestedDirPath, res.Note)
+	}
+	// The SAME action sentence as every other zero-resolution path. A nested tree
+	// is not a special case with its own advice: it is one more entry pointing at
+	// files codefit did not read, and the fix is the same one line.
+	if !strings.Contains(res.Note, "point the entry at the schema files it should audit") {
+		t.Errorf("the note drops the ACTION sentence for this case, leaving a fact the reader cannot act "+
+			"on: %q", res.Note)
+	}
 }
 
 // C1. A configured path that resolved to no schema file at all makes the scan
