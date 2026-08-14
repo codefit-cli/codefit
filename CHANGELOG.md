@@ -14,6 +14,56 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **`codefit init` gates the `database:` block on `schema_paths`, not on a
+  detected ORM.** `database.orm` is read by **zero** production code — it is
+  unvalidated free text that round-trips and nothing consumes — while
+  `database.schema_paths` is what the DB sensor, `codefit-scan-db` and
+  `codefit-scan-all` actually read. The block was gated on the former, with the
+  latter inside it.
+
+  **What this fixes, live today.** A drizzle (or typeorm) project's generated
+  config was, in full:
+
+  ```yaml
+  database:
+    orm: drizzle
+  ```
+
+  a section that looks configured and configures nothing — **and** its presence
+  suppressed the schema-gap declaration in the init report, because that
+  declaration keyed on the same ORM. The project with the gap was the one project
+  not told about it.
+
+  **What changes in the output.** A drizzle/typeorm project now gets **no**
+  `database:` block at all, `orm:` included, and **does** get the
+  "Not configured — database schema" section it never used to see. Losing the key
+  is intentional: it configured nothing. The detection fact survives — the report
+  still prints `orm  drizzle` under *Detected* — and a clarifier explains how
+  "an ORM was detected" and "no schema is configured" are both true at once.
+
+  A **Prisma project is unchanged** in every live key, value and order; the only
+  delta is comment text, locked by a golden of the non-comment lines. Existing
+  committed configs are untouched: only re-running `codefit init --force`
+  rewrites anything.
+
+- **`orm:` now says that nothing reads it.** It is still emitted for a project
+  that has a schema — deleting a valid, user-visible key buys nothing — but with
+  one comment stating that no sensor reads it and that `schema_paths` is what
+  turns the DB dimension on.
+
+- **The commented `database:` example names `type:` and what omitting it costs.**
+  It previously showed `schema_paths` alone, which steered a MySQL or SQL Server
+  user into codefit parsing their DDL as PostgreSQL **without saying so**. The
+  example now shows `type: "postgresql"  # postgresql | mysql | sqlserver` and
+  states the consequence; `sqlite` is named as the one value codefit refuses
+  outright rather than guessing at. `type:` is **not** newly required — an empty
+  value is still valid; the instruction was the defect, not the resolver. The
+  same fix is applied to the copy of that example inside the generated skill,
+  which is the first artifact an agent reads.
+
+  See [ADR 0073](docs/decisions/0073-the-config-gate-follows-what-the-audit-reads.md).
+
 ### Changed — BREAKING
 - ⚠️ **A configured `database.schema_paths` entry that resolves to no schema
   file now makes the scan NOT MEASURED instead of scoring 100.** The unread

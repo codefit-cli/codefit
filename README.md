@@ -145,11 +145,16 @@ the full per-language, per-dimension breakdown.
   `tsconfig.json`) resolves a provider it still writes both artifacts and
   declares the gap — which markers it looked for, that no code is scanned here,
   and that the DB dimension still audits the schema once `database.schema_paths`
-  is set. It also declares, whenever no ORM was detected, that it writes **no**
-  `database:` section: schema detection reads a Prisma `schema.prisma` only, so a
+  is set. It writes a `database:` section **only when it detected a schema
+  source** — `schema_paths` is the one DB field codefit's sensors actually read,
+  so it is the one that decides. Whenever no schema source was found it declares
+  that instead: schema detection reads a Prisma `schema.prisma` only, so a
   Flyway/SQL-migration project must point `database.schema_paths` at its
   migrations by hand — until it does, that config audits nothing, and codefit
-  says so instead of letting an empty report imply a clean project.
+  says so instead of letting an empty report imply a clean project. A detected
+  ORM does **not** buy a `database:` section on its own: no sensor reads
+  `database.orm`, and a block holding only an ORM name would look configured
+  while configuring nothing.
 - **MCP stdio server** (official MCP Go SDK), single static binary, `CGO_ENABLED=0`.
 - **Database-dimension auditing** — a neutral schema model with two schema parsers,
   **Prisma** (`schema.prisma`) and **SQL-DDL** (Flyway migrations, reconstructed
@@ -367,9 +372,16 @@ the `database:` section would be:
 
 ```yaml
 database:
+  type: "postgresql" # postgresql | mysql | sqlserver
   schema_paths:
     - "db/migrations"
 ```
+
+`type:` is optional and leaving it out has a consequence worth knowing: codefit
+then parses the DDL as PostgreSQL without announcing the choice, so a MySQL or
+SQL Server schema is silently mis-parsed and every DB finding afterwards reasons
+over a schema you do not have. `sqlite` is the one value codefit refuses outright
+rather than guessing at.
 
 The agent loads codefit's skill, calls `codefit-scan-all`, reads the three buckets
 (every endpoint named with what it takes to rank it), pulls the full concerns of the
