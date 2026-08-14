@@ -22,6 +22,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/registry"
+	"github.com/codefit-cli/codefit/internal/schemasource"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
@@ -917,7 +918,7 @@ func nothingMeasurableError(language string, dbSection *DBSection) error {
 // Measured=false section with a note and ran=false — never an error, so a db
 // misconfiguration can never blank the security audit (ADR 0020).
 func runDBForScanAll(root, language string, cfg *config.Config, rules []crossrules.Rule, scp scope.Scope) (*DBSection, findings.SensorResult, bool) {
-	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
+	parser, note := schemasource.ParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
 	if parser == nil {
 		return &DBSection{Measured: false, Note: note}, findings.SensorResult{}, false
 	}

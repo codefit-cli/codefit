@@ -1,4 +1,4 @@
-package mcp
+package schemasource
 
 import (
 	"os"
@@ -13,25 +13,25 @@ import (
 func TestSchemaParserForPaths_ByInput(t *testing.T) {
 	root := t.TempDir()
 
-	if p, note := schemaParserForPaths(root, []string{"prisma/schema.prisma"}, "postgresql"); p == nil || note != "" {
+	if p, note := ParserForPaths(root, []string{"prisma/schema.prisma"}, "postgresql"); p == nil || note != "" {
 		t.Errorf(".prisma should resolve a parser, got nil=%v note=%q", p == nil, note)
 	}
-	if p, note := schemaParserForPaths(root, []string{"db/migration/V1__x.sql"}, "postgresql"); p == nil || note != "" {
+	if p, note := ParserForPaths(root, []string{"db/migration/V1__x.sql"}, "postgresql"); p == nil || note != "" {
 		t.Errorf(".sql should resolve a parser, got nil=%v note=%q", p == nil, note)
 	}
 	// A directory (no extension) is treated as a SQL migration dir.
 	if err := os.MkdirAll(filepath.Join(root, "db", "migration"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if p, note := schemaParserForPaths(root, []string{"db/migration"}, "postgresql"); p == nil || note != "" {
+	if p, note := ParserForPaths(root, []string{"db/migration"}, "postgresql"); p == nil || note != "" {
 		t.Errorf("a directory should resolve the SQL parser, got nil=%v note=%q", p == nil, note)
 	}
 	// Mixed .prisma + .sql is a declared out-of-scope limit → no parser + note.
-	if p, note := schemaParserForPaths(root, []string{"a.prisma", "b.sql"}, "postgresql"); p != nil || note == "" {
+	if p, note := ParserForPaths(root, []string{"a.prisma", "b.sql"}, "postgresql"); p != nil || note == "" {
 		t.Errorf("mixed schema types must not resolve (nil + note), got nil=%v note=%q", p == nil, note)
 	}
 	// The relocated "no parser" case: an unrecognized schema type.
-	if p, note := schemaParserForPaths(root, []string{"schema.txt"}, "postgresql"); p != nil || note == "" {
+	if p, note := ParserForPaths(root, []string{"schema.txt"}, "postgresql"); p != nil || note == "" {
 		t.Errorf("unrecognized schema type must not resolve (nil + note), got nil=%v note=%q", p == nil, note)
 	}
 }
@@ -112,7 +112,7 @@ func TestSchemaParserForPaths_DBTypeBindsDialect(t *testing.T) {
 	root := t.TempDir()
 
 	t.Run("mysql binds the MySQL dialect", func(t *testing.T) {
-		p, note := schemaParserForPaths(root, []string{"schema.sql"}, "mysql")
+		p, note := ParserForPaths(root, []string{"schema.sql"}, "mysql")
 		if p == nil {
 			t.Fatalf("expected a parser, got note=%q", note)
 		}
@@ -124,7 +124,7 @@ func TestSchemaParserForPaths_DBTypeBindsDialect(t *testing.T) {
 	})
 
 	t.Run("sqlserver binds the SQLServer dialect", func(t *testing.T) {
-		p, note := schemaParserForPaths(root, []string{"schema.sql"}, "sqlserver")
+		p, note := ParserForPaths(root, []string{"schema.sql"}, "sqlserver")
 		if p == nil {
 			t.Fatalf("expected a parser, got note=%q", note)
 		}
@@ -134,7 +134,7 @@ func TestSchemaParserForPaths_DBTypeBindsDialect(t *testing.T) {
 	})
 
 	t.Run("postgresql binds the Postgres dialect, unchanged from before dbType existed", func(t *testing.T) {
-		p, note := schemaParserForPaths(root, []string{"schema.sql"}, "postgresql")
+		p, note := ParserForPaths(root, []string{"schema.sql"}, "postgresql")
 		if p == nil {
 			t.Fatalf("expected a parser, got note=%q", note)
 		}
@@ -148,7 +148,7 @@ func TestSchemaParserForPaths_DBTypeBindsDialect(t *testing.T) {
 // NEVER a silent PostgreSQL parse (the cardinal sin this unit exists to lock).
 func TestSchemaParserForPaths_SQLiteIsExplicitlyNotSupported(t *testing.T) {
 	root := t.TempDir()
-	p, note := schemaParserForPaths(root, []string{"schema.sql"}, "sqlite")
+	p, note := ParserForPaths(root, []string{"schema.sql"}, "sqlite")
 	if p != nil {
 		t.Fatalf("sqlite must never resolve a parser (would silently PG-parse), got %v", p)
 	}
@@ -165,7 +165,7 @@ func TestSchemaParserForPaths_SQLiteIsExplicitlyNotSupported(t *testing.T) {
 // an explicit not-bound note naming the type, mirroring the sqlite branch.
 func TestSchemaParserForPaths_UnrecognizedDBTypeIsExplicit(t *testing.T) {
 	root := t.TempDir()
-	p, note := schemaParserForPaths(root, []string{"schema.sql"}, "oracle")
+	p, note := ParserForPaths(root, []string{"schema.sql"}, "oracle")
 	if p != nil {
 		t.Fatalf("an unrecognized dbType must never resolve a parser (would silently PG-parse), got %v", p)
 	}
@@ -181,7 +181,7 @@ func TestSchemaParserForPaths_UnrecognizedDBTypeIsExplicit(t *testing.T) {
 func TestSchemaParserForPaths_NoDBTypeKeepsTodaysDefault(t *testing.T) {
 	root := t.TempDir()
 	for _, dbType := range []string{"", "none"} {
-		p, note := schemaParserForPaths(root, []string{"schema.sql"}, dbType)
+		p, note := ParserForPaths(root, []string{"schema.sql"}, dbType)
 		if p == nil {
 			t.Fatalf("dbType=%q must still resolve a parser (today's default), got note=%q", dbType, note)
 		}

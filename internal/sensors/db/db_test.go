@@ -149,7 +149,7 @@ func TestSensorDB_NoSchemaPaths_NotMeasured(t *testing.T) {
 
 // The "no parser for this schema type" case is now a compile-time concern of the
 // adapter (the sensor depends on providers.SchemaParser directly), so it is tested
-// in the mcp package (schemaParserForPaths), not here.
+// in the schemasource package (ParserForPaths), not here.
 
 func TestSensorDB_MissingSchemaFile_Errors(t *testing.T) {
 	// .codefit.yaml points at prisma/schema.prisma but we write the schema elsewhere.

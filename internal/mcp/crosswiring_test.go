@@ -12,6 +12,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/internal/schemasource"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
@@ -141,7 +142,7 @@ func TestCrossSeam_DBResultByteIdenticalOverPopulated(t *testing.T) {
 
 	// Reference = db result BEFORE the cross wiring: exactly what runDBForScanAll
 	// returned before the merge existed — dbsensor.Audit's Res.
-	parser, note := schemaParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
+	parser, note := schemasource.ParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
 	if parser == nil {
 		t.Fatalf("no schema parser resolved: %s", note)
 	}

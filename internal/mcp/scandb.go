@@ -8,6 +8,7 @@ import (
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/providers"
+	"github.com/codefit-cli/codefit/internal/schemasource"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
@@ -47,7 +48,7 @@ func HandleScanDB(req ScanDBRequest) (ScanDBResponse, error) {
 	// not-measured note. With no schema_paths at all, the sensor reports it.
 	var parser providers.SchemaParser
 	if cfg != nil && len(cfg.Database.SchemaPaths) > 0 {
-		p, note := schemaParserForPaths(req.Root, cfg.Database.SchemaPaths, cfg.Database.Type)
+		p, note := schemasource.ParserForPaths(req.Root, cfg.Database.SchemaPaths, cfg.Database.Type)
 		if p == nil {
 			return ScanDBResponse{Measured: false, Note: note}, nil
 		}

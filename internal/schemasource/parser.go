@@ -1,4 +1,4 @@
-package mcp
+package schemasource
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
 )
 
-// schemaParserForPaths resolves the schema parser by the INPUT's shape, not by the
+// ParserForPaths resolves the schema parser by the INPUT's shape, not by the
 // backend language (a schema is orthogonal to the app language — PlantaLinda is
 // Java with SQL-DDL migrations; ADR 0018). .prisma → the TS provider's parser;
 // .sql (or a directory of migrations) → the SQL-DDL parser, bound to the SQL
@@ -21,9 +21,15 @@ import (
 // default (Postgres-parsed by-input resolution) — the heuristic sniff fallback
 // (design's Unit J) is NOT YET IMPLEMENTED, so this deliberately does not
 // pretend to sniff. A project mixing .prisma and .sql is a declared
-// out-of-scope limit for this slice. Returns a note when no parser applies. The
-// MCP adapter is the single place that maps input+dbType → concrete parser.
-func schemaParserForPaths(root string, paths []string, dbType string) (providers.SchemaParser, string) {
+// out-of-scope limit for this slice. Returns a note when no parser applies.
+//
+// This package is the single place that maps input+dbType → concrete parser
+// (spec R11), and TestSQLDDLHasExactlyOneProductionImporter holds it to that as
+// a COUNT rather than a location. It used to be the MCP adapter, which was only
+// ever true while the MCP scan was the sole caller; `codefit init` needs the
+// same binding, and a transport adapter handing a parser to a scaffolder was the
+// seam showing.
+func ParserForPaths(root string, paths []string, dbType string) (providers.SchemaParser, string) {
 	kinds := map[string]bool{}
 	for _, p := range paths {
 		kinds[classifySchemaPath(root, p)] = true
