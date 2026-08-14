@@ -453,8 +453,8 @@ does not block anything: the strictness gate lives beside the regex that owns it
 the resolver widens `init` automatically with no scaffold change.
 
 **Still open, and DECLARED: the SQL dialect is never measured.** A proof with no
-`database.type` set runs under the PostgreSQL binding (see P0-11 below for the sniff that does
-not exist). Mitigated, not fixed: a live block carries a commented `type:` line directly above
+`database.type` set runs under the PostgreSQL binding (**P0-12**, filed below — there is no
+sniff). Mitigated, not fixed: a live block carries a commented `type:` line directly above
 the key, and the report names the dialect the proof ran under. Measured and locked: a
 MySQL-flavoured set reconstructs **zero** tables under that binding, so it fails the proof gate
 and is commented rather than written live.
@@ -490,6 +490,28 @@ See [ADR 0072](decisions/0072-a-configured-schema-path-always-leaves-a-trace.md)
    the path named); the *capability* is deferred, because recursing without a cross-directory
    ordering rule would have to pick an order silently — the same trap one level down that the
    golang-migrate naming already sets. Declared at the resolver. Open.
+
+### P0-12 — the SQL dialect is never measured, and nothing sniffs it
+
+`sqlDialectParser("")` binds the **PostgreSQL** parser when `database.type` is absent. Nothing
+measures which dialect the DDL actually is, and nothing ever has — this entry exists because a
+prior citation pointed at a sniff that does not exist, and an undeclared residual is the defect
+this board is ordered by.
+
+**Why it is not worse than it looks.** Measured while building the proof gate: a MySQL-flavoured
+set (backticks, `AUTO_INCREMENT`, `ENGINE=`) reconstructs **zero** tables under that binding, so
+it fails `init`'s ≥1-table proof and is commented rather than written live. The dangerous shape —
+a live block over a partly-wrong model — needs DDL that reduces under the wrong binding and means
+something different there. Not yet exhibited, not yet ruled out.
+
+**Why it is not closable by declaring harder.** Three artifacts already declare it (a commented
+`type:` above the key, a report sentence naming the binding the proof ran under, ADR 0074). The
+gap is that codefit cannot tell the developer *which* dialect it read, because it never asked.
+
+**The cheap first move is a probe, not a parser**: a shape census over the candidate's own bytes
+(backtick quoting, `AUTO_INCREMENT`, `ENGINE=`, `NVARCHAR`, `GO` batch separators) is enough to say
+*"this looks like MySQL; set `database.type`"* without pretending to parse it. Declaring what a
+measurement found beats declaring that no measurement was taken.
 
 ---
 
