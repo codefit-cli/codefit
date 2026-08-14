@@ -310,13 +310,18 @@ func TestRenderConfig_CommentedExampleNamesTypeAndItsConsequence(t *testing.T) {
 	comments := configComments(renderOrFail(t, undetectedInfo(t)))
 	low := strings.ToLower(comments)
 
-	if !strings.Contains(comments, "type:") {
-		t.Errorf("the commented example must show `type:` beside schema_paths, or it instructs the "+
-			"reader into the silent PostgreSQL default\n--- comments ---\n%s", comments)
+	// Both keys are looked for as EXAMPLE LINES, not as mentions. Measured, not
+	// assumed: under the C6 mutation (the `type:` line deleted from the example)
+	// a plain strings.Contains(comments, "type:") stayed GREEN, because the
+	// paragraph explaining the consequence names `type:` too. A test satisfied by
+	// the prose that describes the example cannot notice the example going away.
+	if !commentedExampleHasKey(comments, "type") {
+		t.Errorf("the commented example must show a `type:` LINE beside schema_paths, or it "+
+			"instructs the reader into the silent PostgreSQL default\n--- comments ---\n%s", comments)
 	}
-	if !strings.Contains(comments, "schema_paths") {
-		t.Errorf("the commented example must still show schema_paths — it is what turns the DB "+
-			"dimension on\n--- comments ---\n%s", comments)
+	if !commentedExampleHasKey(comments, "schema_paths") {
+		t.Errorf("the commented example must still show a `schema_paths:` LINE — it is what turns "+
+			"the DB dimension on\n--- comments ---\n%s", comments)
 	}
 
 	// The CONSEQUENCE, not just the key. A `type:` line with no explanation reads
@@ -342,6 +347,25 @@ func TestRenderConfig_CommentedExampleNamesTypeAndItsConsequence(t *testing.T) {
 		t.Errorf("the comment must still state that SQL migration directories are %s\n"+
 			"--- comments ---\n%s", configGapClaim, comments)
 	}
+}
+
+// commentedExampleHasKey reports whether the comment block contains key as a YAML
+// KEY LINE of the commented example — a line that, once its `#` is stripped, is
+// an indented `key:` — rather than merely mentioning the word somewhere in prose.
+//
+// The distinction is the whole value of the check: the example is the instruction
+// a developer copies, and the paragraph explaining it names the same keys.
+func commentedExampleHasKey(comments, key string) bool {
+	for _, line := range strings.Split(comments, "\n") {
+		body := strings.TrimPrefix(strings.TrimSpace(line), "#")
+		if !strings.HasPrefix(body, " ") && !strings.HasPrefix(body, "\t") {
+			continue // prose starts flush against the '#'; example lines are indented
+		}
+		if strings.HasPrefix(strings.TrimSpace(body), key+":") {
+			return true
+		}
+	}
+	return false
 }
 
 // configComments returns only the comment lines of a rendered config.
