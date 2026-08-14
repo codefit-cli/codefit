@@ -428,15 +428,36 @@ supposed to guard it. See
 [ADR 0073](decisions/0073-the-config-gate-follows-what-the-audit-reads.md); this closes explore
 finding 5 (the lock was on the wrong predicate).
 
-**Still open: there is no detection of a SQL migration directory.** A Flyway project still
-receives a config that audits nothing until the developer points `database.schema_paths` at
-its migrations by hand, and the generated config, the init report and the README all say so —
-now whenever **no schema source** was detected, which is the condition that matches the fact.
-It is the follow-up change, and a baited regression lock
-(`TestGenerate_SkillClaimHoldsForBaitedMigrationDir`, a fixture holding both an unregistered
-build manifest and a real Flyway-shaped migration directory) goes **red** the day it lands,
-forcing the generated skill's "carry NO such key" claim to be revisited rather than quietly
-falsified.
+**CLOSED — SQL migration directories are detected, and only ever written when PROVEN.**
+Discovery is language-independent (it no longer sits behind language detection, which used to
+end `Detect` before any schema enrichment ran on exactly the projects that needed it), walks 6
+directory levels while read depth stays 1, and promotes a directory only when its apply order
+is proven from the filenames, the **real** parser reconstructs ≥1 table from it, and it is the
+only directory that proved. Everything else — golang-migrate naming, a set that reconstructs
+nothing, two proven candidates — gets the block **commented with the real path and the
+reason**, and the invented `"db/migrations"` placeholder no longer appears in a config where
+codefit found a real path. See
+[ADR 0074](decisions/0074-init-writes-a-database-block-it-can-prove.md).
+
+**The baited lock did its job and was RETARGETED, not deleted.**
+`TestGenerate_SkillClaimHoldsForBaitedMigrationDir` — a fixture holding both an unregistered
+build manifest and a real Flyway-shaped migration directory — went **red** the day detection
+landed, exactly as designed, forcing the generated skill's "carry NO such key" claim to be
+revisited rather than quietly falsified. It keeps its name and its baited fixture; its body is
+now a two-directional equivalence between the config and the skill one run wrote.
+
+**Still open, and separable: `flywayOrderedSQL` orders Flyway naming only.** golang-migrate's
+`1_init.up.sql` cannot be ordered by proof (`10_x` sorts before `1_init`), so such a directory
+is never written live — it is named and explained instead. That is the safe direction and it
+does not block anything: the strictness gate lives beside the regex that owns it, so extending
+the resolver widens `init` automatically with no scaffold change.
+
+**Still open, and DECLARED: the SQL dialect is never measured.** A proof with no
+`database.type` set runs under the PostgreSQL binding (see P0-11 below for the sniff that does
+not exist). Mitigated, not fixed: a live block carries a commented `type:` line directly above
+the key, and the report names the dialect the proof ran under. Measured and locked: a
+MySQL-flavoured set reconstructs **zero** tables under that binding, so it fails the proof gate
+and is commented rather than written live.
 
 ### P0-11 — CLOSED (`a-configured-schema-path-always-leaves-a-trace`) — a configured schema path that resolved to nothing scored 100
 
