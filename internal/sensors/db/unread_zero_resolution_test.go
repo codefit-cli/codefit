@@ -252,7 +252,12 @@ func TestSensorDB_NestedOnlySQL_IsNotMeasuredAndNamesThePath(t *testing.T) {
 	if res.Measured {
 		t.Fatalf("the configured path resolved to zero schema files (its .sql is one level down, which the "+
 			"resolver does not read) and the scan reports Measured=true with score %d — a measurement of "+
-			"content codefit never opened; note: %q", res.Res.Score, res.Note)
+			"content codefit never opened; note: %q\n\n"+
+			"IF YOU LANDED RECURSION AND THIS WENT RED, THIS TEST IS NOT THE THING TO DELETE. It locks a "+
+			"DECLARED LIMIT, and the declaration is what goes stale: update flywayOrderedSQL's DECLARED "+
+			"LIMIT block in sources.go and ADR 0072 in the same change, then rewrite this test to assert "+
+			"the nested .sql IS read. Deleting it removes the only control over that limit and leaves both "+
+			"declarations claiming something that is no longer true.", res.Res.Score, res.Note)
 	}
 	if res.Res.Score != 0 {
 		t.Errorf("a not-measured result must publish no score, got %d", res.Res.Score)
