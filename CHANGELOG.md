@@ -15,6 +15,48 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed — BREAKING
+- ⚠️ **A configured `database.schema_paths` entry that resolves to no schema
+  file now makes the scan NOT MEASURED instead of scoring 100.** The unread
+  floor counted resolved *files* — a quantity the resolver itself decides — so a
+  configured path that resolved to nothing was subtracted from both sides of the
+  predicate and vanished from the audit. Two defects followed, both measured on
+  `main`:
+
+  1. A path naming a directory that holds one `.go` and zero `.sql` — the
+     ordinary golang-migrate embed layout — returned
+     `{"findings":null,"measured":true,"score":100,"surface":null}`: a clean
+     bill of health over content codefit never read.
+  2. With two configured paths, one real and one holding no `.sql`, the scan
+     audited the real one correctly, reported `measured: true` and score 100,
+     and **never mentioned the empty path anywhere**. The first case at least
+     looks suspicious; this one looks completely normal.
+
+  **What changes in the output.** For a project whose configured paths ALL
+  resolve to nothing: `codefit-scan-db` reports `measured: false` with a note
+  naming each path, and `codefit-scan-all` reports `score.by_dimension.db` as
+  `null` with the `summary.db` block **absent** and the `db` section carrying
+  `measured: false` plus the note. Nothing changes for a project whose paths
+  resolve to real schema files. A project with a *partial* resolution keeps
+  `measured: true` and every real finding — the note simply also names the path
+  that resolved to nothing.
+
+  **Migration.** The note states the action, and it is the whole migration:
+  point the entry at the schema files it should audit, or remove it from
+  `database.schema_paths` so the scan stops claiming to cover it.
+
+  ```yaml
+  database:
+    schema_paths:
+      - db/migrations/schema.sql   # the files, not the package holding them
+  ```
+
+  Declared cost, of the same class as the one already accepted one level down: a
+  project whose paths genuinely resolve to nothing loses its db score instead of
+  scoring 100. Losing a score for a schema nobody read is the correct direction.
+  A directory whose `.sql` files sit one level DOWN also lands here — the
+  listing is one level deep, and that limit is now declared at the resolver and
+  reported out loud rather than scored. See
+  [ADR 0072](docs/decisions/0072-a-configured-schema-path-always-leaves-a-trace.md).
 - ⚠️ **A security finding in a test file is now `info` by default, not one
   severity level down (RF-10).** PRD v1.4 RF-10 has said since v1.3 that
   "findings de seguridad en archivos de test se degradan a `info`

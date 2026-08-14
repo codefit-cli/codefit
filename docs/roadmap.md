@@ -423,6 +423,38 @@ config, the init report and the README, in all three cases whenever **no ORM** w
 (a TypeScript project without Prisma has the identical gap). Open; it is the follow-up to
 this change.
 
+### P0-11 — CLOSED (`a-configured-schema-path-always-leaves-a-trace`) — a configured schema path that resolved to nothing scored 100
+
+The unread floor counted resolved **files** — a quantity the resolver itself decides — so a
+configured `database.schema_paths` entry that resolved to no file was subtracted from both sides
+of its predicate and vanished. Measured live on `main`: a path naming a directory holding one
+`.go` and zero `.sql` (the ordinary golang-migrate embed layout) returned
+`{"findings":null,"measured":true,"score":100,"surface":null}`. Worse, and the reason this is a
+P0 rather than a curiosity: with one real path beside one empty one the scan was **legitimately
+measured** and the empty path was named **nowhere** — a partial result that does not declare
+itself partial. The first shape at least looks suspicious; the second looks completely normal.
+
+Fixed: the unit of account moves from the resolved file to the **configured path**, so a path
+that resolved to nothing reaches the floor as a first-class entry and the note names it, states
+the consequence and states the action. The dead `total > 0` guard is deleted rather than kept
+"defensively" — it is what hid the bug, and deleting it makes the degenerate case fail closed.
+See [ADR 0072](decisions/0072-a-configured-schema-path-always-leaves-a-trace.md) and
+`CHANGELOG.md`.
+
+**Named, DECLARED, not built — two follow-ups.**
+
+1. **`ScanDBResponse.Score` is an `int` without `omitempty`,** so a not-measured
+   `codefit-scan-db` response serialises `"score": 0` beside `"measured": false` — a zero that
+   reads like a measurement. It is pre-existing and byte-identical before and after this change,
+   but this change makes it **fire more often**, because the total zero-resolution case now lands
+   on exactly that shape. Moving it to a pointer is a JSON contract change that deserves its own
+   controls; bundling it here would have made a failing control ambiguous. Open.
+2. **Nested schema trees.** `flywayOrderedSQL` lists one level deep, so a directory whose `.sql`
+   sit in a subdirectory resolves to zero files. The *lie* is closed (it reports not-measured with
+   the path named); the *capability* is deferred, because recursing without a cross-directory
+   ordering rule would have to pick an order silently — the same trap one level down that the
+   golang-migrate naming already sets. Declared at the resolver. Open.
+
 ---
 
 ## P1 — the user cannot tell how far codefit reaches

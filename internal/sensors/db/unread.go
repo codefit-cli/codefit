@@ -7,7 +7,6 @@ import (
 
 	coredb "github.com/codefit-cli/codefit/internal/core/db"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
-	"github.com/codefit-cli/codefit/internal/providers"
 )
 
 // THE FLOOR THIS FILE IS.
@@ -31,15 +30,21 @@ import (
 // that contributed NOTHING to the neutral model is declared, whatever the
 // reason turns out to be.
 
-// unreadReason is the CLOSED vocabulary of why a configured schema source
+// unreadReason is the CLOSED vocabulary of why a configured schema INPUT
 // contributed nothing (ADR 0034 §2.8's measurement/diagnostics boundary: the
 // note states the FACT and what it cost, never which regex missed). The values
-// answer different questions and must not be collapsed: reasonNotText and
-// reasonNothingRecognized are the DEFECT (codefit was blind over content that
-// exists); reasonNoDeclarations, reasonAlreadySatisfied and
-// reasonDeclaresNoSchema are LEGITIMATE (there was nothing to read, or reading
-// it correctly produced nothing), and are recorded anyway only so that "0
-// tables" is never ambiguous.
+// answer different questions and must not be collapsed: reasonNotText,
+// reasonNothingRecognized and reasonResolvedNoFiles are the DEFECT (codefit was
+// blind over content that exists); reasonNoDeclarations, reasonAlreadySatisfied
+// and reasonDeclaresNoSchema are LEGITIMATE (there was nothing to read, or
+// reading it correctly produced nothing), and are recorded anyway only so that
+// "0 tables" is never ambiguous.
+//
+// The unit widened from "configured source FILE" to "configured schema INPUT"
+// with ADR 0072, and deliberately inside this vocabulary rather than beside it.
+// A parallel path-level vocabulary would force the floor to compute over the
+// union of two lists — which is the exact failure class ADR 0072 removes: a list
+// the predicate forgets to count.
 type unreadReason string
 
 const (
@@ -75,6 +80,14 @@ const (
 	reasonDeclaresNoSchema unreadReason = "they declare no schema at all — every statement in them is " +
 		"data or permissions (INSERT/UPDATE/DELETE/MERGE/TRUNCATE/GRANT/REVOKE), so there was no " +
 		"structure to read"
+	// reasonResolvedNoFiles: the DEFECT one level up from all the others. The
+	// five above describe a file codefit opened; this one describes a configured
+	// PATH that produced no file to open. It is stated as the OUTCOME ("resolved
+	// to no readable schema file") and never as a diagnosis of which extension or
+	// which ordering rule declined it: the outcome is what the developer must
+	// act on, and it stays true as the resolver grows, while a diagnosis ages
+	// into a lie the moment it does.
+	reasonResolvedNoFiles unreadReason = "they resolved to no readable schema file at all"
 )
 
 // defect reports whether this reason means codefit was BLIND over content that
@@ -84,17 +97,41 @@ const (
 // is load-bearing: a reason nobody added to this list is treated as a defect, so
 // forgetting to classify something produces noise, never a false all-clear.
 func (r unreadReason) defect() bool {
-	return r == reasonNotText || r == reasonNothingRecognized
+	return r == reasonNotText || r == reasonNothingRecognized || r == reasonResolvedNoFiles
 }
 
-// unreadSource is one configured schema file that reached no rule.
+// unreadSource is one configured schema INPUT that reached no rule.
+//
+// DECLARED COST (ADR 0072): Path is HETEROGENEOUS. For the five file-level
+// reasons it is a resolved file path, relative to the project root. For
+// reasonResolvedNoFiles it is the database.schema_paths entry EXACTLY as written
+// in .codefit.yaml, because there is no file to name — the entry itself is what
+// the developer has to go and fix.
+//
+// This is a real cost and it was taken knowingly: the alternative was a second
+// path-level list, and a second list is a second thing the floor's predicate can
+// forget to count. Nothing keys off Path (it is rendered into a note and nothing
+// else), so the heterogeneity is confined to the sentence a human reads, and the
+// note gives each unit its own sentence so the two are never mixed in one count.
 type unreadSource struct {
 	Path   string
 	Reason unreadReason
 }
 
-// unreadSources returns, IN CONFIG ORDER, every configured source that
-// contributed nothing to the parsed schema.
+// unreadSources returns, IN CONFIG ORDER, every configured schema input that
+// contributed nothing to the parsed schema, together with the number of
+// CONFIGURED PATHS of which not one resolved file contributed anything.
+//
+// The count is returned from the SAME pass rather than recomputed by the caller,
+// and that is deliberate: it is the floor's numerator, and a numerator derived
+// somewhere else is a numerator that can drift away from the list the note
+// renders. Here they cannot disagree.
+//
+// A configured path that resolved to NO file is unproductive by construction and
+// is reported as such, at its config position. That case is the whole of ADR
+// 0072: on a flat source list it was subtracted from both the list and the total,
+// so it left no trace anywhere and a directory codefit never opened a byte of
+// scored 100.
 //
 // "Contributed" is measured against the neutral model's own positions —
 // including its HONEST-FAILURE carriers (Schema.Unreduced, Schema.Withheld,
@@ -104,16 +141,29 @@ type unreadSource struct {
 // provider-agnostic and fail-closed in the sense of ADR 0034 §2.3 — a new
 // SchemaParser cannot forget to implement it, because there is nothing for it
 // to implement.
-func unreadSources(sources []providers.SourceFile, schema *coredb.Schema) []unreadSource {
+func unreadSources(resolution schemaResolution, schema *coredb.Schema) ([]unreadSource, int) {
 	contributed := contributingFiles(schema)
 	var out []unreadSource
-	for _, src := range sources {
-		if contributed[src.Path] {
+	unproductive := 0
+	for _, p := range resolution.Paths {
+		if len(p.Files) == 0 {
+			out = append(out, unreadSource{Path: p.Configured, Reason: reasonResolvedNoFiles})
+			unproductive++
 			continue
 		}
-		out = append(out, unreadSource{Path: src.Path, Reason: reasonFor(src.Content, censusOf(schema, src.Path))})
+		pathContributed := false
+		for _, src := range p.Files {
+			if contributed[src.Path] {
+				pathContributed = true
+				continue
+			}
+			out = append(out, unreadSource{Path: src.Path, Reason: reasonFor(src.Content, censusOf(schema, src.Path))})
+		}
+		if !pathContributed {
+			unproductive++
+		}
 	}
-	return out
+	return out, unproductive
 }
 
 // censusOf returns the parser's statement census for path, or the zero census
@@ -267,7 +317,13 @@ func declaresSomething(content []byte) bool {
 // The consequence sentence is the point of the whole change. Without it a
 // reader sees "0 tables, 0 findings" and cannot tell whether codefit read the
 // schema and found it clean, or never read it at all.
-func unreadNote(unread []unreadSource, total int) string {
+//
+// TWO DENOMINATORS, and they are not interchangeable (ADR 0072). totalFiles
+// counts the schema files the configured paths resolved to; totalPaths counts the
+// entries in database.schema_paths. Each sentence states the one its own numerator
+// is drawn from, because "1 of the 0 configured schema file(s)" is not a rounding
+// error — it is a lie about what codefit was pointed at.
+func unreadNote(unread []unreadSource, totalFiles, totalPaths int) string {
 	if len(unread) == 0 {
 		return ""
 	}
@@ -314,7 +370,24 @@ func unreadNote(unread []unreadSource, total int) string {
 			parts = append(parts, fmt.Sprintf(
 				"%d of the %d configured schema file(s) %s: %s%s. That is not an error — it is recorded "+
 					"so that a schema with no tables is never ambiguous.",
-				len(paths), total, reason, strings.Join(shown, ", "), suffix,
+				len(paths), totalFiles, reason, strings.Join(shown, ", "), suffix,
+			))
+			continue
+		}
+		// The zero-resolution reason gets its OWN sentence, for two reasons that
+		// are both load-bearing. Its denominator is PATHS, so borrowing the file
+		// sentence would print a count against a total it was never drawn from.
+		// And it is the one reason whose subject the developer can fix by editing
+		// one line, so it is the one that states an ACTION — which is also why
+		// that action names no extension and no ordering rule: what to do stays
+		// true as the resolver changes, a diagnosis of why does not.
+		if reason == reasonResolvedNoFiles {
+			parts = append(parts, fmt.Sprintf(
+				"codefit read NOTHING from %d of the %d configured schema path(s) — %s: %s%s. "+
+					"Nothing under them reached any rule, so this scan is not a clean bill of health for them: "+
+					"whatever they hold, codefit did not see it. ACTION: point the entry at the schema files it "+
+					"should audit, or remove it from database.schema_paths so the scan stops claiming to cover it.",
+				len(paths), totalPaths, reason, strings.Join(shown, ", "), suffix,
 			))
 			continue
 		}
@@ -322,15 +395,31 @@ func unreadNote(unread []unreadSource, total int) string {
 			"codefit read NOTHING from %d of the %d configured schema file(s) — %s: %s%s. "+
 				"Not one statement in them reached any rule, so this scan is not a clean bill of health for them: "+
 				"whatever they declare, codefit did not see it.",
-			len(paths), total, reason, strings.Join(shown, ", "), suffix,
+			len(paths), totalFiles, reason, strings.Join(shown, ", "), suffix,
 		))
 	}
 	return strings.Join(parts, " ")
 }
 
-// wholeScanUnproductive reports whether EVERY configured source contributed
+// wholeScanUnproductive reports whether EVERY configured schema PATH contributed
 // nothing to the model — WHATEVER the reason — the case where Measured must be
 // false.
+//
+// THE UNIT IS THE CONFIGURED PATH, and the whole of ADR 0072 is in that choice.
+// The resolved-FILE count was a denominator the resolver itself decides, so a
+// configured path that resolved to no file at all was subtracted from both sides
+// and the predicate never saw it: a directory holding no schema file produced
+// total=0, the old zero-guard short-circuited, the floor never engaged, and the
+// scan reported Measured=true with score 100 over content codefit never opened.
+//
+// THE ZERO-GUARD IS DELETED, NOT COMMENTED, and deleting it is the SAFER of the
+// two options rather than the bolder one. db.go's early return on
+// len(SchemaPaths) == 0 means this function is unreachable with total == 0, so
+// `total > 0` is dead code — but dead code that would keep RE-CREATING the bug
+// it used to hide if that early return ever moved. Deleted, a hypothetical
+// total == 0 evaluates 0 == 0 → true → NOT MEASURED. Unreachable by
+// construction, and fail-closed if the construction ever changes. Keeping it
+// "defensively" would defend the false all-clear, not against it.
 //
 // Result.Measured already carries exactly this doctrine ("Measured=false with a
 // Note is the honest 'not audited' state ... distinct from 'audited, 0
@@ -349,10 +438,12 @@ func unreadNote(unread []unreadSource, total int) string {
 // classification from introducing the defect it was written to remove. It also
 // closes the same pre-existing hole for a comment-only source set.
 //
-// DECLARED COST, of the same class as ADR 0044's: a project whose configured
-// schema_paths genuinely resolve to nothing structural loses its db score
-// instead of scoring 100. Losing a score for a schema nobody read is the correct
-// direction; the note says exactly which files and why.
-func wholeScanUnproductive(unread []unreadSource, total int) bool {
-	return total > 0 && len(unread) == total
+// DECLARED COST, of the same class as ADR 0044's, one level up (ADR 0072): a
+// project whose configured schema_paths genuinely resolve to nothing structural
+// — including a migrations directory that is genuinely empty of schema files —
+// loses its db score instead of scoring 100. Losing a score for a schema nobody
+// read is the correct direction; the note says exactly which paths and files,
+// why, and what to do about it.
+func wholeScanUnproductive(unproductivePaths, totalPaths int) bool {
+	return unproductivePaths == totalPaths
 }

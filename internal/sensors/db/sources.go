@@ -13,12 +13,61 @@ import (
 	"github.com/codefit-cli/codefit/internal/providers"
 )
 
+// resolvedPath is ONE entry of database.schema_paths together with everything
+// it resolved to.
+//
+// Files may legitimately be EMPTY, and carrying that emptiness is the entire
+// reason this type exists. A flat []SourceFile subtracts a path that resolved to
+// nothing from both sides of every downstream count, so the path disappears from
+// the audit as though it had never been configured — which is how a directory
+// holding no schema file at all produced a score of 100.
+type resolvedPath struct {
+	// Configured is the entry EXACTLY as written in .codefit.yaml, because that
+	// is the string the developer has to go and edit. A cleaned or absolute form
+	// would be a different string from the one in their file.
+	Configured string
+	// Files is what the entry resolved to, in resolution order. Empty is a fact,
+	// not an absence: it means codefit read nothing from this entry.
+	Files []providers.SourceFile
+}
+
+// schemaResolution is the whole outcome of resolving database.schema_paths:
+// one entry per CONFIGURED PATH, plus the decoded content keyed by resolved-file
+// path.
+//
+// The two halves are keyed differently on purpose. Paths is the unit of ACCOUNT
+// (what was configured, and what each entry produced); Content stays keyed by
+// resolved FILE because it feeds snippets, fingerprints and file:line positions,
+// which are properties of a file and of nothing else.
+type schemaResolution struct {
+	Paths   []resolvedPath
+	Content map[string][]byte
+}
+
+// sources flattens the per-path resolution back into the ordered SourceFile
+// slice the parsers take. Order is config order across entries and resolution
+// order within an entry — the same order the flat reader produced, so every
+// parser sees exactly what it saw before.
+func (r schemaResolution) sources() []providers.SourceFile {
+	var out []providers.SourceFile
+	for _, p := range r.Paths {
+		out = append(out, p.Files...)
+	}
+	return out
+}
+
 // readSchemaSources resolves the configured schema paths from disk into ORDERED
-// SourceFiles (the sensor is the filesystem-side caller, ADR 0014). A path that is
-// a directory is expanded to its *.sql files in Flyway version order (V<n>__…); a
-// path that is a file is read as-is. Order across entries is config order; within a
-// directory it is Flyway version order. A configured-but-unreadable path is a hard
-// error (a real misconfiguration, not "no DB").
+// SourceFiles grouped BY CONFIGURED PATH (the sensor is the filesystem-side
+// caller, ADR 0014). A path that is a directory is expanded to its *.sql files in
+// Flyway version order (V<n>__…); a path that is a file is read as-is. Order
+// across entries is config order; within a directory it is Flyway version order.
+// A configured-but-unreadable path is a hard error (a real misconfiguration, not
+// "no DB").
+//
+// EVERY configured path yields an entry, including one that resolved to no file.
+// That is the invariant the floor is built on: len(result.Paths) always equals
+// len(paths), so a path cannot be dropped on the way to the floor without the
+// omission being visible.
 //
 // Bytes become TEXT here, through sourcetext.Decode, and this is the right layer
 // for it by ADR 0014's own division: the parser is filesystem-free and receives
@@ -28,13 +77,12 @@ import (
 // everything and no complaint. The decoded content is what is stored in the
 // content map too, so snippets, fingerprints and file:line positions are all
 // computed against the same text the parser saw.
-func readSchemaSources(root string, paths []string) ([]providers.SourceFile, map[string][]byte, error) {
-	var sources []providers.SourceFile
-	content := map[string][]byte{}
-	add := func(abs string) error {
+func readSchemaSources(root string, paths []string) (schemaResolution, error) {
+	res := schemaResolution{Content: map[string][]byte{}}
+	read := func(abs string) (providers.SourceFile, error) {
 		data, err := os.ReadFile(abs)
 		if err != nil {
-			return fmt.Errorf("reading schema %q: %w", abs, err)
+			return providers.SourceFile{}, fmt.Errorf("reading schema %q: %w", abs, err)
 		}
 		text, _ := sourcetext.Decode(data)
 		rel, relErr := filepath.Rel(root, abs)
@@ -42,34 +90,44 @@ func readSchemaSources(root string, paths []string) ([]providers.SourceFile, map
 			rel = abs
 		}
 		rel = filepath.ToSlash(rel)
-		sources = append(sources, providers.SourceFile{Path: rel, Content: text})
-		content[rel] = text
-		return nil
+		res.Content[rel] = text
+		return providers.SourceFile{Path: rel, Content: text}, nil
 	}
 
 	for _, p := range paths {
+		// Appended UNCONDITIONALLY, before anything can go wrong with the
+		// resolution: an entry whose Files stay empty is the fact this whole
+		// change carries, so there is no branch in which a configured path fails
+		// to produce one.
+		entry := resolvedPath{Configured: p}
 		abs := filepath.Join(root, filepath.FromSlash(p))
 		info, err := os.Stat(abs)
 		if err != nil {
-			return nil, nil, fmt.Errorf("reading schema %q: %w", p, err)
+			return schemaResolution{}, fmt.Errorf("reading schema %q: %w", p, err)
 		}
 		if !info.IsDir() {
-			if err := add(abs); err != nil {
-				return nil, nil, err
+			f, err := read(abs)
+			if err != nil {
+				return schemaResolution{}, err
 			}
+			entry.Files = append(entry.Files, f)
+			res.Paths = append(res.Paths, entry)
 			continue
 		}
 		files, err := flywayOrderedSQL(abs)
 		if err != nil {
-			return nil, nil, err
+			return schemaResolution{}, err
 		}
-		for _, f := range files {
-			if err := add(f); err != nil {
-				return nil, nil, err
+		for _, path := range files {
+			f, err := read(path)
+			if err != nil {
+				return schemaResolution{}, err
 			}
+			entry.Files = append(entry.Files, f)
 		}
+		res.Paths = append(res.Paths, entry)
 	}
-	return sources, content, nil
+	return res, nil
 }
 
 var flywayVersion = regexp.MustCompile(`^V(\d+)__`)
@@ -78,6 +136,15 @@ var flywayVersion = regexp.MustCompile(`^V(\d+)__`)
 // named V<n>__*.sql sort by the integer <n>; DECLARED LIMIT — versions with dots
 // (V1.1) do NOT match and fall to the non-versioned bucket (lexical order, after
 // all versioned files). Flyway R (repeatable) / U (undo) prefixes are out of scope.
+//
+// DECLARED LIMIT — this listing is ONE LEVEL DEEP. A directory whose .sql files
+// sit in a subdirectory resolves to zero files, and that is now SAID rather than
+// scored: the path is reported as having resolved to no readable schema file and
+// the scan is not a measurement (unread.go, ADR 0072). The capability — reading
+// nested trees — is deliberately deferred, because recursion without a
+// cross-directory ordering rule would have to pick an order silently, which is
+// the same trap one level down that the golang-migrate naming already sets here.
+// Not-measured with the path named is the honest shape until that rule exists.
 func flywayOrderedSQL(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

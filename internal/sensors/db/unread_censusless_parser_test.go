@@ -89,17 +89,17 @@ func censusLessProject(t *testing.T) auditctx.AuditContext {
 
 // parseCensusLess runs the production reader and the production Prisma parser
 // over the temp project, and returns both halves the classifier consumes.
-func parseCensusLess(t *testing.T, ctx auditctx.AuditContext) ([]providers.SourceFile, *coredb.Schema) {
+func parseCensusLess(t *testing.T, ctx auditctx.AuditContext) (schemaResolution, *coredb.Schema) {
 	t.Helper()
-	sources, _, err := readSchemaSources(ctx.ProjectRoot, ctx.Config.Database.SchemaPaths)
+	resolution, err := readSchemaSources(ctx.ProjectRoot, ctx.Config.Database.SchemaPaths)
 	if err != nil {
 		t.Fatalf("readSchemaSources: %v", err)
 	}
-	schema, err := typescript.New().ParseSchema(sources)
+	schema, err := typescript.New().ParseSchema(resolution.sources())
 	if err != nil {
 		t.Fatalf("ParseSchema: %v", err)
 	}
-	return sources, schema
+	return resolution, schema
 }
 
 // The classification assertion, made against the reason VALUE rather than
@@ -107,12 +107,12 @@ func parseCensusLess(t *testing.T, ctx auditctx.AuditContext) ([]providers.Sourc
 // not.
 func TestSensorDB_CensusLessParser_TracelessFileIsClassifiedAsBlindness(t *testing.T) {
 	ctx := censusLessProject(t)
-	sources, schema := parseCensusLess(t, ctx)
+	resolution, schema := parseCensusLess(t, ctx)
 
 	// Anti-vacuity guards. Each one is a way this test could pass while
 	// exercising nothing, so each is checked rather than assumed.
-	if len(sources) != 2 {
-		t.Fatalf("read %d configured sources, want 2", len(sources))
+	if len(resolution.sources()) != 2 {
+		t.Fatalf("read %d configured sources, want 2", len(resolution.sources()))
 	}
 	if len(schema.Sources) != 0 {
 		t.Fatalf("the Prisma parser now fills db.Schema.Sources (%d entries) — this test no longer "+
@@ -136,9 +136,13 @@ func TestSensorDB_CensusLessParser_TracelessFileIsClassifiedAsBlindness(t *testi
 			prismaViewPath)
 	}
 
-	unread := unreadSources(sources, schema)
+	unread, unproductive := unreadSources(resolution, schema)
 	if len(unread) != 1 || unread[0].Path != prismaViewPath {
 		t.Fatalf("unreadSources = %+v, want exactly one entry for %s", unread, prismaViewPath)
+	}
+	if unproductive != 1 {
+		t.Fatalf("unproductive path count = %d, want 1 (views.prisma is its own configured path and "+
+			"contributed nothing; schema.prisma contributed)", unproductive)
 	}
 	if unread[0].Reason != reasonNothingRecognized {
 		t.Errorf("a file no parser position names, under a parser that accounts for NOTHING, is classified "+
@@ -166,8 +170,8 @@ func TestSensorDB_CensusLessParser_NoteReportsTheBlindnessNotABenignFact(t *test
 		t.Fatalf("Measured = false although %s declared a table; note:\n%s", prismaModelPath, res.Note)
 	}
 
-	blind := unreadNote([]unreadSource{{Path: prismaViewPath, Reason: reasonNothingRecognized}}, 2)
-	benign := unreadNote([]unreadSource{{Path: prismaViewPath, Reason: reasonDeclaresNoSchema}}, 2)
+	blind := unreadNote([]unreadSource{{Path: prismaViewPath, Reason: reasonNothingRecognized}}, 2, 2)
+	benign := unreadNote([]unreadSource{{Path: prismaViewPath, Reason: reasonDeclaresNoSchema}}, 2, 2)
 	if blind == benign {
 		t.Fatal("the two classifications render the same sentence, so this test cannot tell them apart")
 	}
@@ -199,9 +203,18 @@ func TestSensorDB_CensusFillingParser_TracelessDataFileStaysBenign(t *testing.T)
 		t.Fatal("the SQL-DDL parser filled no census for seed.sql — the contrast this control draws does not exist")
 	}
 
-	unread := unreadSources(sources, schema)
+	// Each source is its own configured entry, which is how a two-file
+	// schema_paths list resolves.
+	resolution := schemaResolution{Paths: []resolvedPath{
+		{Configured: sources[0].Path, Files: sources[:1]},
+		{Configured: sources[1].Path, Files: sources[1:]},
+	}}
+	unread, unproductive := unreadSources(resolution, schema)
 	if len(unread) != 1 || unread[0].Path != "seed.sql" {
 		t.Fatalf("unreadSources = %+v, want exactly one entry for seed.sql", unread)
+	}
+	if unproductive != 1 {
+		t.Fatalf("unproductive path count = %d, want 1 (seed.sql's entry contributed nothing)", unproductive)
 	}
 	if unread[0].Reason != reasonDeclaresNoSchema {
 		t.Errorf("a traceless file whose every statement the reducer POSITIVELY explained is classified "+
