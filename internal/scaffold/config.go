@@ -92,35 +92,46 @@ project:
   #     test:
   #       - "**/*_test.*"
 {{- end}}
-{{- if .ORM}}
+{{- if .SchemaPaths}}
 
 database:
+{{- if .ORM}}
+  # ` + "`orm:`" + ` is recorded for you, not for codefit: no sensor reads it. What turns
+  # the DB dimension on is ` + "`schema_paths`" + ` below — that is the field the audit
+  # actually consumes, and the only one whose absence makes it audit nothing.
   orm: {{q .ORM}}
+{{- end}}
 {{- if .DBType}}
   type: {{q .DBType}}
 {{- end}}
 {{- if .DBParadigm}}
   paradigm: {{q .DBParadigm}}
 {{- end}}
-{{- if .SchemaPaths}}
   schema_paths:
 {{- range .SchemaPaths}}
     - {{q .}}
-{{- end}}
 {{- end}}
 {{- else}}
 
 # No ` + "`database:`" + ` section was written, and codefit is telling you rather than
 # letting you find out from an empty report: it detects a schema ONLY from a
 # Prisma schema.prisma. SQL migration directories — Flyway, golang-migrate,
-# plain .sql DDL — are NOT detected yet.
+# plain .sql DDL — are NOT detected yet. A detected ORM name is not a schema
+# either: no sensor reads it, so it buys this config nothing on its own.
 #
 # So AS WRITTEN this config audits no schema. If this project has one, point
 # codefit at it by hand and the DB dimension runs on the next scan:
 #
 #   database:
+#     type: "postgresql"   # postgresql | mysql | sqlserver
 #     schema_paths:
 #       - "db/migrations"
+#
+# ` + "`type:`" + ` is optional, and leaving it out has a CONSEQUENCE worth knowing:
+# codefit then parses your SQL DDL as PostgreSQL and says nothing about having
+# chosen. A MySQL or SQL Server schema is silently mis-parsed, and every DB
+# finding after it reasons over a schema you do not have. sqlite is the one
+# value codefit refuses outright instead of guessing at.
 {{- end}}
 `))
 

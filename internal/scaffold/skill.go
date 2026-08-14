@@ -248,8 +248,14 @@ for a project like this carry NO such key, so as written nothing is audited. Add
 what turns the dimension on:
 
     database:
+      type: "postgresql"   # postgresql | mysql | sqlserver
       schema_paths:
         - "db/migrations"
+
+Leaving ` + "`type:`" + ` out is allowed and has a consequence: codefit parses the DDL as
+PostgreSQL without saying it chose, so a MySQL or SQL Server schema is silently
+mis-parsed and every finding after it reasons over a schema that does not exist.
+sqlite is the one value codefit refuses outright rather than guessing at.
 
 - A table with no primary key is deterministic. Everything else — foreign keys with no
   covering index, duplicate/redundant indexes, sensitive columns in the clear, risks in
