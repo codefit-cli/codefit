@@ -119,24 +119,31 @@ func (s *Sensor) Audit(ctx auditctx.AuditContext) (Result, error) {
 		return notMeasured("no database.schema_paths configured in .codefit.yaml"), nil
 	}
 
-	sources, content, err := readSchemaSources(ctx.ProjectRoot, ctx.Config.Database.SchemaPaths)
+	resolution, err := readSchemaSources(ctx.ProjectRoot, ctx.Config.Database.SchemaPaths)
 	if err != nil {
 		return Result{}, err
 	}
+	content := resolution.Content
 
-	schema, err := s.parser.ParseSchema(sources)
+	schema, err := s.parser.ParseSchema(resolution.sources())
 	if err != nil {
 		return Result{}, fmt.Errorf("parsing database schema: %w", err)
 	}
 
-	// The source-level floor (unread.go), BEFORE any rule runs: a configured
-	// file that contributed nothing to the model is declared, and a scan in
-	// which NO file contributed anything is not a measurement at all. Running
+	// The input-level floor (unread.go), BEFORE any rule runs: a configured
+	// schema input that contributed nothing to the model is declared, and a scan
+	// in which NO input contributed anything is not a measurement at all. Running
 	// the rules over an empty schema and reporting score 100 is the false
 	// all-clear this sensor exists to make impossible.
-	unread := unreadSources(sources, schema)
-	unreadTrace := unreadNote(unread, len(sources))
-	if wholeScanUnproductive(unread, len(sources)) {
+	//
+	// The unit is the CONFIGURED PATH, not the resolved file, and that is the
+	// whole of ADR 0072. A resolved-file denominator is a number the resolver
+	// itself decides, so a path that resolved to nothing was subtracted from both
+	// sides and the floor never engaged — the case the early return above cannot
+	// catch, because schema_paths WAS configured.
+	unread, unproductive := unreadSources(resolution, schema)
+	unreadTrace := unreadNote(unread, len(resolution.sources()), len(resolution.Paths))
+	if wholeScanUnproductive(unproductive, len(resolution.Paths)) {
 		return notMeasured(unreadTrace), nil
 	}
 
