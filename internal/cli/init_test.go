@@ -207,6 +207,20 @@ func TestInitCommandStatesRealGoCapability(t *testing.T) {
 	}
 }
 
+// reportGapClaim anchors the sentence the init REPORT makes about detection when
+// no schema source was written.
+//
+// It is byte-identical to internal/scaffold's configGapClaim on purpose. The two
+// artifacts are the same product speaking about the same run, and holding them
+// to one wording is what stops them describing two different codefits — the
+// developer reads the report, then opens the config, and a discrepancy there is
+// a discrepancy about whether codefit looked at all.
+//
+// It replaced "NOT detected", which this change made false. See configGapClaim's
+// comment for why the replacement is the stronger claim rather than a smaller
+// one, and for the per-site mutation evidence.
+const reportGapClaim = "LOOKED for one and found none"
+
 // TestFormatReport_UndetectedDeclaresGap is the report half of the three-place
 // declaration (generated config, init report, README).
 //
@@ -251,8 +265,22 @@ func TestFormatReport_UndetectedDeclaresGap(t *testing.T) {
 	if !strings.Contains(out, "schema_paths") {
 		t.Errorf("the report must say the DB dimension still audits a configured schema\n---\n%s", out)
 	}
+	// SITE 4 of the configGapClaim retarget, and the only one outside
+	// internal/scaffold. The old assertion here anchored on the loose word
+	// "migration" while its message spoke of "NOT detected" — so it went on
+	// passing for any sentence that happened to contain the word, including one
+	// that never said whether codefit had LOOKED.
+	//
+	// The fixture root holds pom.xml and nothing else: no .sql anywhere. So the
+	// true report is codefit's search result over this project, and the report is
+	// the artifact the developer actually reads.
+	if !strings.Contains(out, reportGapClaim) {
+		t.Errorf("the report must state that codefit %q. A report that only lists what was not "+
+			"written cannot be told apart from a codefit that never searched\n---\n%s",
+			reportGapClaim, out)
+	}
 	if !strings.Contains(low, "migration") {
-		t.Errorf("the report must declare that SQL migration directories are NOT detected\n---\n%s", out)
+		t.Errorf("the report must name what codefit searched for: SQL migration directories\n---\n%s", out)
 	}
 	if !strings.Contains(low, "scan-all") {
 		t.Errorf("the report must name the consequence for the next codefit-scan-all\n---\n%s", out)
