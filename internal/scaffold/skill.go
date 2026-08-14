@@ -3,6 +3,7 @@ package scaffold
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -175,6 +176,11 @@ own. ` + "`codefit-scan-all`" + ` runs it too, but ONLY when ` + "`database.sche
 migrations (PostgreSQL, MySQL, SQL Server), and classifies the schema as transactional or
 a warehouse — on a warehouse it adds the star-schema/SCD, columnar-index and partitioning
 checks.
+{{- if .HasSchemaPaths}}
+This project's config carries that key: ` + "`schema_paths`" + ` names ` + "`{{.SchemaPath}}`" + `, so the
+dimension is ON. ` + "`codefit init`" + ` wrote it because it PROVED it — a config WITHOUT the key
+means codefit could not prove one, never that it did not look.
+{{- end}}
 - A table with no primary key is deterministic. Everything else — foreign keys with no
   covering index, duplicate/redundant indexes, sensitive columns in the clear, risks in
   procedure/trigger bodies — is SURFACE: yours to reason about, exactly like the endpoint
@@ -243,7 +249,16 @@ a Prisma ` + "`schema.prisma`" + ` OR a directory of SQL-DDL/Flyway migrations (
 SQL Server) — never from the project's language, which is why this dimension reaches a
 project no code provider does.
 
-It reads exactly what ` + "`database.schema_paths`" + ` names in ` + "`.codefit.yaml`" + `. Generated configs
+It reads exactly what ` + "`database.schema_paths`" + ` names in ` + "`.codefit.yaml`" + `.
+{{- if .HasSchemaPaths}}
+This project's config DOES carry that key: ` + "`schema_paths`" + ` names ` + "`{{.SchemaPath}}`" + `, so the
+dimension is ON and ` + "`codefit-scan-db`" + ` audits that schema as written.
+
+` + "`codefit init`" + ` wrote it because it PROVED it — it read that directory exactly as an audit
+would and reconstructed a schema from it. It writes nothing it cannot prove, so a config
+WITHOUT the key means codefit could not prove one, never that it did not look.
+{{- else}}
+Generated configs
 for a project like this carry NO such key, so as written nothing is audited. Adding it is
 what turns the dimension on:
 
@@ -251,6 +266,7 @@ what turns the dimension on:
       type: "postgresql"   # postgresql | mysql | sqlserver
       schema_paths:
         - "db/migrations"
+{{- end}}
 
 Leaving ` + "`type:`" + ` out is allowed and has a consequence: codefit parses the DDL as
 PostgreSQL without saying it chose, so a MySQL or SQL Server schema is silently
@@ -292,6 +308,17 @@ provider for this language" — never a bare "codefit found no issues".
 // and schema triggers; narrowing it for an undetected project would mean a
 // schema task never loads the skill at all — the agent would not see a smaller
 // skill, it would see none.
+// firstSchemaPath is the path the skill NAMES, slash-spelled exactly as the
+// config beside it spells the same path. An agent that reads a different
+// spelling here than the config carries would be told to audit a path that does
+// not exist.
+func firstSchemaPath(info ProjectInfo) string {
+	if len(info.SchemaPaths) == 0 {
+		return ""
+	}
+	return filepath.ToSlash(info.SchemaPaths[0])
+}
+
 func RenderSkill(info ProjectInfo) ([]byte, error) {
 	var declared []surface.Category
 	if e, ok := registry.ByName(info.Language); ok {
@@ -310,13 +337,23 @@ func RenderSkill(info ProjectInfo) ([]byte, error) {
 		// locked vocabulary the response-level not-covered statement uses —
 		// never a hardcoded per-language sentence.
 		SurfaceReach string
+		// HasSchemaPaths and SchemaPath describe the config written BESIDE this
+		// skill by the same run. They exist because the skill's claim that "a
+		// project like this carries NO such key" became false the moment codefit
+		// learned to detect SQL migration directories: the first artifact an
+		// agent reads would tell it to expect no schema key in a config that has
+		// one. They gate BODY prose only — never the frontmatter description.
+		HasSchemaPaths bool
+		SchemaPath     string
 	}{
-		Language:      info.Language,
-		Detected:      info.Detected(),
-		Markers:       markerList(),
-		SurfaceClause: surfaceClause(declared),
-		HasIDOR:       hasCategory(declared, surface.CategoryIDOR),
-		SurfaceReach:  surface.DeriveCoverage(declared).Note,
+		Language:       info.Language,
+		Detected:       info.Detected(),
+		Markers:        markerList(),
+		SurfaceClause:  surfaceClause(declared),
+		HasIDOR:        hasCategory(declared, surface.CategoryIDOR),
+		SurfaceReach:   surface.DeriveCoverage(declared).Note,
+		HasSchemaPaths: len(info.SchemaPaths) > 0,
+		SchemaPath:     firstSchemaPath(info),
 	}
 	var buf bytes.Buffer
 	if err := skillTemplate.Execute(&buf, data); err != nil {

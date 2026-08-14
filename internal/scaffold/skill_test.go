@@ -166,10 +166,17 @@ func TestSkillTeachesDatabaseDimension(t *testing.T) {
 	}
 }
 
-// The DB section is rendered UNCONDITIONALLY. Detect() only recognizes a database
-// through enrichTypeScript (Prisma/Drizzle/TypeORM) — SQL-DDL/Flyway migrations
-// are not detected at all — so gating the section on detection would hide the
-// dimension on exactly the projects the SQL-DDL parser was built for.
+// The DB SECTION is rendered UNCONDITIONALLY, and that is a different thing from
+// the claim INSIDE it, which is now conditional.
+//
+// Detect() used to recognize a database only through enrichTypeScript
+// (Prisma/Drizzle/TypeORM); SQL-DDL/Flyway migrations were not detected at all.
+// They are now, and the section's "generated configs for a project like this
+// carry NO such key" sentence became conditional on what init actually wrote
+// (see TestGenerate_SkillClaimHoldsForBaitedMigrationDir). The SECTION itself
+// stays ungated for the original reason, which still holds: a project whose
+// schema codefit could not prove is exactly the project that most needs to be
+// told `codefit-scan-db` exists and how to point it at one.
 func TestSkillTeachesDatabaseEvenWhenNoORMDetected(t *testing.T) {
 	_, body := renderSkill(t, scaffold.ProjectInfo{Name: "flyway-app", Language: "go"})
 	if !strings.Contains(body, "codefit-scan-db") {
@@ -186,6 +193,48 @@ func TestSkillDescriptionTriggersOnDatabaseWork(t *testing.T) {
 	low := strings.ToLower(desc)
 	if !strings.Contains(low, "database") && !strings.Contains(low, "schema") {
 		t.Errorf("description must also trigger on database/schema work, got %q", desc)
+	}
+}
+
+// TestSkillDescriptionKeepsTheDBTriggerInEveryCombination is C-R7c, and it
+// guards the frontmatter against the CONDITIONAL that now lives in the body.
+//
+// The body's schema prose is gated on what init wrote (HasSchemaPaths). The
+// obvious next edit — "only mention the database when we configured one" —
+// applied to the DESCRIPTION would be a different kind of change entirely:
+// progressive disclosure loads the skill from the description ALONE, so
+// narrowing it means a schema task never loads the skill at all. The agent does
+// not get a smaller skill; it gets none, and never learns codefit could have
+// audited the schema it was asked about.
+//
+// All four combinations are rendered because the gate has two inputs and the
+// failure only needs one of them to go wrong.
+func TestSkillDescriptionKeepsTheDBTriggerInEveryCombination(t *testing.T) {
+	combos := map[string]scaffold.ProjectInfo{
+		"detected with schema": {Name: "x", Language: "typescript",
+			SchemaPaths: []string{"db/migrations"}},
+		"detected without schema": {Name: "x", Language: "typescript"},
+		"undetected with schema": {Name: "x", Language: config.LanguageUndetected,
+			SchemaPaths: []string{"db/migrations"}},
+		"undetected without schema": {Name: "x", Language: config.LanguageUndetected},
+	}
+	for name, info := range combos {
+		t.Run(name, func(t *testing.T) {
+			front, _ := renderSkill(t, info)
+			desc, ok := front["description"].(string)
+			if !ok || desc == "" {
+				t.Fatalf("the skill rendered no description at all; progressive disclosure would "+
+					"never load it. frontmatter = %v", front)
+			}
+			low := strings.ToLower(desc)
+			for _, trigger := range []string{"database", "schema"} {
+				if !strings.Contains(low, trigger) {
+					t.Errorf("the description lost its %q trigger. A task about a database schema "+
+						"would never load this skill — the agent sees no skill, not a smaller "+
+						"one\ndescription = %q", trigger, desc)
+				}
+			}
+		})
 	}
 }
 
