@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/codefit-cli/codefit/internal/config"
 )
@@ -40,6 +41,16 @@ type Result struct {
 	ConfigAction ConfigAction
 	UsedFallback bool // skill placed in the standard location (no agent detected)
 	Skills       []SkillWrite
+	// DroppedSchemaPaths names every database.schema_paths entry the PREVIOUS
+	// config carried that this run did not write again, with the reason it no
+	// longer proves.
+	//
+	// It exists because `init --force` re-derives schema_paths from disk, and a
+	// path that stops proving therefore disappears. A silent disappearance is
+	// found out from a later scan that suddenly measures nothing, with nothing
+	// connecting it to the init that caused it — the developer decides, but only
+	// if codefit tells them what changed.
+	DroppedSchemaPaths []SchemaCandidate
 }
 
 // Generate runs the full init: detect the project, write .codefit.yaml (honoring
@@ -55,7 +66,7 @@ func Generate(opts Options) (Result, error) {
 	}
 	res := Result{Info: info, ConfigPath: ConfigName}
 
-	if res.ConfigAction, err = writeConfig(opts, info); err != nil {
+	if res.ConfigAction, res.DroppedSchemaPaths, err = writeConfig(opts, info); err != nil {
 		return Result{}, err
 	}
 	if res.Skills, res.UsedFallback, err = placeSkill(opts.Root, info); err != nil {
@@ -64,31 +75,77 @@ func Generate(opts Options) (Result, error) {
 	return res, nil
 }
 
-// writeConfig renders and writes .codefit.yaml, respecting the overwrite decision.
-func writeConfig(opts Options, info ProjectInfo) (ConfigAction, error) {
+// writeConfig renders and writes .codefit.yaml, respecting the overwrite
+// decision, and reports any schema_paths entry the file it replaced carried and
+// this one does not.
+//
+// The demotion is read from the OUTGOING file, before it is overwritten, because
+// afterwards the fact is gone. It is deliberately not recomputed from disk a
+// second time: what the developer needs to know is what CHANGED between the
+// config they had and the config they now have.
+func writeConfig(opts Options, info ProjectInfo) (ConfigAction, []SchemaCandidate, error) {
 	path := filepath.Join(opts.Root, ConfigName)
 	existed := fileExists(path)
 	if existed && !opts.OverwriteConfig {
-		return ConfigSkipped, nil
+		return ConfigSkipped, nil, nil
+	}
+	var dropped []SchemaCandidate
+	if existed {
+		dropped = droppedSchemaPaths(path, info)
 	}
 	data, err := RenderConfig(info)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", fmt.Errorf("writing %s: %w", ConfigName, err)
+		return "", nil, fmt.Errorf("writing %s: %w", ConfigName, err)
 	}
 	// Backstop the honesty rule: never report a config as written if it does not
 	// load+validate. Values come from validated enums and the name is YAML-escaped,
 	// so this should never fire — but a success message over a broken file would be
 	// exactly the silent failure the project forbids.
 	if _, err := config.Load(path); err != nil {
-		return "", fmt.Errorf("generated %s failed validation: %w", ConfigName, err)
+		return "", nil, fmt.Errorf("generated %s failed validation: %w", ConfigName, err)
 	}
 	if existed {
-		return ConfigOverwritten, nil
+		return ConfigOverwritten, dropped, nil
 	}
-	return ConfigCreated, nil
+	return ConfigCreated, dropped, nil
+}
+
+// droppedSchemaPaths compares the schema_paths of the config about to be
+// replaced against the one about to be written, and returns what is going away
+// with the reason discovery gave for it.
+//
+// An unloadable existing config yields nothing rather than an error: it is a
+// file the developer hand-edited into an invalid state, and refusing to
+// regenerate over it would take away the one command that fixes it.
+func droppedSchemaPaths(path string, info ProjectInfo) []SchemaCandidate {
+	prev, err := config.Load(path)
+	if err != nil {
+		return nil
+	}
+	var out []SchemaCandidate
+	for _, was := range prev.Database.SchemaPaths {
+		p := filepath.ToSlash(was)
+		if slices.Contains(toSlashAll(info.SchemaPaths), p) {
+			continue
+		}
+		out = append(out, SchemaCandidate{Path: p, Reason: dropReason(info, p)})
+	}
+	return out
+}
+
+// dropReason explains a demotion with the measurement discovery actually made of
+// that path when it still exists, and says plainly that it is gone when it does
+// not. A reason invented here would be the guess this whole change removes.
+func dropReason(info ProjectInfo, path string) string {
+	for _, c := range info.SchemaCandidates {
+		if c.Path == path {
+			return c.Reason
+		}
+	}
+	return "no longer holds SQL files codefit can order and reconstruct"
 }
 
 // placeSkill renders codefit's skill and writes it to every placement target,

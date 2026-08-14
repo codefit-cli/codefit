@@ -14,7 +14,68 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **`codefit init` detects SQL schema directories — and writes only what it can
+  PROVE.** Schema detection used to read a Prisma `schema.prisma` and nothing
+  else, and it ran *behind* language detection: an unresolved language provider
+  ended `Detect` before any schema enrichment, so a Java service with Flyway
+  migrations — the exact project a language-independent SQL-DDL parser exists for
+  — was never even looked at. Discovery is now language-independent (ADR 0018:
+  a schema source is orthogonal to the application language).
+
+  **A directory becomes a live `database.schema_paths` only when it proves**, in
+  this order: its apply order is proven (every `.sql` at its own level carries an
+  integer version the scan-time resolver matches — one stray filename
+  disqualifies the level), the **real** SQL-DDL parser reconstructs at least one
+  table from it, and it is the **only** directory that proved. The proof reads
+  the directory through the literal scan-time reader and the same parser binding
+  `codefit-scan-db` uses when `database.type` is unset, so init-time proof and
+  scan-time behaviour cannot disagree about the same path.
+
+  **Everything else gets the block COMMENTED, naming the real path and the
+  reason** — "codefit cannot prove the apply order of these filenames" for a
+  golang-migrate directory, "reconstructed no table" for one the parser read and
+  made nothing of, and, when two or more proved, all of them with their table
+  counts and the statement that codefit cannot know whether they are one schema
+  or several. `schema_paths` entries merge into ONE reconstructed model, so a
+  wrong extra entry does not add noise — it poisons the model, and every DB
+  finding after it is stated at full confidence about a schema you do not have.
+
+  **The invented `"db/migrations"` placeholder is gone from any config where
+  codefit found a real path.** Nothing in the old file distinguished an example
+  from a finding. When codefit genuinely finds nothing, the block now says so,
+  states how deep it walked, and marks its example as an example.
+
+  **`init --force` re-proves from disk**, and announces a demotion: a path that
+  no longer proves is dropped, named, and explained, rather than disappearing
+  into a later scan that suddenly measures nothing.
+
+  Not covered, deliberately: codefit still does **not** sniff the SQL dialect, so
+  a proof with no `database.type` set runs under the PostgreSQL binding. A live
+  block carries a commented `type:` line directly above the key and the report
+  names the dialect the proof ran under — the proof says the DDL reconstructs, it
+  does not say the dialect is right. Measured and locked as a control: a
+  MySQL-flavoured migration set (backticks, `AUTO_INCREMENT`, `ENGINE=InnoDB`)
+  reconstructs **zero** tables under that binding, so it fails the proof gate and
+  is commented rather than written. See
+  [ADR 0074](docs/decisions/0074-init-writes-a-database-block-it-can-prove.md).
+
 ### Changed
+- **The generated config and the init report state codefit's SEARCH RESULT, not
+  a capability gap.** Both used to say SQL migration directories "are NOT
+  detected" — a sentence about codefit, true of every project at once, and
+  therefore silent about the one in front of you. They now report what codefit
+  found in *this* project and why each candidate was left out, or that it looked
+  and found none and how deep it walked. A config that says nothing about having
+  searched cannot be told apart from a codefit that never searched.
+- **codefit's own skill stops claiming a config it may no longer be describing.**
+  The generated `SKILL.md` told every agent that "generated configs for a project
+  like this carry NO such key". That is false the moment a proof succeeds on a
+  project with no resolved language, so the claim is now conditional on what the
+  run actually wrote: with a live `schema_paths` the skill names the key and the
+  path instead. The frontmatter `description` is deliberately **not** gated —
+  progressive disclosure loads the skill from the description alone, so narrowing
+  it would mean a schema task never loads the skill at all.
 - **`codefit init` gates the `database:` block on `schema_paths`, not on a
   detected ORM.** `database.orm` is read by **zero** production code — it is
   unvalidated free text that round-trips and nothing consumes — while

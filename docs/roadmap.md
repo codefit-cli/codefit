@@ -428,15 +428,36 @@ supposed to guard it. See
 [ADR 0073](decisions/0073-the-config-gate-follows-what-the-audit-reads.md); this closes explore
 finding 5 (the lock was on the wrong predicate).
 
-**Still open: there is no detection of a SQL migration directory.** A Flyway project still
-receives a config that audits nothing until the developer points `database.schema_paths` at
-its migrations by hand, and the generated config, the init report and the README all say so —
-now whenever **no schema source** was detected, which is the condition that matches the fact.
-It is the follow-up change, and a baited regression lock
-(`TestGenerate_SkillClaimHoldsForBaitedMigrationDir`, a fixture holding both an unregistered
-build manifest and a real Flyway-shaped migration directory) goes **red** the day it lands,
-forcing the generated skill's "carry NO such key" claim to be revisited rather than quietly
-falsified.
+**CLOSED — SQL migration directories are detected, and only ever written when PROVEN.**
+Discovery is language-independent (it no longer sits behind language detection, which used to
+end `Detect` before any schema enrichment ran on exactly the projects that needed it), walks 6
+directory levels while read depth stays 1, and promotes a directory only when its apply order
+is proven from the filenames, the **real** parser reconstructs ≥1 table from it, and it is the
+only directory that proved. Everything else — golang-migrate naming, a set that reconstructs
+nothing, two proven candidates — gets the block **commented with the real path and the
+reason**, and the invented `"db/migrations"` placeholder no longer appears in a config where
+codefit found a real path. See
+[ADR 0074](decisions/0074-init-writes-a-database-block-it-can-prove.md).
+
+**The baited lock did its job and was RETARGETED, not deleted.**
+`TestGenerate_SkillClaimHoldsForBaitedMigrationDir` — a fixture holding both an unregistered
+build manifest and a real Flyway-shaped migration directory — went **red** the day detection
+landed, exactly as designed, forcing the generated skill's "carry NO such key" claim to be
+revisited rather than quietly falsified. It keeps its name and its baited fixture; its body is
+now a two-directional equivalence between the config and the skill one run wrote.
+
+**Still open, and separable: `flywayOrderedSQL` orders Flyway naming only.** golang-migrate's
+`1_init.up.sql` cannot be ordered by proof (`10_x` sorts before `1_init`), so such a directory
+is never written live — it is named and explained instead. That is the safe direction and it
+does not block anything: the strictness gate lives beside the regex that owns it, so extending
+the resolver widens `init` automatically with no scaffold change.
+
+**Still open, and DECLARED: the SQL dialect is never measured.** A proof with no
+`database.type` set runs under the PostgreSQL binding (**P0-12**, filed below — there is no
+sniff). Mitigated, not fixed: a live block carries a commented `type:` line directly above
+the key, and the report names the dialect the proof ran under. Measured and locked: a
+MySQL-flavoured set reconstructs **zero** tables under that binding, so it fails the proof gate
+and is commented rather than written live.
 
 ### P0-11 — CLOSED (`a-configured-schema-path-always-leaves-a-trace`) — a configured schema path that resolved to nothing scored 100
 
@@ -469,6 +490,28 @@ See [ADR 0072](decisions/0072-a-configured-schema-path-always-leaves-a-trace.md)
    the path named); the *capability* is deferred, because recursing without a cross-directory
    ordering rule would have to pick an order silently — the same trap one level down that the
    golang-migrate naming already sets. Declared at the resolver. Open.
+
+### P0-12 — the SQL dialect is never measured, and nothing sniffs it
+
+`sqlDialectParser("")` binds the **PostgreSQL** parser when `database.type` is absent. Nothing
+measures which dialect the DDL actually is, and nothing ever has — this entry exists because a
+prior citation pointed at a sniff that does not exist, and an undeclared residual is the defect
+this board is ordered by.
+
+**Why it is not worse than it looks.** Measured while building the proof gate: a MySQL-flavoured
+set (backticks, `AUTO_INCREMENT`, `ENGINE=`) reconstructs **zero** tables under that binding, so
+it fails `init`'s ≥1-table proof and is commented rather than written live. The dangerous shape —
+a live block over a partly-wrong model — needs DDL that reduces under the wrong binding and means
+something different there. Not yet exhibited, not yet ruled out.
+
+**Why it is not closable by declaring harder.** Three artifacts already declare it (a commented
+`type:` above the key, a report sentence naming the binding the proof ran under, ADR 0074). The
+gap is that codefit cannot tell the developer *which* dialect it read, because it never asked.
+
+**The cheap first move is a probe, not a parser**: a shape census over the candidate's own bytes
+(backtick quoting, `AUTO_INCREMENT`, `ENGINE=`, `NVARCHAR`, `GO` batch separators) is enough to say
+*"this looks like MySQL; set `database.type`"* without pretending to parse it. Declaring what a
+measurement found beats declaring that no measurement was taken.
 
 ---
 

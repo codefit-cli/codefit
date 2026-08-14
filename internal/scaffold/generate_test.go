@@ -288,23 +288,35 @@ func liveYAMLKeyPresent(raw, key string) bool {
 	return false
 }
 
-// TestGenerate_SkillClaimHoldsForBaitedMigrationDir is R6, and the fixture is
-// BAITED on purpose.
+// TestGenerate_SkillClaimHoldsForBaitedMigrationDir is R7, the fixture is STILL
+// BAITED on purpose, and the test's meaning has been RETARGETED because the bait
+// finally fired.
 //
 // The root holds a build manifest codefit registers no provider for AND a real
-// Flyway-shaped SQL migration directory. Today detection finds neither: no
-// `database:` block is written, so the skill's claim that "generated configs for
-// a project like this carry NO such key" is TRUE, and this test is GREEN.
+// Flyway-shaped SQL migration directory. When this lock was written, detection
+// found neither, so the skill's unconditional claim that "generated configs for
+// a project like this carry NO such key" was TRUE and the test was green. The
+// bait existed to make that stop being true the day SQL-migration detection
+// landed — and it did: this same fixture now acquires SchemaPaths, the config
+// gains a live `schema_paths:` key, and the old body could not pass.
 //
-// The bait is what makes it worth writing. The day SQL-migration detection lands
-// — the named follow-up to this change — this same fixture acquires SchemaPaths,
-// the config gains a live `schema_paths:` key, and this lock goes RED. That is
-// the point: the skill's claim is unconditional prose over a fact this change
-// makes conditional, and the only thing forcing the next change to revisit it is
-// a test it cannot satisfy without a decision.
+// THE CORRECT RESPONSE WAS NOT TO DELETE IT. The test keeps its exact NAME (a
+// rename is deletion by another name) and its baited fixture; what changed is
+// that the claim it guards is now CONDITIONAL, so the lock became a
+// two-directional EQUIVALENCE over the bytes one Generate run really wrote:
 //
-// An UNBAITED fixture (pom.xml alone) would sail straight through that change
-// still green, proving nothing about the claim it names.
+//	no live schema_paths ⇒ the skill MUST state the no-key claim
+//	   live schema_paths ⇒ the skill MUST NOT state it, and MUST name the key
+//	                       and the path init actually wrote
+//
+// Both directions are needed. Checking only the first would pass for a skill
+// that dropped the conditional and never mentioned a schema again; checking only
+// the second would pass for a skill that lost the claim it makes on the
+// projects that still have no schema (TestGenerate_SkillClaimHoldsForUnbaitedRoot
+// is that half's fixture).
+//
+// The anchored positive probe still runs FIRST in whichever branch applies, so a
+// REWORDED skill fails loudly instead of passing vacuously.
 func TestGenerate_SkillClaimHoldsForBaitedMigrationDir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pom.xml", "<project/>\n")
@@ -330,16 +342,46 @@ CREATE TABLE invoice (
 		t.Fatalf("fixture is not the undetected case: language = %q", res.Info.Language)
 	}
 
-	rawConfig, err := os.ReadFile(filepath.Join(root, scaffold.ConfigName))
+	// The bait has to still BE bait. If this fixture ever stops producing a live
+	// key, the live branch below stops running and the test degrades into the
+	// unbaited case while still carrying this name.
+	if !liveYAMLKeyPresent(mustReadConfig(t, root), "schema_paths") {
+		t.Fatalf("the baited fixture no longer yields a live schema_paths. This test's whole "+
+			"value is exercising the branch where the skill's claim must NOT be made; without "+
+			"it the lock is a duplicate of the unbaited case\n--- config ---\n%s",
+			mustReadConfig(t, root))
+	}
+
+	assertSkillMatchesConfig(t, root, res)
+}
+
+// TestGenerate_SkillClaimHoldsForUnbaitedRoot is C-R7b: the same manifest with
+// NO DDL beside it. It keeps the no-key claim itself under test, which the
+// baited fixture no longer can now that the bait fires.
+func TestGenerate_SkillClaimHoldsForUnbaitedRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pom.xml", "<project/>\n")
+
+	res, err := scaffold.Generate(scaffold.Options{Root: root})
 	if err != nil {
-		t.Fatalf("reading the config init wrote: %v", err)
+		t.Fatalf("Generate: %v", err)
 	}
-	cfgText := string(rawConfig)
-
-	if liveYAMLKeyPresent(cfgText, "database") {
-		t.Errorf("a project codefit detects no schema for must get NO live `database:` block\n---\n%s", cfgText)
+	if liveYAMLKeyPresent(mustReadConfig(t, root), "schema_paths") {
+		t.Fatalf("a root with no DDL must not produce a live schema_paths\n--- config ---\n%s",
+			mustReadConfig(t, root))
 	}
+	assertSkillMatchesConfig(t, root, res)
+}
 
+// assertSkillMatchesConfig holds the two artifacts one Generate run wrote to the
+// equivalence R7 requires, in whichever direction that run landed in.
+//
+// It reads the FILES rather than re-rendering, because what the developer's
+// agent loads is the file. Re-rendering would test the template against itself.
+func assertSkillMatchesConfig(t *testing.T, root string, res scaffold.Result) {
+	t.Helper()
+
+	cfgText := mustReadConfig(t, root)
 	if len(res.Skills) != 1 {
 		t.Fatalf("skills written = %d, want 1 fallback", len(res.Skills))
 	}
@@ -347,24 +389,39 @@ CREATE TABLE invoice (
 	if err != nil {
 		t.Fatalf("reading the written skill: %v", err)
 	}
+	skill := string(rawSkill)
 
-	// Positive probe FIRST. Without it the equivalence below is satisfied by a
-	// reworded skill just as well as by a correct config — a false all-clear
-	// wearing the shape of a cross-artifact check.
-	if !strings.Contains(string(rawSkill), skillNoSuchKeyClaim) {
-		t.Fatalf("the skill written for an undetected project no longer states %q. If the wording "+
-			"changed legitimately, move the anchor; if the CLAIM changed, this lock is the reason "+
-			"you are reading this message — decide what the skill should now say about a config "+
-			"that DOES carry schema_paths\n--- skill ---\n%s", skillNoSuchKeyClaim, rawSkill)
+	if !liveYAMLKeyPresent(cfgText, "schema_paths") {
+		// Direction 1. Positive probe FIRST: without it, "the skill states the
+		// claim" is satisfied by any skill that happens not to contradict it, and
+		// a rewording would pass as silently as a deletion.
+		if !strings.Contains(skill, skillNoSuchKeyClaim) {
+			t.Fatalf("the config carries NO live schema_paths, so the skill must state %q — and "+
+				"it does not. If the wording changed legitimately, move the anchor; if the CLAIM "+
+				"changed, decide what the skill should now tell an agent about a config with no "+
+				"schema key\n--- skill ---\n%s", skillNoSuchKeyClaim, skill)
+		}
+		return
 	}
 
-	// The equivalence: the skill promises the config beside it carries no such
-	// key, so the config must not carry one.
-	if liveYAMLKeyPresent(cfgText, "schema_paths") {
-		t.Errorf("the skill states %q, but the config init wrote in the same run carries a live "+
-			"schema_paths key. The two artifacts now contradict each other: either the skill's claim "+
-			"must become conditional, or this config must not have one\n--- config ---\n%s",
-			skillNoSuchKeyClaim, cfgText)
+	// Direction 2. The config DOES carry the key, so the claim is now false and
+	// must be gone — and its absence is not enough on its own: the skill has to
+	// tell the agent what the config really says, or the agent learns nothing.
+	if strings.Contains(skill, skillNoSuchKeyClaim) {
+		t.Errorf("the config init wrote in this same run carries a live schema_paths, yet the "+
+			"skill beside it still claims %q. The first artifact an agent reads would tell it to "+
+			"expect no such key in a config that has one\n--- config ---\n%s\n--- skill ---\n%s",
+			skillNoSuchKeyClaim, cfgText, skill)
+	}
+	if !strings.Contains(skill, "schema_paths") {
+		t.Errorf("the skill must NAME the `schema_paths` key the config carries\n--- skill ---\n%s", skill)
+	}
+	for _, p := range res.Info.SchemaPaths {
+		if !strings.Contains(skill, filepath.ToSlash(p)) {
+			t.Errorf("the skill must name the path init actually wrote (%q), not a generic example "+
+				"— an agent that reads a different path audits a different schema\n--- skill ---\n%s",
+				filepath.ToSlash(p), skill)
+		}
 	}
 }
 
