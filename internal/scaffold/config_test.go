@@ -181,7 +181,25 @@ func TestRenderConfig_UndetectedNamesTheMarkersItLooksFor(t *testing.T) {
 // configGapClaim anchors the sentence the generated config's else-branch makes
 // about detection. Anchoring on the CLAIM rather than on a loose word keeps the
 // counter-cases below from being satisfied by any other mention of a schema.
-const configGapClaim = "NOT detected"
+//
+// It used to be "NOT detected", and that became FALSE the day codefit learned to
+// detect SQL migration directories. Retargeting an anchor is the moment a lock is
+// most easily weakened into a substring that passes vacuously, so the replacement
+// was chosen for DISCRIMINATING POWER and each of its four assertion sites was
+// mutation-proven individually — with mutations that would still have satisfied
+// the old "NOT detected" check.
+//
+// What replaced it is not a smaller claim but a different one, and the stronger
+// of the two: the old anchor recorded a CAPABILITY GAP, which any config could
+// state truthfully by accident; the new one records codefit's own SEARCH RESULT
+// over this specific project. A config that says nothing about having searched is
+// indistinguishable from a codefit that never searched — which is exactly the
+// state this change left behind.
+//
+// The identical sentence appears in the init REPORT (internal/cli's
+// reportGapClaim). Two artifacts, one wording, so they cannot drift into
+// describing different codefits.
+const configGapClaim = "LOOKED for one and found none"
 
 func renderOrFail(t *testing.T, info scaffold.ProjectInfo) string {
 	t.Helper()
@@ -228,12 +246,17 @@ func TestRenderConfig_DeclaresTheSchemaGapWheneverNoSchemaPaths(t *testing.T) {
 				t.Errorf("a config auditing no schema must tell the developer schema_paths is how the "+
 					"DB dimension turns on\n---\n%s", out)
 			}
+			// SITE 1 of the retarget. The declaration must state codefit's SEARCH
+			// RESULT over this project, not a general fact about what codefit can
+			// or cannot detect. A capability sentence is true of every project at
+			// once and therefore says nothing about this one.
 			if !strings.Contains(out, configGapClaim) {
-				t.Errorf("the declaration must say SQL migration directories are %s — the gap that "+
-					"leaves this config auditing nothing\n---\n%s", configGapClaim, out)
+				t.Errorf("the declaration must state that codefit %q. Without it, a config that "+
+					"audits no schema is indistinguishable from a codefit that never looked for "+
+					"one\n---\n%s", configGapClaim, out)
 			}
 			if !strings.Contains(strings.ToLower(out), "migration") {
-				t.Errorf("the declaration must name what is not detected: SQL migration "+
+				t.Errorf("the declaration must name what codefit searched for: SQL migration "+
 					"directories\n---\n%s", out)
 			}
 		})
@@ -258,9 +281,13 @@ func TestRenderConfig_DeclaresTheSchemaGapWheneverNoSchemaPaths(t *testing.T) {
 				t.Errorf("a detected schema source must be written as a LIVE schema_paths key, not "+
 					"discussed in a comment\n---\n%s", out)
 			}
+			// SITE 2 of the retarget, and the direction that keeps SITE 1 from
+			// being satisfied by a template that simply prints the declaration
+			// unconditionally. A config that HAS a schema source must never also
+			// report that codefit searched and came back empty-handed.
 			if strings.Contains(out, configGapClaim) {
-				t.Errorf("this config names a schema source, so it must not also claim schemas are "+
-					"%s\n---\n%s", configGapClaim, out)
+				t.Errorf("this config names a schema source, yet it also claims codefit %q. Both "+
+					"sentences cannot be true of one run\n---\n%s", configGapClaim, out)
 			}
 		})
 	}
@@ -343,8 +370,12 @@ func TestRenderConfig_CommentedExampleNamesTypeAndItsConsequence(t *testing.T) {
 
 	// R5's second scenario: naming type: must not cost the honesty about
 	// detection that already lives here.
+	// SITE 3 of the retarget. This test's subject is the UNDETECTED render, and
+	// its point is that naming `type:` must not cost the honesty about detection
+	// that already lives in the same comment block. The two must coexist.
 	if !strings.Contains(comments, configGapClaim) || !strings.Contains(low, "migration") {
-		t.Errorf("the comment must still state that SQL migration directories are %s\n"+
+		t.Errorf("the comment block carries the type: guidance but no longer states that codefit "+
+			"%q. The dialect advice must not be bought with the search result\n"+
 			"--- comments ---\n%s", configGapClaim, comments)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -107,25 +108,81 @@ database:
 {{- if .DBParadigm}}
   paradigm: {{q .DBParadigm}}
 {{- end}}
+{{- if not .DBType}}
+  # ` + "`type:`" + ` is NOT written above, and its absence is a MEASUREMENT, not an
+  # oversight: codefit proved the path below by parsing it, but it does not sniff
+  # the SQL dialect, so it has no measured value to write. Uncomment and set it:
+  #
+  # type: "postgresql"   # postgresql | mysql | sqlserver
+  #
+  # CONSEQUENCE of leaving it out: codefit parses the DDL as PostgreSQL and says
+  # nothing about having chosen. A MySQL or SQL Server schema is silently
+  # mis-parsed, and every DB finding after it reasons over a schema you do not
+  # have. sqlite is the one value codefit refuses outright instead of guessing at.
+{{- end}}
   schema_paths:
 {{- range .SchemaPaths}}
     - {{q .}}
 {{- end}}
+{{- if .OtherCandidates}}
+  # codefit also found SQL under this project it did NOT write here, and says so
+  # rather than letting the omission look like an absence:
+{{- range .OtherCandidates}}
+  #   {{.Path}} — {{.Reason}}
+{{- end}}
+{{- end}}
 {{- else}}
 
 # No ` + "`database:`" + ` section was written, and codefit is telling you rather than
-# letting you find out from an empty report: it detects a schema ONLY from a
-# Prisma schema.prisma. SQL migration directories — Flyway, golang-migrate,
-# plain .sql DDL — are NOT detected yet. A detected ORM name is not a schema
-# either: no sensor reads it, so it buys this config nothing on its own.
+# letting you find out from an empty report. A detected ORM name is not a schema:
+# no sensor reads it, so it buys this config nothing on its own. What the DB
+# dimension audits is whatever ` + "`database.schema_paths`" + ` names.
+{{- if .Candidates}}
 #
-# So AS WRITTEN this config audits no schema. If this project has one, point
-# codefit at it by hand and the DB dimension runs on the next scan:
+# codefit DID find SQL in this project, and could not PROVE any single directory
+# into a schema it may write for you. It never guesses one: schema_paths entries
+# merge into ONE reconstructed model, so a wrong entry does not add noise, it
+# poisons the model — and every DB finding after it is stated at full confidence
+# about a schema you do not have.
+#
+# What it found, and why each was left out:
+{{- range .Candidates}}
+#
+#   {{.Path}}
+#     {{.Reason}}{{if .Tables}} ({{.Tables}} table(s) reconstructed){{end}}
+{{- end}}
+{{- if .Ambiguous}}
+#
+# More than one directory proved. codefit cannot know whether they are one schema
+# or several, and choosing for you is the guess it refuses to make. The choice is
+# yours.
+{{- end}}
+#
+# If one of those IS your schema, write it by hand and the DB dimension runs on
+# the next scan:
 #
 #   database:
 #     type: "postgresql"   # postgresql | mysql | sqlserver
 #     schema_paths:
-#       - "db/migrations"
+#       - {{q .FirstCandidate}}
+{{- else}}
+#
+# codefit LOOKED for one and found none. It walked this project down to
+# {{.DiscoveryDepth}} directory levels below the root, skipping vendored trees, build
+# output and test fixtures, for a directory holding .sql files whose apply order it
+# can prove from their names — and it detects a Prisma schema.prisma directly.
+# That is codefit's search RESULT, not a claim about your project: a schema deeper than
+# {{.DiscoveryDepth}} levels is outside the bound, and a monorepo should run
+# ` + "`codefit init`" + ` per sub-project root.
+#
+# If this project has a schema, point codefit at it by hand. The path below is an
+# EXAMPLE — codefit found nothing here, so replace it with your own:
+#
+#   database:
+#     type: "postgresql"   # postgresql | mysql | sqlserver
+#     schema_paths:
+#       - "path/to/your/migrations"   # example only — not a path codefit found
+{{- end}}
 #
 # ` + "`type:`" + ` is optional, and leaving it out has a CONSEQUENCE worth knowing:
 # codefit then parses your SQL DDL as PostgreSQL and says nothing about having
@@ -147,6 +204,19 @@ type configView struct {
 	Production, Test, Example []string
 	ORM, DBType, DBParadigm   string
 	SchemaPaths               []string
+	// Candidates is every SQL directory discovery found and could not write
+	// live, with the reason each was left out. OtherCandidates is the same list
+	// minus the one that WAS written, for the live branch.
+	Candidates, OtherCandidates []SchemaCandidate
+	// Ambiguous is R4: more than one directory proved, so none was written.
+	Ambiguous bool
+	// FirstCandidate is the path the commented example uses. It is a REAL path
+	// codefit found — never the invented "db/migrations" placeholder, which in
+	// this branch would print an example indistinguishable from a finding.
+	FirstCandidate string
+	// DiscoveryDepth is the declared bound, interpolated rather than spelled in
+	// the template so the config can never state a number the walk does not use.
+	DiscoveryDepth int
 }
 
 // RenderConfig renders a commented .codefit.yaml for the detected project. Paths
@@ -165,12 +235,61 @@ func RenderConfig(info ProjectInfo) ([]byte, error) {
 		DBType:      info.DBType,
 		DBParadigm:  info.DBParadigm,
 		SchemaPaths: toSlashAll(info.SchemaPaths),
+
+		Candidates:      info.SchemaCandidates,
+		OtherCandidates: candidatesExcept(info.SchemaCandidates, info.SchemaPaths),
+		Ambiguous:       ambiguousCandidates(info.SchemaCandidates),
+		FirstCandidate:  firstCandidatePath(info.SchemaCandidates),
+		DiscoveryDepth:  DiscoveryDepth,
 	}
 	var buf bytes.Buffer
 	if err := configTemplate.Execute(&buf, view); err != nil {
 		return nil, fmt.Errorf("rendering config: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// candidatesExcept returns the candidates NOT written into schema_paths, so a
+// live block can still name what codefit found and left out. Silence about the
+// rest would read as absence.
+func candidatesExcept(all []SchemaCandidate, written []string) []SchemaCandidate {
+	var out []SchemaCandidate
+	for _, c := range all {
+		if !slices.Contains(toSlashAll(written), c.Path) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ambiguousCandidates reports R4's stalemate: more than one directory proved, so
+// none may be written.
+func ambiguousCandidates(all []SchemaCandidate) bool {
+	n := 0
+	for _, c := range all {
+		if c.Reason == ReasonAmbiguous {
+			n++
+		}
+	}
+	return n > 1
+}
+
+// firstCandidatePath is the REAL path the commented example uses.
+//
+// A proven-but-ambiguous candidate wins over an unprovable one: it is the path
+// most likely to be the developer's actual answer, and it is the one codefit has
+// a table count for. The empty string is impossible in the branch that reads
+// this field — the template only enters it when Candidates is non-empty.
+func firstCandidatePath(all []SchemaCandidate) string {
+	for _, c := range all {
+		if c.Reason == ReasonAmbiguous {
+			return c.Path
+		}
+	}
+	if len(all) > 0 {
+		return all[0].Path
+	}
+	return ""
 }
 
 func toSlashAll(in []string) []string {
