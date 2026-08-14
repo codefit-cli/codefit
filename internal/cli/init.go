@@ -138,22 +138,40 @@ func formatReport(res scaffold.Result) string {
 // writeSchemaGap declares, in the report the developer actually reads, that the
 // config just written audits no database schema.
 //
-// The condition is ORM == "", NOT "the language was undetected". The whole
-// `database:` block is gated behind a detected ORM, and SchemaPaths is only
-// ever populated from a Prisma schema — there is no detection of a SQL
-// migration directory at all. A TypeScript project without Prisma therefore has
-// exactly the same gap as a Java one, and declaring it only in the case that
-// happens to be new would be the over-promise this project exists to prevent.
+// The condition is len(SchemaPaths) == 0 — the field the audit actually reads.
+// schema_paths is what the DB sensor consumes; `orm` is consumed by nothing, so
+// keying this declaration on an ORM made it answer a question nobody asked. It
+// went silent for a drizzle or typeorm project, which has the full gap AND a
+// `database:` block that configured nothing, and it would have spoken for a
+// Flyway project the moment detection fills schema_paths with no ORM to go with
+// it. Wrong in both directions, out of one predicate.
+//
+// It is not keyed on "the language was undetected" either. A TypeScript project
+// without a schema has exactly the same gap as a Java one, and declaring it only
+// in the case that happens to be new would be the over-promise this project
+// exists to prevent.
+//
+// ORM is still read here — for WORDING, never to gate. A report printing "orm
+// drizzle" under Detected and "Not configured — database schema" below it states
+// two true facts that read as a contradiction; the clarifier explains how both
+// hold at once rather than leaving the developer to reconcile them.
 //
 // The consequence is spelled out rather than implied: with no schema configured
 // AND no security provider, the next codefit-scan-all has nothing to measure
 // and says so. That is honest, and it is precisely why detecting SQL migration
 // directories is the follow-up work.
 func writeSchemaGap(b *strings.Builder, info scaffold.ProjectInfo) {
-	if info.ORM != "" {
+	if len(info.SchemaPaths) > 0 {
 		return
 	}
 	fmt.Fprintln(b, "\nNot configured — database schema:")
+	if info.ORM != "" {
+		fmt.Fprintf(b, "  codefit did detect %s, and that fact stands — but an ORM name is not a schema.\n", info.ORM)
+		fmt.Fprintln(b, "  No sensor reads it, so it was not written on its own: a `database:` block")
+		fmt.Fprintln(b, "  holding only an ORM configures nothing while looking configured. What the DB")
+		fmt.Fprintln(b, "  dimension audits is whatever database.schema_paths names, and no schema source")
+		fmt.Fprintln(b, "  resolved here.")
+	}
 	fmt.Fprintln(b, "  codefit detects a schema only from a Prisma schema.prisma. SQL migration")
 	fmt.Fprintln(b, "  directories (Flyway, golang-migrate, plain .sql DDL) are NOT detected, so no")
 	fmt.Fprintln(b, "  database.schema_paths was written and the DB dimension audits nothing here.")

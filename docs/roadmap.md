@@ -415,13 +415,28 @@ is now driven from `registry.All()` plus a no-marker root. See
 **Rejected, and not re-openable:** adding Java and Python to the registry. It moves the line
 without removing it — Ruby, PHP, C#, Rust and every future language stay refused.
 
-**Named, DECLARED, not built — the second gap.** `internal/scaffold/config.go` gates the whole
-`database:` block, `schema_paths` included, behind a detected ORM, and `SchemaPaths` is only
-ever populated from a Prisma schema. There is **no detection of a SQL migration directory**,
-so a Flyway project still receives a config that audits nothing. Declared in the generated
-config, the init report and the README, in all three cases whenever **no ORM** was detected
-(a TypeScript project without Prisma has the identical gap). Open; it is the follow-up to
-this change.
+**Named, DECLARED, not built — the second gap. The UNGATE half is now CLOSED; detection is
+not.** `internal/scaffold/config.go` used to gate the whole `database:` block, `schema_paths`
+included, behind a detected ORM — the one DB field **zero** production code reads — which was
+wrong in both directions at once. It went silent for a drizzle/typeorm project, which received
+a `database:` block holding only `orm: drizzle` (configuring nothing) *and* no gap declaration,
+because the declaration keyed on the same ORM; and it would have spoken for a Flyway project
+the moment detection filled `schema_paths` with no ORM beside it. The gate now follows
+`len(SchemaPaths) > 0` in all three sites, and both locks moved with it — their counter-cases
+each set ORM *and* SchemaPaths, so the predicate move was invisible to the suite that was
+supposed to guard it. See
+[ADR 0073](decisions/0073-the-config-gate-follows-what-the-audit-reads.md); this closes explore
+finding 5 (the lock was on the wrong predicate).
+
+**Still open: there is no detection of a SQL migration directory.** A Flyway project still
+receives a config that audits nothing until the developer points `database.schema_paths` at
+its migrations by hand, and the generated config, the init report and the README all say so —
+now whenever **no schema source** was detected, which is the condition that matches the fact.
+It is the follow-up change, and a baited regression lock
+(`TestGenerate_SkillClaimHoldsForBaitedMigrationDir`, a fixture holding both an unregistered
+build manifest and a real Flyway-shaped migration directory) goes **red** the day it lands,
+forcing the generated skill's "carry NO such key" claim to be revisited rather than quietly
+falsified.
 
 ### P0-11 — CLOSED (`a-configured-schema-path-always-leaves-a-trace`) — a configured schema path that resolved to nothing scored 100
 

@@ -15,7 +15,17 @@ import (
 // write artifacts without polluting testdata.
 func copyTree(t *testing.T, src string) string {
 	t.Helper()
-	dst := t.TempDir()
+	return copyTreeInto(t, src, t.TempDir())
+}
+
+// copyTreeInto is copyTree with the destination chosen by the caller. A test that
+// asserts the project NAME needs the root's base name to be its own choice rather
+// than t.TempDir()'s counter ("001").
+func copyTreeInto(t *testing.T, src, dst string) string {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("copyTreeInto: %v", err)
+	}
 	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -252,6 +262,109 @@ func TestGenerate_UndetectedWritesNothingElse(t *testing.T) {
 	}
 	if string(after) != sentinelText {
 		t.Errorf("codefit modified the user's CLAUDE.md:\n%s", after)
+	}
+}
+
+// skillNoSuchKeyClaim is the sentence the undetected skill body states about the
+// config generated beside it. It is quoted here as an ANCHOR, not as a substring
+// convenience: the lock below fails loudly when the sentence is reworded, rather
+// than quietly passing because its `if` never fired.
+const skillNoSuchKeyClaim = "Generated configs\nfor a project like this carry NO such key"
+
+// liveYAMLKeyPresent reports whether raw carries key as a LIVE (non-comment) YAML
+// key. The generated config discusses `schema_paths` in prose for every project
+// that has none, so a plain substring search would answer "yes" for the exact
+// case this lock exists to keep saying "no" about.
+func liveYAMLKeyPresent(raw, key string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, key+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestGenerate_SkillClaimHoldsForBaitedMigrationDir is R6, and the fixture is
+// BAITED on purpose.
+//
+// The root holds a build manifest codefit registers no provider for AND a real
+// Flyway-shaped SQL migration directory. Today detection finds neither: no
+// `database:` block is written, so the skill's claim that "generated configs for
+// a project like this carry NO such key" is TRUE, and this test is GREEN.
+//
+// The bait is what makes it worth writing. The day SQL-migration detection lands
+// — the named follow-up to this change — this same fixture acquires SchemaPaths,
+// the config gains a live `schema_paths:` key, and this lock goes RED. That is
+// the point: the skill's claim is unconditional prose over a fact this change
+// makes conditional, and the only thing forcing the next change to revisit it is
+// a test it cannot satisfy without a decision.
+//
+// An UNBAITED fixture (pom.xml alone) would sail straight through that change
+// still green, proving nothing about the claim it names.
+func TestGenerate_SkillClaimHoldsForBaitedMigrationDir(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "pom.xml", "<project/>\n")
+	mkdirs(t, root, filepath.Join("db", "migrations"))
+	writeFile(t, root, filepath.Join("db", "migrations", "V1__init.sql"), `
+CREATE TABLE customer (
+  id      BIGINT PRIMARY KEY,
+  email   VARCHAR(255) NOT NULL,
+  created TIMESTAMP NOT NULL
+);
+CREATE TABLE invoice (
+  id          BIGINT PRIMARY KEY,
+  customer_id BIGINT NOT NULL REFERENCES customer(id),
+  total_cents BIGINT NOT NULL
+);
+`)
+
+	res, err := scaffold.Generate(scaffold.Options{Root: root})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Info.Detected() {
+		t.Fatalf("fixture is not the undetected case: language = %q", res.Info.Language)
+	}
+
+	rawConfig, err := os.ReadFile(filepath.Join(root, scaffold.ConfigName))
+	if err != nil {
+		t.Fatalf("reading the config init wrote: %v", err)
+	}
+	cfgText := string(rawConfig)
+
+	if liveYAMLKeyPresent(cfgText, "database") {
+		t.Errorf("a project codefit detects no schema for must get NO live `database:` block\n---\n%s", cfgText)
+	}
+
+	if len(res.Skills) != 1 {
+		t.Fatalf("skills written = %d, want 1 fallback", len(res.Skills))
+	}
+	rawSkill, err := os.ReadFile(filepath.Join(root, res.Skills[0].Path))
+	if err != nil {
+		t.Fatalf("reading the written skill: %v", err)
+	}
+
+	// Positive probe FIRST. Without it the equivalence below is satisfied by a
+	// reworded skill just as well as by a correct config — a false all-clear
+	// wearing the shape of a cross-artifact check.
+	if !strings.Contains(string(rawSkill), skillNoSuchKeyClaim) {
+		t.Fatalf("the skill written for an undetected project no longer states %q. If the wording "+
+			"changed legitimately, move the anchor; if the CLAIM changed, this lock is the reason "+
+			"you are reading this message — decide what the skill should now say about a config "+
+			"that DOES carry schema_paths\n--- skill ---\n%s", skillNoSuchKeyClaim, rawSkill)
+	}
+
+	// The equivalence: the skill promises the config beside it carries no such
+	// key, so the config must not carry one.
+	if liveYAMLKeyPresent(cfgText, "schema_paths") {
+		t.Errorf("the skill states %q, but the config init wrote in the same run carries a live "+
+			"schema_paths key. The two artifacts now contradict each other: either the skill's claim "+
+			"must become conditional, or this config must not have one\n--- config ---\n%s",
+			skillNoSuchKeyClaim, cfgText)
 	}
 }
 
