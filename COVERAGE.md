@@ -29,32 +29,47 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 > hand whenever the manifest changes. Edit in that order — rules, then manifest,
 > then this file. Today only the **TypeScript** provider has a full manifest.
 
+> **The bracketed `id:` marker is the entry's name, and it is the same name the
+> agent uses.** `codefit-coverage` answers with an INDEX of named entries and
+> serves the full prose only when an agent asks for an id
+> (`detail: ["db.sqlddl-dialect-limits"]`). The marker next to each block below
+> carries that id — several, comma-separated, when one block mirrors several
+> entries — so a citation from an agent and a paragraph in this file can be
+> pointed at each other instead of matched by reading. It is **mechanically
+> checked in both directions**: `TestCoverageMirror_NamesEveryEntry` fails if a
+> declared entry is named nowhere here, and fails if a marker names an id no entry
+> carries. That second direction is why this paragraph spells the marker out in
+> words instead of showing one: a literal marker anywhere in this file is a claim
+> about a real entry, illustration included. Correspondence, not accuracy — a
+> marker sitting beside the wrong prose still passes, which is the same limit the
+> manifest's own controls state about themselves.
+
 ## TypeScript / Next.js / Express / Fastify / NestJS / Prisma
 
 ### Deterministic — codefit affirms (certainty 1.0)
 
-- **Hardcoded secrets.** A variable whose **name** looks like a credential
+- **Hardcoded secrets.** [id: ts.hardcoded-secrets] A variable whose **name** looks like a credential
   (`password`, `apiKey`, `token`, `secret`, `authToken`, …) assigned a static
   string literal. Matched by variable **name + literal value** — codefit does NOT
   scan values for the shape of an API key, private key, or connection string, so a
   hardcoded secret not tied to a credential-named variable is not caught here.
-- **Weak cryptography.** MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
+- **Weak cryptography.** [id: ts.weak-crypto] MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
   `createHash('md5'|'sha1')`. **Known limit:** these are flagged **wherever they
   appear**; a non-security use (a cache key, an ETag) may be a false positive,
   because deciding whether a hash is security-relevant means following the data
   (surface). Also flagged: `Math.random()` assigned to a security-named variable
   (`token`, `nonce`, `salt`, …) — not a cryptographically secure source.
-- **Dangerous code evaluation.** `eval()` / `new Function()` with a non-constant
+- **Dangerous code evaluation.** [id: ts.dangerous-code-evaluation] `eval()` / `new Function()` with a non-constant
   argument (an identifier, call, concatenation, or interpolated template). A
   constant string-literal argument is static code and is not flagged.
-- **SQL injection — inline.** A query passed to `.query()` / `.execute()`
+- **SQL injection — inline.** [id: ts.sql-injection-inline] A query passed to `.query()` / `.execute()`
   assembled **inline** by string concatenation or an interpolated template, e.g.
   ``db.query(`SELECT ... ${userInput}`)``. Assembly through an intermediate
   variable is **surface** (below).
-- **XSS — inline.** React `dangerouslySetInnerHTML` whose `__html` is built
+- **XSS — inline.** [id: ts.xss-inline-inner-html] React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
-- **Table without a primary key (DB-050).** A model with no `@id`/`@@id`, read from
+- **Table without a primary key (DB-050).** [id: DB-050] A model with no `@id`/`@@id`, read from
   the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
   (Flyway) migrations reconstructed to their final state (`database.schema_paths`).
   A table with no primary key is structurally undeniable, so it is **affirmed** —
@@ -84,7 +99,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 ### Reasoning — codefit maps surface, the agent judges
 
-- **IDOR.** Next.js App Router **route handlers AND Server Actions** (`"use
+- **IDOR.** [id: ts.idor] Next.js App Router **route handlers AND Server Actions** (`"use
   server"`) that receive a client-controlled identifier and reach a resource —
   mapped so the agent verifies ownership is checked. For a route handler the
   id-input is read from the request (route param, query string, request body); for
@@ -108,7 +123,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   does not prove the caller owns *this* resource, which codefit cannot verify from
   structure (ADR 0006 amended). `known_authz_detected` gates the authz concern, never
   the IDOR one.
-- **Broken authorization.** Route handlers **and Server Actions** that perform a
+- **Broken authorization.** [id: ts.broken-authorization] Route handlers **and Server Actions** that perform a
   sensitive operation — touch data or mutate state (a Prisma read/write, or an
   indirect service call) — mapped with a signal stating the operation and whether a
   known authz helper was detected in the body. Broader than IDOR (needs no client
@@ -124,7 +139,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   baseline (`codefit-baseline-register-authz-helper`) and recognizes it on later scans
   without re-reasoning (ADR 0013). Registering clears the **authz** gap, never the
   **IDOR/ownership** one.
-- **Over-fetching.** Points where a domain object is serialized from a Prisma find
+- **Over-fetching.** [id: ts.over-fetching] Points where a domain object is serialized from a Prisma find
   — for a route handler the sink is an explicit `Response.json` /
   `NextResponse.json` / `JSON.stringify`; for a **Server Action** it is the
   **return value**, which the framework serializes to the client (an action has no
@@ -134,7 +149,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `name` is not; that needs the schema and is the agent's. Serialization through a
   service is the frontier (codefit can't see the field selection). Matched by the
   serialization, never by model name.
-- **N+1 query-in-loop pattern (DB-201).** Every query call site — a local Prisma
+- **N+1 query-in-loop pattern (DB-201).** [id: ts.nplus1-query-in-loop] Every query call site — a local Prisma
   access OR a call at the cross-function frontier (the same service/repository
   frontier IDOR/authz/over-fetching already declare, reusing `isPrismaCall`/
   `isServiceCall` verbatim) — that sits lexically inside a loop construct: a
@@ -157,7 +172,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   it is mapped as **per-endpoint surface** (from the application's code, not the
   schema), so it appears in `scan-all`'s endpoint buckets, **never in the
   schema-only DB section below**.
-- **Express & Fastify.** The same IDOR / broken-authorization / over-fetching /
+- **Express & Fastify.** [id: ts.express-fastify-handlers] The same IDOR / broken-authorization / over-fetching /
   N+1 surface above is mapped for these non-Next.js frameworks. Handlers are discovered
   **by shape, never by path** — an Express `router.<verb>('/path', …middleware,
   handler)` call, and Fastify's options-object form `.<verb>('/path', { handler,
@@ -177,7 +192,16 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   controller→service split) — codefit emits `indirect_access=true` and names the
   callee in `indirect_call`; it does **not** follow the call across files, the agent
   reasons over the named function.
-- **NestJS.** Same IDOR / authz / over-fetching / N+1 surface, for routes declared as
+- **SQL injection — via an intermediate variable.** [id: ts.sql-injection-via-intermediate]
+  The other half of the split above: the query is assembled in **steps** through
+  intermediate variables (`const q = "..." + input; db.query(q)`), so codefit maps
+  the database calls as **surface** and the agent reasons about where the query
+  text came from.
+- **XSS — `__html` from a variable.** [id: ts.xss-inner-html-from-variable] The
+  other half of the XSS split: `dangerouslySetInnerHTML` receives a **variable**
+  whose safety depends on whether it was sanitized earlier, so codefit maps it and
+  the agent judges whether the value is safe.
+- **NestJS.** [id: ts.nestjs-controllers] Same IDOR / authz / over-fetching / N+1 surface, for routes declared as
   decorated class methods. A handler is a method with an **HTTP-verb decorator**
   (`@Get`/`@Post`/…), detected by that shape, never by `@Controller`. The client
   id-input comes from the method's **parameter decorators** (`@Param('id')`,
@@ -197,12 +221,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   detected, so an app that guards via middleware reads `known_authz_detected: false`
   across the board (a conservative *verify*, never a false *secure*).
 - **Database structure (from the schema, no query analysis).**
-  - **FK with no covering index (DB-001).** A foreign key is *covered* when some
+  - **FK with no covering index (DB-001).** [id: DB-001] A foreign key is *covered* when some
     index's **leading columns** match it — the **primary key counts as an implicit
     index**, a `@unique` as an index. Whether an un-indexed FK matters depends on the
     table's size/access pattern, so codefit states the fact (`fk_columns`,
     `existing_indexes`, `covering_index_detected: false`) and the agent judges.
-  - **Exact duplicate index (DB-011a).** Two indexes on the same columns, same
+  - **Exact duplicate index (DB-011a).** [id: DB-011a] Two indexes on the same columns, same
     order, same uniqueness — a pure write/storage cost; which to drop is the
     human's call. **Dialect-uneven real-world coverage:** on **PostgreSQL/Pagila**
     this rule fires on a **genuine upstream duplicate** (the `payment_p2022_01`
@@ -213,7 +237,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     rule is verified **clean** against real DDL (no false positives), but its
     positive fire path is proven only by a **constructed (synthetic)** schema,
     since neither real corpus ships a duplicate index.
-  - **Prefix-redundant index (DB-011b).** An index `[a]` that is a **strict
+  - **Prefix-redundant index (DB-011b).** [id: DB-011b] An index `[a]` that is a **strict
     leading prefix** of a wider index-like coverer `[a,b]` on the same table (a
     real index, or the primary key as an implicit index) — pure write/storage
     overhead, which to drop is the human's call. A **`UNIQUE` index never fires**
@@ -225,9 +249,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     dialect is proven by mutating a copy of a real table (e.g. adding a synthetic
     index on the leading column of Sakila's own real `film_actor` composite
     primary key `[actor_id, film_id]`), never a fully synthetic fixture.
-  - **Multivalued (array) column (DB-002).** An array violates 1NF, but a native
+  - **Multivalued (array) column (DB-002).** [id: DB-002] An array violates 1NF, but a native
     array (Postgres) is legitimate sometimes — surfaced, not affirmed.
-- **Index-vs-query — the code's queries crossed with the schema (`scan-all` only,
+- [id: db.index-vs-query-cross, db.index-vs-query-precedence-and-scope] **Index-vs-query — the code's queries crossed with the schema (`scan-all` only,
   Prisma).** Unlike every rule above (schema-only), these read BOTH sides: the WHERE
   columns of the code's Prisma queries **and** the schema's indexes. Both are
   **surface** — a missing index may or may not matter (cardinality, table size, write
@@ -235,11 +259,11 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   columns**, the **primary key**, and a **`@unique`**; a filter that constrains a
   unique key is a single-row lookup and never fires. Matching is by the **logical
   field name** on both sides (Prisma `@map` physical names never enter).
-  - **Filtered column with no index (DB-010).** One column the code filters on with
+  - **Filtered column with no index (DB-010).** [id: DB-010] One column the code filters on with
     nothing (index, unique, or PK) covering it as a leading column. A `Boolean` or
     `enum` column is **skipped** — low-cardinality by its declared type, where a
     standalone index is almost always wrong.
-  - **Multi-column filter with no composite index (DB-013).** A `WHERE a AND b` with
+  - **Multi-column filter with no composite index (DB-013).** [id: DB-013] A `WHERE a AND b` with
     no composite index whose leading columns are that **set** — order-insensitive, so
     `[b,a]` covers `(a,b)`. The **same set recurring across many models is grouped
     into one item** listing every affected model (an architectural pattern — e.g.
@@ -268,12 +292,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   from column names, so they are **never affirmed** — codefit states the fact, the
   agent judges. Names are matched **by component** (camelCase/snake_case), never raw
   substring.
-  - **FK typed as text (DB-051).** A `String`/`Text` FK whose referenced key is
+  - **FK typed as text (DB-051).** [id: DB-051] A `String`/`Text` FK whose referenced key is
     **numeric**, or an unbounded `@db.Text` key. A `String` FK to a `String`
     uuid/cuid key does **not** fire (it is a structural type-mismatch check, not a
     name guess); an unresolvable reference does not fire. Facts: `type_mismatch`,
     `text_key`, `referenced_type_resolved`.
-  - **Missing audit timestamps (DB-052).** A table carrying **no audit-timestamp
+  - **Missing audit timestamps (DB-052).** [id: DB-052] A table carrying **no audit-timestamp
     column at all** — not one column named for when the row was created, changed
     or recorded. `looks_like_join_table` is exposed so link tables can be
     dismissed. "Only one missing" is a **deferred candidate**, not fired yet.
@@ -323,17 +347,17 @@ so a blind spot is *declared and known*, never silent (PRD §10).
       admitting one **silences** a table, and a false negative is the error that
       hides. The `columns:` signal lists every column, so such an item is
       dismissible in one step.
-  - **Sensitive column in the clear (DB-053).** A column whose name matches a
+  - **Sensitive column in the clear (DB-053).** [id: DB-053] A column whose name matches a
     sensitive token (`password`, `token`, `apiKey`, `ssn`, …) held in a
     `String`/`Text`/`Bytes` type. It **always emits**; an encryption hint in the
     name (`passwordHash`, `encrypted`…) is reported as `encryption_hint_in_name`,
     **not** used to suppress — a name is not a guarantee, and hiding a possible
     plaintext secret would be a silent false negative. `passwordChangedAt`
     (DateTime) and `passwordResetCount` (Int) do not fire (type filter).
-  - **Repeating groups (DB-003).** Two or more same-typed columns sharing a base
+  - **Repeating groups (DB-003).** [id: DB-003] Two or more same-typed columns sharing a base
     name with numeric suffixes (`phone1/phone2/phone3`) — a 1NF smell weighed
     against an intentional fixed set (address line 1/2).
-- **View sensitive-column exposure (DB-020).** A **`VIEW`** whose top-level
+- **View sensitive-column exposure (DB-020).** [id: DB-020] A **`VIEW`** whose top-level
   `SELECT` column list exposes a column or alias whose name matches a sensitive
   token (the same vocabulary as DB-053). Read through a deliberately **bounded**
   `SELECT`-projection scanner, never a general SQL-expression parser: a function
@@ -354,7 +378,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   projects:** Prisma's `schema.prisma` has no view-block concept (ADR 0014
   places it out of scope), so a Prisma-only project has no views for this rule
   to read at all.
-- **Routine without exception handling (DB-031).** A **stored procedure or
+- **Routine without exception handling (DB-031).** [id: DB-031] A **stored procedure or
   function** (both surface as `db.Procedure`) whose captured body contains **no
   exception-handling construct** for its dialect: T-SQL `BEGIN TRY` (paired with
   `BEGIN CATCH`), MySQL `DECLARE ... HANDLER`, or PL/pgSQL `EXCEPTION WHEN`. This
@@ -391,7 +415,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   Prisma-only projects:** Prisma's `schema.prisma` has no
   stored-procedure/function block concept, so a Prisma-only project has no
   routines for this rule to read.
-- **Trigger cross-table cascade (DB-040).** A **trigger** whose body performs
+- **Trigger cross-table cascade (DB-040).** [id: DB-040] A **trigger** whose body performs
   DML (INSERT/UPDATE/DELETE) against a table **other** than the one it fires on.
   Surface, never an affirmation: it states the facts (`writes_other_table: X`
   per other table, and `documented_by_comment`) and the **agent** judges whether
@@ -419,7 +443,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `testdata/pg_constructed_cascade_trigger.sql` (a trigger→function pair
   exercising the ADR-0026 resolution path). **Zero value on Prisma-only
   projects:** `schema.prisma` has no trigger block concept.
-- **Trigger external-effecting call (DB-041).** A **trigger** whose body invokes
+- **Trigger external-effecting call (DB-041).** [id: DB-041] A **trigger** whose body invokes
   a call that reaches **outside** the database (shell exec, OLE automation,
   email, remote/cross-database query, async notification, or a pipe to a
   program). Surface, never an affirmation: it states the fact (`external_call:
@@ -449,7 +473,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   from _not covered_** (which would mean non-detectable): the capability exists,
   only the dogfood evidence is absent by the dialect's nature. **Zero value on
   Prisma-only projects.**
-- **Dynamic SQL construction in a routine (DB-030).** A **stored procedure or
+- **Dynamic SQL construction in a routine (DB-030).** [id: DB-030] A **stored procedure or
   function** whose body **builds and runs SQL from a string at runtime**.
   Surface, never an affirmation: it states the fact (`dynamic_sql: <marker>`) and
   the **agent** judges whether it is injectable — codefit maps the surface, it
@@ -472,7 +496,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   in `testdata/tsql/constructed_dynamic_sql_proc.sql` (`sp_executesql` over a
   built string), and a real NEGATIVE (`uspGetBillOfMaterials`). **Zero value on
   Prisma-only projects.**
-- **Table structural completeness (`db-model-completeness-contract`, ADR 0034).**
+- **Table structural completeness (`db-model-completeness-contract`, ADR 0034).** [id: db.table-structural-completeness]
   Every table carries a completeness signal (`db.Table.Complete`/`Note`/
   `Unreduced`) mirroring the pre-existing `Body.Complete` idiom (ADR 0004/0025) at
   TABLE granularity: `false` means the parser met at least one statement affecting
@@ -546,7 +570,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   double-space fabrication, and the missing-comma-before-`PRIMARY KEY` wrong
   composite key, all documented below) reports `Complete=true`
   regardless; that class needs its own, separate control.
-- **Index access method (`db.Index.Method`, `index-method-capture`).** Every
+- **Index access method (`db.Index.Method`, `index-method-capture`).** [id: db.index-access-method] Every
   index the schema-parsing providers read now carries its **declared** access
   method/kind when the source states one, lowercased at every capture site for
   one convention across dialects: PostgreSQL's `USING <method>` on a
@@ -605,7 +629,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   `CREATE INDEX`-shaped statement uses, never silently proven complete. See
   the SQL-DDL known limits below (item 7) for the narrower set of
   `CREATE INDEX`-family shapes still genuinely unread after this slice.
-- **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
+- [id: db.paradigm-and-table-role] **Paradigm and table-role detection, plus 3NF-suppression on OLAP-classified
   tables (S1, RF-03 OLAP closure; inverted to top-down by the **schema gate**,
   ADR 0037).** codefit computes a schema's **paradigm**
   (`oltp` | `olap` | `mixed`) and each table's **warehouse role** (`fact` |
@@ -766,18 +790,18 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   entry — the columnar/analytic-index check landed in S3 — the entry after
   that — and the partitioning census (DW-020) landed in S4, so the DW-0xx
   family is now **complete** and nothing in its scope is left unbuilt.
-- **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
+- [id: db.star-schema-family-contract] **Star-schema and slowly-changing-dimension checks (DW-001/002/005/010/011,
   S2, RF-03 OLAP closure).** Five rules reading the schema **plus** the S1
   paradigm/role classification. They reach **only** fact- and dimension-role
   tables — an `oltp` or `unclassified` table is never evaluated — and all five
   are **pure surface, never affirmations**: a warehouse-modelling choice is a
   design judgment, not a structurally undeniable defect.
-  - **DW-001, fact table with no dimension FK.** A fact-role table whose
+  - **DW-001, fact table with no dimension FK.** [id: DW-001] A fact-role table whose
     foreign keys reach no dimension-role table. A FK to another **fact**, to
     staging, or to an unclassified table deliberately does **not** count — a
     fact-to-fact bridge looks joined but carries no dimensional context. A fact
     with zero FKs fires too, and says so (`foreign_keys: (none)`).
-  - **DW-002, dimension without a surrogate key.** A dimension-role table whose
+  - **DW-002, dimension without a surrogate key.** [id: DW-002] A dimension-role table whose
     primary key is **composite**, or a single column that is **not provably an
     integer** surrogate. The test is structural and narrow on purpose — a
     one-column integer primary key, the shape every well-modelled warehouse
@@ -810,7 +834,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     also restored the table's visibility to DW-002 at all. A dimension with
     **no** primary key at all **abstains** — DB-050 already affirms that case,
     and two IDs for one defect is noise.
-  - **DW-005, facts present but no time dimension.** Schema-level, at most
+  - **DW-005, facts present but no time dimension.** [id: DW-005] Schema-level, at most
     **one** item, anchored on the first fact table. A time dimension is
     recognized by **either** the **name** or the structural grain. The name
     test **composes on the same role-name vocabulary** documented above: it
@@ -842,7 +866,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     `dim_fiscal_date`, `dim_datetime`) does **not**, and neither does a bare
     `calendar` carrying no role token (which the role vocabulary would never
     classify as a dimension in the first place).
-  - **DW-010, SCD-2 dimension without a currency index.** A dimension carrying
+  - **DW-010, SCD-2 dimension without a currency index.** [id: DW-010] A dimension carrying
     slowly-changing columns (`valid_from`/`valid_to`/`is_current`/
     `effective_date`, separator-insensitive so `validTo`/`isCurrent` match too)
     where **no index leads with** `valid_to` or `is_current` — so every "give
@@ -855,7 +879,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     enough to go quiet. A dimension with no slowly-changing columns is never
     evaluated; one with history columns but **neither** currency column
     abstains rather than demanding an index no query would use.
-  - **DW-011, mixed SCD strategies.** Schema-level, one item, when some
+  - **DW-011, mixed SCD strategies.** [id: DW-011] Schema-level, one item, when some
     dimensions keep history and others overwrite in place — a report joining
     both mixes point-in-time with as-of-today attributes. **Time dimensions are
     excluded** from the comparison (a calendar is not slowly-changing by
@@ -883,7 +907,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     its **declared limit**: a dimension using a different vocabulary
     (AdventureWorksDW's `DimProduct` uses `StartDate`/`EndDate`/`Status`) reads
     as SCD-1.
-  - **Dogfood status — stated plainly, not implied.** The positive and trap
+  - **Dogfood status — stated plainly, not implied.** [id: db.star-schema-dogfood-status] The positive and trap
     fire paths of all five rules are proven by **constructed** (declared
     synthetic, ADR 0028) schemas, **not** by real vendored DDL. Microsoft's
     AdventureWorksDW **is** vendored
@@ -923,7 +947,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   - **Zero value on Prisma-only projects.** A `schema.prisma` expresses no
     warehouse concept, so these rules can only classify a Prisma project whose
     models happen to carry a recognized warehouse name.
-- **Fact table missing a columnar/analytic index (DW-021, S3, RF-03 OLAP
+- [id: DW-021] **Fact table missing a columnar/analytic index (DW-021, S3, RF-03 OLAP
   closure).** A fact-role table with no index using a **recognized**
   columnar/analytic access method. Pure **surface, never an affirmation**
   (ADR 0017): whether the absence matters depends on the table's real size and
@@ -1024,7 +1048,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
     its fire paths through constructed DDL, per the dogfood status above —
     but the coverage gap is honestly scoped to "not vendored", never "does
     not exist".
-- **Fact tables censused for declared table partitioning (DW-020, S4, RF-03
+- [id: DW-020] **Fact tables censused for declared table partitioning (DW-020, S4, RF-03
   OLAP closure)** — the schema's fact-role tables, counted against
   `db.Table.Partitioning`.
   - **Pure surface, never an affirmation** (ADR 0017): whether partitioning is
@@ -1137,7 +1161,7 @@ covered" would be a lie, and leaving them out would be the silence this document
 exists to prevent — so they get their own answer
 ([ADR 0057](docs/decisions/0057-the-coverage-manifest-answers-for-every-capability-the-prd-promises.md)).
 
-- **N+1 query-in-loop (DB-201).** Promised by the PRD as a DB rule id (RF-04),
+- **N+1 query-in-loop (DB-201).** [id: DB-201] Promised by the PRD as a DB rule id (RF-04),
   **delivered since `v0.2.2`** as the language provider's **`nplus1` surface
   category** — not a DB/DW rule. It is reachable today:
   `codefit-surface-nplus1` enumerates it, `scan-all` reports it in the
@@ -1154,30 +1178,30 @@ exists to prevent — so they get their own answer
 
 ### Not covered (declared, not silent)
 
-- Race conditions in business logic.
-- Architectural design flaws.
-- Business-logic correctness (not a security property).
-- Deep static taint analysis — covered by surface mapping + agent reasoning, not
+- [id: ts.race-conditions] Race conditions in business logic.
+- [id: ts.architectural-design-flaws] Architectural design flaws.
+- [id: ts.business-logic-correctness] Business-logic correctness (not a security property).
+- [id: ts.deep-static-taint-analysis] Deep static taint analysis — covered by surface mapping + agent reasoning, not
   deterministically.
-- **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** — **not yet
+- **JS server frameworks beyond Next.js, Express, Fastify, and NestJS** [id: ts.other-server-frameworks] — **not yet
   covered**, a known gap, not a silent one.
-- **Index-vs-query analysis** — whether the schema indexes the columns the code
+- **Index-vs-query analysis** [id: db.index-vs-query-residual-gap] — whether the schema indexes the columns the code
   actually filters on — **is now covered** by DB-010 / DB-013 (see the *Index-vs-query*
   section above) for **Prisma** projects, in `scan-all`. What remains uncovered is
   declared there: range-vs-equality (no WHERE operator captured), a `String` used as
   an enum, cross-naming-space against a physical SQL-DDL schema, and cross-table
   (join) filters. Whether an existing index is *actually used* at runtime is a
   different, telemetry-only question — see DB-012 below. (**N+1 query-in-loop
-  patterns** are a separate capability — mapped as per-handler surface in `scan-all`'s
+  patterns** [id: db.nplus1-pointer] are a separate capability — mapped as per-handler surface in `scan-all`'s
   endpoint buckets, never in this DB section; see the N+1 entry above.)
-- **Never-used index (DB-012)** is **not** covered, and this is **permanent**,
+- **Never-used index (DB-012)** [id: DB-012] is **not** covered, and this is **permanent**,
   not deferred: detecting an unused index requires runtime query telemetry
   (e.g. PostgreSQL's `pg_stat_user_indexes`) that only exists inside a live,
   running database with real traffic history. codefit's model is static and
   never connects to a database — it reads only DDL/schema text — so this rule
   is structurally incompatible with how codefit operates, not merely
   unscheduled.
-- **View logic that should be a function (DB-021)** is **not** covered. It would
+- **View logic that should be a function (DB-021)** [id: DB-021] is **not** covered. It would
   ask whether a view's `SELECT` body carries computation — a `CASE` ladder,
   business arithmetic, string assembly — that belongs in a stored function
   instead, where it is nameable, parameterizable and reusable rather than frozen
@@ -1188,7 +1212,7 @@ exists to prevent — so they get their own answer
   surrounding application to decide, which makes it a **surface candidate**
   (enumerate the views whose bodies compute, let the agent judge), never a
   deterministic affirmation. Not built, not scheduled.
-- **Materialized view without a refresh (DB-022)** is **not covered today**.
+- **Materialized view without a refresh (DB-022)** [id: DB-022] is **not covered today**.
   Refresh cadence lives in scheduler state — a cron entry, a CI pipeline, an
   application job — that static DDL does not carry, so codefit cannot **affirm**
   that a materialized view is stale; that is the same reasoning recorded for its
@@ -1205,7 +1229,7 @@ exists to prevent — so they get their own answer
   shape of floor DW-021 (`Index.Method`) and DW-020 (`Table.Partitioning`)
   each needed. Until the floor lands and a rule is built this is a declared
   gap, not a capability.
-- **View with broken references (DB-023)** is **not** covered. It would ask
+- **View with broken references (DB-023)** [id: DB-023] is **not** covered. It would ask
   whether a view's body still references tables and columns that exist — a view
   outliving a dropped column or a renamed table keeps its definition and fails
   only when someone queries it. The blocker is not the view text but **name
@@ -1216,7 +1240,7 @@ exists to prevent — so they get their own answer
   reference* raised over an alias codefit failed to follow is a **fabrication**,
   the class `db.Table.Complete` structurally cannot catch. Not built, not
   scheduled.
-- **Undocumented routine side effects (DB-032)** is **not** covered — the one
+- **Undocumented routine side effects (DB-032)** [id: DB-032] is **not** covered — the one
   member of the routine-body family that is not built (see the next bullet for
   the four that are). It would ask whether a procedure or function that **writes**
   — an `INSERT`/`UPDATE`/`DELETE`, a call out, a state change beyond its declared
@@ -1228,7 +1252,7 @@ exists to prevent — so they get their own answer
   **surface candidate** — enumerate the routines that write and what they write —
   and recording that is the point: built as a rule that *affirms* "undocumented",
   it would be an auditor asserting something it cannot establish.
-- **Candidate 2NF violations (DB-101)** are **not** covered. It would flag a
+- **Candidate 2NF violations (DB-101)** [id: DB-101] are **not** covered. It would flag a
   non-key column that depends on **part** of a composite primary key rather than
   on the whole of it (an `order_line` carrying `product_name` beside its
   `product_id`). **Surface, never an affirmation** — and that is not a local
@@ -1239,7 +1263,7 @@ exists to prevent — so they get their own answer
   The most codefit could honestly do is **enumerate the shape** — composite-keyed
   tables and their non-key columns — and let the agent judge. Stated so a future
   implementer does not build it as a deterministic rule.
-- **Candidate 3NF violations (DB-102)** are **not** covered. It would flag a
+- **Candidate 3NF violations (DB-102)** [id: DB-102] are **not** covered. It would flag a
   non-key column that depends on **another non-key column** rather than on the key
   (a `customer` carrying both `zip` and `city`). Same footing as DB-101 and for
   the same reason. One interaction is already built and any future implementation
@@ -1248,7 +1272,7 @@ exists to prevent — so they get their own answer
   (`internal/core/paradigm` plus the schema gate, ADR 0037) — surface enumerated
   for DB-102 has to run behind that same gate or it will flag every dimension
   table in every warehouse.
-- **The routine-body rule family that READS A BODY is COMPLETE.** DB-030 (dynamic
+- **The routine-body rule family that READS A BODY is COMPLETE.** [id: db.routine-body-family-scope] DB-030 (dynamic
   SQL construction), DB-031 (routine without exception handling), DB-040 (trigger
   cross-table cascade), and DB-041 (trigger external-effecting call) are **all
   covered** as surface (see above), **none deferred**. It is **not** the whole of
@@ -1266,7 +1290,7 @@ exists to prevent — so they get their own answer
   whole is never evaluated. The whole family carries the same Prisma-zero-value
   limit as DB-020: Prisma's `schema.prisma` has no stored-procedure/trigger
   block concept, so a Prisma-only project gets no value from any of these rules.
-- **OLAP / data-warehouse rule family (DW-0xx) is now COMPLETE, as of S4.**
+- **OLAP / data-warehouse rule family (DW-0xx) is now COMPLETE, as of S4.** [id: db.olap-family-scope, DW-022, db.olap-name-vocabulary-and-gate-limits]
   Paradigm/table-role detection, 3NF-suppression on OLAP-classified tables,
   the star-schema/SCD checks (DW-001, DW-002, DW-005, DW-010, DW-011), the
   columnar/analytic-index check (**DW-021**) **and** the partitioning census
@@ -1345,17 +1369,17 @@ exists to prevent — so they get their own answer
   is used. A genuine three-way miss on evidence.
   One line of `database.paradigm: olap` restores every one of these schemas in
   full.
-- **Express/Fastify handler passed by reference.** A handler that is a named
+- **Express/Fastify handler passed by reference.** [id: ts.handler-passed-by-reference] A handler that is a named
   identifier rather than an inline function (`router.get('/x', listUsers)`, with
   `listUsers` defined elsewhere) is not enumerated — codefit maps inline handler
   bodies; a body in another scope is a cross-file case for the agent. (An auth
   **guard** by reference is unaffected — it is matched by name in the registration.)
-- **Inline FormData → service frontier.** A Server Action input read inline as
+- **Inline FormData → service frontier.** [id: ts.server-action-formdata-inline] A Server Action input read inline as
   `formData.get('key')` and passed **directly** into a service call (no
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
-- **SQL-DDL dialect known limits (declared, not silent).** (1) A T-SQL routine
+- **SQL-DDL dialect known limits (declared, not silent).** [id: db.sqlddl-dialect-limits] (1) A T-SQL routine
   body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
   fragment inside a `GO`-batched procedure/trigger body is **absorbed into the
   body**, not surfaced as a spurious top-level table (ADR 0027, closing a limit
@@ -1838,7 +1862,7 @@ exists to prevent — so they get their own answer
   against themselves — every column of every `.sql` corpus under `testdata/` must
   be anchored on a line **containing its own name** (195 anchors across 22
   corpora), which no off-by-one can satisfy.
-- **Schema-file encoding, and the source-level floor under it (ADR 0044).**
+- **Schema-file encoding, and the source-level floor under it (ADR 0044).** [id: db.schema-file-encoding]
   - *What is read.* codefit decodes the three **byte-order-marked** encodings
     before any tokenizer sees a schema file: UTF-8 (`EF BB BF`), UTF-16LE
     (`FF FE`) and UTF-16BE (`FE FF`). The UTF-16LE case is not exotic — it is
@@ -1875,7 +1899,7 @@ exists to prevent — so they get their own answer
     where a file yielding nothing is the ordinary case — so a BOM-less UTF-16
     **source** file (not schema file) is still read as-is and still yields
     nothing, silently.
-- **PII coverage is PARTIAL — an open design question, not a settled exclusion.**
+- **PII coverage is PARTIAL — an open design question, not a settled exclusion.** [id: db.pii-coverage-partial]
   DB-053 asks exactly one question, *"is this **secret** sitting in plaintext?"*,
   and its vocabulary is built for that: `password`, `passwd`, `pwd`, `secret`,
   `apikey`, `token`, `accesstoken`, `refreshtoken`, `privatekey`, `cvv`, `cvc`.
@@ -1891,7 +1915,7 @@ exists to prevent — so they get their own answer
   **Not decided, not scheduled** — recorded here rather than silently omitted,
   because a manifest that leaves a known partial boundary unstated is the
   over-promise this document exists to prevent.
-- **SQL-DDL dialect assumptions.** MySQL parsing assumes `ANSI_QUOTES` is OFF (a
+- **SQL-DDL dialect assumptions.** [id: db.sqlddl-dialect-assumptions] MySQL parsing assumes `ANSI_QUOTES` is OFF (a
   bare `"` is read as a string literal, not an identifier quote); the parser
   binds a **single dialect per project** at construction (a project mixing
   dialects is not supported). A project mixing `.prisma` and `.sql` schema

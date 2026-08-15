@@ -15,6 +15,62 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed
+- ⚠️ **`codefit-coverage` answers with an INDEX of named entries and serves full
+  prose on request. Its response shape changed and 20 entry ids were renamed —
+  read this if anything of yours reads that tool's output.**
+  (ADR [0076](docs/decisions/0076-a-coverage-golden-locks-identity-not-prose.md),
+  [0077](docs/decisions/0077-a-coverage-entry-is-keyed-by-the-rule-it-describes.md),
+  [0078](docs/decisions/0078-a-coverage-answer-is-found-by-id-and-declares-the-size-of-what-it-returns.md))
+
+  It used to return every declaration as full prose in one payload: **143,293
+  bytes** for TypeScript, one string of it 34,080 characters — a serialized ADR
+  inside a JSON list, large enough that an agent reading it had spent its context
+  before it audited anything. It now returns `{id, claim, status, has_detail}`
+  per entry and the full prose only for the ids you ask for:
+  `{language: "typescript", detail: ["DB-050", "db.sqlddl-dialect-limits"]}`
+  takes many ids in one call and returns each entry byte for byte as authored.
+
+  **Nothing is withheld, ever.** The index carries every entry the manifest
+  holds; `withheld` is `0` and a note says so in words, because silence and
+  "nothing was dropped" are not the same bytes. The response budget authorizes
+  withholding for `scan-all`; for coverage it authorizes nothing.
+
+  **Every rule id is now an entry of its own.** A rule you saw in a finding is
+  askable by name — `DB-011a`, `DB-053`, `DW-010` — where before it existed only
+  *inside* another entry's prose: in the payload, but not in the index, so an
+  agent could not name it and asking for it came back unrecognized. Five
+  multi-rule prose blobs were cut into 21 entries and 17 single-subject entries
+  were re-keyed to their rule id; the DB block went from 32 to 48 entries and the
+  TypeScript index from 52 to 68. Every cut is a contiguous, gap-free partition
+  of the blob it came from — nothing was paraphrased, summarized or invented, and
+  that was proved by tiling the pre-change corpus rather than asserted.
+
+  **BREAKING for anything that pinned an id.** 20 ids are GONE and 36 are NEW.
+  No released tag carried the old ones (probed: `git tag --contains` on the first
+  commit of the change is empty), so nothing in a release is affected.
+
+  **An id that matches nothing is NAMED back to you**, never answered with an
+  empty success: "there is no such entry" and "that entry has nothing to declare"
+  are different answers.
+
+  **The response declares the size of what it is actually returning.** `bytes`
+  covers the index plus any detail you asked for and `index_bytes` is the index's
+  share. A `detail` request big enough to cross the response budget says
+  `over_budget: true` **and still comes back complete** — asking for all 68
+  entries returns a 182,848-byte response that declares 182,152 bytes rather than
+  reporting the index's 21,951 and calling itself within budget.
+
+  Measured over a real client/server transport pair by the committed integration
+  test: **143,293 B → 22,249 B** structured payload, 68 entries, 0 withheld.
+
+- **`COVERAGE.md` carries each entry's id next to its full prose**, so a citation
+  from an agent and a paragraph a human is reading can be pointed at each other.
+  The prose is untouched — a human has no token limit. The correspondence is
+  mechanically checked in both directions, and writing that check found two
+  declared entries the mirror had never carried at all (the "assembled through an
+  intermediate variable" halves of the SQL-injection and XSS splits, which two
+  bullets pointed at with "is **surface** (below)"). Both are now mirrored.
+
 - ⚠️ **SEC-001 (Go) now identifies a credential by NAME COMPONENT, not by raw
   substring and not by value length. Findings change in BOTH directions — read
   this before you re-baseline.** (ADR 0075)

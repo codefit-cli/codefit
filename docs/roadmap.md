@@ -526,6 +526,12 @@ PRE-CHANGE  structured 143,293 B · text block 143,293 B · identical: true · 2
 POST-CHANGE structured  16,006 B · text block  16,006 B · identical: true ·  32,012 B total
 ```
 
+The two numbers above are that change's before/after and are not tracked here as the current
+payload — the duplication, not the size, is what this entry is about. The same committed
+integration test re-measures the size on every run; on `main` today it reads **22,249 B
+structured, 44,498 B on the wire, 68 entries**, the growth being the per-rule split buying 36
+more nameable entries and the response declaring its own index bytes.
+
 **FILED, NOT FIXED,** and deliberately not fixed inside the coverage change that found it:
 returning a `*CallToolResult` from `addTool` touches every tool at once, and it is a
 protocol-layer decision, not a coverage one.
