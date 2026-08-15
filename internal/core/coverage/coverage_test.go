@@ -203,6 +203,47 @@ func TestMaxClaimBytes_IsDerivedFromTheResponseBudget(t *testing.T) {
 	}
 }
 
+// TestTransitionalProseDrift_CatchesEveryWayTheParallelCanDiverge guards the
+// window in which a manifest carries BOTH the legacy prose slices and the new
+// entries. Retyping the buckets in one shot would break every consumer at once
+// and turn each new control's first run into a build error, which is not a red;
+// so the two live side by side for exactly as long as the migration takes, and
+// this check makes drift between them impossible rather than unlikely.
+func TestTransitionalProseDrift_CatchesEveryWayTheParallelCanDiverge(t *testing.T) {
+	agreeing := coverage.Manifest{
+		Deterministic:      []coverage.Entry{{ID: "a", Claim: "c", Detail: "one"}},
+		DeterministicProse: []string{"one"},
+		Reasoning:          []coverage.Entry{{ID: "b", Claim: "c", Detail: "two"}},
+		ReasoningProse:     []string{"two"},
+	}
+	if drift := agreeing.TransitionalProseDrift(); len(drift) != 0 {
+		t.Fatalf("a manifest whose prose and entries agree reported drift: %v", drift)
+	}
+
+	for name, m := range map[string]coverage.Manifest{
+		"an entry the prose does not have": {
+			Deterministic:      []coverage.Entry{{ID: "a", Detail: "one"}, {ID: "b", Detail: "two"}},
+			DeterministicProse: []string{"one"},
+		},
+		"prose the entries do not have": {
+			Deterministic:      []coverage.Entry{{ID: "a", Detail: "one"}},
+			DeterministicProse: []string{"one", "two"},
+		},
+		"the same count but different text": {
+			Deterministic:      []coverage.Entry{{ID: "a", Detail: "one"}},
+			DeterministicProse: []string{"ONE"},
+		},
+		"the right text in the wrong order": {
+			Reasoning:      []coverage.Entry{{ID: "a", Detail: "two"}, {ID: "b", Detail: "one"}},
+			ReasoningProse: []string{"one", "two"},
+		},
+	} {
+		if drift := m.TransitionalProseDrift(); len(drift) == 0 {
+			t.Errorf("%s: reported no drift", name)
+		}
+	}
+}
+
 // TestIndex_ClaimIsNeverEmpty: an empty claim is an I5 failure wearing an id —
 // the entry is counted, named, and says nothing.
 func TestIndex_ClaimIsNeverEmpty(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/coverage"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
 )
 
@@ -14,6 +15,48 @@ func mentions(list []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestCoverageManifest_EntriesCarryTheProseVerbatim is the transition guard
+// (design D6) applied to the real hand-written manifest: while the manifest
+// carries both shapes, every entry's detail must be exactly the prose line it
+// replaces, in order. It is run against the REAL provider, not a struct
+// assembled in the test, because a hand-built fixture would lock a shape the
+// production path cannot produce.
+func TestCoverageManifest_EntriesCarryTheProseVerbatim(t *testing.T) {
+	m := typescript.New().CoverageManifest()
+	if len(m.Index()) == 0 {
+		t.Fatal("vacuum: the manifest indexed no entries, so parity would hold trivially")
+	}
+	for _, d := range m.TransitionalProseDrift() {
+		t.Error(d)
+	}
+}
+
+// TestCoverageManifest_EveryEntryIsNamedAndClaimed: an entry with no id cannot
+// be asked for, and one with no claim is counted, named, and says nothing.
+func TestCoverageManifest_EveryEntryIsNamedAndClaimed(t *testing.T) {
+	idx := typescript.New().CoverageManifest().Index()
+	if len(idx) == 0 {
+		t.Fatal("vacuum: nothing to check")
+	}
+	seen := map[string]bool{}
+	for _, e := range idx {
+		switch {
+		case strings.TrimSpace(e.ID) == "":
+			t.Errorf("an entry has no id: %q", e.Claim)
+		case seen[e.ID]:
+			t.Errorf("duplicate id %q", e.ID)
+		}
+		seen[e.ID] = true
+		if strings.TrimSpace(e.Claim) == "" {
+			t.Errorf("entry %q has an empty claim", e.ID)
+		}
+		if len(e.Claim) > coverage.MaxClaimBytes {
+			t.Errorf("entry %q has a %d-byte claim, over the %d-byte cap — shorten the claim, never drop the entry",
+				e.ID, len(e.Claim), coverage.MaxClaimBytes)
+		}
+	}
 }
 
 func TestCoverageManifest(t *testing.T) {

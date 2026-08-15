@@ -1,5 +1,10 @@
 package coverage
 
+// The only import in this package, and it exists only for the transitional
+// drift check below. It leaves with that check, and coverage goes back to
+// importing nothing at all.
+import "fmt"
+
 // Entry is one declared unit of coverage, authored ONCE. The index the agent
 // receives is a projection of this value and the detail it can ask for is a
 // lookup in the same value, so a claim and its prose cannot drift apart: there
@@ -113,6 +118,77 @@ func (m Manifest) Index() []IndexEntry {
 		}
 	}
 	return idx
+}
+
+// ProseOf is the one rule for turning an entry back into the prose line it
+// replaces: the detail if there is one, otherwise the claim. An entry short
+// enough to say everything in its claim carries no detail, and duplicating the
+// claim into the detail would make has_detail meaningless.
+func ProseOf(e Entry) string {
+	if e.Detail != "" {
+		return e.Detail
+	}
+	return e.Claim
+}
+
+// WithProse returns a copy of the manifest with the legacy prose slices filled
+// from the entries. It exists only while both shapes are on Manifest at once,
+// and it leaves with the prose slices.
+//
+// The prose is DERIVED rather than authored a second time. Two hand-written
+// copies of 126 KB would be the drift this whole change exists to remove, and a
+// test comparing them would be guarding a hazard that did not need to exist.
+func (m Manifest) WithProse() Manifest {
+	m.DeterministicProse = proseSlice(m.Deterministic)
+	m.ReasoningProse = proseSlice(m.Reasoning)
+	m.NotCoveredProse = proseSlice(m.NotCovered)
+	m.DeliveredElsewhereProse = proseSlice(m.DeliveredElsewhere)
+	return m
+}
+
+func proseSlice(entries []Entry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, ProseOf(e))
+	}
+	return out
+}
+
+// TransitionalProseDrift reports every place the legacy prose slices and the
+// entry buckets disagree.
+//
+// STATED PLAINLY so nobody reads more into it than it carries: because WithProse
+// DERIVES the prose from the entries, this cannot catch two hand-authored lists
+// diverging — there is only one authored list. What it does catch is a producer
+// that built entries and never called WithProse, which would serve an empty
+// prose answer to every consumer still reading the legacy shape. That is the
+// real failure available during this transition, and it is the one this checks.
+func (m Manifest) TransitionalProseDrift() []string {
+	var drift []string
+	for _, p := range []struct {
+		name    string
+		entries []Entry
+		prose   []string
+	}{
+		{"Deterministic", m.Deterministic, m.DeterministicProse},
+		{"Reasoning", m.Reasoning, m.ReasoningProse},
+		{"NotCovered", m.NotCovered, m.NotCoveredProse},
+		{"DeliveredElsewhere", m.DeliveredElsewhere, m.DeliveredElsewhereProse},
+	} {
+		if len(p.entries) != len(p.prose) {
+			drift = append(drift, fmt.Sprintf("%s: %d entries but %d prose lines",
+				p.name, len(p.entries), len(p.prose)))
+			continue
+		}
+		for i := range p.entries {
+			if ProseOf(p.entries[i]) != p.prose[i] {
+				drift = append(drift, fmt.Sprintf(
+					"%s[%d] (%s): the entry's detail is not the prose line it replaces",
+					p.name, i, p.entries[i].ID))
+			}
+		}
+	}
+	return drift
 }
 
 type bucket struct {

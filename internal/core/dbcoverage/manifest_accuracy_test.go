@@ -87,7 +87,7 @@ func boundaryExampleParenthetical(t *testing.T) string {
 	t.Helper()
 
 	var entry string
-	for _, e := range dbcoverage.Reasoning() {
+	for _, e := range proseOf(dbcoverage.Reasoning()) {
 		if strings.Contains(e, completenessBoundaryAnchor) {
 			entry = e
 			break
