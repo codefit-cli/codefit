@@ -1,0 +1,74 @@
+{
+  "captured_from": "0df902a4eb83a4c57bb0bdc8cd6cbb7feb5867d7",
+  "pattern": "\\bD[BW]-[0-9]+[a-z]?\\b",
+  "command": "go run ./censustool (inside the detached pre-change worktree)",
+  "note": "Multiset of DB-/DW- rule ids per manifest bucket, tokenized over the joined DB coverage prose of the PRE-CHANGE tree. Captured before the first edit of the coverage-entry-shape change, because the split in a later slice rewrites the exact blobs this counts. After any re-shaping, the same tokenizer over Claim+Detail must reproduce an equal multiset.",
+  "buckets": {
+    "DeliveredElsewhere": {
+      "DB-201": 3
+    },
+    "Deterministic": {
+      "DB-050": 5
+    },
+    "NotCovered": {
+      "DB-001": 3,
+      "DB-010": 2,
+      "DB-012": 3,
+      "DB-013": 3,
+      "DB-020": 1,
+      "DB-021": 1,
+      "DB-022": 2,
+      "DB-023": 1,
+      "DB-030": 2,
+      "DB-031": 3,
+      "DB-032": 2,
+      "DB-040": 2,
+      "DB-041": 2,
+      "DB-050": 3,
+      "DB-052": 2,
+      "DB-053": 6,
+      "DB-101": 2,
+      "DB-102": 3,
+      "DW-001": 1,
+      "DW-002": 4,
+      "DW-005": 1,
+      "DW-011": 1,
+      "DW-020": 6,
+      "DW-021": 5,
+      "DW-022": 2
+    },
+    "Reasoning": {
+      "DB-001": 5,
+      "DB-002": 4,
+      "DB-003": 4,
+      "DB-010": 4,
+      "DB-011a": 1,
+      "DB-011b": 1,
+      "DB-013": 4,
+      "DB-020": 3,
+      "DB-030": 1,
+      "DB-031": 4,
+      "DB-040": 4,
+      "DB-041": 4,
+      "DB-050": 3,
+      "DB-051": 3,
+      "DB-052": 5,
+      "DB-053": 2,
+      "DB-201": 1,
+      "DW-001": 7,
+      "DW-002": 7,
+      "DW-005": 22,
+      "DW-010": 4,
+      "DW-011": 16,
+      "DW-020": 7,
+      "DW-021": 9
+    }
+  },
+  "bucket_totals": {
+    "DeliveredElsewhere": 3,
+    "Deterministic": 5,
+    "NotCovered": 63,
+    "Reasoning": 125
+  },
+  "total": 196
+}
