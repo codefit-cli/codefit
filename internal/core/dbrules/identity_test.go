@@ -153,9 +153,21 @@ func TestMatchSensitiveTokenIdentity(t *testing.T) {
 // identityCorpus is the input set the DB-053 extraction is proven identical
 // over. It is deliberately wider than "names that match":
 //
-//   - every column/table name appearing in DB-053's and DB-020's fixtures (both
-//     rules consume matchSensitiveToken), so the corpus is grounded in what the
-//     rules actually see rather than in what a vocabulary list suggests;
+//   - every COLUMN name appearing in DB-053's and DB-020's fixtures (both rules
+//     consume matchSensitiveToken), so the corpus is grounded in what the rules
+//     actually see rather than in what a vocabulary list suggests. It carries
+//     two of DB-020's thirteen VIEW names (v_secrets, v_tokens) and not the
+//     other eleven (v_users, v_actor, v_maybe, v_all, v_lead, v_q, v_fn, v_cast,
+//     v_concat, v_multi, v_multiline). That is stated rather than smoothed over:
+//     an earlier wording here claimed every column AND table name, which was an
+//     over-statement, and this repo treats an over-stating comment as drift.
+//     The eleven are measured ("", false) — none carries a component or adjacent
+//     pair in the frozen 15-name union — so admitting them would add rows and no
+//     coverage. They stay out for a stronger reason than tidiness: every row of
+//     identityGolden below is the MEASURED output of the pre-extraction
+//     implementation, which no longer exists in this tree. A row added now could
+//     only be reasoned, and a reasoned row inside a measured golden is exactly
+//     the substitution this control exists to refuse;
 //   - all 15 entries of the vocabulary itself, so no entry can be dropped
 //     silently;
 //   - ORDER-ADVERSARIAL names carrying two vocabulary tokens in both orders
