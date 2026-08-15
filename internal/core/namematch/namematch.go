@@ -9,13 +9,17 @@ import "strings"
 // way to go stale. Copying the text into a provider, a manifest, or COVERAGE.md
 // would create a second place to be wrong.
 const LimitLowercaseConcatenation = "SEC-001 (go) matches by NAME COMPONENT " +
-	"(camelCase/snake_case/kebab-case tokenized, with adjacent-pair joining), " +
-	"never by raw substring. An ALL-LOWERCASE CONCATENATION carries no boundary " +
-	"to tokenize on, so `secretkey := \"...\"` is NOT reported, while `secretKey`, " +
-	"`secret_key` and `SECRET_KEY` are. This is a known under-detection, declared " +
-	"rather than closed: the substring matcher it replaced reported enum " +
-	"constants as hardcoded credentials at Confidence 1.0, and a false " +
-	"affirmation is a worse failure than a declared gap."
+	"(camelCase/snake_case/kebab-case tokenized, with adjacent-pair joining and " +
+	"regular +s plurals, so `passwords`, `apiKeys` and `userPasswords` are " +
+	"reported), never by raw substring and never by value length. THE GAP: an " +
+	"ALL-LOWERCASE CONCATENATION carries no boundary to tokenize on, so " +
+	"`secretkey`, `dbpassword`, `mypassword` and `authtoken` are NOT reported, " +
+	"while `secretKey`, `secret_key`, `SECRET_KEY`, `db_password`, `myPassword` " +
+	"and `auth_token` are. Only the regular +s plural is folded: no other " +
+	"inflection is recognised. This is a known under-detection, declared rather " +
+	"than closed: the substring matcher it replaced reported enum constants as " +
+	"hardcoded credentials at Confidence 1.0, and a false affirmation is a worse " +
+	"failure than a declared gap."
 
 // credentialShared are the credential names BOTH SEC-001 and DB-053 recognise.
 // It is the intersection by construction, not by coincidence — see the three-set
@@ -61,8 +65,51 @@ var securityValueTokens = map[string]bool{
 }
 
 // Credential is the vocabulary SEC-001 consumes: credentialShared plus the
-// SEC-001-only restorations, and never the PII names.
-func Credential() map[string]bool { return union(credentialShared, securityOnlyTokens) }
+// SEC-001-only restorations, PLURAL-FOLDED, and never the PII names.
+//
+// The fold is SEC-001's alone. DB053Union() and SecurityValue() are deliberately
+// not folded: DB-053's vocabulary is frozen name for name against main 0fb211d
+// across 29 measured corpora (ADR 0047), and folding it here would move it as a
+// side effect of credential work — the exact coupling the three-set split exists
+// to prevent.
+func Credential() map[string]bool {
+	return withPlurals(union(credentialShared, securityOnlyTokens))
+}
+
+// withPlurals adds the regular English plural of every member of set, and
+// nothing else.
+//
+// WHY IT EXISTS. Component matching replaced a raw strings.Contains, and
+// substring matching had been carrying the plural spellings for free:
+// "passwords" contains "password". Tokenizing turns "passwords" into ONE
+// component that is not in the set, so passwords, secrets, tokens, apiKeys,
+// apikeys, privateKeys, refreshTokens, mySecrets and userPasswords all went
+// silent — measured on the real AnalyzeSecurity path against the pre-change
+// tree, and eight of the nine at ANY value length. `var passwords = []string{…}`
+// is ordinary Go; losing it undeclared is a narrowing this project's doctrine
+// does not permit, and the false-positive fix never required it.
+//
+// WHY IT IS A SUFFIX ADD AND NOT A SUFFIX STRIP. The two are equivalent in
+// effect — a component matches iff it is a member or a member plus "s" — but
+// only this direction is ENUMERABLE. The folded set is a value a test can print
+// and pin (TestCredentialSet), so a widening cannot arrive unnoticed, and the
+// cross-provider case table's Control 3 forces every folded token to carry a
+// declared TypeScript verdict. A strip is a predicate: it admits an open set of
+// names and nothing can enumerate what it just accepted.
+//
+// WHAT IT DELIBERATELY DOES NOT DO. No "-es"/"-ies" handling: no member of this
+// vocabulary ends in s, x, z, ch, sh or a consonant+y, so those rules would add
+// nothing but reach. No stemming, no singularisation, no inflection beyond this
+// one suffix. publickey is absent from the set, so publicKeys stays silent too —
+// the fold widens the SPELLINGS of the vocabulary, never the vocabulary.
+func withPlurals(set map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(set)*2)
+	for k := range set {
+		out[k] = true
+		out[k+"s"] = true
+	}
+	return out
+}
 
 // DB053Union is the vocabulary DB-053 and DB-020 consume: credentialShared plus
 // piiShared, and NOTHING else. This is the whole reason the split is three sets

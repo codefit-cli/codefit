@@ -29,16 +29,33 @@ All notable changes to codefit are documented here. The format is based on
   the false-positive class and rejected short real credentials
   (`SIGNING_KEY = "s3cr3t"` was 6 bytes and was rejected).
 
-  **Fires that STOP.** Names carrying `key` only as a substring or as a
-  non-credential component, with a 16+ byte value — enum and category constants,
-  and names such as `keyboard`, `monkeyId`, `textKey`, `tokenizer`.
+  **Fires that STOP**, measured on the real analyser over both trees. There are
+  two groups and they stop for different reasons:
 
-  **Fires that START.** `pwd`, `accessKey`, `SIGNING_KEY`, `encryptionKey`, and
-  every credential name whose value is shorter than 16 bytes. `API_KEY`,
-  `api_key`, `apiKey`, `privateKey`, `accessToken` and `refreshToken` keep
-  firing: the adjacent-pair join (`api`+`key` → `apikey`) is what made removing
-  the old arm safe rather than a silent false negative, since `lower("API_KEY")`
-  never contained `apikey`.
+  - *Only when the value was 16+ bytes* — names carrying `key` as a substring or
+    as a non-credential component, which never fired any other way: enum and
+    category constants, and names such as `keyboard`, `keyword`, `monkeyId`,
+    `textKey`, `publicKey`, `turnkey`, `donkey`, `sessionKey`.
+  - *At ANY value length* — a credential word buried inside a longer lowercase
+    run, where no boundary exists to tokenize on: `tokenizer`, and the
+    all-lowercase concatenations `secretkey`, `dbpassword`, `mypassword`,
+    `authtoken`, `clientsecret`. The delimited and camelCase spellings of those
+    (`secret_key`, `db_password`, `myPassword`, `auth_token`, `clientSecret`)
+    keep firing.
+
+  PLURAL AND INFLECTED SPELLINGS ARE NOT IN THAT LIST. `passwords`, `secrets`,
+  `tokens`, `apiKeys`, `apikeys`, `privateKeys`, `refreshTokens`, `mySecrets`
+  and `userPasswords` fired before and fire after: the name gate folds the
+  regular `+s` plural of every vocabulary entry. Component matching alone would
+  have dropped all nine — eight of them at any value length — which is a
+  narrowing nobody asked for and the false-positive fix never required.
+
+  **Fires that START.** `pwd` and `pwds`, `accessKey`, `SIGNING_KEY`,
+  `encryptionKey` (and their plurals), and every credential name whose value is
+  shorter than 16 bytes. `API_KEY`, `api_key`, `apiKey`, `privateKey`,
+  `accessToken` and `refreshToken` keep firing: the adjacent-pair join
+  (`api`+`key` → `apikey`) is what made removing the old arm safe rather than a
+  silent false negative, since `lower("API_KEY")` never contained `apikey`.
 
   **What to do with your baseline.** Fingerprints are unchanged for anything
   that keeps firing. A finding that stops leaves a STALE baseline entry, which
@@ -52,9 +69,12 @@ All notable changes to codefit are documented here. The format is based on
   requires a `math/rand` call.
 
   **Declared limit, now readable from `codefit-coverage`:** component matching
-  cannot split an all-lowercase concatenation, so `secretkey := "…"` is NOT
-  reported while `secretKey`, `secret_key` and `SECRET_KEY` are. This is stated
-  on SEC-001's own line in the Go coverage answer, not in a separate list.
+  cannot split an all-lowercase concatenation, so `secretkey`, `dbpassword`,
+  `mypassword` and `authtoken` are NOT reported while `secretKey`, `secret_key`,
+  `SECRET_KEY`, `db_password`, `myPassword` and `auth_token` are. Only the
+  regular `+s` plural is folded — no other inflection is recognised. This is
+  stated on SEC-001's own line in the Go coverage answer, not in a separate
+  list.
 
   DB-053 and DB-020 are UNCHANGED: they consume a separately frozen vocabulary,
   proven identical name-for-name and verdict-for-verdict against the previous

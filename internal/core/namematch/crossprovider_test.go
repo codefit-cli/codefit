@@ -53,6 +53,55 @@ var crossCases = []crossCase{
 	{name: "accesstoken", goFires: true, tsFires: true},
 	{name: "refreshtoken", goFires: true, tsFires: true},
 
+	// --- The PLURAL class. ---
+	//
+	// These rows exist because their absence hid a real narrowing. TS matches
+	// $NAME as an unanchored substring, so it never stopped firing on
+	// "passwords"; Go's move to component matching turned each plural into ONE
+	// component outside the set and went silent. With no plural row, Control 2
+	// had nothing to compare and the divergence was unstateable — a table's
+	// guarantee is only as wide as its rows. The spellings are the measured
+	// losses, not invented examples.
+	{name: "passwords", goFires: true, tsFires: true},
+	{name: "secrets", goFires: true, tsFires: true},
+	{name: "tokens", goFires: true, tsFires: true},
+	{name: "passwds", goFires: true, tsFires: true},
+	{name: "pwds", goFires: true, tsFires: true},
+	{name: "apiKeys", goFires: true, tsFires: true},
+	{name: "apikeys", goFires: true, tsFires: true},
+	{name: "privateKeys", goFires: true, tsFires: true},
+	{name: "accessKeys", goFires: true, tsFires: true},
+	{name: "refreshTokens", goFires: true, tsFires: true},
+	{name: "mySecrets", goFires: true, tsFires: true},
+	{name: "userPasswords", goFires: true, tsFires: true},
+	// Same reachability property as the singular compounds above: in
+	// accessTokens the component "tokens" matches before any pair is tried, so
+	// the compound plural entries are only reachable as one lowercase run.
+	{name: "accesstokens", goFires: true, tsFires: true},
+	{name: "refreshtokens", goFires: true, tsFires: true},
+	{
+		name: "signingKeys", goFires: true, tsFires: false,
+		divergence: "The plural of a Go-only RESTORATION inherits its divergence exactly: " +
+			"TS's $NAME has no signing_key alternative, so neither spelling fires there.",
+	},
+	{
+		name: "encryptionKeys", goFires: true, tsFires: false,
+		divergence: "Same as signingKeys — TS's $NAME lacks the encryption_key alternative.",
+	},
+	// The fold's false-positive side, stated as rows rather than argued in a
+	// comment. publickey is refused by the vocabulary, so its plural is refused
+	// too; keys/keyboards are the substring class this change silenced, and a
+	// plural fold must not smuggle them back.
+	{name: "publicKeys", goFires: false, tsFires: false},
+	{name: "keys", goFires: false, tsFires: false},
+	{name: "keyboards", goFires: false, tsFires: false},
+	{
+		name: "tokenizers", goFires: false, tsFires: true,
+		divergence: "The plural of the tokenizer row, and the same reason: TS's substring " +
+			"match sees \"token\" inside it, Go sees one component. Carried here so the " +
+			"plural fold is shown NOT to have reopened the substring class.",
+	},
+
 	// --- Agreement: names neither engine treats as a credential. ---
 	{name: "userId", goFires: false, tsFires: false},
 	{name: "count", goFires: false, tsFires: false},

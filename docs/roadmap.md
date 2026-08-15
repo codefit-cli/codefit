@@ -536,7 +536,15 @@ would have bought the false-positive fix with five undeclared false negatives.
 
 Fixed by one matcher in a stdlib-only core leaf with **three vocabularies**, so DB-053 (measured
 across 29 corpora in ADR 0047, no longer cloned) stays provably byte-identical while SEC-001's
-set moves. SEC-050 adopts the convention and keeps its own crypto-material set. See
+set moves. SEC-050 adopts the convention and keeps its own crypto-material set.
+
+**The second measured narrowing, and its repair.** Component matching also dropped the PLURAL
+spellings substring matching had carried for free — `passwords`, `secrets`, `tokens`, `apiKeys`,
+`apikeys`, `privateKeys`, `refreshTokens`, `mySecrets`, `userPasswords`, eight of them at any
+value length. That was a loss from replacing the FIRST arm, orthogonal to the second arm's
+deletion, and no declared limit described it. SEC-001's set now folds the regular `+s` plural of
+every entry (and only SEC-001's: DB-053 and SEC-050 keep their frozen sets), with the
+false-positive side measured — zero new sites in the AST census over codefit's own tree. See
 [ADR 0075](decisions/0075-sec-001-affirms-only-what-the-name-established.md) and `CHANGELOG.md`.
 
 **Named, DECLARED, not built — three follow-ups.**

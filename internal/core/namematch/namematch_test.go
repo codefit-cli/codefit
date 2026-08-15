@@ -3,6 +3,7 @@ package namematch_test
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/namematch"
@@ -71,15 +72,58 @@ func TestMatchSetScanOrder(t *testing.T) {
 // much a regression as a silent narrowing: this set feeds an AFFIRMATION
 // channel that tells a user "this looks like a hardcoded credential" at
 // Confidence 1.0, so every member must be a deliberate, recorded decision.
+// The set is PLURAL-FOLDED, and the fold is pinned here in full rather than
+// computed: computing the expectation from the same helper the code uses would
+// assert nothing. Twelve tokens, each with its regular plural, is what the fold
+// is allowed to produce — a thirteenth stem or a second inflection rule shows up
+// here as a diff.
 func TestCredentialSet(t *testing.T) {
 	want := []string{
-		"accesskey", "accesstoken", "apikey", "encryptionkey", "passwd",
-		"password", "privatekey", "pwd", "refreshtoken", "secret",
-		"signingkey", "token",
+		"accesskey", "accesskeys", "accesstoken", "accesstokens",
+		"apikey", "apikeys", "encryptionkey", "encryptionkeys",
+		"passwd", "passwds", "password", "passwords",
+		"privatekey", "privatekeys", "pwd", "pwds",
+		"refreshtoken", "refreshtokens", "secret", "secrets",
+		"signingkey", "signingkeys", "token", "tokens",
 	}
 	got := slices.Sorted(maps.Keys(namematch.Credential()))
 	if !slices.Equal(got, want) {
 		t.Errorf("Credential() = %v, want %v", got, want)
+	}
+}
+
+// TestPluralFoldIsSEC001Only is the containment half of the plural repair, and
+// it is the one that keeps DB-053 out of it.
+//
+// The fold answers a measured SEC-001 narrowing: substring matching used to
+// carry "passwords" for free and component matching does not. DB-053's
+// vocabulary is frozen name for name against main 0fb211d across 29 measured
+// corpora (ADR 0047) that are no longer available to re-measure, and SEC-050's
+// set is crypto material with its own scan. Neither asked for this fold, so
+// neither may receive it as a side effect — a plural leaking into DB053Union()
+// would move a rule this change never measured.
+func TestPluralFoldIsSEC001Only(t *testing.T) {
+	cred := namematch.Credential()
+	union := namematch.DB053Union()
+	secval := namematch.SecurityValue()
+
+	for _, tok := range []string{"passwords", "secrets", "tokens", "apikeys", "privatekeys"} {
+		if !cred[tok] {
+			t.Errorf("Credential() is missing %q — the plural fired before component matching and its loss was undeclared", tok)
+		}
+		if union[tok] {
+			t.Errorf("DB053Union() contains %q — the SEC-001 plural fold leaked into DB-053's frozen vocabulary", tok)
+		}
+		if secval[tok] {
+			t.Errorf("SecurityValue() contains %q — the SEC-001 plural fold leaked into SEC-050's crypto vocabulary", tok)
+		}
+	}
+	// The fold widens SPELLINGS, never the vocabulary: a stem that was
+	// deliberately refused does not get in through its plural.
+	for _, tok := range []string{"publickey", "publickeys", "keys", "credentials", "ssns"} {
+		if cred[tok] {
+			t.Errorf("Credential() contains %q — the fold admitted a stem the vocabulary refuses", tok)
+		}
 	}
 }
 
@@ -153,5 +197,44 @@ func TestLimitIsDeclaredNotEmpty(t *testing.T) {
 	}
 	if _, ok := namematch.MatchSet("secret_key", namematch.Credential()); !ok {
 		t.Error("secret_key does NOT match — the limit is about the concatenated spelling only, not the delimited one")
+	}
+}
+
+// TestLimitTextIsTrueOfTheCode binds the DECLARED limit to the behaviour it
+// declares, in both directions and example by example.
+//
+// codefit-coverage renders this const verbatim to an agent, which has no way to
+// check it: whatever it says about SEC-001 is what the agent believes. So each
+// example is asserted twice — that the const really names it (a silently edited
+// const cannot drift away from this control) and that the matcher really behaves
+// that way (the const cannot describe a gap that does not exist, nor hide one
+// that does). The previous text scoped the losses to names carrying "key" with a
+// long value; six of the nine measured losses carried no "key" at all and eight
+// stopped at any length, which is precisely the kind of over-narrow claim this
+// control now makes impossible to leave standing.
+func TestLimitTextIsTrueOfTheCode(t *testing.T) {
+	cred := namematch.Credential()
+	limit := namematch.LimitLowercaseConcatenation
+
+	// Named by the const as NOT reported: the all-lowercase concatenations.
+	for _, name := range []string{"secretkey", "dbpassword", "mypassword", "authtoken"} {
+		if !strings.Contains(limit, "`"+name+"`") {
+			t.Errorf("the declared limit no longer names %q as an example, but this control still asserts it — the const and its proof drifted apart", name)
+		}
+		if tok, ok := namematch.MatchSet(name, cred); ok {
+			t.Errorf("%q matches (on %q), yet the declared limit tells an agent it is NOT reported", name, tok)
+		}
+	}
+	// Named by the const as reported: the delimited spellings and the plurals.
+	for _, name := range []string{
+		"secretKey", "secret_key", "SECRET_KEY", "db_password", "myPassword",
+		"auth_token", "passwords", "apiKeys", "userPasswords",
+	} {
+		if !strings.Contains(limit, "`"+name+"`") {
+			t.Errorf("the declared limit no longer names %q as an example, but this control still asserts it — the const and its proof drifted apart", name)
+		}
+		if _, ok := namematch.MatchSet(name, cred); !ok {
+			t.Errorf("%q does NOT match, yet the declared limit tells an agent it IS reported", name)
+		}
 	}
 }

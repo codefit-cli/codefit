@@ -87,6 +87,40 @@ because SEC-050 additionally requires a `math/rand` call — a second condition
 SEC-001 has no equivalent of. It was strictly looser than SEC-001 before this:
 `monkeyIndex := rand.Intn(n)` fired.
 
+### The plural fold, and why it is an ADD and not a STRIP
+
+`Credential()` folds the regular `+s` plural of every entry. `DB053Union()` and
+`SecurityValue()` do not: the fold answers a SEC-001 narrowing, and letting it
+reach DB-053 would move a frozen vocabulary as a side effect of credential work
+— the coupling the three-set split exists to prevent.
+
+It is here because substring matching had been carrying the plurals for free
+(`"passwords"` contains `"password"`) and component matching turns each plural
+into ONE component outside the set. Measured on the real analyser over both
+trees, nine spellings went silent — `passwords`, `secrets`, `tokens`, `apiKeys`,
+`apikeys`, `privateKeys`, `refreshTokens`, `mySecrets`, `userPasswords` — eight
+of them at ANY value length, so this was a loss from replacing Arm A and was
+orthogonal to the Arm B deletion. Six carry no `key` at all and five carry a
+camelCase boundary, so the all-lowercase-concatenation limit never described
+them: it was an UNDECLARED narrowing, and `var passwords = []string{…}` is
+ordinary Go.
+
+Adding the suffix and stripping it are equivalent in effect — a component
+matches iff it is a member or a member plus `s` — but only the ADD is
+ENUMERABLE. The folded set is a value a test prints and pins, and the
+cross-provider table's no-silent-widening control forces every folded token to
+carry a declared TypeScript verdict. A strip is a predicate: it admits an open
+set and nothing can enumerate what it just accepted. The fold widens the
+SPELLINGS of the vocabulary, never the vocabulary — `publickey` is refused, so
+`publicKeys` is refused too. No `-es`/`-ies` rule: no entry ends in s, x, z, ch,
+sh or consonant+y, so it would add reach and no coverage.
+
+The false-positive side is measured, not argued: the AST census over codefit's
+own tree adds ZERO sites under the fold (positive control: an injected
+`probeUserPasswords` string is reported as unpinned), and across the 53-spelling
+differential nothing fires that did not fire before the change except `pwd` and
+its plural `pwds`, already declared.
+
 ### The declared limit has a source in code
 
 Component matching cannot split an all-lowercase concatenation: `secretkey` is
@@ -118,13 +152,19 @@ table's scope is the NAME GATE only; TS additionally requires
 
 ## Consequences
 
-**Fires that STOP.** Names carrying `key` only as a substring or as a
-non-credential component, with a 16+ byte value: enum constants, category
-names, `keyboard`, `monkeyId`, `textKey`, `tokenizer`. On codefit's own tree
-this is 4 findings going to 0, with no other census entry changing.
+**Fires that STOP**, in two groups with different causes. *Only at a 16+ byte
+value* — names carrying `key` as a substring or as a non-credential component,
+which never fired any other way: enum constants, category names, `keyboard`,
+`keyword`, `monkeyId`, `textKey`, `publicKey`, `turnkey`, `donkey`,
+`sessionKey`. *At any value length* — a credential word inside a longer
+lowercase run: `tokenizer`, and the concatenations `secretkey`, `dbpassword`,
+`mypassword`, `authtoken`, `clientsecret`. On codefit's own tree this is 4
+findings going to 0, with no other census entry changing. Plural spellings are
+NOT in either group; see the plural fold above.
 
-**Fires that START.** `pwd`, `accessKey`, `SIGNING_KEY`, `encryptionKey`, and
-any credential name whose value is under 16 bytes.
+**Fires that START.** `pwd` and `pwds`, `accessKey`, `SIGNING_KEY`,
+`encryptionKey` and their plurals, and any credential name whose value is under
+16 bytes.
 
 Both directions are user-visible and both are in `CHANGELOG.md`. Baseline
 entries for findings that stop are stale, not wrong, and
@@ -154,6 +194,13 @@ census that fails in BOTH directions.
   change.
 - **COVERAGE.md alone.** Inverts the source-to-mirror chain CLAUDE.md forbids —
   a mirror more truthful than its source, which has already happened twice.
+- **Declaring the plural loss as a limit instead of closing it.** A limit is for
+  a gap the mechanism cannot close. Component matching closes this one exactly,
+  with an enumerable fold, so declaring it would have been a choice to ship a
+  smaller Go for no gain — and the constraint is that Go ends strictly stronger.
+- **A trailing-`s` strip in the matcher.** Same verdicts, but a predicate rather
+  than a value: nothing could print what it admits, so the pinned set and the
+  cross-provider control would both lose their subject.
 - **A Go `coverage.go`.** Out of scope: ADR 0065's derived floor stands.
 - **Adding `credential`, `authtoken`, `clientsecret` to Go's set.** TS carries
   them; Go's admission into an affirmation channel needs measurement first.

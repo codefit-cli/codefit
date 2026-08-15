@@ -97,6 +97,78 @@ func TestSEC001CoverageGoLacked(t *testing.T) {
 	}
 }
 
+// TestSEC001PluralCredentialNamesStillFire pins the nine spellings component
+// matching silently dropped, measured on the real production path against the
+// pre-change tree. Every one of them fired before this change — Arm A's raw
+// strings.Contains matched "password" inside "passwords" — and component
+// matching made each plural a single component that no longer hit the set.
+//
+// Eight of the nine also stopped at a 3-byte value, so this was a loss from
+// replacing Arm A, orthogonal to the bare-"key" arm deletion. Six carry no
+// "key" at all and five carry a clear camelCase boundary, so the declared
+// all-lowercase-concatenation limit never described them: this was an
+// UNDECLARED narrowing, which this project's doctrine does not permit.
+//
+// `var passwords = []string{…}` and `secrets := map[string]string{…}` are
+// ordinary Go. Go must end this change strictly stronger, never smaller.
+func TestSEC001PluralCredentialNamesStillFire(t *testing.T) {
+	cases := map[string]string{
+		// The nine measured losses.
+		"passwords":     "package p\n\nfunc f() { passwords := \"hunter2\"; _ = passwords }\n",
+		"secrets":       "package p\n\nfunc f() { secrets := \"hunter2\"; _ = secrets }\n",
+		"tokens":        "package p\n\nfunc f() { tokens := \"hunter2\"; _ = tokens }\n",
+		"apiKeys":       "package p\n\nfunc f() { apiKeys := \"hunter2\"; _ = apiKeys }\n",
+		"apikeys":       "package p\n\nfunc f() { apikeys := \"hunter2\"; _ = apikeys }\n",
+		"privateKeys":   "package p\n\nfunc f() { privateKeys := \"hunter2\"; _ = privateKeys }\n",
+		"refreshTokens": "package p\n\nfunc f() { refreshTokens := \"hunter2\"; _ = refreshTokens }\n",
+		"mySecrets":     "package p\n\nfunc f() { mySecrets := \"hunter2\"; _ = mySecrets }\n",
+		"userPasswords": "package p\n\nfunc f() { userPasswords := \"hunter2\"; _ = userPasswords }\n",
+		// The restorations, pluralised: they were never reachable through Arm A
+		// either, so they are covered here for the same reason their singulars
+		// are covered by TestSEC001CoverageGoLacked.
+		"accessKeys":     "package p\n\nfunc f() { accessKeys := \"AKIAIOSFODNN7\"; _ = accessKeys }\n",
+		"signingKeys":    "package p\n\nconst signingKeys = \"s3cr3t\"\n",
+		"encryptionKeys": "package p\n\nfunc f() { encryptionKeys := \"ek_abc\"; _ = encryptionKeys }\n",
+		"accessTokens":   "package p\n\nfunc f() { accessTokens := \"at_abc\"; _ = accessTokens }\n",
+	}
+	for name, src := range cases {
+		if !hasID(analyzeSec(t, "x.go", src), "SEC-001") {
+			t.Errorf("SEC-001 not emitted for %s — a plural credential spelling is lost; "+
+				"it fired before component matching and nothing declares its absence", name)
+		}
+	}
+}
+
+// TestSEC001PluralIsNotABlanketSuffix is the false-positive side of the plural
+// repair, and it is the half that must be MEASURED rather than argued. A naive
+// trailing-"s" strip would admit any component whose stem happens to sit in the
+// vocabulary; folding is allowed to admit exactly `<credential token>`+"s" and
+// nothing else.
+//
+// publicKeys is the sharpest of these: `publickey` is deliberately absent from
+// the credential set (a public key is not a credential), so its plural must be
+// absent too, or the fold would have widened the vocabulary behind the set's
+// back. keys/monkeys/keyboards/tokenizers are the substring class the whole
+// change exists to silence — a plural fold must not smuggle any of them back.
+func TestSEC001PluralIsNotABlanketSuffix(t *testing.T) {
+	cases := map[string]string{
+		"publicKeys": "package p\n\nfunc f() { publicKeys := \"-----BEGIN PUBLIC KEY-----\"; _ = publicKeys }\n",
+		"keys":       "package p\n\nfunc f() { keys := \"some-long-value-here\"; _ = keys }\n",
+		"monkeys":    "package p\n\nfunc f() { monkeys := \"some-long-value-here\"; _ = monkeys }\n",
+		"keyboards":  "package p\n\nfunc f() { keyboards := \"some-long-value-here\"; _ = keyboards }\n",
+		"tokenizers": "package p\n\nfunc f() { tokenizers := \"some-long-value-here\"; _ = tokenizers }\n",
+		"keywords":   "package p\n\nfunc f() { keywords := \"some-long-value-here\"; _ = keywords }\n",
+		"donkeys":    "package p\n\nfunc f() { donkeys := \"some-long-value-here\"; _ = donkeys }\n",
+		"textKeys":   "package p\n\nfunc f() { textKeys := \"some-long-value-here\"; _ = textKeys }\n",
+	}
+	for name, src := range cases {
+		if fs := analyzeSec(t, "x.go", src); hasID(fs, "SEC-001") {
+			t.Errorf("SEC-001 emitted for %s — the plural fold admitted a component that is "+
+				"not the plural of a credential token: %+v", name, fs)
+		}
+	}
+}
+
 // TestSEC001ShortValueStillFires is the true-positive half of the inverted
 // guard. The deleted arm required 16+ bytes of value, so an 8-character
 // password in a bare-"key"-named variable was REJECTED while a 29-byte
