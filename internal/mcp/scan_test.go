@@ -34,8 +34,8 @@ func TestHandleCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Manifest.Language != "typescript" || len(resp.Manifest.DeterministicProse) == 0 {
-		t.Errorf("coverage manifest incomplete: %+v", resp.Manifest)
+	if resp.Language != "typescript" || len(resp.Index) == 0 {
+		t.Errorf("coverage answer incomplete: %d entries for %q", len(resp.Index), resp.Language)
 	}
 	if resp.Derived {
 		t.Error("typescript has a hand-written prose manifest — Derived must be false")
@@ -59,21 +59,35 @@ func TestHandleCoverage_DerivedForLanguageWithNoProseManifest(t *testing.T) {
 	if !resp.Derived {
 		t.Error("go has no CoverageManifest() — Derived must be true")
 	}
-	if resp.Manifest.Language != "go" {
-		t.Errorf("Manifest.Language = %q, want %q", resp.Manifest.Language, "go")
+	if resp.Language != "go" {
+		t.Errorf("Language = %q, want %q", resp.Language, "go")
 	}
-	if len(resp.Manifest.DeterministicProse) == 0 {
-		t.Fatal("Deterministic must name go's declared security rule ids, got none")
+	if joinClaims(resp, coverage.StatusDeterministic) == "" {
+		t.Fatal("the deterministic entries must name go's declared security rule ids, got none")
 	}
-	joinedNotCovered := strings.Join(resp.Manifest.NotCoveredProse, "\n")
+	joinedNotCovered := joinClaims(resp, coverage.StatusNotCovered)
 	for _, cat := range []string{"idor", "overfetch", "nplus1"} {
 		if !strings.Contains(joinedNotCovered, cat) {
-			t.Errorf("NotCovered does not name unmapped surface category %q: %v", cat, resp.Manifest.NotCoveredProse)
+			t.Errorf("no not-covered entry names unmapped surface category %q: %s", cat, joinedNotCovered)
 		}
 	}
-	if strings.Contains(strings.Join(resp.Manifest.ReasoningProse, "\n"), "idor") {
-		t.Error("Reasoning must not claim idor is mapped for go — go maps only authz")
+	if strings.Contains(joinClaims(resp, coverage.StatusReasoning), "idor") {
+		t.Error("no reasoning entry may claim idor is mapped for go — go maps only authz")
 	}
+}
+
+// joinClaims is every claim the response indexes under one status, joined. The
+// controls below ask their original questions of the CLAIM, which is what an
+// agent reads without asking for anything else — so a claim that stopped saying
+// what it used to say still turns them red.
+func joinClaims(resp mcp.CoverageResponse, status coverage.Status) string {
+	var out []string
+	for _, e := range resp.Index {
+		if e.Status == status {
+			out = append(out, e.Claim)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded is P1-4b's owed
@@ -86,16 +100,15 @@ func TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCoverage(go): %v", err)
 	}
-	joined := strings.Join(resp.Manifest.NotCoveredProse, "\n")
+	joined := joinClaims(resp, coverage.StatusNotCovered)
 	if !strings.Contains(joined, "PRAC-004") {
-		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got NotCovered: %v", resp.Manifest.NotCoveredProse)
+		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got: %s", joined)
 	}
 	if !strings.Contains(joined, "ADR 0056") {
-		t.Errorf("PRAC-004's NotCovered entry must carry its reason (ADR 0056), got: %v", resp.Manifest.NotCoveredProse)
+		t.Errorf("PRAC-004's not-covered entry must carry its reason (ADR 0056), got: %s", joined)
 	}
-	declared := strings.Join(resp.Manifest.DeterministicProse, "\n")
-	if strings.Contains(declared, "PRAC-004") {
-		t.Error("PRAC-004 must not also appear in Deterministic — it is excluded, not declared")
+	if strings.Contains(joinClaims(resp, coverage.StatusDeterministic), "PRAC-004") {
+		t.Error("PRAC-004 must not also appear as declared — it is excluded, not declared")
 	}
 }
 
@@ -135,20 +148,49 @@ func TestHandleCoverage_ServesDeliveredElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Manifest.DeliveredElsewhereProse) == 0 {
-		t.Fatal("codefit-coverage returned an EMPTY DeliveredElsewhere — the DB dimension records DB-201 there, " +
-			"so the composition dropped it and the agent never sees the answer")
+	var delivered []string
+	for _, e := range resp.Index {
+		if e.Status == coverage.StatusDeliveredElsewhere {
+			delivered = append(delivered, e.ID)
+		}
 	}
-	if !strings.Contains(strings.Join(resp.Manifest.DeliveredElsewhereProse, "\n"), "DB-201") {
-		t.Errorf("DeliveredElsewhere does not name DB-201: %v", resp.Manifest.DeliveredElsewhereProse)
+	if len(delivered) == 0 {
+		t.Fatal("codefit-coverage returned an EMPTY delivered-elsewhere bucket — the DB dimension records DB-201 " +
+			"there, so the composition dropped it and the agent never sees the answer")
 	}
 
+	// The index must SHOW the third answer exists — an agent that never sees the
+	// status never asks. The promised id itself still lives in the entry's prose
+	// until the per-rule split gives it an id of its own, so DB-201 is checked
+	// where it actually is: resolved through the same tool call the agent makes.
 	raw, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "DeliveredElsewhere") || !strings.Contains(string(raw), "DB-201") {
-		t.Errorf("the serialized coverage response does not carry DeliveredElsewhere/DB-201 — the agent reads "+
-			"this JSON, not the struct:\n%s", raw)
+	if !strings.Contains(string(raw), string(coverage.StatusDeliveredElsewhere)) {
+		t.Errorf("the serialized coverage response never names the delivered-elsewhere status — the agent reads "+
+			"this JSON, not the struct:\n%.400s", raw)
+	}
+
+	full, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "typescript", Detail: delivered})
+	if err != nil {
+		t.Fatalf("resolving the delivered-elsewhere entries: %v", err)
+	}
+	if len(full.Unrecognized) != 0 {
+		t.Fatalf("delivered-elsewhere ids the index advertised did not resolve: %v", full.Unrecognized)
+	}
+	var prose []string
+	for _, e := range full.Detail {
+		prose = append(prose, coverage.ProseOf(e))
+	}
+	if !strings.Contains(strings.Join(prose, "\n"), "DB-201") {
+		t.Errorf("no delivered-elsewhere entry names DB-201; ids were %v", delivered)
+	}
+	rawDetail, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rawDetail), "DB-201") {
+		t.Error("DB-201 does not survive into the JSON the agent reads")
 	}
 }

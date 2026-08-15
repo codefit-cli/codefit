@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -126,13 +127,44 @@ func securityScope(language string) map[string]bool {
 // CoverageRequest is the input to codefit-coverage.
 type CoverageRequest struct {
 	Language string `json:"language"`
+	// Detail names the entries whose full prose the caller wants. Many ids in
+	// one call: an agent that has to make one round trip per declared limit
+	// stops asking. Omit it and the answer is the index alone.
+	Detail []string `json:"detail,omitempty"`
 }
 
-// CoverageResponse carries the coverage manifest: what is audited
-// deterministically vs reasoned over surface vs not covered.
+// CoverageResponse carries the coverage index: every entry codefit declares for
+// the language, as an id, a one-line claim, its answer class, and whether it has
+// more prose to give. The prose itself is served only when asked for by id.
 type CoverageResponse struct {
-	Manifest coverage.Manifest `json:"manifest"`
-	// Derived is true when Manifest was COMPUTED from the provider's
+	Language string `json:"language"`
+	// Index holds EVERY entry the manifest carries, always. The response budget
+	// authorizes withholding for scan-all; for coverage it authorizes nothing,
+	// so an over-budget index is reported as over budget and stays complete.
+	Index []coverage.IndexEntry `json:"index"`
+	// Entries and Bytes let the caller check the two facts it would otherwise
+	// have to take on trust: how many entries arrived, and how large the index
+	// was on the wire.
+	Entries int `json:"entries"`
+	Bytes   int `json:"bytes"`
+	// Withheld is always zero, and WithheldNote says so in words. "No mention of
+	// truncation" and "nothing was truncated" are not the same bytes, and an
+	// agent cannot tell a complete answer from a quiet one without being told.
+	Withheld     int    `json:"withheld"`
+	WithheldNote string `json:"withheld_note"`
+	// OverBudget reports that the index exceeded the response budget. Nothing is
+	// dropped when it does — the instruction is to shorten a claim.
+	OverBudget bool   `json:"over_budget,omitempty"`
+	BudgetNote string `json:"budget_note,omitempty"`
+	// Detail carries the full prose of the requested entries, byte for byte as
+	// authored.
+	Detail []coverage.Entry `json:"detail,omitempty"`
+	// Unrecognized names every requested id that matched no entry. Naming it is
+	// the point: an empty success would say the entry has nothing to declare,
+	// which is a different and false answer from "there is no such entry".
+	Unrecognized     []string `json:"unrecognized,omitempty"`
+	UnrecognizedNote string   `json:"unrecognized_note,omitempty"`
+	// Derived is true when the answer was COMPUTED from the provider's
 	// Capability() rather than served from a hand-written CoverageManifest()
 	// (R1, docs/specs/declared-partial-language-exposure.md): the derived
 	// answer is the FLOOR every registered, exposed language gets; a
@@ -158,9 +190,48 @@ func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
 	if cm, ok := p.(interface {
 		CoverageManifest() coverage.Manifest
 	}); ok {
-		return CoverageResponse{Manifest: cm.CoverageManifest(), Derived: false}, nil
+		return coverageResponse(cm.CoverageManifest(), false, req.Detail), nil
 	}
-	return CoverageResponse{Manifest: deriveManifest(p), Derived: true}, nil
+	return coverageResponse(deriveManifest(p), true, req.Detail), nil
+}
+
+const (
+	coverageWithheldNote = "Nothing was withheld: every entry this manifest holds is named in the index. " +
+		"The response budget authorizes withholding for scan-all; for coverage it authorizes nothing."
+	coverageOverBudgetNote = "This index is over the response budget and is still complete. " +
+		"Shorten a claim, never drop an entry."
+	coverageUnrecognizedNote = "These ids matched no entry in this language's manifest. " +
+		"They are named rather than skipped: an empty result would say the entry has nothing to declare, " +
+		"which is a different answer from there being no such entry. Read the index for the ids that exist."
+)
+
+// coverageResponse projects a manifest into the answer the agent receives. It is
+// the ONLY place that shape is built, so the index and the detail are two views
+// of one value rather than two code paths that have to agree.
+func coverageResponse(m coverage.Manifest, derived bool, want []string) CoverageResponse {
+	index := m.Index()
+	resp := CoverageResponse{
+		Language:     m.Language,
+		Index:        index,
+		Entries:      len(index),
+		Withheld:     0,
+		WithheldNote: coverageWithheldNote,
+		Derived:      derived,
+	}
+	if raw, err := json.Marshal(index); err == nil {
+		resp.Bytes = len(raw)
+	}
+	if resp.Bytes > ResponseBudgetBytes {
+		resp.OverBudget = true
+		resp.BudgetNote = coverageOverBudgetNote
+	}
+	if len(want) > 0 {
+		resp.Detail, resp.Unrecognized = m.Resolve(want)
+		if len(resp.Unrecognized) > 0 {
+			resp.UnrecognizedNote = coverageUnrecognizedNote
+		}
+	}
+	return resp
 }
 
 // deriveManifest builds the FLOOR coverage answer (R1) from a provider's
@@ -187,42 +258,74 @@ func withLimits(line, id string, rs providers.RuleSet) string {
 	return line
 }
 
+// surfaceEntryID derives a surface entry's id from the locked
+// surface.ProviderCategories vocabulary rather than from a hand-typed list, so a
+// category that is renamed cannot leave a stale id behind.
+func surfaceEntryID(c surface.Category) string {
+	return "surface." + string(c)
+}
+
+// ruleEntry builds one declared rule's entry. A rule with no declared limit says
+// everything in its claim and carries no detail. A rule WITH one keeps ADR
+// 0075's placement: the qualification stays welded to that rule's own entry and
+// appears on no other, and because the full limit text is far longer than a
+// claim may be, the claim states that a limit exists and the detail carries it.
+// An agent cannot read the claim and come away thinking the rule is unqualified.
+func ruleEntry(id, family string, rs providers.RuleSet) coverage.Entry {
+	line := fmt.Sprintf("%s (%s rule, declared)", id, family)
+	full := withLimits(line, id, rs)
+	if full == line {
+		return coverage.Entry{ID: id, Claim: line}
+	}
+	return coverage.Entry{
+		ID:     id,
+		Claim:  line + " — carries a DECLARED LIMIT; read this entry's detail before reading it as complete",
+		Detail: full,
+	}
+}
+
 func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
 	cap := p.Capability()
 	cs := surface.DeriveCoverage(cap.Surface)
 
-	det := make([]string, 0, len(cap.Security.Declared)+len(cap.Practices.Declared))
+	det := make([]coverage.Entry, 0, len(cap.Security.Declared)+len(cap.Practices.Declared))
 	for _, id := range cap.Security.Declared {
-		det = append(det, withLimits(fmt.Sprintf("%s (security rule, declared)", id), id, cap.Security))
+		det = append(det, ruleEntry(id, "security", cap.Security))
 	}
 	for _, id := range cap.Practices.Declared {
-		det = append(det, withLimits(fmt.Sprintf("%s (practices rule, declared)", id), id, cap.Practices))
+		det = append(det, ruleEntry(id, "practices", cap.Practices))
 	}
 
-	reasoning := make([]string, 0, len(cs.Mapped))
+	reasoning := make([]coverage.Entry, 0, len(cs.Mapped))
 	for _, c := range cs.Mapped {
-		reasoning = append(reasoning, fmt.Sprintf(
-			"Surface category %q is mapped for %s: the provider enumerates this structural surface for the agent to reason about.",
-			c, p.Language()))
+		reasoning = append(reasoning, coverage.Entry{
+			ID: surfaceEntryID(c),
+			Claim: fmt.Sprintf(
+				"Surface category %q is mapped for %s: the provider enumerates this structural surface for the agent to reason about.",
+				c, p.Language()),
+		})
 	}
 
-	notCovered := make([]string, 0, len(cs.NotMapped)+len(cap.Security.Excluded)+len(cap.Practices.Excluded))
+	notCovered := make([]coverage.Entry, 0, len(cs.NotMapped)+len(cap.Security.Excluded)+len(cap.Practices.Excluded))
 	for _, c := range cs.NotMapped {
-		notCovered = append(notCovered, fmt.Sprintf(
-			"Surface category %q is NOT mapped for %s — never searched for, not merely absent from this scan.",
-			c, p.Language()))
+		notCovered = append(notCovered, coverage.Entry{
+			ID: surfaceEntryID(c),
+			Claim: fmt.Sprintf(
+				"Surface category %q is NOT mapped for %s — never searched for, not merely absent from this scan.",
+				c, p.Language()),
+		})
 	}
-	for _, ex := range cap.Security.Excluded {
-		notCovered = append(notCovered, fmt.Sprintf("%s is permanently NOT covered: %s", ex.ID, ex.Reason))
-	}
-	for _, ex := range cap.Practices.Excluded {
-		notCovered = append(notCovered, fmt.Sprintf("%s is permanently NOT covered: %s", ex.ID, ex.Reason))
+	for _, ex := range append(append([]providers.ExcludedRule{}, cap.Security.Excluded...), cap.Practices.Excluded...) {
+		notCovered = append(notCovered, coverage.Entry{
+			ID:    ex.ID,
+			Claim: fmt.Sprintf("%s is permanently NOT covered: %s", ex.ID, ex.Reason),
+		})
 	}
 
 	return coverage.Manifest{
-		Language:           p.Language(),
-		DeterministicProse: det,
-		ReasoningProse:     reasoning,
-		NotCoveredProse:    notCovered,
-	}
+		Language:      p.Language(),
+		Deterministic: det,
+		Reasoning:     reasoning,
+		NotCovered:    notCovered,
+	}.WithProse()
 }

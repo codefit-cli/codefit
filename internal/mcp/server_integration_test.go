@@ -84,4 +84,61 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if out.Budget.Bytes != mcp.ResponseBudgetBytes || out.Budget.Note == "" {
 		t.Errorf("the response an agent receives over the wire must declare its budget, got %+v", out.Budget)
 	}
+
+	// tools/call codefit-coverage — this test LISTED the tool for a long time and
+	// never called it, so nothing here had ever measured what an agent actually
+	// receives from it. It does now.
+	cov, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "codefit-coverage",
+		Arguments: map[string]any{"language": "typescript"},
+	})
+	if err != nil {
+		t.Fatalf("tools/call codefit-coverage: %v", err)
+	}
+	if cov.IsError {
+		t.Fatalf("codefit-coverage reported an error: %+v", cov.Content)
+	}
+
+	structured, err := json.Marshal(cov.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured coverage result: %v", err)
+	}
+	t.Logf("WIRE MEASUREMENT — codefit-coverage {language: typescript}: structured payload %d bytes", len(structured))
+
+	var covOut mcp.CoverageResponse
+	if err := json.Unmarshal(structured, &covOut); err != nil {
+		t.Fatalf("decode structured coverage result: %v", err)
+	}
+	if len(covOut.Index) == 0 {
+		t.Fatal("vacuum: the coverage index arrived empty over the wire")
+	}
+	t.Logf("WIRE MEASUREMENT — %d entries, index %d bytes, withheld %d", covOut.Entries, covOut.Bytes, covOut.Withheld)
+	if covOut.Withheld != 0 || covOut.WithheldNote == "" {
+		t.Errorf("the response an agent receives must state that it withheld nothing, got withheld=%d note=%q",
+			covOut.Withheld, covOut.WithheldNote)
+	}
+	if len(structured) >= 143_557 {
+		t.Errorf("the coverage response is %d bytes over the wire — no smaller than the 143,557-byte payload this change exists to replace",
+			len(structured))
+	}
+
+	// EMPIRICAL PROOF, recorded rather than fixed: codefit's addTool returns nil
+	// for the *CallToolResult, and the go-sdk then serializes the SAME output
+	// JSON into a TextContent block. Every codefit tool response therefore
+	// crosses the wire TWICE. This asserts the two copies are identical, which is
+	// what makes it duplication rather than two different answers. Which copy the
+	// client meters is UNMEASURED — see the roadmap item; do not assume.
+	if len(cov.Content) != 1 {
+		t.Fatalf("expected exactly one content block alongside the structured result, got %d", len(cov.Content))
+	}
+	text, ok := cov.Content[0].(*mcpsdk.TextContent)
+	if !ok {
+		t.Fatalf("expected the content block to be TextContent, got %T", cov.Content[0])
+	}
+	if text.Text != string(structured) {
+		t.Errorf("the text block and the structured payload differ, so this is not the duplication the finding describes:\n text %d bytes\n structured %d bytes",
+			len(text.Text), len(structured))
+	}
+	t.Logf("WIRE DUPLICATION — the same %d-byte payload is carried twice: once as structured content and once as a text block, %d bytes on the wire in total",
+		len(structured), len(structured)+len(text.Text))
 }
