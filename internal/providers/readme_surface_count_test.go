@@ -51,6 +51,25 @@ func repoRoot(t *testing.T) string {
 // extractLineContaining returns the first line of readme containing anchor,
 // erroring loudly if no such line exists — a missing anchor means README's
 // structure moved and this lock needs to move with it, not silently pass.
+// extractLineContainingUnder is extractLineContaining scoped to one section, and
+// the scoping is the point: the unscoped form returns the FIRST match anywhere in
+// the file, so a summary row added above the fold silently shadows the row this
+// control means to read. That happened — a reach table near the top matched
+// "| **TypeScript" and the control reddened over a row that was never its subject,
+// while the real Supported-languages row still named every category. A control an
+// unrelated edit can point at the wrong line is not measuring what it claims.
+func extractLineContainingUnder(readme, heading, anchor string) (string, error) {
+	_, after, found := strings.Cut(readme, heading)
+	if !found {
+		return "", fmt.Errorf("README.md has no heading %q — this control's anchor moved and it is now reading nothing", heading)
+	}
+	line, err := extractLineContaining(after, anchor)
+	if err != nil {
+		return "", fmt.Errorf("under %q: %w", heading, err)
+	}
+	return line, nil
+}
+
 func extractLineContaining(readme, anchor string) (string, error) {
 	for _, line := range strings.Split(readme, "\n") {
 		if strings.Contains(line, anchor) {
@@ -114,7 +133,7 @@ func TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row, err := extractLineContaining(readme, "| **TypeScript")
+	row, err := extractLineContainingUnder(readme, "## Supported languages", "| **TypeScript")
 	if err != nil {
 		t.Fatal(err)
 	}

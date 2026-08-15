@@ -8,12 +8,28 @@
 > **The MCP-first auditor for AI-generated code — codefit maps, the agent reasons.**
 
 codefit is an open-source tool, written in Go, that audits software written
-(partly or fully) by AI. It detects what a developer **never sees** during normal
-development: security vulnerabilities, algorithmic complexity that scales badly,
-structural database problems, regression risk, and quality issues that only
-surface under deep review. Its guiding principle: *codefit audits what the
-developer is never going to see* — if a dimension is visible during normal
-development, it is out of scope.
+(partly or fully) by AI. Its guiding principle: *codefit audits what the developer
+is never going to see* — if a dimension is visible during normal development, it is
+out of scope.
+
+### What runs today, before you install
+
+Reach is **per dimension AND per language**, and this is the first thing to know —
+not a footnote. Two of the five dimensions codefit is scoped to audit ship today:
+
+| dimension | what runs on `main` |
+|---|---|
+| **Security** (rules + surface mapping) | **TypeScript** — 4 of 4 surface categories · **Go** — 6 rules, 1 of 4 categories (`authz`) · **any other language: refused with an error**, never a false all-clear |
+| **Database** (schema structure) | **any language** — the schema parser resolves by file shape (`.prisma` / `.sql`), never by your project's language |
+| Complexity · Regression risk · Deep-review quality | **not built** — no sensor exists; they are scope, not capability |
+
+So: a Python or Java backend gets the **database** dimension audited if it declares
+`database.schema_paths`, and `by_dimension.security` comes back honestly as `null` —
+not silently skipped. A TypeScript backend gets both. Every response states its own
+reach rather than leaving a count to be misread as complete.
+
+Full breakdown: [Status](#status--phase-2-the-database-dimension-olap-closed) ·
+[Supported languages](#supported-languages) · [COVERAGE.md](COVERAGE.md).
 
 ## How it works — a collaborative loop, not a linter dump
 
