@@ -45,7 +45,11 @@ Consequences, stated rather than left to be discovered:
 - 17 entries were **renamed** from a `db.*` slug to the rule id they describe
   (`db.never-used-index` → `DB-012`, `db.trigger-cross-table-cascade` → `DB-040`,
   and 15 more). This is the breaking change this ADR exists to record.
-- 5 blobs were **cut** into 21 entries: 16 keyed by a rule id, 5 by a family slug.
+- 5 blobs were **cut** into 21 entries: 15 keyed by a rule id, 6 by a family slug.
+  The arithmetic is the check: 17 renamed + 15 cut = the 32 rule-keyed entries the
+  next-but-one bullet claims, and 10 untouched slugs + 6 family = 16 slugs. An
+  earlier draft said 16 + 5, which summed to 33 rule-keyed and contradicted its own
+  next-but-one bullet — measured against the committed id golden before merge.
 - The DB block goes from 32 entries to 48; the TypeScript index from 52 to 68.
 - Every one of the 32 rule ids the prose declares is now an entry of its own, in
   both directions: no declared rule id is missing an entry, and no entry is keyed
