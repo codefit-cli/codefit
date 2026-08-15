@@ -5,6 +5,8 @@ import (
 	"go/parser"
 	"go/token"
 	"strings"
+
+	"github.com/codefit-cli/codefit/internal/core/namematch"
 )
 
 // parsed holds a parsed Go file plus the lookups the checks need.
@@ -79,28 +81,51 @@ func hasNonLiteralOperand(expr ast.Expr) bool {
 	}
 }
 
-// looksSecret reports whether an identifier name suggests a secret. Bare "key"
-// only counts with a sufficiently long value to limit false positives.
-func looksSecret(name string, valueLen int) bool {
-	l := strings.ToLower(name)
-	for _, kw := range []string{"secret", "passwd", "password", "token", "apikey"} {
-		if strings.Contains(l, kw) {
-			return true
-		}
-	}
-	return strings.Contains(l, "key") && valueLen >= 16
+// credentialNames and securityValueNames are resolved once: namematch returns a
+// fresh map per call so a consumer cannot mutate its sets, and these gates are
+// asked per identifier.
+var (
+	credentialNames    = namematch.Credential()
+	securityValueNames = namematch.SecurityValue()
+)
+
+// looksSecret reports whether an identifier NAME denotes a credential.
+//
+// It asks namematch, which matches by name COMPONENT with adjacent-pair joining
+// — never by raw substring, and never by value length. Both of those were
+// removed rather than tuned:
+//
+//   - Raw substring made "tokenizer" and "keyboard" credentials.
+//   - A bare "key" name plus a 16-byte value was the arm that reported enum
+//     constants such as CategoryDWDimensionNoSurrogateKey as hardcoded
+//     credentials at Confidence 1.0. Its length guard was ANTI-CORRELATED with
+//     the property it claimed to filter: descriptive kebab/snake values grow
+//     past 16 bytes BECAUSE they are descriptive, while a credential has no
+//     length floor, so the gate admitted the false-positive class and rejected
+//     short real credentials. ADR 0056 section 1 allows teaching a check or
+//     dropping it, never declaring a false fact as a limit.
+//
+// Deleting that arm is only safe BECAUSE of pair joining: Arm A substring-matched
+// "apikey", and lower("API_KEY") is "api_key", which does not contain it. Every
+// delimiter-separated credential name fired through the deleted arm alone. See
+// ADR 0075.
+func looksSecret(name string) bool {
+	_, ok := namematch.MatchSet(name, credentialNames)
+	return ok
 }
 
-// looksSecurityValue reports whether a name suggests a security-sensitive value
-// (for the math/rand check).
+// looksSecurityValue reports whether a name denotes security-sensitive CRYPTO
+// MATERIAL, for the math/rand check.
+//
+// It shares the matching convention with looksSecret and NOT the vocabulary: a
+// nonce is not a credential and an access key is not crypto material. Its own
+// set legitimately contains a bare "key" component, because SEC-050 also
+// requires the value to come from a math/rand call — a second condition
+// SEC-001 has no equivalent of. Component matching is what stops that bare
+// "key" from making monkeyIndex a security value.
 func looksSecurityValue(name string) bool {
-	l := strings.ToLower(name)
-	for _, kw := range []string{"token", "secret", "nonce", "salt", "key", "password", "iv", "session"} {
-		if strings.Contains(l, kw) {
-			return true
-		}
-	}
-	return false
+	_, ok := namematch.MatchSet(name, securityValueNames)
+	return ok
 }
 
 // stringLit returns the unquoted value of a string literal expression and

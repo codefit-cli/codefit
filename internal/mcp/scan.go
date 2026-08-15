@@ -169,16 +169,34 @@ func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
 // half derived from surface.DeriveCoverage against the locked
 // surface.ProviderCategories vocabulary, never a literal list of category
 // names (test contract item 4).
+// withLimits appends every declared limit for id to that rule's OWN
+// Deterministic line, rather than collecting limits into a separate field.
+//
+// The placement is the point. An agent reading "SEC-001 (security rule,
+// declared)" must not be able to reach that claim without its caveat: they are
+// one string, so no summariser between codefit and the model can keep the claim
+// and drop the qualification. A sibling array is exactly that droppable, and a
+// coverage answer that over-claims is the failure this repo's source-to-mirror
+// chain exists to prevent. See ADR 0075.
+func withLimits(line, id string, rs providers.RuleSet) string {
+	for _, l := range rs.Limits {
+		if l.ID == id {
+			line += " — declared limit: " + l.Limit
+		}
+	}
+	return line
+}
+
 func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
 	cap := p.Capability()
 	cs := surface.DeriveCoverage(cap.Surface)
 
 	det := make([]string, 0, len(cap.Security.Declared)+len(cap.Practices.Declared))
 	for _, id := range cap.Security.Declared {
-		det = append(det, fmt.Sprintf("%s (security rule, declared)", id))
+		det = append(det, withLimits(fmt.Sprintf("%s (security rule, declared)", id), id, cap.Security))
 	}
 	for _, id := range cap.Practices.Declared {
-		det = append(det, fmt.Sprintf("%s (practices rule, declared)", id))
+		det = append(det, withLimits(fmt.Sprintf("%s (practices rule, declared)", id), id, cap.Practices))
 	}
 
 	reasoning := make([]string, 0, len(cs.Mapped))

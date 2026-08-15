@@ -1,6 +1,7 @@
 package golang
 
 import (
+	"github.com/codefit-cli/codefit/internal/core/namematch"
 	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 )
@@ -32,6 +33,17 @@ func (*Provider) Capability() providers.Capability {
 		Security: providers.RuleSet{
 			Declared:   []string{"SEC-001", "SEC-010", "SEC-013", "SEC-040", "SEC-050", "SEC-052"},
 			Enumerable: false,
+			Limits: []providers.RuleLimit{
+				{
+					ID: "SEC-001",
+					// Cited BY REFERENCE, never copied. The const lives beside
+					// the tokenizer that causes the gap, so this declaration
+					// cannot drift from the behaviour it describes: changing one
+					// without the other does not compile into a disagreement,
+					// because there is only one string.
+					Limit: namematch.LimitLowercaseConcatenation,
+				},
+			},
 		},
 		Practices: providers.RuleSet{
 			Declared:   []string{"PRAC-001", "PRAC-002", "PRAC-003", "PRAC-005"},

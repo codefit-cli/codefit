@@ -113,21 +113,36 @@ type sec001Site struct {
 // This pin exists because TestSelfAudit above asserts only len(Findings) != 0
 // and !IsBlocked: it prints no findings and asserts no count, so DELETING a
 // detector entirely left it green. The census is the missing direction.
+//
+// WHAT THIS PIN RECORDED, AND WHY IT SHRANK (ADR 0075). It was written against
+// the substring matcher and held FOUR layer-2 sites that are now gone, each of
+// them a false affirmation about a name that is not a credential:
+//
+//	internal/core/surface/surface.go             CategoryDWDimensionNoSurrogateKey
+//	internal/core/paradigm/schemagate.go         SignalSurrogateKeyNames
+//	internal/scaffold/generate_test.go           skillNoSuchKeyClaim
+//	internal/sensors/db/schemagate_note_test.go  starWithSurrogateKeys
+//
+// All four fired through the bare-"key"-plus-16-byte-value arm, at Confidence
+// 1.0, telling a reader that a category constant "looks like a hardcoded
+// credential". Deleting them is the point of the change, and this diff is where
+// that removal is visible as a measurement rather than a claim.
+//
+// The rest of the census is UNCHANGED, and that is the other half of the
+// evidence: the replacement vocabulary added no new site anywhere in the tree,
+// and the one surviving layer-2 site (secretFile) still fires, now on the
+// component "secret" rather than on a substring.
 var wantSEC001 = map[sec001Site]int{
-	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:                          3,
-	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}:                 1,
-	{"internal/core/paradigm/schemagate.go", "The value assigned to 'SignalSurrogateKeyNames' looks like a hardcoded credential."}:       1,
-	{"internal/core/surface/surface.go", "The value assigned to 'CategoryDWDimensionNoSurrogateKey' looks like a hardcoded credential."}: 1,
-	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:                         2,
-	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:                      1,
-	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:                          1,
-	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                                 2,
-	{"internal/scaffold/generate_test.go", "The value assigned to 'skillNoSuchKeyClaim' looks like a hardcoded credential."}:             1,
-	{"internal/sensors/db/schemagate_note_test.go", "The value assigned to 'starWithSurrogateKeys' looks like a hardcoded credential."}:  1,
-	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:                    5,
-	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}:                 2,
-	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:                    1,
-	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}:                 5,
+	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:          3,
+	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}: 1,
+	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:         2,
+	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:      1,
+	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:          1,
+	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                 2,
+	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:    5,
+	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}: 2,
+	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:    1,
+	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}: 5,
 }
 
 // TestSelfAuditSEC001Census is the enumeration control TestSelfAudit lacks. It

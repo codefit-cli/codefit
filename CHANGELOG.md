@@ -14,6 +14,52 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- ⚠️ **SEC-001 (Go) now identifies a credential by NAME COMPONENT, not by raw
+  substring and not by value length. Findings change in BOTH directions — read
+  this before you re-baseline.** (ADR 0075)
+
+  The old name gate had a second arm: any name containing `key` as a substring,
+  with a value of 16+ bytes. Driving the security sensor over codefit's own tree
+  through the real `go/ast` parser found **4 of its 5 name-gate findings were
+  false** — enum constants and descriptive names reported at `Confidence: 1.0`
+  as "looks like a hardcoded credential". The length guard was inverted in
+  practice: descriptive kebab/snake values pass 16 bytes *because* they are
+  descriptive, while a real credential has no length floor, so the gate admitted
+  the false-positive class and rejected short real credentials
+  (`SIGNING_KEY = "s3cr3t"` was 6 bytes and was rejected).
+
+  **Fires that STOP.** Names carrying `key` only as a substring or as a
+  non-credential component, with a 16+ byte value — enum and category constants,
+  and names such as `keyboard`, `monkeyId`, `textKey`, `tokenizer`.
+
+  **Fires that START.** `pwd`, `accessKey`, `SIGNING_KEY`, `encryptionKey`, and
+  every credential name whose value is shorter than 16 bytes. `API_KEY`,
+  `api_key`, `apiKey`, `privateKey`, `accessToken` and `refreshToken` keep
+  firing: the adjacent-pair join (`api`+`key` → `apikey`) is what made removing
+  the old arm safe rather than a silent false negative, since `lower("API_KEY")`
+  never contained `apikey`.
+
+  **What to do with your baseline.** Fingerprints are unchanged for anything
+  that keeps firing. A finding that stops leaves a STALE baseline entry, which
+  is harmless — clear it with **`codefit-baseline-prune`**. A finding that
+  starts is NEW and will appear as such.
+
+  SEC-050 adopts the same matching convention over its OWN crypto-material
+  vocabulary — it was strictly looser, with no guard at all, so
+  `monkeyIndex := rand.Intn(n)` used to fire. `nonce`, `salt`, `iv`, `session`
+  and a bare `key` component still fire there, because SEC-050 additionally
+  requires a `math/rand` call.
+
+  **Declared limit, now readable from `codefit-coverage`:** component matching
+  cannot split an all-lowercase concatenation, so `secretkey := "…"` is NOT
+  reported while `secretKey`, `secret_key` and `SECRET_KEY` are. This is stated
+  on SEC-001's own line in the Go coverage answer, not in a separate list.
+
+  DB-053 and DB-020 are UNCHANGED: they consume a separately frozen vocabulary,
+  proven identical name-for-name and verdict-for-verdict against the previous
+  implementation.
+
 ### Added
 - **`codefit init` detects SQL schema directories — and writes only what it can
   PROVE.** Schema detection used to read a Prisma `schema.prisma` and nothing
