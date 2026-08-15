@@ -75,10 +75,10 @@ func promisedIDs(t *testing.T) []string {
 // Silence is not a fourth answer.
 func answerText() string {
 	var all []string
-	all = append(all, dbcoverage.Deterministic()...)
-	all = append(all, dbcoverage.Reasoning()...)
-	all = append(all, dbcoverage.NotCovered()...)
-	all = append(all, dbcoverage.DeliveredElsewhere()...)
+	all = append(all, proseOf(dbcoverage.Deterministic())...)
+	all = append(all, proseOf(dbcoverage.Reasoning())...)
+	all = append(all, proseOf(dbcoverage.NotCovered())...)
+	all = append(all, proseOf(dbcoverage.DeliveredElsewhere())...)
 	return strings.Join(all, "\n")
 }
 
@@ -172,8 +172,8 @@ func TestManifest_EachOfTheThreeAnswers_SatisfiesTheControl(t *testing.T) {
 	for _, id := range registeredIDs() {
 		registered[id] = true
 	}
-	notCovered := strings.Join(dbcoverage.NotCovered(), "\n")
-	delivered := strings.Join(dbcoverage.DeliveredElsewhere(), "\n")
+	notCovered := strings.Join(proseOf(dbcoverage.NotCovered()), "\n")
+	delivered := strings.Join(proseOf(dbcoverage.DeliveredElsewhere()), "\n")
 
 	t.Run("registered", func(t *testing.T) {
 		// DB-002 (multivalued columns) is a registered rule, so Control A

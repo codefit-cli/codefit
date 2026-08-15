@@ -6,9 +6,16 @@
 // language), so its coverage prose belongs beside the rules that produce it,
 // not duplicated into every ORM provider that happens to consume it.
 //
-// dbcoverage is a pure leaf: it imports nothing beyond the standard library, so
-// it cannot create a cycle with any provider or with core/dbrules itself. A
-// provider's own CoverageManifest composes these lists into its own
-// Deterministic/Reasoning/NotCovered slices (ADR 0014 layering: no provider
-// knowledge here, no DB knowledge duplicated there).
+// dbcoverage imports exactly one codefit package, core/coverage, for the Entry
+// type its four functions return. That is leaf to leaf: coverage imports nothing
+// of codefit's, so there is no cycle in either direction, and neither package
+// imports a provider. A provider's own CoverageManifest composes these entries
+// into its own Deterministic/Reasoning/NotCovered buckets by append, exactly as
+// before (ADR 0014 layering: no provider knowledge here, no DB knowledge
+// duplicated there).
+//
+// dbcoverage does not know that detail resolution exists. It returns entries and
+// nothing else; whether a caller serves a claim, the prose, or both is entirely
+// the caller's business, so the DB dimension never grows a second code path to
+// keep in step with the first.
 package dbcoverage

@@ -4,30 +4,24 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/codefit-cli/codefit/internal/core/namematch"
 	"github.com/codefit-cli/codefit/internal/mcp"
 )
 
-// TestHandleCoverage_TypeScript_UnchangedFromPreChange is test contract item
-// 3: TypeScript's coverage answer must be UNCHANGED by this change — its
-// hand-written prose manifest stays authoritative, never replaced by the R1
-// derived floor. The golden is the REAL pre-change response (commit
-// 810b816, this branch's base) captured via `git worktree add --detach` and
-// dumped with json.MarshalIndent over resp.Manifest — not a
-// re-implementation of what the old manifest "should" say (see
-// testdata/README.md's established pattern for these captures).
+// TestHandleCoverage_TypeScript_RefusesTheDerivedFloor is the contract this
+// file's doc comment always claimed: R1's DERIVED fallback must never replace a
+// language that already has a hand-written prose manifest. That contract is one
+// boolean and one non-vacuity check.
 //
-// Compared field for field (the whole Manifest, byte for byte): this
-// change adds NOTHING to coverage.Manifest itself and never touches
-// internal/providers/typescript/coverage.go, so TypeScript's manifest must
-// be IDENTICAL, not merely "minus one added key" the way the scan-all
-// goldens are (this response's only NEW field is the sibling
-// CoverageResponse.Derived, which this test does not marshal — it compares
-// resp.Manifest alone).
-func TestHandleCoverage_TypeScript_UnchangedFromPreChange(t *testing.T) {
+// It used to be asserted by comparing the whole response byte for byte against a
+// 143,557-byte golden whose longest single line was 34,226 characters — a
+// serialized ADR inside a JSON string. That golden was far wider than the
+// contract: it locked every word of every declared limit, so it went red on a
+// change that altered no prose at all. ADR 0076 records the re-scope and forbids
+// re-capturing the same shape. Identity of the ENTRY SET is locked instead, by
+// the small ids golden below.
+func TestHandleCoverage_TypeScript_RefusesTheDerivedFloor(t *testing.T) {
 	resp, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "typescript"})
 	if err != nil {
 		t.Fatalf("HandleCoverage: %v", err)
@@ -35,65 +29,93 @@ func TestHandleCoverage_TypeScript_UnchangedFromPreChange(t *testing.T) {
 	if resp.Derived {
 		t.Error("typescript must still serve its hand-written manifest, Derived must be false")
 	}
+	// Without this, "Derived is false" would also pass over an empty answer,
+	// and an empty coverage manifest is the failure this tool exists to prevent.
+	if len(resp.Index) == 0 {
+		t.Fatal("vacuum: typescript's hand-written manifest served no entries at all")
+	}
+}
 
-	live, err := json.MarshalIndent(resp.Manifest, "", "  ")
+// TestCoverage_EntryIDsMatchTheGolden locks the identity of the ENTRY SET, which
+// is what the deleted 143 KB golden was actually protecting worth protecting.
+// Ids are append-only and a rename is a breaking change, so this golden's churn
+// is meaningful: every line of a diff here is an id that appeared or vanished,
+// and no line of it is a reworded sentence.
+//
+// Deliberately ids and statuses only. Re-capturing the prose in the new shape
+// would re-import the exact defect ADR 0076 removed.
+func TestCoverage_EntryIDsMatchTheGolden(t *testing.T) {
+	type entryID struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	live := map[string][]entryID{}
+	for _, lang := range []string{"typescript", "go"} {
+		resp, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: lang})
+		if err != nil {
+			t.Fatalf("HandleCoverage(%s): %v", lang, err)
+		}
+		if len(resp.Index) == 0 {
+			t.Fatalf("vacuum: %s indexed nothing, so the golden would lock an empty answer", lang)
+		}
+		for _, e := range resp.Index {
+			live[lang] = append(live[lang], entryID{ID: e.ID, Status: string(e.Status)})
+		}
+	}
+
+	raw, err := json.MarshalIndent(live, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	golden, err := os.ReadFile(filepath.Join("testdata", "coverage_ts_prechange.json"))
+	path := filepath.Join("testdata", "coverage_entry_ids.json")
+	golden, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading pre-change golden: %v", err)
+		t.Fatalf("reading the entry-id golden: %v", err)
 	}
-	if string(live) != string(golden) {
-		t.Errorf("typescript's coverage manifest changed from the pre-change (810b816) response — " +
-			"R1's derived-manifest fallback must never touch a language that already has a hand-written one")
+	if string(raw) == string(golden) {
+		return
+	}
+
+	// Name what moved. A byte diff over ids is readable, but naming the added and
+	// removed ids is what tells an author whether they renamed something on
+	// purpose or dropped a declared limit by accident.
+	var want map[string][]entryID
+	if err := json.Unmarshal(golden, &want); err != nil {
+		t.Fatalf("parsing the entry-id golden: %v", err)
+	}
+	for lang, got := range live {
+		had := map[string]string{}
+		for _, e := range want[lang] {
+			had[e.ID] = e.Status
+		}
+		has := map[string]bool{}
+		for _, e := range got {
+			has[e.ID] = true
+			status, known := had[e.ID]
+			switch {
+			case !known:
+				t.Errorf("%s: entry id %q is NEW — ids are append-only, and a rename is a breaking change needing an ADR", lang, e.ID)
+			case status != e.Status:
+				t.Errorf("%s: entry %q moved from %s to %s", lang, e.ID, status, e.Status)
+			}
+		}
+		for _, e := range want[lang] {
+			if !has[e.ID] {
+				t.Errorf("%s: entry id %q is GONE — a declared limit the agent can no longer ask for", lang, e.ID)
+			}
+		}
+	}
+	if !t.Failed() {
+		t.Errorf("the entry-id golden differs but no id changed — the ORDER moved, which reorders the agent's index")
 	}
 }
 
-// TestHandleCoverage_Go_StatesSEC001Limit is Q5's user-facing half: the
-// declared limit must reach an AGENT, not merely exist in a const.
-//
-// It is asserted on the SAME STRING as the SEC-001 claim, not on a sibling
-// array, and that placement is the decision being locked. An agent cannot read
-// "SEC-001 (security rule, declared)" and miss the caveat, because there is no
-// version of the line without it. A separate DeclaredLimits array would be
-// droppable by any summariser between codefit and the model — which is the
-// failure mode this repo's coverage chain exists to prevent.
-func TestHandleCoverage_Go_StatesSEC001Limit(t *testing.T) {
-	resp, err := mcp.HandleCoverage(mcp.CoverageRequest{Language: "go"})
-	if err != nil {
-		t.Fatalf("HandleCoverage(go): %v", err)
-	}
-	if !resp.Derived {
-		t.Error("go has no hand-written manifest, so its answer must be Derived (ADR 0065)")
-	}
-	if len(resp.Manifest.Deterministic) == 0 {
-		t.Fatal("vacuum: go's derived manifest declares no deterministic rules at all")
-	}
-
-	var sec001 string
-	for _, d := range resp.Manifest.Deterministic {
-		if strings.HasPrefix(d, "SEC-001 ") {
-			sec001 = d
-		}
-	}
-	if sec001 == "" {
-		t.Fatalf("no SEC-001 line in go's Deterministic list: %v", resp.Manifest.Deterministic)
-	}
-	if !strings.Contains(sec001, namematch.LimitLowercaseConcatenation) {
-		t.Errorf("SEC-001's line does not carry the declared limit.\n got: %s\nwant it to contain: %s",
-			sec001, namematch.LimitLowercaseConcatenation)
-	}
-
-	// The limit must be attached to SEC-001 and to nothing else. A limit
-	// smeared across every rule id would be worse than absent: it would
-	// under-claim five rules that have no such gap.
-	for _, d := range resp.Manifest.Deterministic {
-		if d == sec001 {
-			continue
-		}
-		if strings.Contains(d, namematch.LimitLowercaseConcatenation) {
-			t.Errorf("the SEC-001 limit leaked onto another rule's line: %s", d)
-		}
-	}
-}
+// Q5's user-facing half — the declared limit must reach an AGENT, not merely
+// exist in a const — used to live here as TestHandleCoverage_Go_StatesSEC001Limit,
+// asserting over the joined Deterministic prose. It moved to
+// TestCoverage_GoDerivedFloorKeepsSEC001sLimitWeldedToItsOwnEntry in
+// coverage_detail_test.go, which asks the same question of the shape the agent
+// now receives and asks MORE of it: that SEC-001's index claim itself warns the
+// rule is qualified, that the full limit text comes back on that entry's own
+// detail, and that it appears on no other entry's claim OR detail. The old
+// version checked only the second of those three.

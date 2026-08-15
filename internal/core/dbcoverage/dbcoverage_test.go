@@ -41,8 +41,8 @@ func registeredIDs() []string {
 // checks CORRESPONDENCE (an entry exists), never accuracy of that entry.
 func manifestText() string {
 	var all []string
-	all = append(all, dbcoverage.Deterministic()...)
-	all = append(all, dbcoverage.Reasoning()...)
+	all = append(all, proseOf(dbcoverage.Deterministic())...)
+	all = append(all, proseOf(dbcoverage.Reasoning())...)
 	return strings.Join(all, "\n")
 }
 
@@ -158,10 +158,10 @@ func mentionedTokenIsAnswered(id string) bool {
 			return true
 		}
 	}
-	if containsWholeToken(strings.Join(dbcoverage.NotCovered(), "\n"), id) {
+	if containsWholeToken(strings.Join(proseOf(dbcoverage.NotCovered()), "\n"), id) {
 		return true
 	}
-	return containsWholeToken(strings.Join(dbcoverage.DeliveredElsewhere(), "\n"), id)
+	return containsWholeToken(strings.Join(proseOf(dbcoverage.DeliveredElsewhere()), "\n"), id)
 }
 
 // TestManifest_NoPhantomCapability is Control B (secondary, design SS9):
