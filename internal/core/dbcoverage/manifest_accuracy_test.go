@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/coverage"
 	"github.com/codefit-cli/codefit/internal/core/dbcoverage"
 )
 
@@ -63,11 +64,20 @@ import (
 // granularity is the coarsest grain that still catches this project's actual
 // defect without also flagging correct prose as broken.
 
-// completenessBoundaryAnchor is the stable phrase that identifies the
-// db-model-completeness-contract's BOUNDARY sentence among every other entry
-// dbcoverage.Reasoning() returns. It is prose already locked by this
-// project's own doc comment (dbcoverage.go, item 40) — not a new invention
-// for this test.
+// completenessBoundaryEntryID is the entry that OWNS the
+// db-model-completeness-contract's BOUNDARY sentence. This control used to
+// find its subject by scanning every entry in dbcoverage.Reasoning() for the
+// anchor phrase and taking the first hit — a finder that silently retargets
+// itself the moment any other entry quotes the phrase, which is exactly how a
+// doc control ends up reddening over a line that was never its subject. Now it
+// asks the manifest for one named entry.
+const completenessBoundaryEntryID = "db.table-structural-completeness"
+
+// completenessBoundaryAnchor is the stable phrase that identifies the BOUNDARY
+// sentence INSIDE that entry. It is prose already locked by this project's own
+// doc comment (dbcoverage.go, item 40) — not a new invention for this test. It
+// stays: the id says which entry to read, the anchor says where in it to start,
+// and losing either one has to fail loudly rather than quietly measure nothing.
 const completenessBoundaryAnchor = "Complete covers DROPS, not FABRICATIONS"
 
 // fabricationTriggers mark a clause as NAMING a fabrication example.
@@ -87,17 +97,21 @@ func boundaryExampleParenthetical(t *testing.T) string {
 	t.Helper()
 
 	var entry string
-	for _, e := range proseOf(dbcoverage.Reasoning()) {
-		if strings.Contains(e, completenessBoundaryAnchor) {
-			entry = e
+	for _, e := range dbcoverage.Reasoning() {
+		if e.ID == completenessBoundaryEntryID {
+			entry = coverage.ProseOf(e)
 			break
 		}
 	}
 	if entry == "" {
-		t.Fatalf("no entry in dbcoverage.Reasoning() contains the anchor %q — "+
-			"the db-model-completeness-contract BOUNDARY sentence moved or was reworded; "+
-			"this control cannot locate its target and must not silently pass over nothing",
-			completenessBoundaryAnchor)
+		t.Fatalf("dbcoverage.Reasoning() holds no entry %q — this control's subject was renamed or "+
+			"removed, and it must fail loudly rather than pick some other entry that happens to "+
+			"quote the same phrase", completenessBoundaryEntryID)
+	}
+	if !strings.Contains(entry, completenessBoundaryAnchor) {
+		t.Fatalf("entry %q no longer contains the anchor %q — the BOUNDARY sentence moved or was "+
+			"reworded; this control cannot locate its target and must not silently pass over nothing",
+			completenessBoundaryEntryID, completenessBoundaryAnchor)
 	}
 
 	afterAnchor := entry[strings.Index(entry, completenessBoundaryAnchor):]

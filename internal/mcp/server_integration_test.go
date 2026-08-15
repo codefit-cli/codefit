@@ -112,7 +112,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	if len(covOut.Index) == 0 {
 		t.Fatal("vacuum: the coverage index arrived empty over the wire")
 	}
-	t.Logf("WIRE MEASUREMENT — %d entries, index %d bytes, withheld %d", covOut.Entries, covOut.Bytes, covOut.Withheld)
+	t.Logf("WIRE MEASUREMENT — %d entries, payload %d bytes (index %d), over budget %v, withheld %d",
+		covOut.Entries, covOut.Bytes, covOut.IndexBytes, covOut.OverBudget, covOut.Withheld)
+	// The declared size describes what an agent actually received, which for an
+	// index-only call is the index. A detail call declares the detail too — see
+	// TestCoverage_ADetailResponseDeclaresTheSizeOfWhatItReturns.
+	if covOut.Bytes != covOut.IndexBytes {
+		t.Errorf("no detail was asked for, so the declared payload IS the index: bytes=%d index_bytes=%d",
+			covOut.Bytes, covOut.IndexBytes)
+	}
 	if covOut.Withheld != 0 || covOut.WithheldNote == "" {
 		t.Errorf("the response an agent receives must state that it withheld nothing, got withheld=%d note=%q",
 			covOut.Withheld, covOut.WithheldNote)

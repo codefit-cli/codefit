@@ -73,6 +73,99 @@ func TestCoverage_IndexNamesEveryEntryAndDeclaresItsOwnSize(t *testing.T) {
 	}
 }
 
+// TestCoverage_ADetailResponseDeclaresTheSizeOfWhatItReturns closes the defect
+// slice 1's verification found: the size verdict was scoped to the INDEX while
+// the response was not. Asked for every id at once, codefit returned a
+// 182,440-byte response that declared "bytes: 21951, over_budget: false" — a
+// response misreporting its own size, which is byte for byte the defect class
+// PR #128 fixed for scan-all's budget note.
+//
+// The fix is NOT to withhold anything. Coverage authorizes no withholding under
+// any condition (I5), and detail was asked for by id, so every requested entry
+// comes back whole. What has to change is the declaration: the number describes
+// what is actually being returned, and an over-budget detail request SAYS SO,
+// per PR #128's precedent that a complete answer states its own cost.
+func TestCoverage_ADetailResponseDeclaresTheSizeOfWhatItReturns(t *testing.T) {
+	index := coverageOf(t, mcp.CoverageRequest{Language: "typescript"})
+	ids := idsOf(index.Index)
+	if len(ids) == 0 {
+		t.Fatal("vacuum: no ids to ask for, so nothing below would be measured")
+	}
+	resp := coverageOf(t, mcp.CoverageRequest{Language: "typescript", Detail: ids})
+	if len(resp.Detail) != len(ids) {
+		t.Fatalf("asked for %d ids and got %d entries — this test measures a COMPLETE answer", len(ids), len(resp.Detail))
+	}
+
+	indexRaw, err := json.Marshal(resp.Index)
+	if err != nil {
+		t.Fatalf("marshal index: %v", err)
+	}
+	detailRaw, err := json.Marshal(resp.Detail)
+	if err != nil {
+		t.Fatalf("marshal detail: %v", err)
+	}
+	if want := len(indexRaw) + len(detailRaw); resp.Bytes != want {
+		t.Errorf("the response declares %d bytes; the payload it is actually carrying is %d "+
+			"(index %d + detail %d). A size verdict scoped to the index while the response is not "+
+			"is a response misreporting itself.", resp.Bytes, want, len(indexRaw), len(detailRaw))
+	}
+	if resp.IndexBytes != len(indexRaw) {
+		t.Errorf("the response declares an index of %d bytes and serializes %d", resp.IndexBytes, len(indexRaw))
+	}
+
+	// And the declared number has to be believable against the WHOLE serialized
+	// response, not merely self-consistent: everything outside index+detail is
+	// JSON framing and the fixed notes, so a declaration that is a fraction of
+	// what crosses the wire is the original defect wearing new arithmetic.
+	whole, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if float64(len(whole)) > 1.02*float64(resp.Bytes) {
+		t.Errorf("the response serializes to %d bytes and declares %d — the declaration does not describe "+
+			"what the caller receives", len(whole), resp.Bytes)
+	}
+
+	if !resp.OverBudget {
+		t.Errorf("this response is %d bytes against a %d-byte budget and does not declare itself over it",
+			resp.Bytes, mcp.ResponseBudgetBytes)
+	}
+	if resp.BudgetNote == "" {
+		t.Error("an over-budget response must SAY it is over budget — silence and 'within budget' are not the same bytes")
+	}
+	// Nothing was dropped, and the note has to say what the caller can do about
+	// it. "Shorten a claim" is the authoring instruction for an over-budget
+	// INDEX and is the wrong answer here: nothing was authored too long, the
+	// caller asked for a lot at once.
+	if resp.Withheld != 0 || resp.WithheldNote == "" {
+		t.Errorf("an over-budget detail response still withholds nothing and must still say so: withheld=%d note=%q",
+			resp.Withheld, resp.WithheldNote)
+	}
+	if strings.Contains(resp.BudgetNote, "Shorten a claim") {
+		t.Errorf("the budget note blames the author of a claim for a caller asking for every entry at once: %q", resp.BudgetNote)
+	}
+	if !strings.Contains(resp.BudgetNote, "detail") {
+		t.Errorf("the budget note does not tell the caller that the detail it asked for is what crossed the budget: %q", resp.BudgetNote)
+	}
+}
+
+// TestCoverage_AnIndexOnlyResponseIsWithinBudgetAndSaysSo is the other side of
+// the same fact, and it is what keeps the fix above from being satisfied by a
+// response that simply declares itself over budget always.
+func TestCoverage_AnIndexOnlyResponseIsWithinBudgetAndSaysSo(t *testing.T) {
+	resp := coverageOf(t, mcp.CoverageRequest{Language: "typescript"})
+	if len(resp.Index) == 0 {
+		t.Fatal("vacuum: nothing to measure")
+	}
+	if resp.Bytes != resp.IndexBytes {
+		t.Errorf("no detail was asked for, so the payload IS the index: bytes=%d index_bytes=%d", resp.Bytes, resp.IndexBytes)
+	}
+	if resp.OverBudget || resp.BudgetNote != "" {
+		t.Errorf("the index is %d bytes against a %d-byte budget and declares itself over it: %q",
+			resp.Bytes, mcp.ResponseBudgetBytes, resp.BudgetNote)
+	}
+}
+
 // TestCoverage_IndexCarriesNoPayloadSizedString is the acceptance bar for this
 // whole change. The pre-change response carried a single 34,226-character
 // string — a serialized ADR inside a JSON list — and no declared limit may ever
@@ -93,6 +186,13 @@ func TestCoverage_IndexCarriesNoPayloadSizedString(t *testing.T) {
 		t.Errorf("entry %q carries a %d-byte claim in the index, over the %d-byte cap — shorten the claim, never drop the entry",
 			worst, longest, coverage.MaxClaimBytes)
 	}
+	// The headroom is LOGGED rather than written into a comment beside the
+	// constant. A measured figure recorded in prose drifts the moment a claim is
+	// edited — the published one already did, saying 9 bytes against a measured
+	// 8 — and a number that has to be re-measured to be trusted belongs where
+	// running the test produces it.
+	t.Logf("CLAIM HEADROOM — %d entries, longest claim %d bytes (%s), cap %d, headroom %d",
+		len(resp.Index), longest, worst, coverage.MaxClaimBytes, coverage.MaxClaimBytes-longest)
 }
 
 // TestCoverage_DetailReturnsTheProseByteForByte: an id that appears in the index

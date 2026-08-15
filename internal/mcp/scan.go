@@ -142,11 +142,19 @@ type CoverageResponse struct {
 	// authorizes withholding for scan-all; for coverage it authorizes nothing,
 	// so an over-budget index is reported as over budget and stays complete.
 	Index []coverage.IndexEntry `json:"index"`
-	// Entries and Bytes let the caller check the two facts it would otherwise
-	// have to take on trust: how many entries arrived, and how large the index
-	// was on the wire.
-	Entries int `json:"entries"`
-	Bytes   int `json:"bytes"`
+	// Entries, Bytes and IndexBytes let the caller check the facts it would
+	// otherwise have to take on trust: how many entries arrived, and how large
+	// this response's payload was on the wire.
+	//
+	// Bytes is the WHOLE payload — the index plus any detail that was asked for
+	// — and never the index alone. It used to be the index alone, which made a
+	// detail request answer with a size verdict scoped to something smaller than
+	// what it was returning: a 182,440-byte response declaring 21,951 bytes and
+	// "within budget". A response that misreports its own size is the defect
+	// PR #128 fixed for scan-all's budget note, and it is not allowed here either.
+	Entries    int `json:"entries"`
+	Bytes      int `json:"bytes"`
+	IndexBytes int `json:"index_bytes"`
 	// Withheld is always zero, and WithheldNote says so in words. "No mention of
 	// truncation" and "nothing was truncated" are not the same bytes, and an
 	// agent cannot tell a complete answer from a quiet one without being told.
@@ -183,6 +191,20 @@ type CoverageResponse struct {
 // not exposed for security scanning) still errors: there is nothing to
 // derive from.
 func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
+	return handleCoverageBudgeted(req, ResponseBudgetBytes)
+}
+
+// handleCoverageBudgeted is HandleCoverage with the response budget made an
+// argument instead of a constant. It is a SEAM, not an option: production has
+// exactly one caller and it passes the declared ResponseBudgetBytes.
+//
+// It exists because the over-budget INDEX branch is unreachable at the shipped
+// budget — the real 68-entry index is 21,951 bytes against 40,000 — and the only
+// other way to exercise it would be to synthesise a manifest big enough, which
+// tests a fixture's arithmetic instead of the answer codefit actually serves.
+// Lowering the budget drives the REAL manifest through the REAL handler. Same
+// reasoning, and the same shape, as handleScanAllBudgeted.
+func handleCoverageBudgeted(req CoverageRequest, budget int) (CoverageResponse, error) {
 	p := providerForLanguage(req.Language, nil)
 	if p == nil {
 		return CoverageResponse{}, fmt.Errorf("no coverage manifest for language %q", req.Language)
@@ -190,9 +212,9 @@ func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
 	if cm, ok := p.(interface {
 		CoverageManifest() coverage.Manifest
 	}); ok {
-		return coverageResponse(cm.CoverageManifest(), false, req.Detail), nil
+		return coverageResponse(cm.CoverageManifest(), false, req.Detail, budget), nil
 	}
-	return coverageResponse(deriveManifest(p), true, req.Detail), nil
+	return coverageResponse(deriveManifest(p), true, req.Detail, budget), nil
 }
 
 const (
@@ -200,6 +222,10 @@ const (
 		"The response budget authorizes withholding for scan-all; for coverage it authorizes nothing."
 	coverageOverBudgetNote = "This index is over the response budget and is still complete. " +
 		"Shorten a claim, never drop an entry."
+	coverageDetailOverBudgetNote = "This response is over the response budget because of the detail you " +
+		"asked for, and it is still complete: every entry you named came back whole and nothing was " +
+		"withheld. The budget authorizes withholding for scan-all; for coverage it authorizes nothing, " +
+		"so this is stated rather than acted on. Ask for fewer ids per call if your client caps a response."
 	coverageUnrecognizedNote = "These ids matched no entry in this language's manifest. " +
 		"They are named rather than skipped: an empty result would say the entry has nothing to declare, " +
 		"which is a different answer from there being no such entry. Read the index for the ids that exist."
@@ -208,7 +234,7 @@ const (
 // coverageResponse projects a manifest into the answer the agent receives. It is
 // the ONLY place that shape is built, so the index and the detail are two views
 // of one value rather than two code paths that have to agree.
-func coverageResponse(m coverage.Manifest, derived bool, want []string) CoverageResponse {
+func coverageResponse(m coverage.Manifest, derived bool, want []string, budget int) CoverageResponse {
 	index := m.Index()
 	resp := CoverageResponse{
 		Language:     m.Language,
@@ -219,16 +245,34 @@ func coverageResponse(m coverage.Manifest, derived bool, want []string) Coverage
 		Derived:      derived,
 	}
 	if raw, err := json.Marshal(index); err == nil {
-		resp.Bytes = len(raw)
-	}
-	if resp.Bytes > ResponseBudgetBytes {
-		resp.OverBudget = true
-		resp.BudgetNote = coverageOverBudgetNote
+		resp.IndexBytes = len(raw)
 	}
 	if len(want) > 0 {
 		resp.Detail, resp.Unrecognized = m.Resolve(want)
 		if len(resp.Unrecognized) > 0 {
 			resp.UnrecognizedNote = coverageUnrecognizedNote
+		}
+	}
+	// The size is declared LAST, over everything the response is actually
+	// carrying. Measuring before the detail is attached is how a 182,440-byte
+	// answer came to declare 21,951 bytes and "within budget".
+	resp.Bytes = resp.IndexBytes
+	if len(resp.Detail) > 0 {
+		if raw, err := json.Marshal(resp.Detail); err == nil {
+			resp.Bytes += len(raw)
+		}
+	}
+	if resp.Bytes > budget {
+		resp.OverBudget = true
+		// Which note is the truthful one depends on what crossed the budget, and
+		// the difference is the instruction. An over-budget INDEX is an authoring
+		// problem: shorten a claim, never drop an entry. An over-budget DETAIL is
+		// not — nothing was authored too long, the caller asked for a lot at once
+		// — so telling them to shorten a claim would send them to fix the wrong
+		// thing. Neither note withholds anything; both say so.
+		resp.BudgetNote = coverageOverBudgetNote
+		if len(resp.Detail) > 0 {
+			resp.BudgetNote = coverageDetailOverBudgetNote
 		}
 	}
 	return resp

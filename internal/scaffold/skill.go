@@ -194,6 +194,15 @@ means codefit could not prove one, never that it did not look.
 - ` + "`codefit-coverage`" + ` ` + "`{language}`" + ` — what codefit audits deterministically, what it maps as
   surface, and what it does NOT cover. Read it before telling the human something is out
   of scope; do not assume the boundary. For ` + "`{{.Language}}`" + ` today: {{.SurfaceReach}}
+  It answers with an INDEX, not with prose: every entry as ` + "`{id, claim, status, has_detail}`" + `,
+  and it withholds NOTHING from that index (` + "`withheld`" + ` is always 0 and says so). To read one
+  entry in full, call it again with ` + "`detail: [\"<id>\"]`" + ` — MANY ids in one call, e.g.
+  ` + "`{language: \"typescript\", detail: [\"DB-050\", \"db.sqlddl-dialect-limits\"]}`" + `. Rule ids
+  (` + "`DB-050`" + `, ` + "`DW-011`" + `, ` + "`SEC-001`" + `) are entry ids, so a rule you saw in a finding is askable
+  by name. An id that matches nothing is NAMED back to you as unrecognized, never answered
+  with an empty success. Ask for the ids you need rather than all of them: the response
+  declares its own ` + "`bytes`" + ` and tells you when the detail you asked for crossed the budget —
+  complete either way, never truncated.
 
 ## Baseline (don't re-review what's already tracked)
 codefit records the audited surface in ` + "`.codefit-baseline`" + ` (committed). ` + "`codefit-scan-all`" + `

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/coverage"
 	"github.com/codefit-cli/codefit/internal/core/crossrules"
 	"github.com/codefit-cli/codefit/internal/core/dbcoverage"
 	"github.com/codefit-cli/codefit/internal/core/dbrules"
@@ -37,8 +38,9 @@ func registeredIDs() []string {
 	return ids
 }
 
-// manifestText is every prose entry the manifest exposes, joined — Control A
-// checks CORRESPONDENCE (an entry exists), never accuracy of that entry.
+// manifestText is every prose entry the manifest exposes, joined. Control B
+// still reads it — a phantom capability is a MENTION in prose, and prose is
+// exactly where it has to be hunted. Control A no longer does: see entryIDs.
 func manifestText() string {
 	var all []string
 	all = append(all, proseOf(dbcoverage.Deterministic())...)
@@ -46,43 +48,55 @@ func manifestText() string {
 	return strings.Join(all, "\n")
 }
 
-// containsWholeToken reports whether id appears in text as a whole token —
-// not as a strict prefix of a longer ID (e.g. "DB-011" must NOT be satisfied
-// by a manifest that only mentions "DB-011a"). The byte immediately
-// following a match must not be alphanumeric.
-func containsWholeToken(text, id string) bool {
-	start := 0
-	for {
-		i := strings.Index(text[start:], id)
-		if i < 0 {
-			return false
+// entryIDs is the set of ids the given buckets declare. Since the per-rule
+// split (ADR 0077) every rule the manifest describes is an ENTRY keyed by its
+// own rule id, so "does the manifest answer for this rule" is an exact map
+// lookup rather than a search through joined prose.
+//
+// That replacement is what retired containsWholeToken, whose whole reason to
+// exist was keeping "DB-011" from being satisfied by a manifest that only says
+// "DB-011a" — a prefix hazard a map lookup does not have. The controls got
+// STRICTLY STRONGER in the process: a rule id merely MENTIONED inside another
+// entry's paragraph used to satisfy Control A, and no longer does. That is the
+// answer an agent actually needs, because a rule with no entry of its own
+// cannot be named in the index and cannot be asked for by id.
+func entryIDs(buckets ...[]coverage.Entry) map[string]bool {
+	ids := map[string]bool{}
+	for _, b := range buckets {
+		for _, e := range b {
+			ids[e.ID] = true
 		}
-		idx := start + i
-		end := idx + len(id)
-		if end >= len(text) || !isAlnum(text[end]) {
-			return true
-		}
-		start = idx + 1
 	}
+	return ids
 }
 
-func isAlnum(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+// coveredIDs is the set of ids the manifest answers as COVERED — Deterministic()
+// union Reasoning(). Control A checks CORRESPONDENCE (an entry exists), never
+// the accuracy of that entry.
+func coveredIDs() map[string]bool {
+	return entryIDs(dbcoverage.Deterministic(), dbcoverage.Reasoning())
 }
 
 // TestManifest_EveryRegisteredRule_HasACoveredEntry is Control A (the
 // PRIMARY, mechanical control): every rule ID registered in dbrules.All() /
-// dwrules.All() / crossrules.All() must have a matching manifest entry in
-// Deterministic() union Reasoning(). This is the control that would have
-// caught BOTH blocking v0.2.5-alpha.1 defects: the DW family registered
-// while the manifest said "not yet built", and DB-010/DB-013 shipped while
-// the manifest denied the cross.
+// dwrules.All() / crossrules.All() must be an ENTRY of Deterministic() union
+// Reasoning(). This is the control that would have caught BOTH blocking
+// v0.2.5-alpha.1 defects: the DW family registered while the manifest said
+// "not yet built", and DB-010/DB-013 shipped while the manifest denied the
+// cross.
+//
+// It also looks in the ONE direction the rule-id census cannot: the census was
+// captured from the prose, so it can only ask about rules the prose already
+// mentions. A rule registered in All() and mentioned nowhere at all is
+// invisible from there and visible from here.
 func TestManifest_EveryRegisteredRule_HasACoveredEntry(t *testing.T) {
-	text := manifestText()
+	covered := coveredIDs()
 	for _, id := range registeredIDs() {
-		if !containsWholeToken(text, id) {
-			t.Errorf("rule %q is registered (All()) but has no matching entry in "+
-				"dbcoverage.Deterministic()/Reasoning() — an undeclared capability", id)
+		if !covered[id] {
+			t.Errorf("rule %q is registered (All()) but is not an ENTRY of "+
+				"dbcoverage.Deterministic()/Reasoning() — an undeclared capability. Being mentioned "+
+				"inside another entry's prose is not an answer: an agent reading the index cannot name "+
+				"it and cannot ask for its detail", id)
 		}
 	}
 }
@@ -95,9 +109,12 @@ func TestManifest_CurrentRuleSet_Passes(t *testing.T) {
 	if len(ids) == 0 {
 		t.Fatal("registeredIDs() returned nothing — the mechanical derivation is broken, this test would pass vacuously")
 	}
-	text := manifestText()
+	covered := coveredIDs()
+	if len(covered) == 0 {
+		t.Fatal("the manifest declared no entries at all — Control A would pass vacuously against an empty id set")
+	}
 	for _, id := range ids {
-		if !containsWholeToken(text, id) {
+		if !covered[id] {
 			t.Fatalf("today's registered rule set must pass: %q has no manifest entry", id)
 		}
 	}
@@ -110,17 +127,17 @@ func TestManifest_CurrentRuleSet_Passes(t *testing.T) {
 // sdd-verify W5 (obs #1279): the original version only asserted "DB-999 is
 // absent from the manifest today" — a fixture sanity check, not a proof that
 // Control A's own CHECK LOGIC fires on an undeclared ID. This version feeds
-// the exact loop Control A runs (registeredIDs() + containsWholeToken against
-// manifestText()) a FABRICATED extra ID appended to the real registered set —
-// exercising the real check, not a description of it — and asserts it is the
-// ONLY one reported missing (proving the negative fires on the fabricated ID
+// the exact loop Control A runs (registeredIDs() against coveredIDs()) a
+// FABRICATED extra ID appended to the real registered set — exercising the
+// real check, not a description of it — and asserts it is the ONLY one
+// reported missing (proving the negative fires on the fabricated ID
 // specifically, not as a side effect of some other, real gap).
 func TestManifest_UndeclaredRule_Fails(t *testing.T) {
 	ids := append(append([]string(nil), registeredIDs()...), "DB-999")
-	text := manifestText()
+	covered := coveredIDs()
 	var missing []string
 	for _, id := range ids {
-		if !containsWholeToken(text, id) {
+		if !covered[id] {
 			missing = append(missing, id)
 		}
 	}
@@ -152,16 +169,20 @@ var ruleIDToken = regexp.MustCompile(`\bD[BW]-[0-9]+[a-z]?\b`)
 // What did NOT change: a token in NO bucket is still a phantom capability, and
 // still fails. TestManifest_PhantomCapability_StillFailsAfterTheAmendment holds
 // that line.
+//
+// WHAT DID CHANGE, and it is the same strengthening Control A took: the second
+// and third branches used to search NotCovered()/DeliveredElsewhere() PROSE for
+// the token. They now ask whether the bucket holds an ENTRY keyed to it. The
+// QUESTION is unchanged — the token still has to be answered by one of the three
+// — but "answered" now means an entry an agent can name, not a sentence that
+// happens to spell the id somewhere inside another entry's paragraph.
 func mentionedTokenIsAnswered(id string) bool {
 	for _, registered := range registeredIDs() {
 		if registered == id {
 			return true
 		}
 	}
-	if containsWholeToken(strings.Join(proseOf(dbcoverage.NotCovered()), "\n"), id) {
-		return true
-	}
-	return containsWholeToken(strings.Join(proseOf(dbcoverage.DeliveredElsewhere()), "\n"), id)
+	return entryIDs(dbcoverage.NotCovered(), dbcoverage.DeliveredElsewhere())[id]
 }
 
 // TestManifest_NoPhantomCapability is Control B (secondary, design SS9):
@@ -186,7 +207,8 @@ func TestManifest_NoPhantomCapability(t *testing.T) {
 		seen[id] = true
 		if !mentionedTokenIsAnswered(id) {
 			t.Errorf("manifest mentions %q in Deterministic()/Reasoning() — it is not a registered rule, "+
-				"not named in NotCovered() and not named in DeliveredElsewhere() — a phantom capability", id)
+				"and neither NotCovered() nor DeliveredElsewhere() holds an entry keyed to it — a phantom "+
+				"capability", id)
 		}
 	}
 }

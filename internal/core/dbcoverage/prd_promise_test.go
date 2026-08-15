@@ -63,8 +63,8 @@ func promisedIDs(t *testing.T) []string {
 	return ids
 }
 
-// answerText is every prose surface the manifest exposes — the three answers R1
-// allows, joined:
+// answeringIDs is every id the manifest declares — the three answers R1 allows,
+// as one id set:
 //
 //	(1) covered — Deterministic() union Reasoning(). A REGISTERED rule is
 //	    answered here, because Control A already forces every registered rule to
@@ -73,13 +73,9 @@ func promisedIDs(t *testing.T) []string {
 //	(3) delivered under another identifier — DeliveredElsewhere().
 //
 // Silence is not a fourth answer.
-func answerText() string {
-	var all []string
-	all = append(all, proseOf(dbcoverage.Deterministic())...)
-	all = append(all, proseOf(dbcoverage.Reasoning())...)
-	all = append(all, proseOf(dbcoverage.NotCovered())...)
-	all = append(all, proseOf(dbcoverage.DeliveredElsewhere())...)
-	return strings.Join(all, "\n")
+func answeringIDs() map[string]bool {
+	return entryIDs(dbcoverage.Deterministic(), dbcoverage.Reasoning(),
+		dbcoverage.NotCovered(), dbcoverage.DeliveredElsewhere())
 }
 
 // unansweredIDs runs Control D's REAL check loop over ids and returns the ones
@@ -87,29 +83,47 @@ func answerText() string {
 // negative scenario call THIS function, so the negative exercises the real
 // check rather than a description of it.
 //
-// MATCHING IS PLAIN SUBSTRING CONTAINMENT, not the whole-token match Controls A
-// and B use, and the difference is deliberate. A PRD PARENT id must be answered
-// by the CHILDREN it shipped as: the PRD promises DB-011 (duplicate/redundant
-// indexes) and codefit shipped it split into DB-011a and DB-011b, so the prose
-// spells only the children. Whole-token matching would report DB-011 as
-// unanswered, which is false — the capability is declared, under two narrower
-// ids.
+// MATCHING IS OVER THE ID SET, exactly as it now is for Controls A and B: a
+// promised id is answered when an ENTRY is keyed to it, not when some paragraph
+// happens to spell it. That is a real tightening — the previous version searched
+// ~128 KB of joined prose, where a mention inside an unrelated entry counted as
+// an answer, and where an id could be "answered" by a sentence explaining that
+// something ELSE is not that rule.
 //
-// THE LIMIT THIS ACCEPTS, stated rather than hidden: a promised id that is a
-// strict PREFIX of a longer one would be answered by the longer one's entry
-// (a hypothetical DB-05 would be "answered" by DB-050's prose). No id in the
-// PRD or the rule set has that shape, and the alternative — whole-token
-// matching plus a hand-maintained parent→children alias table — reintroduces
+// PARENT IDS ARE STILL ANSWERED BY THEIR CHILDREN, and that is why the match is
+// a prefix rather than an equality. The PRD promises DB-011 (duplicate/redundant
+// indexes) and codefit shipped it split into DB-011a and DB-011b, so no entry is
+// keyed DB-011 and the capability is nonetheless fully declared. It is the one
+// case in the whole promised set today.
+//
+// THE LIMIT THIS ACCEPTS, stated rather than hidden and now much narrower than
+// it was: a promised id that is a strict PREFIX of a longer ENTRY ID would be
+// answered by that entry (a hypothetical DB-05 would be "answered" by DB-050).
+// The set it can collide with is the manifest's own ids rather than all of its
+// prose, no id in the PRD or the rule set has that shape, and the alternative —
+// equality plus a hand-maintained parent→children alias table — reintroduces
 // exactly the hand-maintained list R2 forbids.
 func unansweredIDs(ids []string) []string {
-	text := answerText()
+	answered := answeringIDs()
 	var missing []string
 	for _, id := range ids {
-		if !strings.Contains(text, id) {
+		if !answeredByIDOrChild(answered, id) {
 			missing = append(missing, id)
 		}
 	}
 	return missing
+}
+
+func answeredByIDOrChild(answered map[string]bool, id string) bool {
+	if answered[id] {
+		return true
+	}
+	for entryID := range answered {
+		if strings.HasPrefix(entryID, id) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestManifest_EveryPRDPromisedRule_IsAnswered is Control D itself.
@@ -125,8 +139,9 @@ func TestManifest_EveryPRDPromisedRule_IsAnswered(t *testing.T) {
 	missing := unansweredIDs(ids)
 	if len(missing) > 0 {
 		t.Errorf("the PRD promises %d DB/DW rule ids; %d are answered by NOTHING in the manifest: %v\n"+
-			"Every promised id needs one of the three answers: registered (so Control A gives it a "+
-			"Deterministic()/Reasoning() entry), named in NotCovered() with its reason, or named in "+
+			"Every promised id needs one of the three answers as an ENTRY keyed to it, or — for a parent "+
+			"id — to the children it shipped as: registered, so Control A gives it a "+
+			"Deterministic()/Reasoning() entry; an entry in NotCovered() with its reason; or an entry in "+
 			"DeliveredElsewhere() with what actually delivers it. Silence is a hole the agent cannot see.",
 			len(ids), len(missing), missing)
 	}
@@ -172,8 +187,8 @@ func TestManifest_EachOfTheThreeAnswers_SatisfiesTheControl(t *testing.T) {
 	for _, id := range registeredIDs() {
 		registered[id] = true
 	}
-	notCovered := strings.Join(proseOf(dbcoverage.NotCovered()), "\n")
-	delivered := strings.Join(proseOf(dbcoverage.DeliveredElsewhere()), "\n")
+	notCovered := entryIDs(dbcoverage.NotCovered())
+	delivered := entryIDs(dbcoverage.DeliveredElsewhere())
 
 	t.Run("registered", func(t *testing.T) {
 		// DB-002 (multivalued columns) is a registered rule, so Control A
@@ -195,8 +210,8 @@ func TestManifest_EachOfTheThreeAnswers_SatisfiesTheControl(t *testing.T) {
 		if registered[id] {
 			t.Fatalf("%s must NOT be registered for this to be the NOT-COVERED answer", id)
 		}
-		if !containsWholeToken(notCovered, id) {
-			t.Fatalf("%s must be named in NotCovered() for this to be the NOT-COVERED answer", id)
+		if !notCovered[id] {
+			t.Fatalf("%s must be an ENTRY of NotCovered() for this to be the NOT-COVERED answer", id)
 		}
 		if got := unansweredIDs([]string{id}); len(got) != 0 {
 			t.Errorf("%s is declared absent and must be answered; unanswered = %v", id, got)
@@ -214,11 +229,11 @@ func TestManifest_EachOfTheThreeAnswers_SatisfiesTheControl(t *testing.T) {
 		if registered[id] {
 			t.Fatalf("%s must NOT be registered — N+1 is code-derived and belongs to the provider", id)
 		}
-		if containsWholeToken(notCovered, id) {
+		if notCovered[id] {
 			t.Fatalf("%s must NOT be in NotCovered() — the capability ships, calling it absent is a lie", id)
 		}
-		if !containsWholeToken(delivered, id) {
-			t.Fatalf("%s must be named in DeliveredElsewhere() for this to be the DELIVERED-ELSEWHERE answer", id)
+		if !delivered[id] {
+			t.Fatalf("%s must be an ENTRY of DeliveredElsewhere() for this to be the DELIVERED-ELSEWHERE answer", id)
 		}
 		if got := unansweredIDs([]string{id}); len(got) != 0 {
 			t.Errorf("%s is delivered under another identifier and must be answered; unanswered = %v", id, got)
