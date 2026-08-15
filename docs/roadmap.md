@@ -513,6 +513,31 @@ gap is that codefit cannot tell the developer *which* dialect it read, because i
 *"this looks like MySQL; set `database.type`"* without pretending to parse it. Declaring what a
 measurement found beats declaring that no measurement was taken.
 
+### P0-14 — every tool response crosses the wire TWICE
+
+**Measured, not inferred.** `internal/mcp/server.go`'s `addTool` returns `nil` for the
+`*CallToolResult`. go-sdk v1.6.1 then serializes the same output JSON into a `TextContent`
+block whenever the handler leaves `res.Content == nil`. The integration test proves the two
+copies are byte-identical, over a real client/server transport pair, on both the pre-change
+and post-change trees:
+
+```
+PRE-CHANGE  structured 143,293 B · text block 143,293 B · identical: true · 286,586 B total
+POST-CHANGE structured  16,006 B · text block  16,006 B · identical: true ·  32,012 B total
+```
+
+**FILED, NOT FIXED,** and deliberately not fixed inside the coverage change that found it:
+returning a `*CallToolResult` from `addTool` touches every tool at once, and it is a
+protocol-layer decision, not a coverage one.
+
+**This bears on P0-4.** The response budget counts ONE copy; the wire carries two. But the
+correction is NOT a doubling, and the caveat is the whole point of this entry: **which copy the
+client meters is UNMEASURED.** ADR 0062's calibration bracket (64,097 / 74,195) is in
+codefit-payload bytes, and `74,195 / 3 ≈ 24,732 ≈ 25,000` is circumstantial evidence that the
+client counts one copy — so ADR 0062's ~1.93× ratio stands and **must not be double-counted**
+on the strength of this finding. Measuring which copy is metered is the first move here, before
+any budget number moves.
+
 ### P0-13 — CLOSED (`sec-001-affirms-only-what-the-name-established`) — SEC-001 (Go) affirmed a credential that was not there, at Confidence 1.0
 
 The Go name gate had a second arm — any name containing `key` as a substring with a value of

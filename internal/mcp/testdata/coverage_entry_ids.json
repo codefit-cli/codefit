@@ -1,0 +1,274 @@
+{
+  "go": [
+    {
+      "id": "SEC-001",
+      "status": "deterministic"
+    },
+    {
+      "id": "SEC-010",
+      "status": "deterministic"
+    },
+    {
+      "id": "SEC-013",
+      "status": "deterministic"
+    },
+    {
+      "id": "SEC-040",
+      "status": "deterministic"
+    },
+    {
+      "id": "SEC-050",
+      "status": "deterministic"
+    },
+    {
+      "id": "SEC-052",
+      "status": "deterministic"
+    },
+    {
+      "id": "PRAC-001",
+      "status": "deterministic"
+    },
+    {
+      "id": "PRAC-002",
+      "status": "deterministic"
+    },
+    {
+      "id": "PRAC-003",
+      "status": "deterministic"
+    },
+    {
+      "id": "PRAC-005",
+      "status": "deterministic"
+    },
+    {
+      "id": "surface.authz",
+      "status": "reasoning"
+    },
+    {
+      "id": "surface.idor",
+      "status": "not_covered"
+    },
+    {
+      "id": "surface.overfetch",
+      "status": "not_covered"
+    },
+    {
+      "id": "surface.nplus1",
+      "status": "not_covered"
+    },
+    {
+      "id": "PRAC-004",
+      "status": "not_covered"
+    }
+  ],
+  "typescript": [
+    {
+      "id": "ts.hardcoded-secrets",
+      "status": "deterministic"
+    },
+    {
+      "id": "ts.weak-crypto",
+      "status": "deterministic"
+    },
+    {
+      "id": "ts.dangerous-code-evaluation",
+      "status": "deterministic"
+    },
+    {
+      "id": "ts.sql-injection-inline",
+      "status": "deterministic"
+    },
+    {
+      "id": "ts.xss-inline-inner-html",
+      "status": "deterministic"
+    },
+    {
+      "id": "db.table-without-primary-key",
+      "status": "deterministic"
+    },
+    {
+      "id": "ts.sql-injection-via-intermediate",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.xss-inner-html-from-variable",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.idor",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.broken-authorization",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.over-fetching",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.nplus1-query-in-loop",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.express-fastify-handlers",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.nestjs-controllers",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.schema-structural-surface",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.nplus1-pointer",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.prefix-redundant-indexes",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.index-vs-query-cross",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.name-heuristic-checks",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.view-sensitive-column-exposure",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.routine-without-exception-handling",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.trigger-cross-table-cascade",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.trigger-external-effecting-call",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.dynamic-sql-in-routine",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.star-schema-and-scd-checks",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.table-structural-completeness",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.index-access-method",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.paradigm-and-table-role",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.fact-table-columnar-index-census",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.fact-table-partitioning-census",
+      "status": "reasoning"
+    },
+    {
+      "id": "ts.race-conditions",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.architectural-design-flaws",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.business-logic-correctness",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.deep-static-taint-analysis",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.other-server-frameworks",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.handler-passed-by-reference",
+      "status": "not_covered"
+    },
+    {
+      "id": "ts.server-action-formdata-inline",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.index-vs-query-residual-gap",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.never-used-index",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.routine-body-family-scope",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.olap-family-scope",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.sqlddl-dialect-limits",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.schema-file-encoding",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.pii-coverage-partial",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.view-logic-that-should-be-a-function",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.materialized-view-without-refresh",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.view-with-broken-references",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.undocumented-routine-side-effects",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.candidate-2nf-violations",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.candidate-3nf-violations",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.sqlddl-dialect-assumptions",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.nplus1-delivered-as-surface",
+      "status": "delivered_elsewhere"
+    }
+  ]
+}
