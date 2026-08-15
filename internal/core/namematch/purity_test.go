@@ -4,7 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -24,26 +25,43 @@ import (
 // graph and does not compromise the leaf; a grep over *.go could not tell the
 // difference.
 func TestLeafPurity(t *testing.T) {
+	// parser.ParseFile per entry rather than parser.ParseDir: ParseDir is
+	// deprecated (Go 1.25) and so is the ast.Package it returns (Go 1.22).
+	// Walking the directory ourselves keeps the real parser — which is the
+	// point of this test — without the deprecated surface, and it makes the
+	// non-test filter explicit instead of a callback.
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.ImportsOnly)
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("parsing namematch: %v", err)
+		t.Fatalf("reading namematch dir: %v", err)
 	}
 
-	// Positive control: a parse that found no package, or a package with no
-	// files, would report "stdlib only" about nothing at all.
-	pkg, ok := pkgs["namematch"]
-	if !ok {
-		t.Fatalf("vacuum: package namematch not found; parsed %d package(s)", len(pkgs))
+	files := map[string]*ast.File{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Clean(name), nil, parser.ImportsOnly)
+		if perr != nil {
+			t.Fatalf("parsing %s: %v", name, perr)
+		}
+		// Positive control on the parse itself: a file that landed in another
+		// package would mean this enumeration is describing the wrong code.
+		if f.Name.Name != "namematch" {
+			t.Fatalf("%s declares package %q, not namematch", name, f.Name.Name)
+		}
+		files[name] = f
 	}
-	if len(pkg.Files) == 0 {
+
+	// Positive control: a walk that found no non-test file would report
+	// "stdlib only" about nothing at all.
+	if len(files) == 0 {
 		t.Fatal("vacuum: package namematch has no non-test files to enumerate")
 	}
 
 	var seen []string
-	for name, f := range pkg.Files {
+	for name, f := range files {
 		for _, imp := range f.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
 			seen = append(seen, path)
@@ -54,7 +72,7 @@ func TestLeafPurity(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("namematch non-test imports across %d file(s): %v", len(pkg.Files), seen)
+	t.Logf("namematch non-test imports across %d file(s): %v", len(files), seen)
 
 	// The enumeration must actually have looked at import declarations. If the
 	// leaf ever legitimately drops to zero imports this needs a conscious edit,
@@ -75,7 +93,3 @@ func contains(hay []string, needle string) bool {
 	}
 	return false
 }
-
-// TestASTNodeIsUsed keeps the go/ast import above honest for linters that
-// cannot see it is used only through parser.ParseDir's result type.
-var _ = ast.Package{}
