@@ -327,5 +327,5 @@ func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
 		Deterministic: det,
 		Reasoning:     reasoning,
 		NotCovered:    notCovered,
-	}.WithProse()
+	}
 }

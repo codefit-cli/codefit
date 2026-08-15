@@ -5,9 +5,12 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/dbcoverage"
 )
 
-// CoverageManifest declares, in plain prose, what codefit audits for TypeScript
-// and how — what the codefit-coverage tool serves and what the human-facing
-// COVERAGE.md mirrors (PRD §10, RF-07). It is NOT itself the root source: the
+// CoverageManifest declares what codefit audits for TypeScript and how — what
+// the codefit-coverage tool serves and what the human-facing COVERAGE.md mirrors
+// (PRD §10, RF-07). Each entry carries an id, a one-line claim, and the full
+// prose as its detail; the tool sends the claims always and the prose only when
+// an agent names an id. An entry short enough to say everything in its claim
+// carries no detail rather than repeating itself. It is NOT itself the root source: the
 // rules (rules/<lang>/, internal/sensors/, and the DB dimension's four rule
 // roots) are, and this manifest is a HAND-MAINTAINED mirror of them that has to
 // be verified against them before it is edited. Calling it the source is how
@@ -20,11 +23,13 @@ import (
 // interface) — the interface convergence is deferred until the Go provider also
 // emits this (ADR 0003).
 //
-// The DB dimension's prose (schema-only, language-independent — ADR 0018) lives
-// in core/dbcoverage and is appended here rather than duplicated: this file
-// carries TypeScript/Next/Express/Fastify/NestJS prose only. The DB entries are
-// appended at the END of each list, which is where they already sat before this
-// composition existed, so the manifest's serialized output is unchanged.
+// The DB dimension's entries (schema-only, language-independent — ADR 0018) live
+// in core/dbcoverage and are appended here rather than duplicated: this file
+// carries TypeScript/Next/Express/Fastify/NestJS entries only. They are appended
+// at the END of each bucket, which is where they already sat before this
+// composition existed, so the manifest's entry ORDER is unchanged. The
+// composition itself is unchanged too: dbcoverage returns entries and this file
+// appends them, exactly as it appended strings before.
 func (*Provider) CoverageManifest() coverage.Manifest {
 	return coverage.Manifest{
 		Language: "typescript",
@@ -128,5 +133,5 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 		// exactly like the three lists above, so a later TypeScript entry lands
 		// in front of the DB ones without touching dbcoverage.
 		DeliveredElsewhere: append([]coverage.Entry{}, dbcoverage.DeliveredElsewhere()...),
-	}.WithProse()
+	}
 }

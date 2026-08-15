@@ -1,10 +1,5 @@
 package coverage
 
-// The only import in this package, and it exists only for the transitional
-// drift check below. It leaves with that check, and coverage goes back to
-// importing nothing at all.
-import "fmt"
-
 // Entry is one declared unit of coverage, authored ONCE. The index the agent
 // receives is a projection of this value and the detail it can ask for is a
 // lookup in the same value, so a claim and its prose cannot drift apart: there
@@ -80,26 +75,6 @@ type Manifest struct {
 	// provider's nplus1 surface category). It is a third answer, not a variant of
 	// the other two (ADR 0057).
 	DeliveredElsewhere []Entry
-
-	// DeterministicProse lists the classes codefit detects with coded patterns
-	// (certainty 1.0): hardcoded secrets, SQL/command injection, weak crypto, ...
-	DeterministicProse []string
-	// ReasoningProse lists the classes codefit maps as surface for the agent to
-	// reason about: IDOR, broken authz, over-fetching, ...
-	ReasoningProse []string
-	// NotCoveredProse lists, explicitly, what codefit does not audit: race
-	// conditions, architectural design flaws, business-logic correctness, ...
-	NotCoveredProse []string
-	// DeliveredElsewhereProse lists capabilities the PRD promises under one
-	// identifier that codefit delivers under ANOTHER — the capability exists,
-	// but not as a rule carrying the promised id (N+1 is promised as DB-201 and
-	// shipped as the provider's nplus1 surface category).
-	//
-	// It is a third answer, not a variant of the other two. Silence would hide a
-	// capability the agent could have used; NotCovered would call a shipped
-	// capability absent. Each entry carries BOTH names and enough prose to
-	// follow the mapping (ADR 0057).
-	DeliveredElsewhereProse []string
 }
 
 // Index projects every entry the manifest holds. It withholds nothing under any
@@ -129,66 +104,6 @@ func ProseOf(e Entry) string {
 		return e.Detail
 	}
 	return e.Claim
-}
-
-// WithProse returns a copy of the manifest with the legacy prose slices filled
-// from the entries. It exists only while both shapes are on Manifest at once,
-// and it leaves with the prose slices.
-//
-// The prose is DERIVED rather than authored a second time. Two hand-written
-// copies of 126 KB would be the drift this whole change exists to remove, and a
-// test comparing them would be guarding a hazard that did not need to exist.
-func (m Manifest) WithProse() Manifest {
-	m.DeterministicProse = proseSlice(m.Deterministic)
-	m.ReasoningProse = proseSlice(m.Reasoning)
-	m.NotCoveredProse = proseSlice(m.NotCovered)
-	m.DeliveredElsewhereProse = proseSlice(m.DeliveredElsewhere)
-	return m
-}
-
-func proseSlice(entries []Entry) []string {
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, ProseOf(e))
-	}
-	return out
-}
-
-// TransitionalProseDrift reports every place the legacy prose slices and the
-// entry buckets disagree.
-//
-// STATED PLAINLY so nobody reads more into it than it carries: because WithProse
-// DERIVES the prose from the entries, this cannot catch two hand-authored lists
-// diverging — there is only one authored list. What it does catch is a producer
-// that built entries and never called WithProse, which would serve an empty
-// prose answer to every consumer still reading the legacy shape. That is the
-// real failure available during this transition, and it is the one this checks.
-func (m Manifest) TransitionalProseDrift() []string {
-	var drift []string
-	for _, p := range []struct {
-		name    string
-		entries []Entry
-		prose   []string
-	}{
-		{"Deterministic", m.Deterministic, m.DeterministicProse},
-		{"Reasoning", m.Reasoning, m.ReasoningProse},
-		{"NotCovered", m.NotCovered, m.NotCoveredProse},
-		{"DeliveredElsewhere", m.DeliveredElsewhere, m.DeliveredElsewhereProse},
-	} {
-		if len(p.entries) != len(p.prose) {
-			drift = append(drift, fmt.Sprintf("%s: %d entries but %d prose lines",
-				p.name, len(p.entries), len(p.prose)))
-			continue
-		}
-		for i := range p.entries {
-			if ProseOf(p.entries[i]) != p.prose[i] {
-				drift = append(drift, fmt.Sprintf(
-					"%s[%d] (%s): the entry's detail is not the prose line it replaces",
-					p.name, i, p.entries[i].ID))
-			}
-		}
-	}
-	return drift
 }
 
 type bucket struct {
