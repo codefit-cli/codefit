@@ -136,10 +136,65 @@ func TestCoverage_DetailReturnsTheProseByteForByte(t *testing.T) {
 	}
 }
 
+// TestCoverage_ARuleIDIsAskableByName is what the per-rule split buys the agent,
+// asked at the handler rather than at the leaf. Before the split a rule id like
+// DB-011a existed only INSIDE another entry's detail: it was in the payload, but
+// it was not in the index, so an agent could not name it and asking for it came
+// back unrecognized. Now each rule is an entry of its own.
+//
+// The three ids under test come from three DIFFERENT pre-split blobs, so one
+// unsplit blob cannot satisfy all of them, and each assertion reads the prose
+// back to confirm the entry is ABOUT that rule rather than merely named after
+// it — an entry keyed DB-011a carrying some other rule's paragraph would pass a
+// lookup-only check.
+func TestCoverage_ARuleIDIsAskableByName(t *testing.T) {
+	cases := []struct {
+		id   string
+		says string // a phrase the rule's own prose must carry
+	}{
+		{"DB-011a", "Exact duplicate indexes"},
+		{"DB-053", "Sensitive column stored in the clear"},
+		{"DW-010", "SCD-2 dimension without a currency index"},
+	}
+
+	index := coverageOf(t, mcp.CoverageRequest{Language: "typescript"})
+	listed := map[string]coverage.IndexEntry{}
+	for _, e := range index.Index {
+		listed[e.ID] = e
+	}
+	if len(listed) == 0 {
+		t.Fatal("vacuum: the index is empty, so every lookup below would fail for the wrong reason")
+	}
+
+	for _, tc := range cases {
+		e, ok := listed[tc.id]
+		if !ok {
+			t.Errorf("rule %s is not in the index — an agent cannot name it", tc.id)
+			continue
+		}
+		if !e.HasDetail {
+			t.Errorf("rule %s is in the index and declares no detail to ask for", tc.id)
+		}
+		resp := coverageOf(t, mcp.CoverageRequest{Language: "typescript", Detail: []string{tc.id}})
+		if len(resp.Unrecognized) != 0 {
+			t.Errorf("rule %s came back unrecognized: %v", tc.id, resp.Unrecognized)
+			continue
+		}
+		if len(resp.Detail) != 1 || resp.Detail[0].ID != tc.id {
+			t.Errorf("asked for %s, got %+v", tc.id, resp.Detail)
+			continue
+		}
+		if !strings.Contains(coverage.ProseOf(resp.Detail[0]), tc.says) {
+			t.Errorf("entry %s came back without its own subject %q — it is named after a rule it does not describe",
+				tc.id, tc.says)
+		}
+	}
+}
+
 // TestCoverage_DetailTakesManyIDsAtOnce: one call, many ids. An agent that has
 // to make one round trip per declared limit will stop asking.
 func TestCoverage_DetailTakesManyIDsAtOnce(t *testing.T) {
-	ids := []string{"db.sqlddl-dialect-limits", "db.never-used-index", "ts.idor"}
+	ids := []string{"db.sqlddl-dialect-limits", "DB-012", "ts.idor"}
 	resp := coverageOf(t, mcp.CoverageRequest{Language: "typescript", Detail: ids})
 	if len(resp.Detail) != len(ids) {
 		t.Fatalf("asked for %d ids, got %d entries", len(ids), len(resp.Detail))
@@ -164,9 +219,9 @@ func TestCoverage_DetailTakesManyIDsAtOnce(t *testing.T) {
 func TestCoverage_UnrecognizedIDIsNamedNotSilentlyEmpty(t *testing.T) {
 	resp := coverageOf(t, mcp.CoverageRequest{
 		Language: "typescript",
-		Detail:   []string{"db.never-used-index", "NOPE-999"},
+		Detail:   []string{"DB-012", "NOPE-999"},
 	})
-	if len(resp.Detail) != 1 || resp.Detail[0].ID != "db.never-used-index" {
+	if len(resp.Detail) != 1 || resp.Detail[0].ID != "DB-012" {
 		t.Fatalf("the real id must still resolve, got %+v", resp.Detail)
 	}
 	if len(resp.Unrecognized) != 1 || resp.Unrecognized[0] != "NOPE-999" {
