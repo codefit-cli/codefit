@@ -37,14 +37,23 @@ const (
 // what a caller receives, it turns a test red so an author shortens a claim.
 //
 // Derivation from two numbers this repo already owns: the response budget
-// (40,000 bytes, ADR 0062) times 0.85 for framing, divided by the expected
-// entry count (~70 after the per-rule split) is ~485; rounded down to 400 for
-// headroom. Arithmetic check: 70 × (400 + ~60 of JSON framing) ≈ 32 KB.
+// (40,000 bytes, ADR 0062) times 0.85 for framing, divided by the entry count is
+// the ceiling a claim could take. RE-RUN against the entry count the per-rule
+// split actually produced, which is 68 and not the ~70 the first pass assumed:
+// 40,000 × 0.85 / 68 ≈ 500, still rounded down to 400 for headroom. Arithmetic
+// check: 68 × (400 + ~60 of JSON framing) ≈ 31 KB, under 40,000.
 //
 // STATED TENSION: cap × count is not automatically under budget. Past roughly 85
 // entries the worst case crosses 40,000 and the derivation has to be re-run. The
 // entry count is visible in the committed ids golden, which makes that re-check
 // mechanical rather than a thing someone has to remember.
+//
+// HOW MUCH ROOM IS LEFT is deliberately NOT frozen in this comment: a measured
+// figure written here is a number that drifts the moment a claim is edited, and
+// this repo has already been bitten by exactly that (the published headroom said
+// 9 bytes against a measured 8). TestCoverage_IndexCarriesNoPayloadSizedString
+// in internal/mcp LOGS the longest claim and the remaining headroom on every
+// run, so the current number is one `go test -v` away and cannot go stale.
 const MaxClaimBytes = 400
 
 // IndexEntry is the projection of an Entry that every caller receives, always,
