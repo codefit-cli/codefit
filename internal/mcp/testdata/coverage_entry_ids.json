@@ -83,7 +83,7 @@
       "status": "deterministic"
     },
     {
-      "id": "db.table-without-primary-key",
+      "id": "DB-050",
       "status": "deterministic"
     },
     {
@@ -119,7 +119,15 @@
       "status": "reasoning"
     },
     {
-      "id": "db.schema-structural-surface",
+      "id": "DB-001",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-011a",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-002",
       "status": "reasoning"
     },
     {
@@ -127,7 +135,7 @@
       "status": "reasoning"
     },
     {
-      "id": "db.prefix-redundant-indexes",
+      "id": "DB-011b",
       "status": "reasoning"
     },
     {
@@ -135,31 +143,79 @@
       "status": "reasoning"
     },
     {
-      "id": "db.name-heuristic-checks",
+      "id": "DB-010",
       "status": "reasoning"
     },
     {
-      "id": "db.view-sensitive-column-exposure",
+      "id": "DB-013",
       "status": "reasoning"
     },
     {
-      "id": "db.routine-without-exception-handling",
+      "id": "db.index-vs-query-precedence-and-scope",
       "status": "reasoning"
     },
     {
-      "id": "db.trigger-cross-table-cascade",
+      "id": "DB-051",
       "status": "reasoning"
     },
     {
-      "id": "db.trigger-external-effecting-call",
+      "id": "DB-052",
       "status": "reasoning"
     },
     {
-      "id": "db.dynamic-sql-in-routine",
+      "id": "DB-053",
       "status": "reasoning"
     },
     {
-      "id": "db.star-schema-and-scd-checks",
+      "id": "DB-003",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-020",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-031",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-040",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-041",
+      "status": "reasoning"
+    },
+    {
+      "id": "DB-030",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.star-schema-family-contract",
+      "status": "reasoning"
+    },
+    {
+      "id": "DW-001",
+      "status": "reasoning"
+    },
+    {
+      "id": "DW-002",
+      "status": "reasoning"
+    },
+    {
+      "id": "DW-005",
+      "status": "reasoning"
+    },
+    {
+      "id": "DW-010",
+      "status": "reasoning"
+    },
+    {
+      "id": "DW-011",
+      "status": "reasoning"
+    },
+    {
+      "id": "db.star-schema-dogfood-status",
       "status": "reasoning"
     },
     {
@@ -175,11 +231,11 @@
       "status": "reasoning"
     },
     {
-      "id": "db.fact-table-columnar-index-census",
+      "id": "DW-021",
       "status": "reasoning"
     },
     {
-      "id": "db.fact-table-partitioning-census",
+      "id": "DW-020",
       "status": "reasoning"
     },
     {
@@ -215,7 +271,7 @@
       "status": "not_covered"
     },
     {
-      "id": "db.never-used-index",
+      "id": "DB-012",
       "status": "not_covered"
     },
     {
@@ -224,6 +280,14 @@
     },
     {
       "id": "db.olap-family-scope",
+      "status": "not_covered"
+    },
+    {
+      "id": "DW-022",
+      "status": "not_covered"
+    },
+    {
+      "id": "db.olap-name-vocabulary-and-gate-limits",
       "status": "not_covered"
     },
     {
@@ -239,27 +303,27 @@
       "status": "not_covered"
     },
     {
-      "id": "db.view-logic-that-should-be-a-function",
+      "id": "DB-021",
       "status": "not_covered"
     },
     {
-      "id": "db.materialized-view-without-refresh",
+      "id": "DB-022",
       "status": "not_covered"
     },
     {
-      "id": "db.view-with-broken-references",
+      "id": "DB-023",
       "status": "not_covered"
     },
     {
-      "id": "db.undocumented-routine-side-effects",
+      "id": "DB-032",
       "status": "not_covered"
     },
     {
-      "id": "db.candidate-2nf-violations",
+      "id": "DB-101",
       "status": "not_covered"
     },
     {
-      "id": "db.candidate-3nf-violations",
+      "id": "DB-102",
       "status": "not_covered"
     },
     {
@@ -267,7 +331,7 @@
       "status": "not_covered"
     },
     {
-      "id": "db.nplus1-delivered-as-surface",
+      "id": "DB-201",
       "status": "delivered_elsewhere"
     }
   ]

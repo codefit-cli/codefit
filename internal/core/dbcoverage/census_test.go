@@ -116,6 +116,79 @@ func TestRuleIDCensus_IsConservedByTheEntryShape(t *testing.T) {
 	}
 }
 
+// allEntries is every DB coverage entry, in bucket order.
+func allEntries() []coverage.Entry {
+	return append(append(append(append([]coverage.Entry{},
+		dbcoverage.Deterministic()...), dbcoverage.Reasoning()...),
+		dbcoverage.NotCovered()...), dbcoverage.DeliveredElsewhere()...)
+}
+
+// isRuleID reports whether the whole string is a rule id, not merely a string
+// that contains one. "DB-053" is a rule id; "db.name-heuristic-checks" and a
+// hypothetical "DB-053-extra" are not.
+func isRuleID(s string) bool { return ruleIDToken.FindString(s) == s }
+
+// TestEveryRuleIDInTheCensus_IsAnEntryOfItsOwn is the control this slice exists
+// to satisfy. The previous slice wrapped each prose blob 1:1, which left a rule
+// id like DB-011a discoverable only INSIDE another entry's detail: an agent
+// reading the index could not name it, and could not ask for it. Splitting the
+// blobs per rule is what closes that, and this is how the split is proved rather
+// than trusted.
+//
+// It reads BOTH directions, and each direction catches a different real error:
+//
+//   - a rule id the prose declares with no entry of its own is an unsplit blob,
+//     the exact state this slice removes;
+//   - an entry keyed to a rule id the prose never declares is an entry invented
+//     during the split, which would make the index name something the manifest
+//     does not actually describe.
+//
+// The census is the authority for "which rule ids the prose declares" because it
+// was captured from the tree BEFORE any of this change was written, so this
+// control cannot be satisfied by editing the thing it measures.
+func TestEveryRuleIDInTheCensus_IsAnEntryOfItsOwn(t *testing.T) {
+	c := loadCensus(t)
+
+	declared := map[string]bool{}
+	for _, bucket := range c.Buckets {
+		for id := range bucket {
+			declared[id] = true
+		}
+	}
+	if len(declared) == 0 {
+		t.Fatal("vacuum: the census declares no rule ids at all, so this control asks nothing")
+	}
+
+	entryIDs := map[string]bool{}
+	for _, e := range allEntries() {
+		if isRuleID(e.ID) {
+			entryIDs[e.ID] = true
+		}
+	}
+
+	for _, id := range sortedKeys(declared) {
+		if !entryIDs[id] {
+			t.Errorf("rule id %s is declared by the DB prose but is not an entry of its own — "+
+				"an agent reading the index cannot name it and cannot ask for its detail", id)
+		}
+	}
+	for _, id := range sortedKeys(entryIDs) {
+		if !declared[id] {
+			t.Errorf("entry %q is keyed to a rule id the DB prose never declares — "+
+				"the index would name something this manifest does not describe", id)
+		}
+	}
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func unionIDs(a, b map[string]int) []string {
 	seen := map[string]bool{}
 	var out []string
