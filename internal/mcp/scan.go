@@ -191,6 +191,20 @@ type CoverageResponse struct {
 // not exposed for security scanning) still errors: there is nothing to
 // derive from.
 func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
+	return handleCoverageBudgeted(req, ResponseBudgetBytes)
+}
+
+// handleCoverageBudgeted is HandleCoverage with the response budget made an
+// argument instead of a constant. It is a SEAM, not an option: production has
+// exactly one caller and it passes the declared ResponseBudgetBytes.
+//
+// It exists because the over-budget INDEX branch is unreachable at the shipped
+// budget — the real 68-entry index is 21,951 bytes against 40,000 — and the only
+// other way to exercise it would be to synthesise a manifest big enough, which
+// tests a fixture's arithmetic instead of the answer codefit actually serves.
+// Lowering the budget drives the REAL manifest through the REAL handler. Same
+// reasoning, and the same shape, as handleScanAllBudgeted.
+func handleCoverageBudgeted(req CoverageRequest, budget int) (CoverageResponse, error) {
 	p := providerForLanguage(req.Language, nil)
 	if p == nil {
 		return CoverageResponse{}, fmt.Errorf("no coverage manifest for language %q", req.Language)
@@ -198,9 +212,9 @@ func HandleCoverage(req CoverageRequest) (CoverageResponse, error) {
 	if cm, ok := p.(interface {
 		CoverageManifest() coverage.Manifest
 	}); ok {
-		return coverageResponse(cm.CoverageManifest(), false, req.Detail), nil
+		return coverageResponse(cm.CoverageManifest(), false, req.Detail, budget), nil
 	}
-	return coverageResponse(deriveManifest(p), true, req.Detail), nil
+	return coverageResponse(deriveManifest(p), true, req.Detail, budget), nil
 }
 
 const (
@@ -220,7 +234,7 @@ const (
 // coverageResponse projects a manifest into the answer the agent receives. It is
 // the ONLY place that shape is built, so the index and the detail are two views
 // of one value rather than two code paths that have to agree.
-func coverageResponse(m coverage.Manifest, derived bool, want []string) CoverageResponse {
+func coverageResponse(m coverage.Manifest, derived bool, want []string, budget int) CoverageResponse {
 	index := m.Index()
 	resp := CoverageResponse{
 		Language:     m.Language,
@@ -248,7 +262,7 @@ func coverageResponse(m coverage.Manifest, derived bool, want []string) Coverage
 			resp.Bytes += len(raw)
 		}
 	}
-	if resp.Bytes > ResponseBudgetBytes {
+	if resp.Bytes > budget {
 		resp.OverBudget = true
 		// Which note is the truthful one depends on what crossed the budget, and
 		// the difference is the instruction. An over-budget INDEX is an authoring

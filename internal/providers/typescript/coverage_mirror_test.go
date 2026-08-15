@@ -79,7 +79,10 @@ func mirrorIDs(t *testing.T) map[string]bool {
 // accuracy. A marker sitting next to prose that describes some OTHER entry
 // passes. That is the same limit Control A states about itself in
 // internal/core/dbcoverage; claiming more would be the over-promising manifest
-// this whole effort exists to prevent.
+// this whole effort exists to prevent. And where one marker carries several ids,
+// the correspondence it buys is BLOCK-level, not paragraph-level: a human
+// following a cited id lands on a block that mirrors several entries and still
+// has to find the right paragraph inside it.
 func TestCoverageMirror_NamesEveryEntry(t *testing.T) {
 	index := typescript.New().CoverageManifest().Index()
 	if len(index) == 0 {
