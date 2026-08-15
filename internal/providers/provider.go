@@ -44,6 +44,48 @@ type RuleSet struct {
 	Declared   []string // rule IDs, sorted
 	Enumerable bool
 	Excluded   []ExcludedRule
+	// Limits qualify rules this family DOES cover — see RuleLimit.
+	Limits []RuleLimit
+}
+
+// RuleLimit records that a rule the provider DOES implement covers less than
+// its id suggests, and says exactly how much less.
+//
+// This is a third kind of fact, distinct from both of its neighbours, and the
+// distinction is what keeps a coverage answer honest:
+//
+//	Declared      — "this rule is covered"
+//	ExcludedRule  — "this rule will NEVER be covered", and why
+//	RuleLimit     — "this rule IS covered, but not over this shape", and why
+//
+// Reusing ExcludedRule for a limit would have been ADR 0066's lie pointed
+// backwards: SEC-001 is covered, so recording it as an exclusion would invent a
+// hole that does not exist, exactly as a phantom exclusion invents one that
+// never did.
+//
+// Limit is expected to be cited BY REFERENCE from wherever the gap actually
+// lives (a const beside the code that causes it), never copied. A copied string
+// is a second place to be wrong; a compile-time reference cannot drift.
+type RuleLimit struct {
+	ID    string // rule id the limit qualifies; MUST be in the same RuleSet's Declared
+	Limit string // what the rule does not cover, and why that is declared rather than fixed
+}
+
+// ValidLimits reports whether every limit is GROUNDED — that is, whether its id
+// appears in Declared — and names every orphan that is not.
+//
+// This is the exact INVERSE of ValidExclusions, and deliberately so. An
+// excluded id must not be in Declared, because it names a rule that will never
+// exist. A limit id must be IN Declared, because it qualifies a rule that does.
+// A limit on an undeclared id is a caveat about nothing, and an agent reading a
+// coverage answer has no way to tell that from a caveat about something.
+func (r RuleSet) ValidLimits() (ok bool, orphan []string) {
+	for _, l := range r.Limits {
+		if !slices.Contains(r.Declared, l.ID) {
+			orphan = append(orphan, l.ID)
+		}
+	}
+	return len(orphan) == 0, orphan
 }
 
 // ValidExclusions reports whether r's Excluded rule ids are disjoint from its

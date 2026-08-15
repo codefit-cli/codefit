@@ -55,7 +55,7 @@ func checkSecretAssign(p *parsed, a *ast.AssignStmt, add func(findings.Finding))
 		if !ok {
 			continue
 		}
-		if val, ok := stringLit(a.Rhs[i]); ok && val != "" && looksSecret(ident.Name, len(val)) {
+		if val, ok := stringLit(a.Rhs[i]); ok && val != "" && looksSecret(ident.Name) {
 			add(secretFinding(p, ident.Name, ident.Pos()))
 		}
 	}
@@ -66,7 +66,7 @@ func checkSecretValueSpec(p *parsed, v *ast.ValueSpec, add func(findings.Finding
 		if i >= len(v.Values) {
 			continue
 		}
-		if val, ok := stringLit(v.Values[i]); ok && val != "" && looksSecret(name.Name, len(val)) {
+		if val, ok := stringLit(v.Values[i]); ok && val != "" && looksSecret(name.Name) {
 			add(secretFinding(p, name.Name, name.Pos()))
 		}
 	}
@@ -77,7 +77,7 @@ func checkSecretKeyValue(p *parsed, kv *ast.KeyValueExpr, add func(findings.Find
 	if !ok {
 		return
 	}
-	if val, ok := stringLit(kv.Value); ok && val != "" && looksSecret(key.Name, len(val)) {
+	if val, ok := stringLit(kv.Value); ok && val != "" && looksSecret(key.Name) {
 		add(secretFinding(p, key.Name, key.Pos()))
 	}
 }

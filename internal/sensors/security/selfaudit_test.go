@@ -2,10 +2,13 @@ package security_test
 
 import (
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/providers/golang"
 	"github.com/codefit-cli/codefit/internal/sensors/security"
@@ -82,4 +85,150 @@ func TestSelfAudit(t *testing.T) {
 			}
 		}
 	}
+}
+
+// sec001Site identifies one SEC-001 emission site WITHOUT its line number.
+// Line is deliberately excluded: it churns on every unrelated edit above the
+// finding, which would make this control a maintenance tax that gets deleted
+// rather than a gate that gets read.
+type sec001Site struct {
+	File        string
+	Description string
+}
+
+// wantSEC001 is the EXACT SEC-001 census over codefit's own tree, transcribed
+// from a real go/ast run of the security sensor (never typed from memory). The
+// value is how many times that (File, Description) pair fires, so a change
+// WITHIN one file is caught too — a set alone would hide 3 fires collapsing to 1.
+//
+// Two distinct detectors emit SEC-001 and both are pinned here:
+//
+//   - "A string matching a known API-key format …" — layer 1, a regex over raw
+//     text (credential SHAPE), security.go's layer1Secrets. It never looks at a
+//     name and is untouched by name-gate work.
+//   - "The value assigned to 'X' looks like a hardcoded credential." — layer 2,
+//     the Go provider's AST name gate (credential NAME), golang/parse.go's
+//     looksSecret. This is the half a name-vocabulary change moves.
+//
+// This pin exists because TestSelfAudit above asserts only len(Findings) != 0
+// and !IsBlocked: it prints no findings and asserts no count, so DELETING a
+// detector entirely left it green. The census is the missing direction.
+//
+// WHAT THIS PIN RECORDED, AND WHY IT SHRANK (ADR 0075). It was written against
+// the substring matcher and held FOUR layer-2 sites that are now gone, each of
+// them a false affirmation about a name that is not a credential:
+//
+//	internal/core/surface/surface.go             CategoryDWDimensionNoSurrogateKey
+//	internal/core/paradigm/schemagate.go         SignalSurrogateKeyNames
+//	internal/scaffold/generate_test.go           skillNoSuchKeyClaim
+//	internal/sensors/db/schemagate_note_test.go  starWithSurrogateKeys
+//
+// All four fired through the bare-"key"-plus-16-byte-value arm, at Confidence
+// 1.0, telling a reader that a category constant "looks like a hardcoded
+// credential". Deleting them is the point of the change, and this diff is where
+// that removal is visible as a measurement rather than a claim.
+//
+// The rest of the census is UNCHANGED, and that is the other half of the
+// evidence: the replacement vocabulary added no new site anywhere in the tree,
+// and the one surviving layer-2 site (secretFile) still fires, now on the
+// component "secret" rather than on a substring.
+var wantSEC001 = map[sec001Site]int{
+	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:          3,
+	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}: 1,
+	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:         2,
+	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:      1,
+	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:          1,
+	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                 2,
+	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:    5,
+	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}: 2,
+	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:    1,
+	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}: 5,
+}
+
+// TestSelfAuditSEC001Census is the enumeration control TestSelfAudit lacks. It
+// fails in BOTH directions: a false affirmation that reappears shows up as an
+// unexpected site, and a true positive that disappears shows up as a missing
+// one. Neither direction is guarded by an existence-only assertion.
+func TestSelfAuditSEC001Census(t *testing.T) {
+	res := runSelfAudit(t)
+
+	// Vacuum guards. An empty census is indistinguishable from a sensor that
+	// never ran, and an all-SEC-001 result would mean the rest of the security
+	// dimension silently died — both would let the comparison below pass by
+	// asserting nothing about a tree that was never analysed.
+	if res.AuditableTotal == 0 || len(res.AuditedFiles) == 0 {
+		t.Fatalf("vacuum: the sensor analysed no files (auditable=%d audited=%d)",
+			res.AuditableTotal, len(res.AuditedFiles))
+	}
+	got := map[sec001Site]int{}
+	var layer1, layer2 int
+	for _, f := range res.Findings {
+		if f.ID != "SEC-001" {
+			continue
+		}
+		got[sec001Site{f.File, f.Description}]++
+		switch {
+		case strings.HasPrefix(f.Description, "A string matching"):
+			layer1++
+		case strings.HasPrefix(f.Description, "The value assigned to"):
+			layer2++
+		}
+	}
+
+	// Both SEC-001 detectors must be represented. This is the vacuum guard that
+	// actually holds here: codefit's own tree emits SEC-001 and NOTHING else
+	// (measured 27 of 27), so "some other rule id is present" would be a false
+	// assertion, and asserting only len(got) != 0 would stay green if the whole
+	// Go provider silently stopped being wired in — layer 1 alone would carry it.
+	if layer1 == 0 {
+		t.Fatal("vacuum: no layer-1 (regex shape) SEC-001 at all — security.go's layer1Secrets is not running")
+	}
+	if layer2 == 0 {
+		t.Fatal("vacuum: no layer-2 (AST name) SEC-001 at all — the Go provider's name gate is not running")
+	}
+
+	for site, want := range wantSEC001 {
+		if got[site] != want {
+			t.Errorf("SEC-001 census: %s | %s — got %d, want %d",
+				site.File, site.Description, got[site], want)
+		}
+	}
+	var extra []sec001Site
+	for site := range got {
+		if _, pinned := wantSEC001[site]; !pinned {
+			extra = append(extra, site)
+		}
+	}
+	sort.Slice(extra, func(i, j int) bool {
+		if extra[i].File != extra[j].File {
+			return extra[i].File < extra[j].File
+		}
+		return extra[i].Description < extra[j].Description
+	})
+	for _, site := range extra {
+		t.Errorf("SEC-001 census: UNPINNED site %s | %s (%d fires) — a new emission the pin never approved",
+			site.File, site.Description, got[site])
+	}
+}
+
+// runSelfAudit runs the real security sensor over codefit's own tree.
+func runSelfAudit(t *testing.T) findings.SensorResult {
+	t.Helper()
+	repoRoot, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(repoRoot, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("loading repo .codefit.yaml: %v", err)
+	}
+	res, err := security.New(golang.New()).Run(auditctx.AuditContext{
+		ProjectRoot: repoRoot,
+		Language:    "go",
+		Config:      cfg,
+	})
+	if err != nil {
+		t.Fatalf("self-audit run: %v", err)
+	}
+	return res
 }

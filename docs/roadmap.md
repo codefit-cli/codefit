@@ -513,6 +513,55 @@ gap is that codefit cannot tell the developer *which* dialect it read, because i
 *"this looks like MySQL; set `database.type`"* without pretending to parse it. Declaring what a
 measurement found beats declaring that no measurement was taken.
 
+### P0-13 — CLOSED (`sec-001-affirms-only-what-the-name-established`) — SEC-001 (Go) affirmed a credential that was not there, at Confidence 1.0
+
+The Go name gate had a second arm — any name containing `key` as a substring with a value of
+16+ bytes. An **AST census** over codefit's own tree (the sensor driven through the real
+`go/ast` parser, because no static probe can enumerate `*ast.KeyValueExpr` or a multi-name
+`*ast.ValueSpec`) found **4 of its 5 name-gate findings were false**: enum constants and
+descriptive names, each reported as "looks like a hardcoded credential". This is the top of the
+board's ordering because it is the failure the ordering criterion names first — codefit
+**telling the user something untrue**, in an affirmation channel, at full confidence.
+
+The length guard was **inverted**, and that is measurable rather than arguable: descriptive
+kebab/snake values pass 16 bytes *because* they are descriptive, while a credential has no
+length floor. `SIGNING_KEY = "s3cr3t"` (6 bytes) was rejected by the same gate that accepted a
+29-byte category name. It admitted the false-positive class and rejected a true-positive one.
+
+**Why deletion alone would have been a REGRESSION, not a fix.** The first arm substring-matched
+`apikey`, and `lower("API_KEY")` is `"api_key"`, which does not contain it. Measured over six
+real credential spellings, **five fired only through the deleted arm**. The component matcher
+with adjacent-pair joining is what makes the deletion safe; shipping the deletion without it
+would have bought the false-positive fix with five undeclared false negatives.
+
+Fixed by one matcher in a stdlib-only core leaf with **three vocabularies**, so DB-053 (measured
+across 29 corpora in ADR 0047, no longer cloned) stays provably byte-identical while SEC-001's
+set moves. SEC-050 adopts the convention and keeps its own crypto-material set.
+
+**The second measured narrowing, and its repair.** Component matching also dropped the PLURAL
+spellings substring matching had carried for free — `passwords`, `secrets`, `tokens`, `apiKeys`,
+`apikeys`, `privateKeys`, `refreshTokens`, `mySecrets`, `userPasswords`, eight of them at any
+value length. That was a loss from replacing the FIRST arm, orthogonal to the second arm's
+deletion, and no declared limit described it. SEC-001's set now folds the regular `+s` plural of
+every entry (and only SEC-001's: DB-053 and SEC-050 keep their frozen sets), with the
+false-positive side measured — zero new sites in the AST census over codefit's own tree. See
+[ADR 0075](decisions/0075-sec-001-affirms-only-what-the-name-established.md) and `CHANGELOG.md`.
+
+**Named, DECLARED, not built — three follow-ups.**
+
+1. **The lowercase-concatenation gap.** `secretkey` is one component and cannot be split without
+   a dictionary. Declared in code (`namematch.LimitLowercaseConcatenation`), rendered on
+   SEC-001's own line by `codefit-coverage`, and locked by a test so it is a limit rather than a
+   belief. Open as a capability, closed as a claim.
+2. **A productive credential-name rule instead of a list.** ADR 0047 replaced ADR 0046's list
+   only because the rule was measured byte-identical over 29 corpora. **No credential-name
+   corpus exists**, and the error directions are opposite — DB-052's admission SILENCES,
+   SEC-001's AFFIRMS. Deferred with its reason, not forgotten.
+3. **TypeScript's `$NAME` still matches by substring**, so `tokenizer` fires there. Carried as a
+   divergence row with a written reason in the cross-provider case table, which loads TS's regex
+   from the real embedded YAML rather than copying it. Widening or narrowing TS is separate,
+   measured work.
+
 ---
 
 ## P1 — the user cannot tell how far codefit reaches

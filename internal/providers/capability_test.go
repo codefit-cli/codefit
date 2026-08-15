@@ -148,3 +148,59 @@ func TestRuleSet_ValidExclusionSource_NonEnumerable_NotApplicable(t *testing.T) 
 		t.Errorf("Enumerable:false must return (true, nil) — 'not applicable', no claim made — got ok=%v bad=%v", ok, bad)
 	}
 }
+
+// TestRuleSet_ValidLimits is the INVERSE of ValidExclusions, and the inversion
+// is the whole point. An excluded id must NOT be in Declared: it names a rule
+// that will never exist. A limit id MUST be in Declared: it qualifies a rule
+// that DOES exist and is claimed as covered. A limit attached to an id the
+// provider does not implement is a caveat about nothing, which reads to an
+// agent as a caveat about something.
+func TestRuleSet_ValidLimits(t *testing.T) {
+	grounded := providers.RuleSet{
+		Declared: []string{"SEC-001", "SEC-010"},
+		Limits:   []providers.RuleLimit{{ID: "SEC-001", Limit: "matches by name component, not substring"}},
+	}
+	if ok, orphan := grounded.ValidLimits(); !ok {
+		t.Errorf("a limit on a Declared id must be valid, got orphans %v", orphan)
+	}
+
+	floating := providers.RuleSet{
+		Declared: []string{"SEC-001", "SEC-010"},
+		Limits:   []providers.RuleLimit{{ID: "SEC-999", Limit: "a caveat about a rule that is not covered"}},
+	}
+	ok, orphan := floating.ValidLimits()
+	if ok {
+		t.Error("a limit whose id is not Declared must be invalid — it qualifies a claim nobody made")
+	}
+	if len(orphan) != 1 || orphan[0] != "SEC-999" {
+		t.Errorf("ValidLimits should name the orphan, got %v", orphan)
+	}
+
+	// An empty Limits list is valid: most rules have no declared limit.
+	if ok, _ := (providers.RuleSet{Declared: []string{"SEC-001"}}.ValidLimits()); !ok {
+		t.Error("a RuleSet with no limits must be valid")
+	}
+}
+
+// TestEveryRegisteredProviderHasGroundedLimits runs the same check over the
+// REAL providers, constructed the way production does, so a provider cannot
+// ship a limit attached to a rule it does not declare.
+func TestEveryRegisteredProviderHasGroundedLimits(t *testing.T) {
+	registered := []providers.LanguageProvider{golang.New(), typescript.New()}
+	var totalLimits int
+	for _, p := range registered {
+		cap := p.Capability()
+		totalLimits += len(cap.Security.Limits) + len(cap.Practices.Limits)
+		if ok, orphan := cap.Security.ValidLimits(); !ok {
+			t.Errorf("%s: security limits reference undeclared rule ids %v", p.Language(), orphan)
+		}
+		if ok, orphan := cap.Practices.ValidLimits(); !ok {
+			t.Errorf("%s: practices limits reference undeclared rule ids %v", p.Language(), orphan)
+		}
+	}
+	// Vacuum guard: with no limits declared anywhere, the loop above asserts
+	// nothing and would stay green after the mechanism was deleted.
+	if totalLimits == 0 {
+		t.Fatal("vacuum: no provider declares any limit, so the grounding check verified nothing")
+	}
+}
