@@ -18,13 +18,16 @@ func proseOf(entries []coverage.Entry) []string {
 	return out
 }
 
-func mentions(list []string, substr string) bool {
-	for _, s := range list {
-		if strings.Contains(strings.ToLower(s), strings.ToLower(substr)) {
-			return true
-		}
+// entryIDs is the set of ids a bucket declares. Every control that asks "does
+// the manifest answer for X" asks it here rather than by searching joined
+// prose: since the per-rule split (ADR 0077) an answer IS an entry, and an id
+// spelled inside some other entry's paragraph is not one.
+func entryIDs(entries []coverage.Entry) map[string]bool {
+	ids := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		ids[e.ID] = true
 	}
-	return false
+	return ids
 }
 
 // TestCoverageManifest_EveryEntryIsNamedAndClaimed: an entry with no id cannot
@@ -65,12 +68,22 @@ func TestCoverageManifest(t *testing.T) {
 	// The two split categories (ADR 0004) must appear on BOTH sides — the local
 	// case under Deterministic, the follow-the-data case under Reasoning — so the
 	// division of labor is explicit, not a gap.
-	for _, cat := range []string{"sql", "dangerouslySetInnerHTML"} {
-		if !mentions(proseOf(m.Deterministic), cat) {
-			t.Errorf("%q split category missing from Deterministic", cat)
+	//
+	// Asked by ID, not by searching the joined prose for the word: each half of a
+	// split is its own entry, so an agent can name both and compare them. The old
+	// form was satisfied by ANY entry that happened to say "sql", including one
+	// describing something else entirely.
+	det := entryIDs(m.Deterministic)
+	rea := entryIDs(m.Reasoning)
+	for _, split := range []struct{ deterministic, reasoning string }{
+		{"ts.sql-injection-inline", "ts.sql-injection-via-intermediate"},
+		{"ts.xss-inline-inner-html", "ts.xss-inner-html-from-variable"},
+	} {
+		if !det[split.deterministic] {
+			t.Errorf("the local half of a split category has no Deterministic entry %q", split.deterministic)
 		}
-		if !mentions(proseOf(m.Reasoning), cat) {
-			t.Errorf("%q split category missing from Reasoning", cat)
+		if !rea[split.reasoning] {
+			t.Errorf("the follow-the-data half of a split category has no Reasoning entry %q", split.reasoning)
 		}
 	}
 

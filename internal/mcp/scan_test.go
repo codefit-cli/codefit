@@ -62,32 +62,47 @@ func TestHandleCoverage_DerivedForLanguageWithNoProseManifest(t *testing.T) {
 	if resp.Language != "go" {
 		t.Errorf("Language = %q, want %q", resp.Language, "go")
 	}
-	if joinClaims(resp, coverage.StatusDeterministic) == "" {
-		t.Fatal("the deterministic entries must name go's declared security rule ids, got none")
+	byID := indexByID(resp)
+	if len(byID) == 0 {
+		t.Fatal("vacuum: the derived floor indexed nothing, so every lookup below would fail for the wrong reason")
 	}
-	joinedNotCovered := joinClaims(resp, coverage.StatusNotCovered)
+	if e, ok := byID["SEC-001"]; !ok || e.Status != coverage.StatusDeterministic {
+		t.Fatalf("the derived floor must name go's declared security rule ids as deterministic entries; SEC-001 = %+v (present=%v)", e, ok)
+	}
+	// Each unmapped surface category is an entry of its OWN, keyed off the locked
+	// surface.ProviderCategories vocabulary. Asking by id is what an agent can
+	// actually do: a category named only inside some other entry's sentence is
+	// not something it can look up.
 	for _, cat := range []string{"idor", "overfetch", "nplus1"} {
-		if !strings.Contains(joinedNotCovered, cat) {
-			t.Errorf("no not-covered entry names unmapped surface category %q: %s", cat, joinedNotCovered)
+		id := "surface." + cat
+		e, ok := byID[id]
+		if !ok {
+			t.Errorf("no entry %q — the derived floor must declare the surface categories go does NOT map, by id", id)
+			continue
+		}
+		if e.Status != coverage.StatusNotCovered {
+			t.Errorf("%s is not mapped for go and its entry says %q, not %q", id, e.Status, coverage.StatusNotCovered)
 		}
 	}
-	if strings.Contains(joinClaims(resp, coverage.StatusReasoning), "idor") {
-		t.Error("no reasoning entry may claim idor is mapped for go — go maps only authz")
+	// The other side of the same fact: go DOES map authz, so its entry must be
+	// the reasoning one. Without this, an answer that called everything
+	// not-covered would satisfy the loop above.
+	if e, ok := byID["surface.authz"]; !ok || e.Status != coverage.StatusReasoning {
+		t.Errorf("go maps the authz surface, so surface.authz must be a reasoning entry; got %+v (present=%v)", e, ok)
 	}
 }
 
-// joinClaims is every claim the response indexes under one status, joined. The
-// controls below ask their original questions of the CLAIM, which is what an
-// agent reads without asking for anything else — so a claim that stopped saying
-// what it used to say still turns them red.
-func joinClaims(resp mcp.CoverageResponse, status coverage.Status) string {
-	var out []string
+// indexByID is the response's index keyed by id — the lookup an agent performs
+// when it reads the index and then asks for one entry by name. The controls
+// below ask their questions of ONE NAMED ENTRY rather than of every claim
+// joined together, so an answer that moved a fact onto some other entry no
+// longer satisfies them.
+func indexByID(resp mcp.CoverageResponse) map[string]coverage.IndexEntry {
+	byID := make(map[string]coverage.IndexEntry, len(resp.Index))
 	for _, e := range resp.Index {
-		if e.Status == status {
-			out = append(out, e.Claim)
-		}
+		byID[e.ID] = e
 	}
-	return strings.Join(out, "\n")
+	return byID
 }
 
 // TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded is P1-4b's owed
@@ -100,15 +115,23 @@ func TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCoverage(go): %v", err)
 	}
-	joined := joinClaims(resp, coverage.StatusNotCovered)
-	if !strings.Contains(joined, "PRAC-004") {
-		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got: %s", joined)
+	e, ok := indexByID(resp)["PRAC-004"]
+	if !ok {
+		t.Fatal("codefit-coverage for go must carry PRAC-004 as an entry of its own — an exclusion an agent " +
+			"cannot name is one it cannot ask about")
 	}
-	if !strings.Contains(joined, "ADR 0056") {
-		t.Errorf("PRAC-004's not-covered entry must carry its reason (ADR 0056), got: %s", joined)
+	if e.Status != coverage.StatusNotCovered {
+		t.Errorf("PRAC-004 is excluded, not declared: its entry says %q", e.Status)
 	}
-	if strings.Contains(joinClaims(resp, coverage.StatusDeterministic), "PRAC-004") {
-		t.Error("PRAC-004 must not also appear as declared — it is excluded, not declared")
+	// The reason rides on THAT entry's own claim, never on a sibling's — the same
+	// welding ADR 0075 requires of SEC-001's declared limit.
+	if !strings.Contains(e.Claim, "ADR 0056") {
+		t.Errorf("PRAC-004's not-covered entry must carry its reason (ADR 0056), got: %s", e.Claim)
+	}
+	for _, other := range resp.Index {
+		if other.ID != "PRAC-004" && other.Status == coverage.StatusDeterministic && strings.Contains(other.Claim, "PRAC-004") {
+			t.Errorf("PRAC-004 also appears on %s's declared claim — it is excluded, not declared", other.ID)
+		}
 	}
 }
 
