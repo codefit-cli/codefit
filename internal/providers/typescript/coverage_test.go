@@ -21,7 +21,7 @@ func TestCoverageManifest(t *testing.T) {
 	if m.Language != "typescript" {
 		t.Errorf("Language = %q", m.Language)
 	}
-	if len(m.Deterministic) == 0 || len(m.Reasoning) == 0 || len(m.NotCovered) == 0 {
+	if len(m.DeterministicProse) == 0 || len(m.ReasoningProse) == 0 || len(m.NotCoveredProse) == 0 {
 		t.Fatalf("manifest lists must be populated: %+v", m)
 	}
 
@@ -29,24 +29,24 @@ func TestCoverageManifest(t *testing.T) {
 	// case under Deterministic, the follow-the-data case under Reasoning — so the
 	// division of labor is explicit, not a gap.
 	for _, cat := range []string{"sql", "dangerouslySetInnerHTML"} {
-		if !mentions(m.Deterministic, cat) {
+		if !mentions(m.DeterministicProse, cat) {
 			t.Errorf("%q split category missing from Deterministic", cat)
 		}
-		if !mentions(m.Reasoning, cat) {
+		if !mentions(m.ReasoningProse, cat) {
 			t.Errorf("%q split category missing from Reasoning", cat)
 		}
 	}
 
 	// Prose, not "partial": each split entry must read as a human sentence, not a
 	// one-word status. Guard against a lazy "SQL injection: partial".
-	for _, s := range append(append([]string{}, m.Deterministic...), m.Reasoning...) {
+	for _, s := range append(append([]string{}, m.DeterministicProse...), m.ReasoningProse...) {
 		if strings.Contains(strings.ToLower(s), "partial") {
 			t.Errorf("manifest uses the word 'partial' instead of explaining the split: %q", s)
 		}
 	}
 	// A split entry should be a real sentence (long enough to explain the limit).
 	foundProse := false
-	for _, s := range m.Reasoning {
+	for _, s := range m.ReasoningProse {
 		if strings.Contains(strings.ToLower(s), "sql") && len(s) > 60 {
 			foundProse = true
 		}

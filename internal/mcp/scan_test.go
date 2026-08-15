@@ -34,7 +34,7 @@ func TestHandleCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Manifest.Language != "typescript" || len(resp.Manifest.Deterministic) == 0 {
+	if resp.Manifest.Language != "typescript" || len(resp.Manifest.DeterministicProse) == 0 {
 		t.Errorf("coverage manifest incomplete: %+v", resp.Manifest)
 	}
 	if resp.Derived {
@@ -62,16 +62,16 @@ func TestHandleCoverage_DerivedForLanguageWithNoProseManifest(t *testing.T) {
 	if resp.Manifest.Language != "go" {
 		t.Errorf("Manifest.Language = %q, want %q", resp.Manifest.Language, "go")
 	}
-	if len(resp.Manifest.Deterministic) == 0 {
+	if len(resp.Manifest.DeterministicProse) == 0 {
 		t.Fatal("Deterministic must name go's declared security rule ids, got none")
 	}
-	joinedNotCovered := strings.Join(resp.Manifest.NotCovered, "\n")
+	joinedNotCovered := strings.Join(resp.Manifest.NotCoveredProse, "\n")
 	for _, cat := range []string{"idor", "overfetch", "nplus1"} {
 		if !strings.Contains(joinedNotCovered, cat) {
-			t.Errorf("NotCovered does not name unmapped surface category %q: %v", cat, resp.Manifest.NotCovered)
+			t.Errorf("NotCovered does not name unmapped surface category %q: %v", cat, resp.Manifest.NotCoveredProse)
 		}
 	}
-	if strings.Contains(strings.Join(resp.Manifest.Reasoning, "\n"), "idor") {
+	if strings.Contains(strings.Join(resp.Manifest.ReasoningProse, "\n"), "idor") {
 		t.Error("Reasoning must not claim idor is mapped for go — go maps only authz")
 	}
 }
@@ -86,14 +86,14 @@ func TestHandleCoverage_Go_NamesPRAC004AsPermanentlyExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleCoverage(go): %v", err)
 	}
-	joined := strings.Join(resp.Manifest.NotCovered, "\n")
+	joined := strings.Join(resp.Manifest.NotCoveredProse, "\n")
 	if !strings.Contains(joined, "PRAC-004") {
-		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got NotCovered: %v", resp.Manifest.NotCovered)
+		t.Errorf("codefit-coverage for go must name PRAC-004 as permanently not covered, got NotCovered: %v", resp.Manifest.NotCoveredProse)
 	}
 	if !strings.Contains(joined, "ADR 0056") {
-		t.Errorf("PRAC-004's NotCovered entry must carry its reason (ADR 0056), got: %v", resp.Manifest.NotCovered)
+		t.Errorf("PRAC-004's NotCovered entry must carry its reason (ADR 0056), got: %v", resp.Manifest.NotCoveredProse)
 	}
-	declared := strings.Join(resp.Manifest.Deterministic, "\n")
+	declared := strings.Join(resp.Manifest.DeterministicProse, "\n")
 	if strings.Contains(declared, "PRAC-004") {
 		t.Error("PRAC-004 must not also appear in Deterministic — it is excluded, not declared")
 	}
@@ -135,12 +135,12 @@ func TestHandleCoverage_ServesDeliveredElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Manifest.DeliveredElsewhere) == 0 {
+	if len(resp.Manifest.DeliveredElsewhereProse) == 0 {
 		t.Fatal("codefit-coverage returned an EMPTY DeliveredElsewhere — the DB dimension records DB-201 there, " +
 			"so the composition dropped it and the agent never sees the answer")
 	}
-	if !strings.Contains(strings.Join(resp.Manifest.DeliveredElsewhere, "\n"), "DB-201") {
-		t.Errorf("DeliveredElsewhere does not name DB-201: %v", resp.Manifest.DeliveredElsewhere)
+	if !strings.Contains(strings.Join(resp.Manifest.DeliveredElsewhereProse, "\n"), "DB-201") {
+		t.Errorf("DeliveredElsewhere does not name DB-201: %v", resp.Manifest.DeliveredElsewhereProse)
 	}
 
 	raw, err := json.Marshal(resp)

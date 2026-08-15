@@ -220,9 +220,9 @@ func deriveManifest(p providers.LanguageProvider) coverage.Manifest {
 	}
 
 	return coverage.Manifest{
-		Language:      p.Language(),
-		Deterministic: det,
-		Reasoning:     reasoning,
-		NotCovered:    notCovered,
+		Language:           p.Language(),
+		DeterministicProse: det,
+		ReasoningProse:     reasoning,
+		NotCoveredProse:    notCovered,
 	}
 }
