@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/mcp"
 )
@@ -156,6 +158,19 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			// evidence the undercount existed. Narrowing this strip-set BEFORE
 			// that wiring would have recorded evidence of a rename instead.
 			//
+			// "db" joins them too (design D6), for a THIRD, different reason: the
+			// db-surface-index change replaces db.surface's flat SurfaceItem shape
+			// with the light index (id/category/file/line/fingerprint/
+			// structural_facts) — a deliberate, declared shape change, not a
+			// regression this golden should catch byte-for-byte. Unlike summary
+			// (which the golden got WRONG), db.surface's PRE-change shape was
+			// correct; it just is not the shape this tool serves any more. The
+			// golden is not thrown away, though — it becomes the input to a
+			// STRONGER control than the bytes it replaces (below): its
+			// `"id": "fe21eaf1dd65"` is a pre-change capture, so matching it by id
+			// against the LIVE index is a live witness that surface.StableID is
+			// unmoved by this change.
+			//
 			// Summary coverage is not dropped, it is HANDED OVER — to two
 			// controls that assert against this same golden and this same
 			// fixture:
@@ -171,13 +186,13 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			//     migration test to look for.
 			strip := func(t *testing.T, raw []byte) string {
 				t.Helper()
-				return stripKey(t, []byte(stripKey(t, []byte(stripKey(t, raw, "security")), "budget")), "summary")
+				return stripKey(t, []byte(stripKey(t, []byte(stripKey(t, []byte(stripKey(t, raw, "security")), "budget")), "summary")), "db")
 			}
 			gotStripped := strip(t, live)
 			wantStripped := strip(t, golden) // golden has no "security" key; delete is a no-op, kept for symmetry
 			if gotStripped != wantStripped {
 				t.Errorf("the change moved a pre-existing field for a resolvable-language project.\n"+
-					"pre-change (minus security, budget, summary): %s\npost-change (minus security, budget, summary): %s",
+					"pre-change (minus security, budget, summary, db): %s\npost-change (minus security, budget, summary, db): %s",
 					wantStripped, gotStripped)
 			}
 
@@ -187,6 +202,10 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			// run, over the same response — otherwise "consumers read
 			// summary.security.* for the old values" is a promise with no control.
 			assertSummarySecurityMatchesFlatGolden(t, golden, resp)
+
+			// The strip above also removed `db` from the byte comparison; the
+			// control it is handed over to (design D6, task 5.4).
+			assertDBUnchangedAndIndexNamesGoldenSurfaceByID(t, golden, resp)
 		})
 	}
 }
@@ -263,6 +282,68 @@ func assertSummarySecurityMatchesFlatGolden(t *testing.T, golden []byte, resp mc
 		t.Errorf("summary.security.* must be verbatim the pre-change flat summary.* (the migration the "+
 			"removed requirement promises).\npre-change summary.*:  %+v\npost-change summary.security.*: %+v",
 			g.Summary, got)
+	}
+}
+
+// assertDBUnchangedAndIndexNamesGoldenSurfaceByID is db's migration control
+// (design D6, task 5.4), handed the `db` key the strip above removed from the
+// byte comparison. It is STRONGER than the bytes it replaces: the golden's
+// `"id": "fe21eaf1dd65"` is a pre-change capture, so matching it against the
+// LIVE index by id is a live witness that surface.StableID is unmoved by this
+// change — the byte comparison it replaces could only prove the shape was
+// identical, never that the identity survived a shape change.
+//
+// A golden with no `db` key (the no-db fixture) has nothing to check here —
+// this is a no-op for that case, matching every other db-scoped assertion in
+// this test.
+func assertDBUnchangedAndIndexNamesGoldenSurfaceByID(t *testing.T, golden []byte, resp mcp.ScanAllResponse) {
+	t.Helper()
+	var g struct {
+		DB *struct {
+			Measured bool                   `json:"measured"`
+			Note     string                 `json:"note"`
+			Findings []findings.Finding     `json:"findings"`
+			Surface  []findings.SurfaceItem `json:"surface"`
+			Score    int                    `json:"score"`
+		} `json:"db"`
+	}
+	if err := json.Unmarshal(golden, &g); err != nil {
+		t.Fatalf("parsing the pre-change golden's db section: %v", err)
+	}
+	if g.DB == nil {
+		return // no-db fixture: nothing to witness
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("golden has a measured db section but the live response does not, got %+v", resp.DB)
+	}
+	if resp.DB.Measured != g.DB.Measured {
+		t.Errorf("db.measured = %v, want %v (unchanged from pre-change)", resp.DB.Measured, g.DB.Measured)
+	}
+	if resp.DB.Note != g.DB.Note {
+		t.Errorf("db.note = %q, want %q (unchanged from pre-change)", resp.DB.Note, g.DB.Note)
+	}
+	if resp.DB.Score != g.DB.Score {
+		t.Errorf("db.score = %d, want %d (unchanged from pre-change)", resp.DB.Score, g.DB.Score)
+	}
+	if !reflect.DeepEqual(resp.DB.Findings, g.DB.Findings) {
+		t.Errorf("db.findings changed:\npre-change:  %+v\npost-change: %+v", g.DB.Findings, resp.DB.Findings)
+	}
+
+	wantIDs := make(map[string]bool, len(g.DB.Surface))
+	for _, it := range g.DB.Surface {
+		wantIDs[it.ID] = true
+	}
+	gotIDs := make(map[string]bool, len(resp.DB.Surface))
+	for _, e := range resp.DB.Surface {
+		gotIDs[e.ID] = true
+	}
+	if len(wantIDs) == 0 {
+		t.Fatal("the golden's db.surface has no items — this control would prove nothing about id stability")
+	}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Errorf("the live index's item ids do not match the pre-change golden's flat db.surface ids "+
+			"(surface.StableID must be unmoved by this change).\npre-change ids: %v\nlive index ids:  %v",
+			wantIDs, gotIDs)
 	}
 }
 

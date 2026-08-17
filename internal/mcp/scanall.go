@@ -20,6 +20,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/core/sourcetext"
 	"github.com/codefit-cli/codefit/internal/core/surface"
+	"github.com/codefit-cli/codefit/internal/core/surfaceindex"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/registry"
 	"github.com/codefit-cli/codefit/internal/schemasource"
@@ -173,15 +174,40 @@ type SecuritySection struct {
 // DBSection is the database dimension's result inside scan-all. Measured=false with
 // a Note is the honest "not audited" state (disabled / no parser / schema read or
 // parse failure) — a db failure is SOFT here, reported but never fatal to the
-// security result (ADR 0020). Findings are affirmations (e.g. DB-050); Surface are
-// questions; both are already filtered by the baseline.
+// security result (ADR 0020). Findings are affirmations (e.g. DB-050); Surface is
+// the LIGHT index (surfaceindex.Entry, not the full findings.SurfaceItem — design
+// D1/D5) of the questions; both are already filtered by the baseline. Full detail
+// of any named item is one codefit-scan-db call away with `detail: [ids]`.
 type DBSection struct {
-	Measured bool                   `json:"measured"`
-	Note     string                 `json:"note,omitempty"`
-	Findings []findings.Finding     `json:"findings,omitempty"`
-	Surface  []findings.SurfaceItem `json:"surface,omitempty"`
-	Score    int                    `json:"score"`
+	Measured bool                 `json:"measured"`
+	Note     string               `json:"note,omitempty"`
+	Findings []findings.Finding   `json:"findings,omitempty"`
+	Surface  []surfaceindex.Entry `json:"surface,omitempty"`
+	// Count is the COMPLETE number of surface items this section classifies —
+	// taken from surfaceindex.Index's own return, computed independently of how
+	// Surface is built, never from len(Surface) after the fact (design D4/I4:
+	// reading it back off the rendered index is the self-referential trap the
+	// coverage-chain archive records, obs #1664).
+	Count int `json:"count"`
+	// Withheld is always 0: there is no ranking axis across db surface's 18
+	// disjoint categories (no severity field) to withhold BY — a stated absence
+	// of a mechanism, not a principle (design D4). WithheldNote says so in
+	// words, deliberately NOT coverage's sentence (a different reason) and NOT
+	// the endpoint-bucket pattern (db.surface is never partially rendered).
+	Withheld     int    `json:"withheld"`
+	WithheldNote string `json:"withheld_note,omitempty"`
+	Score        int    `json:"score"`
 }
+
+// dbWithheldNote is DBSection's own wording for I4 (design D4): db.surface
+// withholds nothing because there is no ranking axis to withhold BY across its
+// 18 disjoint categories, not because a fixed manifest authorizes nothing (the
+// reason coverageWithheldNote gives) and not because a byte budget cut it (the
+// endpoint-bucket reason). Deliberately not reused from either.
+const dbWithheldNote = "Nothing was withheld: every item this dimension classified is named in the index. " +
+	"There is no ranking axis across db.surface's disjoint categories (no severity field) to withhold BY — " +
+	"unlike scan-all's endpoint buckets, this section has no mechanism to cut. Full detail of any named item " +
+	"is one " + string(ToolScanDB) + " call away with detail: [ids]."
 
 // BudgetBlock is scan-all's account of its own size. codefit's primary tool has
 // to RETURN: a response an MCP client refuses is worth less than a smaller one
@@ -597,7 +623,13 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// Two presentations of the same diff: endpoints for security, a flat section for db.
 	actionable, clean, frontier := report.ClassifyEndpoints(filterEndpointsByBaseline(endpoints, diff))
 	if dbSection != nil && dbSection.Measured {
-		dbSection.Findings, dbSection.Surface = filterDBByBaseline(dbRes, diff)
+		var filteredSurface []findings.SurfaceItem
+		dbSection.Findings, filteredSurface = filterDBByBaseline(dbRes, diff)
+		// Count is taken from Index's own second return — computed over the
+		// SAME population passed in, independently of how the entries slice is
+		// built — never from len(dbSection.Surface) after the fact (D4/I4).
+		dbSection.Surface, dbSection.Count = surfaceindex.Index(filteredSurface)
+		dbSection.WithheldNote = dbWithheldNote
 	}
 
 	// Scoring (ADR 0021), over RAW findings (not baseline-filtered) so the global
