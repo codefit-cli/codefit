@@ -181,6 +181,12 @@ func TestScanDB_CountAndWithheldHonesty(t *testing.T) {
 	if resp.Count != want {
 		t.Errorf("Count = %d, want %d", resp.Count, want)
 	}
+	// Conservation, anchored to the sensor's own population (never to
+	// resp.Count itself — that would be the self-referential trap #1664
+	// records): the rendered index must actually carry that many entries.
+	if len(resp.Surface) != want {
+		t.Errorf("len(Surface) = %d, want %d", len(resp.Surface), want)
+	}
 	if resp.Withheld != 0 {
 		t.Errorf("Withheld = %d, want 0", resp.Withheld)
 	}
