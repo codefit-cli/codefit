@@ -15,6 +15,52 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Changed
+- ⚠️ **`db.surface` (in both `codefit-scan-all`'s `db` bucket and standalone
+  `codefit-scan-db`) is now a light INDEX, not the full question. Its shape
+  changed — read this if anything of yours reads `db.surface`.**
+  (ADR [0079](docs/decisions/0079-db-surface-is-an-index-served-by-a-different-tool.md))
+
+  Each item used to carry the full question: `snippet`, `structural_signals`,
+  `reason_to_review`, `indirect_call`, plus `id`/`category`/`file`/`line`/
+  `fingerprint`. It now carries only the light half —
+  `{id, category, file, line, fingerprint, structural_facts}` — and the prose
+  half is served on request. Measured over a real 5-item, 4-category corpus
+  (Pagila excerpt, one sample — the ratio is structural, driven by field
+  size, but the count is small): **609.6 B/item full → 182.6 B/item index,
+  a 3.3x reduction.** `fingerprint` and `structural_facts` stay in the index
+  on purpose: `fingerprint` because `codefit-baseline-accept` takes it
+  directly, and `structural_facts` because it is the only filterable axis
+  across db.surface's 18 disjoint categories (no severity field).
+
+  **Nothing is withheld, ever.** Both sections gain `count` (the total
+  classified) and `withheld` (always `0`, with `withheld_note` saying why:
+  there is no ranking axis across db.surface's categories to withhold BY —
+  a different reason than `codefit-coverage`'s, which authorizes nothing
+  from a fixed manifest).
+
+  **Full detail is one `codefit-scan-db` call away.** `{root, language,
+  detail: [ids]}` returns each requested item byte for byte the old flat
+  shape, mirrors `codefit-coverage`'s `detail` idiom. An id that matches
+  nothing is named in `unrecognized` with a note — codefit is stateless and
+  cannot tell whether the id never existed or the schema changed between
+  calls, never an empty success. `codefit-scan-all`'s `db` bucket carries no
+  detail of its own; fetch it through `codefit-scan-db`.
+
+  **`codefit-scan-db` now declares its own response size**, wired together
+  with `detail` (the shape that made `codefit-coverage` under-declare its
+  size before it carried `bytes`/`index_bytes` — see the coverage entry
+  below): `bytes` covers the index plus any detail asked for, measured LAST;
+  `index_bytes` is the index's own share; a detail request large enough to
+  cross the response budget says `over_budget: true` and still comes back
+  complete.
+
+  **This does not close the structural size problem** (roadmap P0-4's
+  remaining half). At the measured 182.6 B/item, a 200-item db.surface is
+  still ~36 KB on its own — over the 40,000-byte response budget with
+  nothing yet to rank it by. What changes is how far this pushes the
+  problem out: a real ~62-item dogfood case drops from ~38 KB (full) to
+  ~11 KB (index).
+
 - ⚠️ **`codefit-coverage` answers with an INDEX of named entries and serves full
   prose on request. Its response shape changed and 20 entry ids were renamed —
   read this if anything of yours reads that tool's output.**
