@@ -333,10 +333,29 @@ shape. Breaking — `summary.security.*` carries the old values verbatim. See
 [ADR 0069](decisions/0069-the-scan-all-summary-declares-the-dimension-of-every-count.md)
 and `CHANGELOG.md`.
 
-**Named, not built:** invariant I4 has **no registered control** in this repository. Nothing
-asserts that a response's summary covers every dimension that same response reports as
-measured. That is why this defect had room to exist, and the invariant → control registry
-that would close it is its own, larger change.
+**Named, then built (partially):** I4's specific completeness gap is now closed —
+`internal/mcp/summary_measured_completeness_test.go` asserts, on the real `HandleScanAll`
+response, that every dimension `score.by_dimension` reports as measured has a non-null
+`summary` sub-block under the same wire name (the value half), and separately parses
+`internal/core/findings` and `internal/mcp` with `go/ast` to require every
+`measured = append(measured, findings.X)` wiring site to have a matching `ScanAllSummary`
+JSON tag (the wiring half, static — no sensor needed, so it catches a forgotten summary field
+the moment the append site is written, before any fixture would exercise it). Both halves were
+proven to fail correctly: dropping a measured dimension's summary block, and adding a third
+dimension to `measured` without extending `ScanAllSummary`, both turn the control red.
+
+**Still named, not built:** a counted census (5 of 6 `docs/specs/audit-protocol.md` invariants
+— I1 through I5 — already have at least a partial or instance-scoped control; only **I6** has
+none) confirms, rather than shrinks, this entry's original "its own, larger change" framing:
+**zero of the six** invariants has the registry-level meta-control ("a registry mapping
+invariant → control, with a test that fails when an invariant has no control") that
+`docs/specs/audit-protocol.md`'s "How the protocol is enforced" section describes. I4's
+completeness control closes one instance; the registry itself remains open.
+
+**Deliberately deferred, not an oversight:** `ScanAllSummary` still carries slots only for the
+dimensions measurable today (`security`, `db`), not all six the way `score.by_dimension`
+already does. Six-slot summary symmetry was judged a contract change not worth taking in this
+change; a dimension that is never measured is protected by nothing here.
 
 **Still open, unchanged by this:** the structural per-bucket cap for `db.surface` (P0-4's
 remaining half). A correct `summary.db.surface_items` makes a DB-heavy response's size
