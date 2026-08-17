@@ -888,7 +888,7 @@ tried, removing only the first `N+1` mention, did **not** fail, because the same
 recurs later in the same bullet's unrelated prose about item ordering — a disclosed,
 narrow false-negative surface specific to this wider block, not fixed here).
 
-### P1-7 — `codefit-surface-*` silently ignores every project-registered authz helper, for every language
+### P1-7 — `codefit-surface-*` does not apply project-registered authz helpers, for every language (declared decision, not an accident — closed for agent-visibility)
 
 `internal/mcp/surface.go:200`'s `providerFor` resolves the language provider for the
 `codefit-surface-*` family (`codefit-surface-authz`, `codefit-surface-idor`, etc.) with
@@ -900,25 +900,35 @@ surface-tools call site discards it. This is not TypeScript- or Go-specific — 
 one resolver in the registry-driven trio (ADR 0064, P1-1b) that never receives the
 parameter at all, for any exposed language.
 
-**User impact.** A user registers a helper, the agent tells them (per
+**Corrected framing.** This item originally read "silently ignores" — that framing was
+wrong: [ADR 0013](decisions/0013-custom-authz-helper-registry.md) (2026-06-28, six weeks
+before this item was filed) decided this scope on purpose, lines 98-100: *"the file-level
+`codefit-surface-*` tools (which take files, not a project root) keep using the built-in
+set only — registered helpers are project knowledge, applied by the project-scan tools
+(`scan-all`, `scan-endpoint`, `scan-security`)."* The behavior this item describes is
+correct; what was actually missing was agent-visibility — nothing in the tool's own
+description or response told the agent the scope was built-in-only.
+
+**User impact (the real gap).** A user registers a helper, the agent tells them (per
 `internal/mcp/baseline.go`'s own response text) to "re-run `codefit-scan-all` so items
 using it reflect `known_authz_detected=true`" — and that promise holds, scoped to
-`scan-all`/`scan-security`. But a user or agent that calls `codefit-surface-authz`
-directly on the same project, expecting the same registered helper to apply, silently
-gets `known_authz_detected` computed against an empty helper set instead — the same
+`scan-all`/`scan-security`. A user or agent calling `codefit-surface-authz` directly on
+the same project, expecting the same registered helper to apply, got
+`known_authz_detected` computed against the built-in helper set instead, with no
+declaration of that scope anywhere the agent reads before or during the call — the same
 vacuous-false shape [ADR 0067](decisions/0067-every-surface-producer-emits-non-nil-structural-facts.md)
-just spent an entire change eliminating for Go's *default* (no-helper) case, except this
-one is present *even when the project configured a helper*, because the parameter never
-reaches the provider. Nothing in the tool's own output states that `codefit-surface-*`
-does not see registered helpers — the gap is real, silent, and per this document's own
-ordering criterion, exactly the kind of thing that costs a user their trust: not knowing
-how far the tool they are calling actually reaches.
+spent an entire change eliminating for Go's *default* (no-helper) case, except this one
+was present *even when the project configured a helper*.
 
-**Why it is not fixed here.** Found and disclosed by ADR 0067
-(`sdd/go-surface-structural-facts`, PR #127) while wiring the equivalent parameter for Go
-elsewhere in the same registry trio — this exact call site is pre-existing (predates that
-PR), cross-provider (not Go-specific, not introduced by that fix), and explicitly out of
-that change's scope (its design decision D3). Filed here, not fixed there.
+**Closed by `sdd/the-surface-tools-declare-the-helpers-they-do-not-see`.** ADR 0013's
+scope stands unchanged — no `root`, no helper-resolution change. The gap that change
+closed is agent-visibility: `codefit-surface-authz`/`-idor`'s tool descriptions and JSON
+responses (`helper_scope` field) now state the built-in-only scope and point to
+`codefit-scan-all`/`codefit-scan-security` for the project-aware answer.
+
+**Lesson.** Before treating a roadmap item as accidental debt, check whether an ADR
+already decided it. This item was filed without citing ADR 0013, which predated it by six
+weeks and contained exactly this decision with its reason.
 
 ---
 
