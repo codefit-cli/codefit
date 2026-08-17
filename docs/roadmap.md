@@ -300,7 +300,7 @@ remaining half**. At the time this entry closed, the budget governed the endpoin
 a DB-heavy response exceeded it with nothing to withhold; extending withholding there needed a
 stable ranking for db surface items, a "fetch the rest" tool for a named db item, and a per-bucket
 count/withheld contract. **Two of those three landed since** (`db-surface-names-every-item-and-
-serves-detail-by-id`, ADR 0079): `db.surface` is now a light index with `count`/`withheld`
+serves-detail-by-id`, ADR 0080): `db.surface` is now a light index with `count`/`withheld`
 declared, and `codefit-scan-db`'s `detail: [ids]` is the fetch-the-rest tool. What is STILL
 missing is the ranking itself — there is no severity field and no common axis across db.surface's
 18 disjoint categories to rank or withhold by, so a DB-heavy response can still exceed the budget

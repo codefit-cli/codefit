@@ -18,7 +18,7 @@ All notable changes to codefit are documented here. The format is based on
 - ⚠️ **`db.surface` (in both `codefit-scan-all`'s `db` bucket and standalone
   `codefit-scan-db`) is now a light INDEX, not the full question. Its shape
   changed — read this if anything of yours reads `db.surface`.**
-  (ADR [0079](docs/decisions/0079-db-surface-is-an-index-served-by-a-different-tool.md))
+  (ADR [0080](docs/decisions/0080-db-surface-is-an-index-served-by-a-different-tool.md))
 
   Each item used to carry the full question: `snippet`, `structural_signals`,
   `reason_to_review`, `indirect_call`, plus `id`/`category`/`file`/`line`/

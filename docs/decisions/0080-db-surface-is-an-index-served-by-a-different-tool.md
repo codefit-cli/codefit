@@ -1,4 +1,4 @@
-# 0079 — `db.surface` is an index; the question is served by a different tool
+# 0080 — `db.surface` is an index; the question is served by a different tool
 
 - Status: accepted
 - Date: 2026-08-17
