@@ -1,6 +1,6 @@
 # Roadmap — priorities, debts, and what is still owed
 
-**Status:** current as of `main` @ `05b5864` (2026-08-11). Every claim here was measured
+**Status:** current as of `main` @ `4bdd0f0` (2026-08-17). Every claim here was measured
 against the repository, not inferred from the PRD.
 
 This document exists because the Phase-3 thread plan lived only in a conversation. A plan
@@ -513,7 +513,7 @@ gap is that codefit cannot tell the developer *which* dialect it read, because i
 *"this looks like MySQL; set `database.type`"* without pretending to parse it. Declaring what a
 measurement found beats declaring that no measurement was taken.
 
-### P0-14 — every tool response crosses the wire TWICE
+### P0-14 — CLOSED (`a-response-crosses-the-wire-once`) — every tool response crosses the wire TWICE, and the client meters ONE copy
 
 **Measured, not inferred.** `internal/mcp/server.go`'s `addTool` returns `nil` for the
 `*CallToolResult`. go-sdk v1.6.1 then serializes the same output JSON into a `TextContent`
@@ -532,17 +532,50 @@ integration test re-measures the size on every run; on `main` today it reads **2
 structured, 44,498 B on the wire, 68 entries**, the growth being the per-rule split buying 36
 more nameable entries and the response declaring its own index bytes.
 
-**FILED, NOT FIXED,** and deliberately not fixed inside the coverage change that found it:
-returning a `*CallToolResult` from `addTool` touches every tool at once, and it is a
-protocol-layer decision, not a coverage one.
+**MEASURED, then closed as a declared limit — not fixed, and the measurement is why.** The
+question this entry existed to answer was *which copy the client meters*, because a wrong answer
+would have corrupted the response budget. It was answered by driving two binaries — `main`'s and
+one whose `addTool` suppresses the copy — against a live client (Claude Code 2.1.196,
+2026-08-17) over stdio, with the SAME content sized by `codefit-coverage`'s `detail` list:
 
-**This bears on P0-4.** The response budget counts ONE copy; the wire carries two. But the
-correction is NOT a doubling, and the caveat is the whole point of this entry: **which copy the
-client meters is UNMEASURED.** ADR 0062's calibration bracket (64,097 / 74,195) is in
-codefit-payload bytes, and `74,195 / 3 ≈ 24,732 ≈ 25,000` is circumstantial evidence that the
-client counts one copy — so ADR 0062's ~1.93× ratio stands and **must not be double-counted**
-on the strength of this finding. Measuring which copy is metered is the first move here, before
-any budget number moves.
+```
+30 ids  duplicated   ACCEPTED   response declared bytes: 64,661
+35 ids  duplicated   REJECTED   result (74,580 characters)
+35 ids  single copy  REJECTED   result (74,580 characters)   <- IDENTICAL
+```
+
+At 35 ids the payload is ~74,968 B. Metering BOTH copies would have reported ~149,936. The client
+reported 74,580 — one copy — and reported the identical figure for the binary that duplicates and
+the one that does not. Second control: the two results the client persisted are **74,918 bytes and
+byte-identical**. It does not merely count one copy; it stores one.
+
+**The positive control reproduced.** ADR 0062's bisection (2026-08-09, `scan-all` content)
+bracketed the client at 64,097 accepted / 74,195 rejected. This one (`coverage` content, another
+tool, eight days later) brackets it at 64,661 / 74,580 — within ~1% at both ends. The method
+reproduces, so the result is not an artifact of how it was measured.
+
+**Consequence for P0-4: nothing moves.** `addTool` at `d054534` — the exact commit of the `v0.2.6`
+binary ADR 0062 drove — is byte-identical to `main`'s, and `go.mod` pins the same go-sdk v1.6.1 at
+both points, so that calibration was always taken against a duplicated wire. `ResponseBudgetBytes
+= 40,000` is correct and needs no correction. This entry's original warning — that ADR 0062's
+ratio **must not be double-counted** on the strength of the duplication finding — is now a
+measured fact rather than a caution.
+
+**Why it is declared rather than removed.** Removing the copy buys zero headroom in the client
+that was measured; the MCP spec describes the `TextContent` copy as backward compatibility for
+clients that read `content` but not `structuredContent` (the SDK cites it at
+`mcp/server.go:386-388`); and `addTool` is the single seam all 16 tools pass through. Zero benefit
+against non-zero compatibility risk, across every response codefit emits. See
+[ADR 0079](decisions/0079-the-client-meters-one-copy-so-the-duplicated-wire-is-a-declared-limit.md)
+for the full record, including the one-line suppression, so re-opening this for a different client
+costs a rebuild and not a rediscovery.
+
+**What stays true and is NOT closed by this.** The transport cost is real: every response still
+puts twice its bytes through the pipe. The measurement is scoped to ONE client, ONE date, ONE tool
+— Cursor, VSCode, OpenCode and the rest have their own metering, unmeasured, and a client that
+reads only `content` was never exercised. And **P0-4's remaining half is untouched**: the
+structural per-bucket cap for `db.surface`, where a response exceeds its budget with nothing
+withholdable, is addressed by nothing here.
 
 ### P0-13 — CLOSED (`sec-001-affirms-only-what-the-name-established`) — SEC-001 (Go) affirmed a credential that was not there, at Confidence 1.0
 
