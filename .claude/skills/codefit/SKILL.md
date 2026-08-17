@@ -109,6 +109,20 @@ checks.
   surface.
 - `measured: false` means codefit could NOT read the schema (none configured, no parser for
   it, or every source unreadable). That is NOT clean — read the `note`, fix the config, re-run.
+- `surface` (both here and in `codefit-scan-all`'s `db` bucket) is a light INDEX —
+  `id`, `category`, `file`, `line`, `fingerprint`, `structural_facts` — never the
+  question text. It is always COMPLETE: `count` is the total classified and `withheld` is
+  always 0 (there is no ranking axis across db surface's disjoint categories to withhold
+  by; `withheld_note` says so). Read a NAMED item's full detail — the snippet and the
+  actual `reason_to_review` question — by calling `codefit-scan-db` again with
+  `{root, language, detail: [id, ...]}`: many ids in one call, each returned byte-identical
+  to the full item. An id that matches nothing comes back in `unrecognized` with a note —
+  codefit is stateless and cannot tell whether the id never existed or the schema changed
+  between calls, never an empty success. `codefit-scan-all`'s `db` bucket carries no
+  detail of its own; fetch it through `codefit-scan-db`. Once you ask for detail, the
+  response declares its own size the same way `codefit-coverage` does: `bytes` covers
+  the index PLUS whatever detail you asked for, `index_bytes` is the index's own share, and
+  `over_budget: true` still comes back complete, never truncated.
 
 ## Dependencies and declared limits
 - `codefit-check-cves` `{root}` — known CVEs in dependencies via OSV.dev, read from exact

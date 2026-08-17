@@ -190,14 +190,20 @@ func budgetNote(budget, total, dropActionable, dropClean, dropFrontier int, stil
 		//
 		// DECLARED LIMIT, stated rather than papered over: the budget governs the
 		// ENDPOINT LISTS only, so there is no lever here for the excess, which is
-		// in the non-endpoint content. Extending withholding to db.surface needs a
-		// stable ranking for db surface items, a "fetch the rest" tool for a named
-		// db item and a per-bucket count/withheld contract — the structural
-		// per-bucket cap, a design of its own. What this note buys meanwhile is
-		// real: the baseline never advances on an over-budget response (ADR 0061),
-		// so the residual is a failed tool call rather than corrupted memory, and
-		// for the responses that DO arrive it is the whole difference between an
-		// agent that knows it is reading a prefix and one that does not.
+		// in the non-endpoint content. Two of the three things this note used to
+		// say were missing now EXIST: db.surface is already the light index
+		// (surfaceindex — every item named, nothing withheld, declared via
+		// DBSection.Count/Withheld/WithheldNote) and a "fetch the rest" path for a
+		// named db item is codefit-scan-db's `detail: [ids]`. What is STILL
+		// missing, and is the one thing extending withholding to db.surface would
+		// need, is a stable RANKING for db surface items to withhold BY — there is
+		// no severity field and no common axis across its 18 disjoint categories
+		// (roadmap P0-4's remaining half, unchanged by the index). What this note
+		// buys meanwhile is real: the baseline never advances on an over-budget
+		// response (ADR 0061), so the residual is a failed tool call rather than
+		// corrupted memory, and for the responses that DO arrive it is the whole
+		// difference between an agent that knows it is reading a prefix and one
+		// that does not.
 		cause := "there are no endpoints in this response"
 		if total > 0 {
 			cause = "every endpoint carries a deterministic finding, which codefit will not hide behind a byte count"
