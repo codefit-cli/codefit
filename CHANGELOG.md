@@ -137,6 +137,29 @@ All notable changes to codefit are documented here. The format is based on
   implementation.
 
 ### Added
+- **Declared limit, measured: every tool response crosses the wire twice, and the
+  client meters ONE copy — so the response budget is correct and the duplication
+  stays.** (ADR [0079](docs/decisions/0079-the-client-meters-one-copy-so-the-duplicated-wire-is-a-declared-limit.md))
+
+  `addTool` returns `nil` for the `*CallToolResult`, so go-sdk v1.6.1 copies the
+  same output JSON into a `TextContent` block. Which copy a client *counts* was
+  filed as unmeasured, because a wrong answer would have corrupted
+  `ResponseBudgetBytes`. It was measured by driving two binaries — `main`'s and one
+  whose `addTool` suppresses the copy — against a live client (Claude Code 2.1.196,
+  2026-08-17) over stdio with the same content: at a ~74,968-byte payload both
+  reported `74,580 characters`, identically, where metering both copies would have
+  reported ~149,936. The two persisted results are byte-identical at 74,918 bytes.
+
+  The bracket reproduces ADR 0062's (64,097/74,195 on `scan-all` content) at
+  64,661/74,580 on `coverage` content — within ~1% at both ends, so the result is
+  not an artifact of the method. **No behaviour changed and no number moved**:
+  `addTool` at the exact commit ADR 0062 drove is byte-identical to `main`'s, so
+  that calibration was always taken against a duplicated wire.
+
+  **What stays true:** the transport still carries twice the bytes; the
+  measurement covers one client, one date, one tool; and a client that reads
+  `content` but not `structuredContent` — the compatibility case the MCP spec
+  cites for the copy — was never exercised.
 - **`codefit init` detects SQL schema directories — and writes only what it can
   PROVE.** Schema detection used to read a Prisma `schema.prisma` and nothing
   else, and it ran *behind* language detection: an unresolved language provider
