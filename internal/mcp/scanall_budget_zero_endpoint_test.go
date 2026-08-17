@@ -11,6 +11,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/core/surfaceindex"
 	"github.com/codefit-cli/codefit/internal/schemasource"
 	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
@@ -154,6 +155,72 @@ func TestScanAllBudget_ZeroEndpointsOverBudget_DoesNotClaimItFit(t *testing.T) {
 	if !strings.Contains(note, "changed_files") {
 		t.Errorf("the note does not tell the agent what to do about it:\n%s", note)
 	}
+}
+
+// C1d — the SAME reproduction, driven through the real handleScanAllBudgeted
+// seam end to end (real request, real config, real sensor, real baseline
+// path) rather than a hand-built ScanAllResponse fed straight to
+// fitToBudget. This is the form the design's testing strategy names
+// explicitly: "lower the budget through the existing seam
+// (handleScanAllBudgeted), never a synthetic manifest." C1 above proves the
+// rendering step in isolation; this proves the whole pipeline agrees.
+func TestScanAllBudget_RealPipeline_DBHeavyProjectOverBudget_StaysCompleteAndSaysSo(t *testing.T) {
+	root := t.TempDir()
+	writeSchemaProject(t, root, generateNoTimestampSchema(400))
+	want := realNoTimestampPopulationForRoot(t, root, 400)
+
+	const budget = 2_000 // deliberately small: 400 real items cannot fit
+	baselinePath := filepath.Join(root, ".codefit-baseline")
+	resp, err := handleScanAllBudgeted(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), baselinePath, budget)
+	if err != nil {
+		t.Fatalf("handleScanAllBudgeted: %v", err)
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("DB section must stay measured even over budget, got %+v", resp.DB)
+	}
+	raw, _ := json.Marshal(resp)
+	if len(raw) <= budget {
+		t.Fatalf("the fixture is NOT over budget (%d bytes vs %d) — this test would pass vacuously", len(raw), budget)
+	}
+	if resp.DB.Count != want {
+		t.Errorf("DB.Count = %d, want %d (the db sensor's own population) — an over-budget response must still classify every item", resp.DB.Count, want)
+	}
+	if len(resp.DB.Surface) != want {
+		t.Errorf("len(DB.Surface) = %d, want %d — db.surface must stay COMPLETE even over budget (there is nothing to withhold it by)", len(resp.DB.Surface), want)
+	}
+	if resp.DB.Withheld != 0 {
+		t.Errorf("DB.Withheld = %d, want 0", resp.DB.Withheld)
+	}
+	if !strings.Contains(resp.Budget.Note, "does NOT fit") {
+		t.Errorf("Budget.Note does not say the response is over budget:\n%s", resp.Budget.Note)
+	}
+}
+
+// realNoTimestampPopulationForRoot independently re-measures the db sensor's
+// population over an already-written project root, without going through
+// any MCP handler — the anchor the assertions above compare against.
+func realNoTimestampPopulationForRoot(t *testing.T, root string, want int) int {
+	t.Helper()
+	cfg, err := config.LoadOptional(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	parser, note := schemasource.ParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
+	if parser == nil {
+		t.Fatalf("no schema parser resolved: %s", note)
+	}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "typescript", Config: cfg}
+	r, err := dbsensor.New(parser).Audit(ctx)
+	if err != nil {
+		t.Fatalf("db sensor audit: %v", err)
+	}
+	if !r.Measured {
+		t.Fatalf("db sensor did not measure: %s", r.Note)
+	}
+	if len(r.Res.Surface) != want {
+		t.Fatalf("the schema produced %d surface item(s), want %d", len(r.Res.Surface), want)
+	}
+	return len(r.Res.Surface)
 }
 
 // C1b — the mirror control: a genuinely small, fully-fitting response is
