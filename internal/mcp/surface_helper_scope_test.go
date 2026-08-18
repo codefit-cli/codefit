@@ -59,8 +59,8 @@ export async function GET() {
 }`}
 
 	tests := []struct {
-		name       string
-		call       func() (mcp.SurfaceResponse, error)
+		name        string
+		call        func() (mcp.SurfaceResponse, error)
 		wantPresent bool
 	}{
 		{"authz", func() (mcp.SurfaceResponse, error) {
