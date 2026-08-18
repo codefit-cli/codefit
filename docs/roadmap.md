@@ -1,6 +1,6 @@
 # Roadmap — priorities, debts, and what is still owed
 
-**Status:** current as of `main` @ `4bdd0f0` (2026-08-17). Every claim here was measured
+**Status:** current as of `main` @ `a8634eb` (2026-08-18). Every claim here was measured
 against the repository, not inferred from the PRD.
 
 This document exists because the Phase-3 thread plan lived only in a conversation. A plan

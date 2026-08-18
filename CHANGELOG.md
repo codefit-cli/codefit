@@ -183,6 +183,23 @@ All notable changes to codefit are documented here. The format is based on
   implementation.
 
 ### Added
+- **`codefit-surface-authz` and `codefit-surface-idor` now declare the helper scope
+  they audit against.** These two tools are file-level and stateless by design
+  (ADR [0013](docs/decisions/0013-custom-authz-helper-registry.md)): they take files,
+  not a project root, so they compute `known_authz_detected` against codefit's
+  built-in authz-helper set only — a helper you registered with
+  `codefit-baseline-register-authz-helper` is **not** applied there.
+
+  That was true before and said nowhere an agent reads. Both tools now carry a
+  `helper_scope` note in the response, and say the same thing in their tool
+  description, including the part that matters most: **a `false` fact means "not
+  seen", never "unauthorized"**. For the project-aware answer, `codefit-scan-all`
+  and `codefit-scan-security` load the registered helpers as they always have.
+
+  The field is absent — not empty — on `codefit-surface-overfetch` and
+  `codefit-surface-nplus1`, which never consult the helper set, because declaring
+  a limit a tool does not have is its own small lie.
+
 - **Declared limit, measured: every tool response crosses the wire twice, and the
   client meters ONE copy — so the response budget is correct and the duplication
   stays.** (ADR [0079](docs/decisions/0079-the-client-meters-one-copy-so-the-duplicated-wire-is-a-declared-limit.md))
