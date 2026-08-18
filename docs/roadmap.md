@@ -296,11 +296,18 @@ measurement it was already handed. See
 which supersedes ADR 0044 §2.5's declared over-report for the DML/permission family.
 
 **Explicitly NOT done here:** the structural per-bucket cap for `db.surface` — **still P0-4's
-remaining half**. The budget governs the endpoint lists only, so a DB-heavy response exceeds it
-with nothing to withhold; extending withholding there needs a stable ranking for db surface
-items, a "fetch the rest" tool for a named db item, and a per-bucket count/withheld contract.
-The note now declares that limit instead of hiding it, which is a mitigation, not the cure.
-Also untouched, each its own change: the unbudgeted `codefit-coverage` response; Go's
+remaining half**. At the time this entry closed, the budget governed the endpoint lists only, so
+a DB-heavy response exceeded it with nothing to withhold; extending withholding there needed a
+stable ranking for db surface items, a "fetch the rest" tool for a named db item, and a per-bucket
+count/withheld contract. **Two of those three landed since** (`db-surface-names-every-item-and-
+serves-detail-by-id`, ADR 0080): `db.surface` is now a light index with `count`/`withheld`
+declared, and `codefit-scan-db`'s `detail: [ids]` is the fetch-the-rest tool. What is STILL
+missing is the ranking itself — there is no severity field and no common axis across db.surface's
+18 disjoint categories to rank or withhold by, so a DB-heavy response can still exceed the budget
+(at the newly measured ~183 B/item, ~219 items of pure index alone reach 40,000 bytes) with
+nothing to cut. The note declares that limit instead of hiding it, which is a mitigation, not the
+cure. Also untouched at the time, each its own change: the unbudgeted `codefit-coverage` response
+(**closed since** — see `CHANGELOG.md`'s `codefit-coverage` entry and ADR 0076/0077/0078); Go's
 `looksSecret` false positives on enum constants. (`summary` counting security only was the
 fourth item on that list; it is now **P0-8**, below. `codefit init`'s detection message was
 the fifth; it is now **P0-10**, below — and the message turned out to be the symptom of the

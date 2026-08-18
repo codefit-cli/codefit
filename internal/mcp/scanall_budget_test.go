@@ -825,8 +825,8 @@ func TestScanAllBudget_SummaryCountsTheDBDimensionOverADBCarryingProject(t *test
 	if got, want := resp.Summary.DB.DeterministicFindings, len(resp.DB.Findings); got != want {
 		t.Errorf("summary.db.deterministic_findings = %d, the db section holds %d finding(s)", got, want)
 	}
-	if got, want := resp.Summary.DB.SurfaceItems, len(resp.DB.Surface); got != want {
-		t.Errorf("summary.db.surface_items = %d, the db section holds %d surface item(s)", got, want)
+	if got, want := resp.Summary.DB.SurfaceItems, resp.DB.Count; got != want {
+		t.Errorf("summary.db.surface_items = %d, the db section's own Count says %d surface item(s)", got, want)
 	}
 	// The sharpest form of the mutation this catches: if summary.db were fed
 	// secRes, its counts would equal the security ones. Over this fixture they

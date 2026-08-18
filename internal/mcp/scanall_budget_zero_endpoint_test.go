@@ -2,10 +2,19 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/codefit-cli/codefit/internal/config"
+	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scope"
+	"github.com/codefit-cli/codefit/internal/core/surfaceindex"
+	"github.com/codefit-cli/codefit/internal/schemasource"
+	dbsensor "github.com/codefit-cli/codefit/internal/sensors/db"
 )
 
 // THE DEFECT THIS FILE CLOSES.
@@ -26,29 +35,100 @@ import (
 // that is not actually over budget passes vacuously, which is exactly how a test
 // like this comes to protect nothing.
 
+// generateNoTimestampSchema builds n CREATE TABLE statements, each missing
+// any audit-timestamp column, so DB-052 (surface.CategoryDBNoTimestamps)
+// fires once per table when driven through the REAL parser + db sensor
+// (design D7 — never a hand-assembled findings.SurfaceItem, the exact
+// CLAUDE.md fixture-rule violation the pre-change fixture committed).
+func generateNoTimestampSchema(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "CREATE TABLE t%d (\n  id INTEGER PRIMARY KEY,\n  name TEXT NOT NULL\n);\n\n", i)
+	}
+	return b.String()
+}
+
+// writeSchemaProject writes a minimal SQL-DDL project (config + schema file)
+// into root, ready for the real config/schemasource/dbsensor pipeline or a
+// full MCP handler call.
+func writeSchemaProject(t *testing.T, root, sql string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "db", "schema.sql"), []byte(sql), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const yaml = "version: \"1\"\nproject:\n  name: t\n  language: typescript\n  framework: next\ndatabase:\n" +
+		"  type: postgresql\n  schema_paths:\n    - db/schema.sql\n"
+	if err := os.WriteFile(filepath.Join(root, ".codefit.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// realNoTimestampSurfaceItems drives the REAL sqlddl parser and the REAL db
+// sensor over n generated tables and returns the sensor's own
+// findings.SurfaceItem population — every field (ID, Fingerprint,
+// StructuralFacts, ReasonToReview) stamped by the production pipeline, never
+// typed by hand. It FATALs if the generator's assumption (one DB-052 item per
+// table) did not hold, rather than silently proceeding with a fixture that
+// no longer reproduces what it claims to.
+func realNoTimestampSurfaceItems(t *testing.T, n int) []findings.SurfaceItem {
+	t.Helper()
+	root := t.TempDir()
+	writeSchemaProject(t, root, generateNoTimestampSchema(n))
+	cfg, err := config.LoadOptional(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	parser, note := schemasource.ParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
+	if parser == nil {
+		t.Fatalf("no schema parser resolved: %s", note)
+	}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "typescript", Config: cfg}
+	r, err := dbsensor.New(parser).Audit(ctx)
+	if err != nil {
+		t.Fatalf("db sensor audit: %v", err)
+	}
+	if !r.Measured {
+		t.Fatalf("db sensor did not measure the generated schema: %s", r.Note)
+	}
+	if len(r.Res.Surface) != n {
+		t.Fatalf("the generated %d-table schema produced %d surface item(s) — the fixture generator's "+
+			"assumption (one DB-052 item per table) no longer holds; this fixture reproduces nothing "+
+			"until that is fixed", n, len(r.Res.Surface))
+	}
+	return r.Res.Surface
+}
+
 // oversizedDBResponse builds the shape observed in a real project: no
 // endpoints in any bucket, and a db.surface large enough ON ITS OWN to
-// exceed the budget.
-func oversizedDBResponse(budget int) ScanAllResponse {
-	var surface []findings.SurfaceItem
-	for i := 0; i < 200; i++ {
-		surface = append(surface, findings.SurfaceItem{
-			Category: "db-table-structure-unproven",
-			File:     "prisma/schema.prisma",
-			Line:     i + 1,
-			Snippet:  strings.Repeat("this table's structure could not be proven complete; read the raw statement. ", 6),
-		})
+// exceed the budget — even AFTER indexing (design D7: the pre-change fixture
+// stopped reproducing once db.surface became the light index, because its
+// only heavy field was Snippet, which the index drops). The item count is
+// large enough to survive that at the shipped index's measured weight; the
+// vacuity guard in the caller is what actually PROVES it, not this comment.
+func oversizedDBResponse(t *testing.T, budget int) ScanAllResponse {
+	t.Helper()
+	const n = 400
+	items := realNoTimestampSurfaceItems(t, n)
+	entries, count := surfaceindex.Index(items)
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
+	t.Logf("oversizedDBResponse: %d items, index %d bytes total (%.1f B/item, measured here, not frozen)",
+		count, len(raw), float64(len(raw))/float64(count))
 	return ScanAllResponse{
 		Budget: BudgetBlock{Bytes: budget},
-		DB:     &DBSection{Measured: true, Surface: surface, Score: 100},
+		DB:     &DBSection{Measured: true, Surface: entries, Count: count, WithheldNote: dbWithheldNote, Score: 100},
 	}
 }
 
 // C1 — a zero-endpoint response that does not fit says so.
 func TestScanAllBudget_ZeroEndpointsOverBudget_DoesNotClaimItFit(t *testing.T) {
 	const budget = ResponseBudgetBytes
-	resp := oversizedDBResponse(budget)
+	resp := oversizedDBResponse(t, budget)
 
 	fitted, stillOver := fitToBudget(resp, budget)
 
@@ -75,6 +155,72 @@ func TestScanAllBudget_ZeroEndpointsOverBudget_DoesNotClaimItFit(t *testing.T) {
 	if !strings.Contains(note, "changed_files") {
 		t.Errorf("the note does not tell the agent what to do about it:\n%s", note)
 	}
+}
+
+// C1d — the SAME reproduction, driven through the real handleScanAllBudgeted
+// seam end to end (real request, real config, real sensor, real baseline
+// path) rather than a hand-built ScanAllResponse fed straight to
+// fitToBudget. This is the form the design's testing strategy names
+// explicitly: "lower the budget through the existing seam
+// (handleScanAllBudgeted), never a synthetic manifest." C1 above proves the
+// rendering step in isolation; this proves the whole pipeline agrees.
+func TestScanAllBudget_RealPipeline_DBHeavyProjectOverBudget_StaysCompleteAndSaysSo(t *testing.T) {
+	root := t.TempDir()
+	writeSchemaProject(t, root, generateNoTimestampSchema(400))
+	want := realNoTimestampPopulationForRoot(t, root, 400)
+
+	const budget = 2_000 // deliberately small: 400 real items cannot fit
+	baselinePath := filepath.Join(root, ".codefit-baseline")
+	resp, err := handleScanAllBudgeted(ScanAllRequest{Root: root, Language: "typescript"}, scope.Full(), baselinePath, budget)
+	if err != nil {
+		t.Fatalf("handleScanAllBudgeted: %v", err)
+	}
+	if resp.DB == nil || !resp.DB.Measured {
+		t.Fatalf("DB section must stay measured even over budget, got %+v", resp.DB)
+	}
+	raw, _ := json.Marshal(resp)
+	if len(raw) <= budget {
+		t.Fatalf("the fixture is NOT over budget (%d bytes vs %d) — this test would pass vacuously", len(raw), budget)
+	}
+	if resp.DB.Count != want {
+		t.Errorf("DB.Count = %d, want %d (the db sensor's own population) — an over-budget response must still classify every item", resp.DB.Count, want)
+	}
+	if len(resp.DB.Surface) != want {
+		t.Errorf("len(DB.Surface) = %d, want %d — db.surface must stay COMPLETE even over budget (there is nothing to withhold it by)", len(resp.DB.Surface), want)
+	}
+	if resp.DB.Withheld != 0 {
+		t.Errorf("DB.Withheld = %d, want 0", resp.DB.Withheld)
+	}
+	if !strings.Contains(resp.Budget.Note, "does NOT fit") {
+		t.Errorf("Budget.Note does not say the response is over budget:\n%s", resp.Budget.Note)
+	}
+}
+
+// realNoTimestampPopulationForRoot independently re-measures the db sensor's
+// population over an already-written project root, without going through
+// any MCP handler — the anchor the assertions above compare against.
+func realNoTimestampPopulationForRoot(t *testing.T, root string, want int) int {
+	t.Helper()
+	cfg, err := config.LoadOptional(filepath.Join(root, ".codefit.yaml"))
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	parser, note := schemasource.ParserForPaths(root, cfg.Database.SchemaPaths, cfg.Database.Type)
+	if parser == nil {
+		t.Fatalf("no schema parser resolved: %s", note)
+	}
+	ctx := auditctx.AuditContext{ProjectRoot: root, Language: "typescript", Config: cfg}
+	r, err := dbsensor.New(parser).Audit(ctx)
+	if err != nil {
+		t.Fatalf("db sensor audit: %v", err)
+	}
+	if !r.Measured {
+		t.Fatalf("db sensor did not measure: %s", r.Note)
+	}
+	if len(r.Res.Surface) != want {
+		t.Fatalf("the schema produced %d surface item(s), want %d", len(r.Res.Surface), want)
+	}
+	return len(r.Res.Surface)
 }
 
 // C1b — the mirror control: a genuinely small, fully-fitting response is

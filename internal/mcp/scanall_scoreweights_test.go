@@ -193,10 +193,16 @@ func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 	// scanall_ts_withdb_prechange.json this one shows it WITHOUT having to read
 	// another block — the numbers are simply wrong on their face.
 	// Summary coverage for this fixture is taken over below, in the same run.
-	gotStripped := stripKey(t, []byte(stripKey(t, live, "security")), "summary")
-	wantStripped := stripKey(t, []byte(stripKey(t, golden, "security")), "summary")
+	//
+	// "db" joins them for the same reason scanall_regression_test.go excludes it
+	// (design D6): db.surface's flat SurfaceItem shape is REPLACED by the light
+	// index in this change — a declared shape change, not a regression. The
+	// golden's own db.surface item is handed to the same stronger, id-matched
+	// control below rather than a byte comparison.
+	gotStripped := stripKey(t, []byte(stripKey(t, []byte(stripKey(t, live, "security")), "summary")), "db")
+	wantStripped := stripKey(t, []byte(stripKey(t, []byte(stripKey(t, golden, "security")), "summary")), "db")
 	if gotStripped != wantStripped {
-		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response (minus security, summary).\nlive:\n%s\ngolden:\n%s",
+		t.Errorf("absent score_weights must be byte-identical to the pre-change (cfd1ad7) response (minus security, summary, db).\nlive:\n%s\ngolden:\n%s",
 			gotStripped, wantStripped)
 	}
 
@@ -214,6 +220,10 @@ func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 			"the migration assertion below mean something; a zeroed one would pass over anything")
 	}
 	assertSummarySecurityMatchesFlatGolden(t, golden, resp)
+
+	// The strip above also removed `db` from the byte comparison; handed to the
+	// same id-matched control scanall_regression_test.go uses (design D6).
+	assertDBUnchangedAndIndexNamesGoldenSurfaceByID(t, golden, resp)
 
 	// And what the golden got WRONG, stated as the numbers: the db dimension it
 	// measured (its own db section holds a finding and a surface item, and
