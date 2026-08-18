@@ -169,6 +169,28 @@ type SecuritySection struct {
 	// than a zero-valued statement that could be misread as "nothing
 	// unmapped".
 	SurfaceCoverage *surface.CoverageStatement `json:"surface_coverage,omitempty"`
+	// RecognizedAuthzHelpers names the project-registered authz helper(s)
+	// codefit recognized for this language (baseline.RecognizedAuthzHelpers)
+	// — the exact names, never re-derived. Present only when Measured is
+	// true, mirroring SurfaceCoverage: a pointer, so a DB-only pass
+	// serializes no key at all. Unlike SurfaceCoverage, the pointer here must
+	// NEVER address a nil slice — baseline.RecognizedAuthzHelpers returns nil
+	// on zero matches (it only appends), and a `*[]string` pointing at nil
+	// marshals `null`, a THIRD meaning distinct from "absent" and "present
+	// and empty". The zero-registration case is present and empty ([]):
+	// codefit looked at the baseline and found no registration, which is not
+	// the same as never having looked (absent).
+	RecognizedAuthzHelpers *[]string `json:"recognized_authz_helpers,omitempty"`
+	// RecognizedAuthzHelpersNote is always non-empty whenever
+	// RecognizedAuthzHelpers is present — an empty array alone does not tell
+	// the agent what to do next (same idiom as
+	// coverage.CoverageResponse.WithheldNote). See recognizedAuthzHelpersNote
+	// for the wording contract this caption follows: a FACT about codefit's
+	// knowledge, never a judgment about the project, and no claim about
+	// resolved_clean/actionable (the causal link between the two is verified
+	// false — a built-in helper match sets known_authz_detected=true
+	// independent of the registered count).
+	RecognizedAuthzHelpersNote string `json:"recognized_authz_helpers_note,omitempty"`
 }
 
 // DBSection is the database dimension's result inside scan-all. Measured=false with
@@ -512,10 +534,15 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	// provider is the only thing made non-fatal; a config-load or sensor error
 	// inside runSecurity stays a hard error (D1).
 	secRan := providerForLanguage(req.Language, nil) != nil
+	// Hoisted once, unconditionally: securitySection needs it below on the
+	// same code path whether or not security ran, and reusing this exact
+	// slice (rather than a second baseline read) is what keeps the response
+	// and the actual matching input in agreement.
+	helpers := prev.RecognizedAuthzHelpers(req.Language)
 	var secRes findings.SensorResult
 	if secRan {
 		var err error
-		secRes, err = runSecurity(req.Root, req.Language, prev.RecognizedAuthzHelpers(req.Language), scp)
+		secRes, err = runSecurity(req.Root, req.Language, helpers, scp)
 		if err != nil {
 			return ScanAllResponse{}, nil, nil, err
 		}
@@ -714,7 +741,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 			Note:      frontierNote(len(frontier), resolvedLocally, secRan),
 			Endpoints: frontier,
 		},
-		Security: securitySection(secRan, req.Language),
+		Security: securitySection(secRan, req.Language, helpers),
 		DB:       dbSection,
 	}, actionable, diff.Next, nil
 }
@@ -742,16 +769,68 @@ func distinctCanon(paths []string) []string {
 // response: the schema may still have been audited (by the DB dimension)
 // while the code was not — this is reachable only after the
 // nothing-measurable guard, so a DB-only pass having run is guaranteed here.
-func securitySection(secRan bool, language string) SecuritySection {
+func securitySection(secRan bool, language string, helpers []string) SecuritySection {
 	if secRan {
 		cs := surfaceCoverageFor(language)
-		return SecuritySection{Measured: true, SurfaceCoverage: &cs}
+		h := nonNilStrings(helpers)
+		return SecuritySection{
+			Measured:                   true,
+			SurfaceCoverage:            &cs,
+			RecognizedAuthzHelpers:     &h,
+			RecognizedAuthzHelpersNote: recognizedAuthzHelpersNote(helpers),
+		}
 	}
 	return SecuritySection{
 		Measured: false,
 		Note: "security was NOT audited for this language (no provider) — this is not a clean security " +
 			"result; the schema was audited, the code was not.",
 	}
+}
+
+// nonNilStrings converts a nil slice to an explicit non-nil empty one, never
+// mutating or copying a non-nil input. It exists because taking the address
+// of a nil []string for a `*[]string` field marshals JSON `null`, not `[]` —
+// measured directly (see recognized_authz_helpers' doc comment): the trap is
+// live because baseline.RecognizedAuthzHelpers declares `var out []string`
+// and only appends, so it returns nil, not an empty slice, on zero matches.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// recognizedAuthzHelpersNote is the ONE function that builds the caption for
+// recognized_authz_helpers, shared by codefit-scan-all (securitySection) and
+// codefit-scan-security (HandleScanSecurity) so the two responses cannot
+// drift in phrasing (spec: "the two handlers MUST share one note-building
+// function").
+//
+// Wording contract, both non-negotiable (issue #155 / #148 precedent):
+//  1. The subject is codefit's KNOWLEDGE, never the project's authorization
+//     state. The zero case says "codefit recognized no ... helper", never
+//     "this project has no authorization" — a project can guard every action
+//     through a BUILT-IN helper match (e.g. NextAuth-style getServerSession)
+//     that this array does not count at all, so a zero count here is not
+//     evidence the project is unguarded.
+//  2. No claim about bucket contents (resolved_clean, actionable, or any
+//     count). Verified false in general:
+//     internal/providers/typescript/idor.go's known_authz_detected gate is
+//     `authzHelperSet[name] || recognized[name]` — an OR — so a zero
+//     registered-helper run does not force resolved_clean to 0; the field
+//     project's own 0-of-176 came from using neither a built-in nor a
+//     registered helper, a property of THAT project, not a rule this note
+//     may state as general.
+func recognizedAuthzHelpersNote(helpers []string) string {
+	if len(helpers) == 0 {
+		return "codefit recognized no project-registered authorization helper for this language. " +
+			"known_authz_detected reflects codefit's built-in helper set only — it says nothing about " +
+			"whether this project guards its actions some other way. If a project function IS an authz " +
+			"helper, register it with " + string(ToolBaselineRegisterAuthzHelper) + " so codefit recognizes it too."
+	}
+	return fmt.Sprintf("codefit recognized %d project-registered authorization helper(s) for this language, "+
+		"named in recognized_authz_helpers. known_authz_detected reflects codefit's built-in helper set "+
+		"plus these.", len(helpers))
 }
 
 // endpointOrdering is the one sentence the response uses to state HOW its

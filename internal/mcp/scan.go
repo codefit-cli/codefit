@@ -49,6 +49,20 @@ type ScanResponse struct {
 	// reaching this point when no provider resolves, so a returned response
 	// always has one.
 	SurfaceCoverage surface.CoverageStatement `json:"surface_coverage"`
+	// RecognizedAuthzHelpers names the project-registered authz helper(s)
+	// codefit recognized for this language (baseline.RecognizedAuthzHelpers).
+	// ALWAYS present, no omitempty — mirrors SurfaceCoverage's own "ALWAYS
+	// present" reasoning: HandleScanSecurity errors before reaching this
+	// point when no provider resolves, so a returned response always has a
+	// scan behind it. Non-nil even when zero, so it marshals `[]`, never
+	// `null` (see the recognized_authz_helpers doc comment on SecuritySection
+	// in scanall.go for the measured trap this guards against).
+	RecognizedAuthzHelpers []string `json:"recognized_authz_helpers"`
+	// RecognizedAuthzHelpersNote is scan-security's caption for the array
+	// above, built by the SAME function scan-all's SecuritySection uses
+	// (recognizedAuthzHelpersNote in scanall.go) so the two responses cannot
+	// drift in phrasing.
+	RecognizedAuthzHelpersNote string `json:"recognized_authz_helpers_note"`
 }
 
 // HandleScanSecurity runs the security sensor over the project and returns the
@@ -57,7 +71,8 @@ type ScanResponse struct {
 // and returns its result — no detection logic lives here.
 func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 	scp := scope.Of(req.ChangedFiles)
-	res, err := runSecurity(req.Root, req.Language, recognizedHelpers(req.Root, req.Language), scp)
+	helpers := recognizedHelpers(req.Root, req.Language)
+	res, err := runSecurity(req.Root, req.Language, helpers, scp)
 	if err != nil {
 		return ScanResponse{}, err
 	}
@@ -66,12 +81,14 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 		return ScanResponse{}, err
 	}
 	return ScanResponse{
-		Findings:        res.Findings,
-		Surface:         res.Surface,
-		Score:           res.Score,
-		Blocked:         scoring.IsBlocked(res.Findings),
-		Scope:           block,
-		SurfaceCoverage: surfaceCoverageFor(req.Language),
+		Findings:                   res.Findings,
+		Surface:                    res.Surface,
+		Score:                      res.Score,
+		Blocked:                    scoring.IsBlocked(res.Findings),
+		Scope:                      block,
+		SurfaceCoverage:            surfaceCoverageFor(req.Language),
+		RecognizedAuthzHelpers:     nonNilStrings(helpers),
+		RecognizedAuthzHelpersNote: recognizedAuthzHelpersNote(helpers),
 	}, nil
 }
 
