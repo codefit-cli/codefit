@@ -31,13 +31,35 @@ type SurfaceIDORRequest struct {
 // SurfaceResponse is the §11 surface contract: the items the agent must reason.
 type SurfaceResponse struct {
 	Surface []findings.SurfaceItem `json:"surface"`
+	// HelperScope is set ONLY by HandleSurfaceAuthz and HandleSurfaceIDOR: it
+	// declares that their helper-dependent structural facts (known_authz_detected)
+	// were computed against codefit's BUILT-IN helper set, never the project's
+	// registered ones (ADR 0013). Like findings.SurfaceItem.StructuralFacts, this
+	// is a FACT about what was computed, never a judgment about the result — a
+	// false structural fact still means "not seen", not "unauthorized".
+	// omitempty keeps it entirely ABSENT (not present-and-empty) on
+	// HandleSurfaceOverfetch/HandleSurfaceNPlus1, whose facts never consult the
+	// helper set: "no mention" and "nothing to mention" must not be the same
+	// bytes.
+	HelperScope string `json:"helper_scope,omitempty"`
 }
+
+// helperScopeNote is the built-in-only helper-scope declaration shared by
+// codefit-surface-authz's and codefit-surface-idor's tool description
+// (server.go) and their SurfaceResponse.HelperScope field: one string, two
+// surfaces, so the two can never drift apart.
+const helperScopeNote = "Helper-dependent facts (known_authz_detected) are computed against codefit's built-in authz-helper set only — project-registered helpers (see codefit-baseline-register-authz-helper) are not applied here. A false fact means \"not seen\", never \"unauthorized\". For the project-aware answer, use codefit-scan-all or codefit-scan-security."
 
 // HandleSurfaceIDOR enumerates the IDOR surface across the given files and
 // returns it in the canonical JSON contract. Files that are not handled by a
 // provider (or carry no IDOR surface) contribute nothing.
 func HandleSurfaceIDOR(req SurfaceIDORRequest) (SurfaceResponse, error) {
-	return handleSurface(req, string(surface.CategoryIDOR))
+	resp, err := handleSurface(req, string(surface.CategoryIDOR))
+	if err != nil {
+		return resp, err
+	}
+	resp.HelperScope = helperScopeNote
+	return resp, nil
 }
 
 // HandleSurfaceAuthz enumerates the broken-authorization surface across the given
@@ -53,6 +75,7 @@ func HandleSurfaceAuthz(req SurfaceIDORRequest) (SurfaceResponse, error) {
 		return resp, err
 	}
 	sortUncheckedFirst(resp.Surface, "known_authz_detected")
+	resp.HelperScope = helperScopeNote
 	return resp, nil
 }
 

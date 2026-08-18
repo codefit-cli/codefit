@@ -41,10 +41,10 @@ func NewServer() *mcpsdk.Server {
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",
 		HandleScanEndpoint)
 	addTool(s, string(ToolSurfaceIDOR),
-		"Enumerate the IDOR surface (id→resource endpoints) for the agent to reason about ownership checks. Input: {files:[{path, content}]}.",
+		"Enumerate the IDOR surface (id→resource endpoints) for the agent to reason about ownership checks. "+helperScopeNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceIDOR)
 	addTool(s, string(ToolSurfaceAuthz),
-		"Enumerate the broken-authorization surface (handlers doing something sensitive), ordered unchecked-first. Input: {files:[{path, content}]}.",
+		"Enumerate the broken-authorization surface (handlers doing something sensitive), ordered unchecked-first. "+helperScopeNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceAuthz)
 	addTool(s, string(ToolSurfaceOverfetch),
 		"Enumerate the over-fetching surface (domain-object serializations), ordered by structural certainty. Input: {files:[{path, content}]}.",
