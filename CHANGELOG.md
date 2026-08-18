@@ -14,6 +14,10 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.9] — 2026-08-18
+
 ### Changed
 - ⚠️ **`db.surface` (in both `codefit-scan-all`'s `db` bucket and standalone
   `codefit-scan-db`) is now a light INDEX, not the full question. Its shape

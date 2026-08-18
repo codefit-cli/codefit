@@ -62,6 +62,23 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **`v0.2.9` — a PATCH: no phase closes here.** The `0.2` line again, and the honest
+  reason is that nothing landed since `v0.2.8` is Phase 3 capability: `codefit-coverage`
+  became an index that serves prose by id (ADRs 0076–0078), `SEC-001` stopped affirming a
+  credential the name never established (ADR 0075), and four repairs closed the roadmap's
+  Block A — the duplicated wire measured and declared rather than removed (ADR 0079),
+  `db.surface` turned into an index served by a different tool (ADR 0080), a control that
+  fails when a measured dimension is missing from the summary, and the built-in-only helper
+  scope of `codefit-surface-authz`/`-idor` stated where an agent reads it. Phase 3 stays
+  open: `H0` shipped in `v0.2.7`, `H1` (practices) is 2 of 6 slices, and `H2`/`H3`/`H4`
+  have not started — so the next MINOR is still `0.3.0`, and builds toward it will carry
+  `-alpha.N` as the Pre-releases rule requires.
+
+  **Recorded because it is the point of the tag, not a footnote:** this release closes a
+  **132-commit, 8-day gap** in which real improvements sat unpublished while the installed
+  binary stayed on `v0.2.6`. A tool nobody can install is not a shipped tool. The gap is
+  the reason this tag exists now rather than after the next repair.
+
 - **`v0.2.8` — a PATCH: no phase closes here.** *(This bullet supersedes the one below it,
   kept append-only rather than deleted: the architect reversed the call it made.)* The
   superseded bullet argued the next tag should be `v0.3.0-alpha.N` because "from H1 onward
