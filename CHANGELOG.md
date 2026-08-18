@@ -14,7 +14,28 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- **`codefit-scan-all` and `codefit-scan-security` now declare which project-registered
+  authz helpers codefit recognized for the language.** Affirms ADR
+  [0013](docs/decisions/0013-custom-authz-helper-registry.md) (no new ADR): the registry
+  and matching were already there, but a run showing many `known_authz_detected: false`
+  items gave no way to tell "codefit never learned this project's helper" from "this
+  project has no equivalent guard" — the exact ambiguity issue #155 named.
+
+  Both responses gain `recognized_authz_helpers` (the exact names
+  `baseline.RecognizedAuthzHelpers` returns for the language) and
+  `recognized_authz_helpers_note`. On `codefit-scan-all` the pair sits under
+  `security` and is present only when `security.measured` is true (absent, not
+  empty, mirroring `security.surface_coverage`); on `codefit-scan-security` it is
+  always present. The zero-registration case renders `[]`, never `null` — codefit
+  looked at the baseline and found no registration, which is not the same as never
+  having looked. The note states a fact about codefit's own knowledge ("codefit
+  recognized no project-registered authorization helper for this language"), never
+  a judgment about the project's authorization — a built-in helper match
+  (e.g. NextAuth-style `getServerSession`) can still clear `known_authz_detected`
+  with zero registered helpers, so the two counts make no claim about each other.
+  Both tool descriptions and the generated skill now point the agent at the new
+  fields before it reads `known_authz_detected: false` across many endpoints.
 
 ## [0.2.9] — 2026-08-18
 
