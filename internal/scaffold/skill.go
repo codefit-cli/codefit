@@ -239,6 +239,9 @@ Narrate every baseline operation to the human (what you accepted or pruned, and 
 codefit never edits code — only its baseline.
 
 ## Custom authz helpers (teach codefit your project's auth)
+Read ` + "`security.recognized_authz_helpers`" + ` / ` + "`recognized_authz_helpers_note`" + ` (in
+` + "`codefit-scan-all`" + `'s response) directly for what codefit ALREADY recognizes for this
+language — do not count ` + "`known_authz_detected: false`" + ` items by hand to find out.
 codefit knows NextAuth-style helpers (` + "`getServerSession`" + `, ` + "`auth`" + `) but NOT your project's own
 (e.g. ` + "`requirePermission`" + `, ` + "`getCurrentUser`" + `). When many authz items show ` + "`known_authz_detected:\nfalse`" + ` yet they DO call a project auth function, reason about whether that function is a
 real authz helper, then PROPOSE registering it to the human ("N items call ` + "`X`" + `, which looks

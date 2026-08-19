@@ -108,6 +108,43 @@ func TestScanAllDescriptionDocumentsSecurityNotMeasured(t *testing.T) {
 	}
 }
 
+// recognizedAuthzHelpersDescPhrase is the caption sentence's own load-bearing
+// substring — locked separately from the bare field name so this test proves
+// the description states the "codefit's knowledge, not the project's actual
+// guarding" caveat, not merely that the JSON field name appears somewhere in
+// the prose.
+const recognizedAuthzHelpersDescPhrase = "codefit's KNOWLEDGE, not the project's actual guarding"
+
+// TestScanAllAndScanSecurityDescriptionsDeclareRecognizedAuthzHelpers is the
+// spec's "Tool descriptions declare the fields exist" requirement, made
+// checkable: an agent reading codefit-scan-all's or codefit-scan-security's
+// registered description, BEFORE it ever sees a response, must already be
+// told that a low or zero recognized_authz_helpers count is codefit's own
+// knowledge gap, not a statement that the project is unguarded — the same
+// distinction issue #148 exists because SEC-001 crossed once, at the response
+// level, without a description warning it off first.
+func TestScanAllAndScanSecurityDescriptionsDeclareRecognizedAuthzHelpers(t *testing.T) {
+	for _, name := range []string{string(mcp.ToolScanAll), string(mcp.ToolScanSecurity)} {
+		desc := toolDescription(t, name)
+		if !strings.Contains(desc, "recognized_authz_helpers") {
+			t.Errorf("%s's description must mention recognized_authz_helpers, got:\n%s", name, desc)
+		}
+		if !strings.Contains(desc, recognizedAuthzHelpersDescPhrase) {
+			t.Errorf("%s's description must state that a low/zero count reflects codefit's knowledge, "+
+				"not the project's actual guarding (%q), got:\n%s", name, recognizedAuthzHelpersDescPhrase, desc)
+		}
+	}
+
+	skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: "typescript"})
+	if err != nil {
+		t.Fatalf("RenderSkill: %v", err)
+	}
+	body := string(skill)
+	if !strings.Contains(body, "recognized_authz_helpers") {
+		t.Errorf("the generated skill must mention recognized_authz_helpers, got:\n%s", body)
+	}
+}
+
 // TestSkillNamesEveryRegisteredTool is the drift lock between the two agent-facing
 // sources: the tools the server registers and the skill that teaches them. Every
 // registered tool must either be named in the skill or carry a declared reason for

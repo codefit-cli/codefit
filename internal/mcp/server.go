@@ -10,6 +10,17 @@ import (
 	"github.com/codefit-cli/codefit/internal/version"
 )
 
+// recognizedAuthzHelpersDescNote is the agent-facing declaration shared by
+// codefit-scan-security's and codefit-scan-all's tool descriptions (spec
+// "Tool descriptions declare the fields exist"): it must be read BEFORE the
+// agent concludes "no authorization" from a run of known_authz_detected:
+// false across many endpoints, so it is worded to be found there first, not
+// buried after the fact.
+const recognizedAuthzHelpersDescNote = " `recognized_authz_helpers` names the project-registered authz " +
+	"helper(s) codefit recognized for this language, and `recognized_authz_helpers_note` explains the " +
+	"count; a low or zero count there reflects codefit's KNOWLEDGE, not the project's actual guarding — " +
+	"read it before concluding known_authz_detected: false means unauthorized."
+
 // NewServer builds the codefit MCP server with its tools registered. Each tool is
 // a THIN adapter: it hands the SDK's typed request to the core handler that
 // already exists and is tested, and returns the core's result as structured
@@ -20,7 +31,8 @@ func NewServer() *mcpsdk.Server {
 	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "codefit", Version: version.Version}, nil)
 
 	addTool(s, string(ToolScanSecurity),
-		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language, changed_files?}. Pass changed_files to audit only those paths; the response's scope block then declares the narrowing, and score/blocked describe only the audited slice. Returns findings + surface + score + blocked + scope.",
+		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language, changed_files?}. Pass changed_files to audit only those paths; the response's scope block then declares the narrowing, and score/blocked describe only the audited slice. Returns findings + surface + score + blocked + scope."+
+			recognizedAuthzHelpersDescNote,
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
 		"The actionable summary per endpoint. Every endpoint is NAMED, not inlined: `actionable` gives file, line, method, how many concerns and of which categories, which kinds of gap, the highest certainty reached and whether an affirmation is present — enough to rank and choose. The per-concern signals and reason_to_review text is NOT here; fetch any endpoint's full concerns with codefit-scan-endpoint, which re-runs the same analysis. Deterministic findings are the exception: they are facts codefit already concluded, so they come back IN FULL in actionable.endpoints[].deterministic_concerns and never need a second call. resolved_clean and frontier_pending are named the same way. Every response declares a byte `budget`; if the endpoint list did not fit, budget.withheld says how many endpoints are missing and budget.ordering says what ranking the ones you have are a prefix of — never a silent cut. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language, changed_files?}. "+
@@ -35,7 +47,9 @@ func NewServer() *mcpsdk.Server {
 			"`summary.db`. The counts are the RAW population, taken before the baseline filter, so they can exceed what the buckets and `db.surface` list; `summary.note` says so. "+
 			"`db.surface` is a light INDEX (id/category/file/line/fingerprint/structural_facts per item, not the full question text) — every item is named, `db.count` is the complete number and `db.withheld` "+
 			"is always 0 (there is no ranking axis across db.surface's disjoint categories to withhold by; `db.withheld_note` says so). To read a NAMED item's full detail (the snippet and the actual "+
-			"reason_to_review question), call codefit-scan-db with `{root, language, detail: [ids]}` — scan-all's db bucket carries no detail of its own.",
+			"reason_to_review question), call codefit-scan-db with `{root, language, detail: [ids]}` — scan-all's db bucket carries no detail of its own. "+
+			"`security.recognized_authz_helpers` and `security.recognized_authz_helpers_note` (present only when `security.measured` is true) are the same declaration as codefit-scan-security's, scoped under `security`:"+
+			recognizedAuthzHelpersDescNote,
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",
