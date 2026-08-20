@@ -24,6 +24,7 @@ const (
 	ToolBaselinePrune                 Tool = "codefit-baseline-prune"
 	ToolBaselineRegisterAuthzHelper   Tool = "codefit-baseline-register-authz-helper"
 	ToolBaselineUnregisterAuthzHelper Tool = "codefit-baseline-unregister-authz-helper"
+	ToolBaselineRecordVerdict         Tool = "codefit-baseline-record-verdict"
 	ToolCoverage                      Tool = "codefit-coverage"
 )
 
