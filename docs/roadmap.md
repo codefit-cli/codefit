@@ -1,7 +1,14 @@
 # Roadmap — priorities, debts, and what is still owed
 
-**Status:** current as of `main` @ `a8634eb` (2026-08-18). Every claim here was measured
+**Status:** current as of `main` @ `46fa453` (2026-08-18). Every claim here was measured
 against the repository, not inferred from the PRD.
+
+**Where the open debt now lives.** Since 2026-08-18 the actionable debt is tracked as
+**GitHub issues**, not only here: each one carries the measurement that produced it, so
+whoever takes it does not re-derive anything. This document keeps what issues cannot —
+the ordering criterion, the history of how a defect was found, and the reasoning that was
+already tried and rejected. It stays a POINTER: when an entry has an issue, the issue is
+where the work happens.
 
 This document exists because the Phase-3 thread plan lived only in a conversation. A plan
 that depends on someone remembering it is not a plan.
@@ -27,8 +34,10 @@ nothing. An undeclared one costs them their trust.
 
 **What works, from `main`, right now:**
 
-- MCP stdio server. **Per dimension, not per project:** security and its surface mapping are
-  TypeScript-only; the database dimension audits **any** language that declares a schema.
+- MCP stdio server. **Per dimension, not per project:** security and its surface mapping run
+  on **TypeScript** (4 of 4 surface categories) and on **Go** (authz only, 1 of 4 — declared
+  in the response, never implied as parity, ADR 0065); the database dimension audits **any**
+  language that declares a schema.
 - Security: deterministic rules + surface mapping (IDOR, authz, over-fetching, N+1).
 - Database: schema-only OLTP rules across Prisma and SQL-DDL (PostgreSQL, MySQL, T-SQL),
   the DW-0xx analytic family, and the code×schema cross (`scan-all` only).
@@ -63,6 +72,35 @@ dimension runs, naming both missing inputs. `by_dimension.security` is honestly
 
 **What does not exist:** the review, tests, complexity and practices sensors. Phase 3 is
 started, not half-done — see P2.
+
+### First use on a project that is not codefit (2026-08-18)
+
+`v0.2.9` was run against a real Next.js 16 App Router + Prisma project (375 TypeScript
+files, 41 models). It is the first time the tool was pointed at a codebase it was built
+for rather than at itself, and four facts came out of it that no amount of reading the
+code would have produced:
+
+```
+176 endpoints · 388 surface items · 323 certain concerns · 69 db surface items
+  0 endpoints resolved clean
+ 88 of 176 endpoints withheld — the response did not fit its budget
+score.global: 100
+```
+
+1. **Zero clean out of 176.** codefit recognized none of that project's authorization
+   helpers and never said so, so every endpoint read as equally unverified. Closed by
+   issue #155 (`recognized_authz_helpers`, merged).
+2. **88 withheld on the first real project.** P0-4's remaining half is not a synthetic
+   concern — issue #154 carries the field numbers.
+3. **`score.global: 100`** beside 323 open questions. See the H4 finding in P2: the score
+   is not miscalculated, it is calculated before the agent has answered.
+4. **The tool found the surface and could not rank it.** The three genuinely serious items
+   sat among 176 that looked identical; separating them took agent reasoning, not the
+   scan. That is the design working — codefit maps, the agent reasons — but it also means
+   the volume codefit returns today is not yet actionable at one-agent scale.
+
+Per the dogfood rule in `CLAUDE.md`, the project is named and the counts are published;
+nothing here locates a finding, names a function, a model or a file of that project.
 
 ---
 
@@ -150,7 +188,7 @@ tell a legitimately empty file from one mid-write), so none is attempted. No beh
 changed: this closes as a declared limit narrowed to what is true, not as a code fix. See ADR
 0053's superseding note for the full record.
 
-### P0-4 — CLOSED, in part (`response-budget-calibrated`) — the response budget is now measured by bisection, not chosen; the structural cap is the remaining half
+### P0-4 — CLOSED, in part (`response-budget-calibrated`) — remaining half: [issue #154](https://github.com/codefit-cli/codefit/issues/154) — the response budget is now measured by bisection, not chosen; the structural cap is the remaining half
 
 `ResponseBudgetBytes` was 60 000, **chosen, not measured** — 312 692 bytes rejected, 40 282
 accepted, and nothing measured between them.
@@ -517,7 +555,7 @@ See [ADR 0072](decisions/0072-a-configured-schema-path-always-leaves-a-trace.md)
    ordering rule would have to pick an order silently — the same trap one level down that the
    golang-migrate naming already sets. Declared at the resolver. Open.
 
-### P0-12 — the SQL dialect is never measured, and nothing sniffs it
+### P0-12 — the SQL dialect is never measured, and nothing sniffs it — [issue #153](https://github.com/codefit-cli/codefit/issues/153)
 
 `sqlDialectParser("")` binds the **PostgreSQL** parser when `database.type` is absent. Nothing
 measures which dialect the DDL actually is, and nothing ever has — this entry exists because a
@@ -888,7 +926,7 @@ tried, removing only the first `N+1` mention, did **not** fail, because the same
 recurs later in the same bullet's unrelated prose about item ordering — a disclosed,
 narrow false-negative surface specific to this wider block, not fixed here).
 
-### P1-7 — `codefit-surface-*` does not apply project-registered authz helpers, for every language (declared decision, not an accident — closed for agent-visibility)
+### P1-7 — CLOSED (`the-surface-tools-declare-the-helpers-they-do-not-see`) — `codefit-surface-*` does not apply project-registered authz helpers, for every language (declared decision, not an accident — closed for agent-visibility)
 
 `internal/mcp/surface.go:200`'s `providerFor` resolves the language provider for the
 `codefit-surface-*` family (`codefit-surface-authz`, `codefit-surface-idor`, etc.) with
@@ -945,11 +983,53 @@ an actionable review on a real PlantaLinda PR.
 | **H1** | the practices dimension | 🔨 2 of 6 slices — see `docs/specs/practices-dimension.md` |
 | **H2** | tests quality + regression risk | ⬜ not started (H0 unblocked it) |
 | **H3** | code review — **the phase's close criterion** | ⬜ not started |
-| **H4** | the closing protocol | ⬜ not started |
+| **H4** | the closing protocol — **the cycle does not close today** | ⬜ not started |
 
 H1's remaining slices: the sensor + `codefit-check-practices` (S3), the **TypeScript** rules
 that make it a product (S4), the per-rule severity config (S5), and the mandatory close —
 wiring it into `scan-all` (DoD, per ADR 0016).
+
+### H4 — measured 2026-08-18, and it outranks its position in this table
+
+The closing protocol is listed last and is not last in importance. Measured against `main`:
+
+- `codefit-confirm-surface` takes the agent's verdicts, validates them, returns
+  probabilistic findings — and **persists nothing**. Its request carries no `root`, so it
+  could not write a baseline even if it wanted to.
+- `scoring.Compute` is called in **exactly one place**, inside the scan, before the agent
+  has said anything.
+- The baseline stores `fp / category / file / snippet / acknowledged`. There is **no field
+  for what an agent concluded**, and `by:` is documented three times as *"always human:
+  codefit never acknowledges on its own"*.
+
+So the agent reasons, answers, and the answer dies in the conversation. The next audit
+reasons the same items again. The PRD promises the opposite in §7:
+
+> *"Así el razonamiento del agente queda registrado para baseline, **score** y
+> trazabilidad — **no solo en la conversación**."*
+
+And [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md) already decided
+the dependency — *"surface scores only after confirm-surface"* — twenty-one ADRs ago. The
+decision exists; the mechanism does not.
+
+**This reframes the score complaint (issue #2).** `score.global: 100` beside 323 open
+questions is not a scoring defect: the score is emitted at a point in the protocol where
+the only thing it can count is deterministic affirmations, and the path for the agent's
+answer to reach it is H4. Fixing the number without H4 is treating a symptom.
+
+**Design constraints already established, so H4 does not start from zero:**
+
+- **Staleness is already solved.** The baseline's identity is
+  `sha256(category + file + normalized content)` (ADR 0009), so a verdict stops applying
+  the moment the code changes, and a reformat does not churn it.
+- **The asymmetry that decides the design is written down**, in
+  `docs/specs/audit-protocol.md`'s I3: over-reporting is noise, harmless; under-reporting
+  is *"a false all-clear; unforgivable"*. Persisting a verdict raises the stakes on
+  validating it — today `confirm-surface` checks only that the agent's id is internally
+  consistent with the triple it sent, never that the item exists.
+- **Persistence belongs to the `baseline-*` family**, not to `confirm-surface`
+  ([ADR 0013](decisions/0013-custom-authz-helper-registry.md) settled exactly this
+  question for authz helpers, and leaned on confirm-surface being stateless to do it).
 
 Version line: Phase 3 targets `0.3.0`; work toward it tags `v0.3.0-alpha.N` (see
 `VERSIONING.md`).
