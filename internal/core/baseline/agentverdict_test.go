@@ -56,6 +56,20 @@ func TestRecordVerdict_AppendsToExistingItem(t *testing.T) {
 	if len(b.Items[0].AgentVerdicts) != 1 {
 		t.Fatalf("want 1 verdict on the existing item, got %d", len(b.Items[0].AgentVerdicts))
 	}
+	// The comment above promised this and the body did not check it. D1 is the
+	// autonomy principle in one behaviour, and the APPEND path is the common one
+	// (the item already exists from a prior scan), so it needs the assertion more
+	// than the create path does, not less.
+	if b.Items[0].Ack != nil {
+		t.Errorf("appending a verdict must never touch Ack, got %+v", b.Items[0].Ack)
+	}
+	// The dangerous direction (D4): a not_vulnerable verdict REMOVES alarm, so it
+	// is the one that must never silence on its own. Recorded on an EXISTING item,
+	// which is where a real re-scan puts it.
+	b.RecordVerdict("fp1", "idor", "app/x/route.ts", "GET /x", notVulnerable("agent says the guard is upstream"))
+	if b.Items[0].Ack != nil {
+		t.Errorf("a not_vulnerable verdict must never silence: only a human acknowledges, got %+v", b.Items[0].Ack)
+	}
 }
 
 // A single verdict never conflicts.
