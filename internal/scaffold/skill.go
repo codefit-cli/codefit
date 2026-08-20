@@ -238,6 +238,23 @@ manages it and reports a delta — act on what's new:
 Narrate every baseline operation to the human (what you accepted or pruned, and why).
 codefit never edits code — only its baseline.
 
+## Closing the loop (persist what you reasoned)
+After you reason about a surface item (from ` + "`codefit-scan-*`" + ` or ` + "`codefit-surface-*`" + `) and
+reach a verdict, call ` + "`codefit-baseline-record-verdict`" + ` (` + "`{root, language, verdicts:[{surface_id, category, file, line, verdict, reasoning, confidence, severity?}]}`" + `)
+so the answer accumulates across audits instead of dying in this conversation. It
+re-validates each verdict against a FRESH re-analysis first: a verdict whose item no
+longer exists there is REFUSED and named in the response, never silently dropped.
+- **Recording a verdict never silences the item — only a human can, via
+  ` + "`codefit-baseline-accept`" + `.** ` + "`vulnerable`" + ` may be recorded freely: it only adds alarm, the
+  safe direction. ` + "`not_vulnerable`" + ` does NOT remove the item from view — it stays
+  actionable on every scan until a human accepts it, exactly like any other item.
+- Two agents disagreeing on the same item is not an error: BOTH verdicts are kept, and
+  the item is flagged in conflict for a human to look at. Never treat a later verdict as
+  overriding an earlier one.
+- ` + "`reasoning`" + ` is prose ABOUT the item, committed to a shared file. NEVER quote the
+  source line, a secret, or another project's schema identifier in it — cite the FORM
+  of the issue, never the identifier.
+
 ## Custom authz helpers (teach codefit your project's auth)
 Read ` + "`security.recognized_authz_helpers`" + ` / ` + "`recognized_authz_helpers_note`" + ` (in
 ` + "`codefit-scan-all`" + `'s response) directly for what codefit ALREADY recognizes for this

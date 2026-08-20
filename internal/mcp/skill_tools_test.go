@@ -24,7 +24,7 @@ var deliberatelyNotInSkill = map[string]string{
 	"codefit-surface-authz":     "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
 	"codefit-surface-nplus1":    "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
 	"codefit-surface-overfetch": "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
-	"codefit-confirm-surface":   "the agent-verdict closing protocol is Phase 3; the skill teaches it when it lands",
+	"codefit-confirm-surface":   "low-level, root-less, non-persisting entry point (stateless, no project identity) — the skill drives codefit-baseline-record-verdict, which persists across audits, instead",
 }
 
 // registeredTools returns the tool names the MCP server actually exposes, read
