@@ -11,6 +11,11 @@
 //     it is shown on every scan until a human accepts it explicitly with a reason.
 //     Silencing an affirmation is graver than silencing a question, so it needs the
 //     stronger safeguard.
+//   - AGENT VERDICT (an agent's reasoning about an item, confidence < 1.0) is
+//     RECORDED but NEVER silences on its own (D1, ADR 0081): it persists in
+//     Item.AgentVerdicts, always by:"agent", and the item keeps appearing on
+//     every scan exactly as if no verdict had been recorded, until a human
+//     accepts it through the same Accept path as any other item.
 //
 // codefit never edits code — only this file.
 package baseline
@@ -19,32 +24,84 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scope"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 )
 
 // Name is the baseline file, committed at the repo root.
 const Name = ".codefit-baseline"
 
+// Actor is who recorded an entry in this file. Exactly two values, and the
+// asymmetry between them IS the safeguard (D4, ADR 0081): a human's record is a
+// DECISION and can silence an item (Ack, AuthzHelper); an agent's is a
+// RECOMMENDATION (AgentVerdict) and never can.
+type Actor string
+
+const (
+	ActorHuman Actor = "human" // Ack, AuthzHelper — silences
+	ActorAgent Actor = "agent" // AgentVerdict only — never silences
+)
+
 // Ack records that a human accepted an item (false positive or accepted debt).
 type Ack struct {
 	Reason string `yaml:"reason"`
 	At     string `yaml:"at"`
-	By     string `yaml:"by"` // always "human": codefit never acknowledges on its own
+	By     Actor  `yaml:"by"` // always "human": codefit never acknowledges on its own
+}
+
+// AgentVerdict is what an AGENT concluded after reasoning over this item's
+// surface (codefit-baseline-record-verdict). Recording one NEVER silences the
+// item (D1) and NEVER overwrites a previous verdict on the same fp — conflicting
+// verdicts are both kept for a human to resolve (D2, see Item.InConflict). By is
+// always ActorAgent, stamped by RecordVerdict itself, never caller-supplied — a
+// claim scoped to THIS type; the human-only claims on Ack.By and AuthzHelper.By
+// are unchanged and still true.
+type AgentVerdict struct {
+	Verdict    surface.Verdict   `yaml:"verdict"`
+	Reasoning  string            `yaml:"reasoning"`
+	Confidence float64           `yaml:"confidence"`
+	Severity   findings.Severity `yaml:"severity,omitempty"`
+	At         string            `yaml:"at"`
+	By         Actor             `yaml:"by"`
 }
 
 // Item is one tracked surface item or deterministic finding. Snippet is a
 // human-readable display only; it is never the matched secret (the identity is the
 // content-hashed FP). Ack is non-nil only when the item was accepted.
+// AgentVerdicts is the append-only history of what an agent concluded about this
+// item across audit passes — never trimmed except by ADR 0009's identity reset
+// (a code edit changes FP, which starts a new item with an empty history).
 type Item struct {
-	FP       string `yaml:"fp"`
-	Category string `yaml:"category"`
-	File     string `yaml:"file"`
-	Snippet  string `yaml:"snippet,omitempty"`
-	Ack      *Ack   `yaml:"acknowledged,omitempty"`
+	FP            string         `yaml:"fp"`
+	Category      string         `yaml:"category"`
+	File          string         `yaml:"file"`
+	Snippet       string         `yaml:"snippet,omitempty"`
+	AgentVerdicts []AgentVerdict `yaml:"agent_verdicts,omitempty"`
+	Ack           *Ack           `yaml:"acknowledged,omitempty"`
+}
+
+// InConflict reports whether this item's agent verdicts disagree: at least one
+// "vulnerable" AND at least one "not_vulnerable" (an "uncertain" verdict
+// participates in neither direction). Derived, never stored — every reader
+// applies its own current rule to the raw facts rather than trusting a flag a
+// different binary version may have written (D2).
+func (it Item) InConflict() bool {
+	var vuln, notVuln bool
+	for _, v := range it.AgentVerdicts {
+		switch v.Verdict {
+		case surface.VerdictVulnerable:
+			vuln = true
+		case surface.VerdictNotVulnerable:
+			notVuln = true
+		}
+	}
+	return vuln && notVuln
 }
 
 // AuthzHelper is a project-specific authorization helper the AGENT identified by
@@ -59,7 +116,7 @@ type AuthzHelper struct {
 	Language string `yaml:"language"`
 	Reason   string `yaml:"reason"`
 	At       string `yaml:"at"`
-	By       string `yaml:"by"` // always "human": codefit never registers on its own
+	By       Actor  `yaml:"by"` // always "human": codefit never registers on its own
 }
 
 // Baseline is the committed set of known items plus the project's registered authz
@@ -68,6 +125,60 @@ type Baseline struct {
 	Version      string        `yaml:"version"`
 	Items        []Item        `yaml:"items"`
 	AuthzHelpers []AuthzHelper `yaml:"authz_helpers,omitempty"`
+
+	// unknown holds top-level YAML keys this binary does not recognize (D6-B,
+	// ADR 0081): preserved verbatim across Load->Save and Load->Diff->Save (see
+	// Diff, which builds Next from scratch and must carry this forward
+	// explicitly), so an OLDER codefit binary reading a NEWER baseline does not
+	// silently delete a field it does not know about yet. It protects the NEXT
+	// format addition; it does NOT protect the CURRENT one — v0.2.6-v0.2.9 are
+	// already distributed without this guard (D6-A, accepted and declared).
+	unknown map[string]yaml.Node `yaml:"-"`
+}
+
+// UnmarshalYAML decodes the known Baseline fields normally, then captures any
+// top-level key this binary does not recognize (D6-B) so Save can re-emit it
+// unchanged.
+func (b *Baseline) UnmarshalYAML(value *yaml.Node) error {
+	type plain Baseline
+	var p plain
+	if err := value.Decode(&p); err != nil {
+		return err
+	}
+	*b = Baseline(p)
+
+	var raw map[string]yaml.Node
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	for _, known := range []string{"version", "items", "authz_helpers"} {
+		delete(raw, known)
+	}
+	if len(raw) > 0 {
+		b.unknown = raw
+	}
+	return nil
+}
+
+// MarshalYAML encodes the known Baseline fields normally, then re-emits any
+// unknown top-level key this binary preserved from Load (D6-B), sorted for
+// deterministic output.
+func (b Baseline) MarshalYAML() (interface{}, error) {
+	type plain Baseline
+	node := &yaml.Node{}
+	if err := node.Encode(plain(b)); err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(b.unknown))
+	for k := range b.unknown {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := b.unknown[k]
+		node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: k}, &v)
+	}
+	return node, nil
 }
 
 // Observed is one item seen in the current scan. Affirms is true for a
@@ -135,7 +246,12 @@ func (b *Baseline) Save(path string) error {
 	}
 	header := "# .codefit-baseline — codefit's view of the audited surface.\n" +
 		"# Committed (shared knowledge, like .codefit.yaml). Managed by codefit's MCP\n" +
-		"# tools (scan-all / baseline-accept / baseline-prune), not edited by hand.\n"
+		"# tools (scan-all / baseline-accept / baseline-prune / baseline-record-verdict),\n" +
+		"# not edited by hand. WARNING (ADR 0081): an older codefit binary does not know\n" +
+		"# about agent_verdicts (or any field newer than its own version) and silently\n" +
+		"# drops it if it re-saves this file — a recoverable, visible-in-review loss via\n" +
+		"# `git diff`/`git revert`, not a silent one, but real across mixed binary\n" +
+		"# versions on the same repo.\n"
 	// Atomic replace: write to a temp file in the same dir, then rename. Avoids a
 	// torn file on crash and a last-writer-wins read-modify-write race between
 	// concurrent scan-all/accept/prune calls.
@@ -201,8 +317,11 @@ func Diff(prev *Baseline, observed []Observed, scanned map[string]bool, files sc
 	}
 
 	// Next carries forward the registered authz helpers: they are project knowledge,
-	// not per-scan observations, so a scan must never drop them.
-	res := DiffResult{State: map[string]State{}, Shown: map[string]bool{}, Next: &Baseline{Version: "1", AuthzHelpers: prev.AuthzHelpers}}
+	// not per-scan observations, so a scan must never drop them. It also carries
+	// forward any unrecognized top-level field (D6-B) — Next is built FROM SCRATCH
+	// here, so without this explicit carry the catch-all in Load/Save alone is not
+	// enough: a Load->Diff->Save round trip would still lose it.
+	res := DiffResult{State: map[string]State{}, Shown: map[string]bool{}, Next: &Baseline{Version: "1", AuthzHelpers: prev.AuthzHelpers, unknown: prev.unknown}}
 
 	// Partition the previous items: out-of-scope items (their sensor did not run)
 	// are carried forward verbatim and take no part in the delta. In-scope items
@@ -327,6 +446,43 @@ func (b *Baseline) Accept(fps []string, reason, at string) (accepted []string, e
 		accepted = append(accepted, fp)
 	}
 	return accepted, nil
+}
+
+// maxVerdictReasonLen bounds an AgentVerdict's Reasoning at STORAGE time,
+// distinct from maxReasonLen (200 runes, LIST-time only and thus not a bound on
+// disk/git growth — see the scaling discussion in ADR 0081). 500 runes is
+// generous enough for a real rationale while keeping a large, reasoned baseline
+// from growing unbounded per verdict.
+const maxVerdictReasonLen = 500
+
+func truncateVerdictReasoning(s string) string {
+	r := []rune(s)
+	if len(r) <= maxVerdictReasonLen {
+		return s
+	}
+	return string(r[:maxVerdictReasonLen]) + "…"
+}
+
+// RecordVerdict appends an agent's reasoning about one item to the baseline,
+// creating the item (fp/category/file/snippet) if this is its first record.
+// It NEVER sets Ack (D1: an agent verdict never silences the item) and NEVER
+// overwrites a previous verdict on the same fp — conflicting verdicts are both
+// kept for a human to resolve (D2, Item.InConflict). By is stamped ActorAgent
+// here, unconditionally, regardless of what the caller passed in v.By — the
+// same handler-assigned discipline Accept and RegisterAuthzHelper already
+// apply to their own by:"human". Reasoning is capped at maxVerdictReasonLen
+// runes, here in core, so every caller is bounded.
+func (b *Baseline) RecordVerdict(fp, category, file, snippet string, v AgentVerdict) *Item {
+	v.By = ActorAgent
+	v.Reasoning = truncateVerdictReasoning(v.Reasoning)
+	for i := range b.Items {
+		if b.Items[i].FP == fp {
+			b.Items[i].AgentVerdicts = append(b.Items[i].AgentVerdicts, v)
+			return &b.Items[i]
+		}
+	}
+	b.Items = append(b.Items, Item{FP: fp, Category: category, File: file, Snippet: snippet, AgentVerdicts: []AgentVerdict{v}})
+	return &b.Items[len(b.Items)-1]
 }
 
 // Entry is a read-only projection of a baseline item for codefit-baseline-list:
