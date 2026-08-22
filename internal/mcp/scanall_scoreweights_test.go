@@ -199,6 +199,12 @@ func TestScanAll_ScoreWeights_Absent_ByteIdenticalToPreChange(t *testing.T) {
 	// index in this change — a declared shape change, not a regression. The
 	// golden's own db.surface item is handed to the same stronger, id-matched
 	// control below rather than a byte comparison.
+	// The baseline delta's H4 slice 2 keys (R4/R5) are stripped for a FOURTH
+	// reason, distinct from the three above: they are a declared shape ADDITION,
+	// the golden predates them, and nothing pre-existing moved. They are removed
+	// key by key (agentReasoningKeys), never by stripping "baseline" wholesale —
+	// which would retire this golden's lock on eight fields it exists to protect.
+	live = stripAddedBaselineKeys(t, live)
 	gotStripped := stripKey(t, []byte(stripKey(t, []byte(stripKey(t, live, "security")), "summary")), "db")
 	wantStripped := stripKey(t, []byte(stripKey(t, []byte(stripKey(t, golden, "security")), "summary")), "db")
 	if gotStripped != wantStripped {

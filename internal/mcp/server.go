@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -49,7 +50,14 @@ func NewServer() *mcpsdk.Server {
 			"is always 0 (there is no ranking axis across db.surface's disjoint categories to withhold by; `db.withheld_note` says so). To read a NAMED item's full detail (the snippet and the actual "+
 			"reason_to_review question), call codefit-scan-db with `{root, language, detail: [ids]}` — scan-all's db bucket carries no detail of its own. "+
 			"`security.recognized_authz_helpers` and `security.recognized_authz_helpers_note` (present only when `security.measured` is true) are the same declaration as codefit-scan-security's, scoped under `security`:"+
-			recognizedAuthzHelpersDescNote,
+			recognizedAuthzHelpersDescNote+
+			" The `baseline` delta also reports what AGENTS have already reasoned, so you do not re-reason it: `baseline.reasoned_by_agent` is the complete number of items carrying a verdict "+
+			"(always present — 0 means codefit looked and found none, never that it did not look), `baseline.reasoned_items` names them (fingerprint/file/category/latest verdict/when/conflict) and "+
+			"`baseline.in_conflict` + `baseline.in_conflict_count` name the items whose verdicts DISAGREE — one agent said vulnerable, another said not_vulnerable — which only a HUMAN resolves. "+
+			"Read this before reasoning: a surface item you already answered goes `known` on the next scan and stops appearing in the endpoint buckets, so this delta is the only place the response "+
+			"tells you it was answered. Both lists are capped at "+strconv.Itoa(MaxRenderedReasoned)+" entries and `baseline.agent_reasoning_note` says whether you are holding a complete list or a "+
+			"prefix, plus how many were cut. No reasoning PROSE is carried here (it would not fit the byte budget) — call codefit-baseline-list for the text. Reporting a verdict never accepts it: only "+
+			"a human does, via codefit-baseline-accept.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",

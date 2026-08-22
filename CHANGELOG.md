@@ -15,6 +15,40 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **⚠️ `scan-all`'s baseline delta now reports what agents already reasoned** — a
+  response-shape change. Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)
+  (H4, slice 2 of 3, R4/R5). `baseline` gains `reasoned_by_agent` and
+  `in_conflict_count` (both ALWAYS present: 0 means codefit looked and found none,
+  never that it did not look), plus `reasoned_items`, `in_conflict`,
+  `reasoned_withheld`, `in_conflict_withheld` and `agent_reasoning_note` (all
+  omitted when empty, matching `gone_candidates` in the same block). Same kind of
+  additive key change as `by_dimension`'s sixth key; tolerant consumers are
+  unaffected.
+
+  **Why the read-back matters more than it looks.** A surface item an agent has
+  answered goes `known` on the next scan and stops appearing in the endpoint
+  buckets — the baseline's own safeguard, which predates agent verdicts and which
+  recording does not change in either direction. Without this delta the response
+  gave an agent no way to learn that anything had ever been reasoned, so the next
+  audit reasoned it again. This is the read half of the closing protocol; slice 1
+  was the write half.
+
+  `in_conflict` is a SEPARATE list, not a flag folded into the counts: one agent
+  saying `vulnerable` while another says `not_vulnerable` is a question for a
+  HUMAN, and averaging it into new/changed/known/acknowledged would bury exactly
+  the thing that needs attention. Nothing here accepts anything — only
+  `codefit-baseline-accept` does, and only a human runs it.
+
+  Both lists are capped at 20 entries by construction, and `agent_reasoning_note`
+  says whether you are holding a complete list or a prefix and how many were cut.
+  The cap is measured, not chosen: a worst-case rendered item is 170 bytes, so both
+  lists full cost 4,526 — 11.3% of the 40,000-byte budget. It is a build-time cap
+  rather than the usual budget step because `fitToBudget` can only withhold
+  endpoints from the three buckets and cannot see this block at all; an unbounded
+  list here would push a response over budget with nothing the budget step is able
+  to withhold. No reasoning PROSE is carried in the delta — `codefit-baseline-list`
+  entries now carry it instead, truncated by the existing list-time idiom.
+
 - **New tool `codefit-baseline-record-verdict` persists an agent's reasoning about a
   surface item across audits.** Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)
   (H4, slice 1 of 3): until now `codefit-confirm-surface` validated a verdict and
