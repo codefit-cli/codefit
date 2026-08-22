@@ -1,6 +1,16 @@
 name: security
 
 on:
+  # Gate every change. The weekly cron alone let a toolchain with FOUR called
+  # stdlib vulnerabilities sit on main until someone ran govulncheck by hand
+  # (issue #163): the job always failed correctly, but nothing ever waited for
+  # it. A check nobody blocks on is a report, not a gate.
+  pull_request:
+  push:
+    branches: [main]
+  # The cron stays, and it is not redundant: a vulnerability published upstream
+  # between two PRs affects a tree that has not changed, so nothing would
+  # re-check it.
   schedule:
     # Mondays at 06:00 UTC.
     - cron: "0 6 * * 1"
@@ -18,7 +28,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.12"
+          go-version: "1.25.13"
 
       - name: install govulncheck
         # Un-pinned: the generics panic that forced v1.1.4 came from
@@ -26,4 +36,9 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: run govulncheck
+        # No `continue-on-error`, deliberately. govulncheck exits 3 when a
+        # vulnerability is CALLED, so this fails the check — which is the point.
+        # The accepted cost: a CVE published upstream can redden a PR that
+        # changed nothing related to it. For a tool whose whole premise is
+        # auditing what a developer never sees, that is the correct default.
         run: govulncheck ./...
