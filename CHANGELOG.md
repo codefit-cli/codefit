@@ -14,6 +14,31 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- **Go toolchain `1.25.12` → `1.25.13`, closing FOUR standard-library
+  vulnerabilities codefit's own code CALLS** — `GO-2026-6218` (`net/url`,
+  quadratic `resolvePath`), `GO-2026-6090` (`crypto/tls`, unbounded
+  post-handshake messages), `GO-2026-5972` (`encoding/asn1`, unbounded
+  recursion) and `GO-2026-5026` (`net/http`, ASCII-only Punycode labels not
+  rejected). Reached through the OSV client, the MCP server's tool registration,
+  and both providers' parsers. Bumped in `go.mod` and all four workflow pins.
+- **`golang.org/x/sys` `v0.41.0` → `v0.44.0`**, closing `GO-2026-5024` (integer
+  overflow in `NewNTUnicodeString`, windows). Not called by codefit, but it
+  shipped inside the published `windows/amd64` binary.
+- **`govulncheck` now gates every change.** It already ran and already failed
+  correctly — but only on a weekly cron, so nothing ever waited for it, and a
+  toolchain with four called vulnerabilities sat on `main` until someone ran the
+  command by hand. `security.yml` now also triggers on `pull_request` and on
+  push to `main`. The cron stays: a vulnerability published upstream between two
+  PRs affects a tree that has not changed, and nothing else would re-check it.
+  Accepted cost, stated rather than discovered later: an upstream CVE can redden
+  a PR that changed nothing related to it.
+
+  Verified by measurement, not by bumping and assuming — `govulncheck ./...`
+  against the exact release toolchain reports `No vulnerabilities found`, and the
+  same binary against the old pin still reports the four, so the clean result is
+  not a broken run.
+
 ### Changed
 - **⚠️ BEHAVIOUR CHANGE — `score.global` can DROP on upgrade with no code change.**
   Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)
