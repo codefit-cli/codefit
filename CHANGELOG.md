@@ -14,6 +14,41 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- **⚠️ BEHAVIOUR CHANGE — `score.global` can DROP on upgrade with no code change.**
+  Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)
+  (H4, slice 3 of 3, R6/R7/D4) and closes the dependency
+  [ADR 0021](docs/decisions/0021-by-dimension-scoring-wired-into-scan-all.md) stated
+  and never mechanised: *"surface scores only after confirm-surface"*.
+
+  A persisted `vulnerable` agent verdict on an item a scan STILL observes is now
+  folded into scoring, through the same `surface.FindingFrom` a live confirmation
+  uses — so an agent's reasoning can never become a deterministic fact by taking a
+  different road into the score (confidence stays clamped below 1.0,
+  `probabilistic: true`). **Any repo that already carries such a verdict will see a
+  lower `score.global` on the first scan after upgrading, with nothing in the code
+  having changed.** That is the fix, not a side effect: it reframes
+  [#2](https://github.com/codefit-cli/codefit/issues/2), where `score.global: 100`
+  sat beside hundreds of open questions. The arithmetic was never wrong — the score
+  was computed at a point in the protocol where the only thing it could count was
+  what codefit affirms on its own. **Mitigation, if a drop is unwanted: a human
+  accepts the item with `codefit-baseline-accept`, same as any other item.**
+
+  What does NOT change: `not_vulnerable` counts for nothing — it never removes, and
+  never cancels a conflicting `vulnerable` on the same item, because an agent
+  recommending that something is fine must not be able to lower the alarm on its
+  own. `blocked` is untouched: `scoring.IsBlocked` stays reserved for deterministic
+  critical security affirmations, so an agent's probabilistic judgment can never
+  force a hard block (PRD §18). N agreeing verdicts on one item penalise once —
+  corroboration is not N defects.
+
+  A verdict codefit cannot score is DECLARED, never dropped: `baseline.verdicts_not_scored`
+  and its note name the dimension whose sensor did not run. This is reachable in
+  ordinary use — the security sensor owns the `nplus1` category, so a TypeScript
+  project with no configured `database.schema_paths` observes nplus1 surface while
+  the db dimension never runs. Folding such a finding in would make the score pass
+  over it in silence; claiming the dimension WAS measured would be worse.
+
 ### Added
 - **⚠️ `scan-all`'s baseline delta now reports what agents already reasoned** — a
   response-shape change. Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)

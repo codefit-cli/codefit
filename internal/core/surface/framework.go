@@ -116,6 +116,18 @@ func Integrate(confs []Confirmation) Integration {
 }
 
 // findingFrom builds the probabilistic finding for a confirmed-vulnerable item.
+// FindingFrom is the exported seam for turning an agent's Confirmation into a
+// finding. It is a one-line wrapper over findingFrom and MUST stay one: the
+// severity/title/dimension rules and clampConfidence's 1.0 -> 0.99 invariant live
+// there, and a second conversion path is exactly the fuente/espejo drift this
+// project's doctrine names as its recurring failure.
+//
+// scan-all's score fold (H4 slice 3) is the caller: a persisted verdict becomes
+// a finding through the SAME rules a live confirm-surface call would use, so an
+// agent's reasoning can never become a deterministic fact by taking a different
+// road into the score.
+func FindingFrom(c Confirmation) findings.Finding { return findingFrom(c) }
+
 func findingFrom(c Confirmation) findings.Finding {
 	return findings.Finding{
 		ID:            strings.ToUpper(c.Category),

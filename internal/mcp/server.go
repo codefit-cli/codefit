@@ -57,7 +57,12 @@ func NewServer() *mcpsdk.Server {
 			"Read this before reasoning: a surface item you already answered goes `known` on the next scan and stops appearing in the endpoint buckets, so this delta is the only place the response "+
 			"tells you it was answered. Both lists are capped at "+strconv.Itoa(MaxRenderedReasoned)+" entries and `baseline.agent_reasoning_note` says whether you are holding a complete list or a "+
 			"prefix, plus how many were cut. No reasoning PROSE is carried here (it would not fit the byte budget) — call codefit-baseline-list for the text. Reporting a verdict never accepts it: only "+
-			"a human does, via codefit-baseline-accept.",
+			"a human does, via codefit-baseline-accept. "+
+			"A persisted `vulnerable` verdict on an item this scan STILL observes now COUNTS toward the score, through the same rules a live confirmation would use — so recording one lowers "+
+			"score.global, and that is the point. `not_vulnerable` counts for nothing: it never removes and never cancels a conflicting `vulnerable` on the same item; only a human Ack silences. "+
+			"A verdict codefit could not score is DECLARED, never dropped: `baseline.verdicts_not_scored` and its note name the dimension whose sensor did not run on this pass (a category can belong "+
+			"to a dimension that did not run — nplus1 maps to db but is enumerated by the security sensor). `blocked` is NOT affected by any verdict: that gate stays reserved for deterministic "+
+			"critical security affirmations.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
 		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",
