@@ -497,6 +497,23 @@ type Entry struct {
 	State       State  `json:"state"` // known | acknowledged
 	Reason      string `json:"reason,omitempty"`
 	At          string `json:"at,omitempty"`
+	// AgentVerdicts is where the agent reasoning PROSE lives. scan-all's delta
+	// names reasoned items without it — 500 runes per verdict would eat the
+	// response budget — so this targeted read is the only place the text is
+	// reachable. Omitting it here would make the light delta a loss instead of a
+	// trade-off.
+	AgentVerdicts []EntryVerdict `json:"agent_verdicts,omitempty"`
+}
+
+// EntryVerdict is the list-time projection of one AgentVerdict. Reasoning is
+// truncated by the same maxReasonLen idiom Ack.Reason already uses here; the
+// FULL text always stays in the committed .codefit-baseline.
+type EntryVerdict struct {
+	Verdict    string  `json:"verdict"`
+	Reasoning  string  `json:"reasoning,omitempty"`
+	Confidence float64 `json:"confidence"`
+	At         string  `json:"at"`
+	By         string  `json:"by"`
 }
 
 // List returns the baseline items as Entries, filtered by state: "" (all),
@@ -521,6 +538,18 @@ func (b *Baseline) List(filter string) ([]Entry, error) {
 			e.State = StateAcked
 			e.Reason = truncateReason(it.Ack.Reason)
 			e.At = it.Ack.At
+		}
+		// The verdicts ride along in BOTH states on purpose. An acknowledged item
+		// still carries why an agent thought what it thought, and that is exactly
+		// what a human re-reading their own past acceptance needs.
+		for _, v := range it.AgentVerdicts {
+			e.AgentVerdicts = append(e.AgentVerdicts, EntryVerdict{
+				Verdict:    string(v.Verdict),
+				Reasoning:  truncateReason(v.Reasoning),
+				Confidence: v.Confidence,
+				At:         v.At,
+				By:         string(v.By),
+			})
 		}
 		out = append(out, e)
 	}

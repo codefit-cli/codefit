@@ -59,6 +59,47 @@ func stripKey(t *testing.T, raw []byte, key string) string {
 	return string(out)
 }
 
+// agentReasoningKeys are the keys H4 slice 2 (R4/R5) ADDED inside the baseline
+// delta. They are stripped from the golden comparisons below because the change
+// that introduced them is a DECLARED response-shape change, not drift.
+//
+// They are removed one by one rather than by stripping "baseline" wholesale, and
+// that distinction is the whole point: stripping the parent would silently
+// retire the lock on new/changed/known/acknowledged/gone/affirmations_shown/
+// gone_candidates/note — eight pre-existing fields this golden exists to
+// protect. Naming the four keeps every one of them compared byte-for-byte, and
+// makes the FIFTH added key fail loudly instead of slipping through.
+var agentReasoningKeys = []string{
+	"reasoned_by_agent", "reasoned_items", "reasoned_withheld",
+	"in_conflict", "in_conflict_count", "in_conflict_withheld",
+	"agent_reasoning_note",
+}
+
+// stripAddedBaselineKeys removes exactly agentReasoningKeys from the response's
+// baseline object, leaving every other byte — including every other baseline
+// field — intact.
+func stripAddedBaselineKeys(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	b, ok := m["baseline"].(map[string]any)
+	if !ok {
+		// A response with no baseline object is not this test's shape; leaving it
+		// untouched keeps the failure the comparison's, not the helper's.
+		return raw
+	}
+	for _, k := range agentReasoningKeys {
+		delete(b, k)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return out
+}
+
 // TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey is the modified
 // requirement's exact success criterion, made checkable rather than asserted:
 // "every pre-existing field value and the baseline delta identical", NOT
@@ -186,6 +227,7 @@ func TestScanAll_TypeScriptHappyPath_OnlyDiffIsAddedSecurityKey(t *testing.T) {
 			//     migration test to look for.
 			strip := func(t *testing.T, raw []byte) string {
 				t.Helper()
+				raw = stripAddedBaselineKeys(t, raw)
 				return stripKey(t, []byte(stripKey(t, []byte(stripKey(t, []byte(stripKey(t, raw, "security")), "budget")), "summary")), "db")
 			}
 			gotStripped := strip(t, live)

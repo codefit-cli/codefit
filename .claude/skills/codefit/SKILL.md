@@ -166,7 +166,7 @@ reach a verdict, call `codefit-baseline-record-verdict` (`{root, language, verdi
 so the answer accumulates across audits instead of dying in this conversation. It
 re-validates each verdict against a FRESH re-analysis first: a verdict whose item no
 longer exists there is REFUSED and named in the response, never silently dropped.
-- **Recording a verdict never silences the item — only a human can, via
+- **Recording a verdict never ACCEPTS the item — only a human does, via
   `codefit-baseline-accept`.** `vulnerable` may be recorded freely: it only adds alarm, the
   safe direction. `not_vulnerable` is a recommendation ON THE RECORD, never a
   dismissal: it creates no acknowledgement and moves the item's visibility in NEITHER
@@ -177,6 +177,15 @@ longer exists there is REFUSED and named in the response, never silently dropped
 - `reasoning` is prose ABOUT the item, committed to a shared file. NEVER quote the
   source line, a secret, or another project's schema identifier in it — cite the FORM
   of the issue, never the identifier.
+- **Read it back before you reason.** Every `codefit-scan-all` response carries
+  `baseline.reasoned_by_agent` and `baseline.reasoned_items` — what has
+  ALREADY been reasoned, and by which verdict. Check it first: an item you answered in a
+  previous audit goes `known` and stops showing up in the endpoint buckets, so
+  this block is the only place the response tells you it was answered. Reasoning it again
+  costs the human context for nothing.
+- `baseline.in_conflict` is for the HUMAN, not for you. Those items have opposing
+  verdicts from different passes. Surface them and say what each side concluded; never
+  pick a winner and never record a third verdict to break the tie.
 
 ## Custom authz helpers (teach codefit your project's auth)
 Read `security.recognized_authz_helpers` / `recognized_authz_helpers_note` (in

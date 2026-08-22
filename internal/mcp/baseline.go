@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,8 +26,73 @@ type BaselineDelta struct {
 	Gone              int        `json:"gone"`
 	AffirmationsShown int        `json:"affirmations_shown"`
 	GoneCandidates    []GoneItem `json:"gone_candidates,omitempty"`
-	Note              string     `json:"note"`
+
+	// ReasonedByAgent is the COMPLETE number of baseline items carrying at least
+	// one agent verdict (R4). ALWAYS present, deliberately NOT omitempty: 0 must
+	// read as "codefit looked and found none", never as "codefit did not look" —
+	// an absent key and a measured zero are different claims (the discipline ADR
+	// 0068 established for recognized_authz_helpers).
+	//
+	// This count is the reason the block exists. A reasoned SURFACE item is
+	// silenced on the next scan by the baseline's own safeguard — it goes known
+	// and stops appearing in the endpoint buckets — so without this delta an
+	// agent has no way to learn from the response that anything was ever
+	// reasoned. Recording still does not silence (D1): what silences is the
+	// pre-existing known-surface rule, which applied before any verdict existed.
+	ReasonedByAgent int `json:"reasoned_by_agent"`
+	// ReasonedItems is the rendered PREFIX of the reasoned items, conflicts first
+	// then most-recently reasoned. It is capped by construction — see
+	// maxRenderedReasoned — never by fitToBudget, which can only withhold
+	// endpoints from the three buckets and cannot see this list at all.
+	ReasonedItems []ReasonedItem `json:"reasoned_items,omitempty"`
+	// InConflict names the items whose verdicts DISAGREE (R5): at least one
+	// vulnerable and at least one not_vulnerable. It is a separate list, not a
+	// flag inside the counts, because a disagreement is a question for a HUMAN
+	// and must not be averaged into new/changed/known/acknowledged.
+	InConflict []ConflictItem `json:"in_conflict,omitempty"`
+	// InConflictCount is the COMPLETE conflict count, ALWAYS present for the same
+	// reason as ReasonedByAgent: a measured zero is a claim worth making.
+	InConflictCount int `json:"in_conflict_count"`
+	// ReasonedWithheld is how many of ReasonedByAgent are NOT printed in
+	// ReasonedItems, and InConflictWithheld the same for InConflict. Both are
+	// counted AT THE CUT, never derived from len() of the rendered list — reading
+	// a display fact back off the rendered output is the self-referential trap
+	// DBSection.Count already records.
+	//
+	// Unlike the two counts above these ARE omitempty, and the asymmetry is
+	// deliberate. A zero count is a measurement ("codefit looked, nothing is
+	// reasoned"); a zero withheld on an empty list measures nothing — it would be
+	// a key on every response of every project that has never recorded a verdict,
+	// which is the "zeros that read like measurements" defect issue #151 already
+	// files against scan-db. When a list IS present and complete,
+	// AgentReasoningNote says so in words, so nothing is lost by the omission.
+	ReasonedWithheld   int `json:"reasoned_withheld,omitempty"`
+	InConflictWithheld int `json:"in_conflict_withheld,omitempty"`
+	// AgentReasoningNote states WHY something was withheld, in this block's own
+	// words. Deliberately not reused from dbWithheldNote (a stated absence of any
+	// ranking axis) nor from the endpoint buckets (a bisected byte budget): here
+	// the cause is a FIXED build-time cap, chosen because this block sits outside
+	// fitToBudget's reach and an unbounded list here could push a response over
+	// budget with nothing the budget step is able to withhold.
+	AgentReasoningNote string `json:"agent_reasoning_note,omitempty"`
+
+	Note string `json:"note"`
 }
+
+// MaxRenderedReasoned caps how many reasoned items and how many conflicts the
+// delta PRINTS. The counts beside them are never capped.
+//
+// The number is measured, not chosen. json.Marshal on a worst-case ReasonedItem
+// (a real Next.js App Router path, conflict set) is 170 B; a ConflictItem is
+// 109 B. At this cap both lists rendered full cost 4,526 B — 11.3% of the 40,000
+// -byte response budget (ADR 0062), leaving the endpoint buckets, which are the
+// reason the scan was run, their room.
+//
+// A cap is required rather than nice: fitToBudget can only withhold endpoints
+// from the three buckets and cannot see this block at all, so an unbounded list
+// here would push a response past its budget with NOTHING the budget step is
+// able to withhold — the failure mode P0-4's remaining half describes.
+const MaxRenderedReasoned = 20
 
 // GoneItem names a baseline item no longer present in the code — a prune candidate.
 type GoneItem struct {
@@ -34,6 +100,34 @@ type GoneItem struct {
 	Category    string `json:"category"`
 	File        string `json:"file"`
 	Snippet     string `json:"snippet,omitempty"`
+}
+
+// ReasonedItem names one baseline item an agent has reasoned about. It is
+// deliberately LIGHT — it carries no reasoning prose. The prose is what makes a
+// verdict useful to a human and also what makes it large (500 runes at storage
+// cap); putting it here would let one well-documented audit pass consume the
+// whole response budget. The full text is one codefit-baseline-list call away.
+type ReasonedItem struct {
+	Fingerprint string `json:"fingerprint"`
+	File        string `json:"file"`
+	Category    string `json:"category"`
+	// Verdict and At are the LATEST verdict on the item (last appended). Earlier
+	// verdicts are not shown here and are never discarded — they stay in the
+	// committed baseline, which is what Conflict is derived from.
+	Verdict string `json:"verdict"`
+	At      string `json:"at"`
+	// Conflict repeats Item.InConflict() so a reader scanning this list alone can
+	// see the disagreement without cross-referencing InConflict.
+	Conflict bool `json:"conflict,omitempty"`
+}
+
+// ConflictItem names an item whose agent verdicts disagree. Same light shape and
+// the same reason: a human needs to know WHICH items to look at, and gets the
+// reasoning from codefit-baseline-list once they have picked one.
+type ConflictItem struct {
+	Fingerprint string `json:"fingerprint"`
+	File        string `json:"file"`
+	Category    string `json:"category"`
 }
 
 // diffBaseline computes the UNIFIED baseline diff over the observed union (across
@@ -63,7 +157,106 @@ func diffBaseline(prev *baseline.Baseline, observed []baseline.Observed, scanned
 		GoneCandidates:    goneItems(diff.Gone),
 		Note:              baselineNote(diff.Counts),
 	}
+	applyAgentReasoning(&delta, diff.Next)
 	return diff, delta
+}
+
+// applyAgentReasoning fills the delta's R4/R5 block from the baseline being
+// persisted. It reads diff.Next rather than prev because Next is what the scan
+// will commit: an item whose fp CHANGED is a different item with an empty
+// verdict list (ADR 0009 identity), and reporting the old fp's reasoning against
+// new code would be the staleness the content hash exists to prevent.
+//
+// The two totals are counted over the SOURCE population and never read back off
+// the rendered lists — deriving a display fact from the display is the
+// self-referential trap DBSection.Count already records.
+func applyAgentReasoning(delta *BaselineDelta, next *baseline.Baseline) {
+	if next == nil {
+		return
+	}
+	type row struct {
+		item     ReasonedItem
+		conflict ConflictItem
+	}
+	var rows []row
+	for _, it := range next.Items {
+		if len(it.AgentVerdicts) == 0 {
+			continue
+		}
+		last := it.AgentVerdicts[len(it.AgentVerdicts)-1]
+		conflict := it.InConflict()
+		delta.ReasonedByAgent++
+		if conflict {
+			delta.InConflictCount++
+		}
+		rows = append(rows, row{
+			item: ReasonedItem{
+				Fingerprint: it.FP, File: it.File, Category: it.Category,
+				Verdict: string(last.Verdict), At: last.At, Conflict: conflict,
+			},
+			conflict: ConflictItem{Fingerprint: it.FP, File: it.File, Category: it.Category},
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+
+	// Rank: disagreements first (the only entries that need a HUMAN), then the
+	// most recently reasoned, then file and category. The last two keys exist so
+	// the rendered prefix is DETERMINISTIC across runs on the same baseline — a
+	// response that reshuffles between identical scans is worse than one that
+	// ranks imperfectly, because a reader cannot tell change from churn.
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i].item, rows[j].item
+		if a.Conflict != b.Conflict {
+			return a.Conflict
+		}
+		if a.At != b.At {
+			return a.At > b.At
+		}
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Category < b.Category
+	})
+
+	for _, r := range rows {
+		if len(delta.ReasonedItems) < MaxRenderedReasoned {
+			delta.ReasonedItems = append(delta.ReasonedItems, r.item)
+		} else {
+			delta.ReasonedWithheld++
+		}
+		if !r.item.Conflict {
+			continue
+		}
+		if len(delta.InConflict) < MaxRenderedReasoned {
+			delta.InConflict = append(delta.InConflict, r.conflict)
+		} else {
+			delta.InConflictWithheld++
+		}
+	}
+	delta.AgentReasoningNote = agentReasoningNote(delta)
+}
+
+// agentReasoningNote says whether the two lists are COMPLETE or cut, in this
+// block's own words. It is written even when nothing was withheld: an agent must
+// be able to tell a complete list from a cut one by reading the response, never
+// by guessing (ADR 0054) — the same reason BudgetBlock is always present.
+func agentReasoningNote(d *BaselineDelta) string {
+	base := fmt.Sprintf("%d baseline item(s) carry an agent verdict. IN CONFLICT: %d "+
+		"(one agent said vulnerable, another said not_vulnerable — only a human resolves that). "+
+		"Recording a verdict never accepts an item: these are still whatever the baseline already "+
+		"made them, and only "+string(ToolBaselineAccept)+" changes that.",
+		d.ReasonedByAgent, d.InConflictCount)
+	if d.ReasonedWithheld == 0 && d.InConflictWithheld == 0 {
+		return base + " Both lists above are COMPLETE. Reasoning prose is not carried here — it is one " +
+			string(ToolBaselineList) + " call away."
+	}
+	return base + fmt.Sprintf(" The lists above are a PREFIX: %d reasoned item(s) and %d conflict(s) are "+
+		"not printed. They were cut by a fixed cap of %d per list, not by the response byte budget — "+
+		"this block sits outside the step that withholds endpoints, so it bounds itself. The counts are "+
+		"complete; the full list and its reasoning prose are one "+string(ToolBaselineList)+" call away.",
+		d.ReasonedWithheld, d.InConflictWithheld, MaxRenderedReasoned)
 }
 
 // filterEndpointsByBaseline is security's presentation: keep the endpoints with a
