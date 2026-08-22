@@ -550,6 +550,7 @@ no debe confundir una stub con una tool usable.
 | `codefit-baseline-list` | Baseline | ✅ Fase 1 | Lista los items rastreados (fp, file, category, state; razón/fecha si acknowledged). `filter: known \| acknowledged`. Read-only |
 | `codefit-baseline-accept` | Baseline | ✅ Fase 1 | Registra la decisión humana de aceptar item(s) (falso positivo / deuda asumida) con razón obligatoria |
 | `codefit-baseline-prune` | Baseline | ✅ Fase 1 | Saca del baseline los items que un refactor resolvió (re-escanea para confirmar que están `gone`) |
+| `codefit-baseline-record-verdict` | Cierre | ✅ Fase 3 | Persiste el veredicto del agente en `items[].agent_verdicts` (`by: agent`). Re-valida contra un re-análisis fresco: un veredicto cuyo item ya no está se RECHAZA y se nombra. Nunca acepta el item — solo un humano, con `-accept`. Dos agentes en desacuerdo: se guardan LOS DOS y el item queda `in_conflict` (ADR 0081) |
 | `codefit-coverage` | Metadata | ✅ Fase 1 | Devuelve el manifiesto de cobertura para el lenguaje |
 | `codefit-scan-db` | Determinístico + Superficie | ✅ Fase 2 (`v0.2.0`) | Estructura de DB schema-only (OLTP): sin PK, FK sin índice, índices duplicados, columnas array, heurísticas por nombre. Los diferidos ya NO lo están: vistas (`v0.2.2`), procs/triggers (`v0.2.3`), N+1 (`v0.2.2`, como `codefit-surface-nplus1`) y OLAP (familia DW-0xx completa, en `main` sin taggear) están todos cerrados |
 | `codefit-check-cves` | Determinístico | ✅ Fase 1 (RF-09) | Consulta OSV.dev por las dependencias (versiones exactas de lockfile/go.mod) |
@@ -628,6 +629,8 @@ El baseline es un archivo commiteado (`.codefit-baseline`, raíz del repo — co
 ### Cómo el agente devuelve hallazgos de superficie (`codefit-confirm-surface`)
 
 Cuando el agente razona la superficie y confirma una vulnerabilidad real, la integra al reporte con **`codefit-confirm-surface`** (tool implementada): el item vulnerable pasa a un finding **probabilístico** (confidence < 1.0) anclado al item. Stateless: codefit recomputa el id para validar. Así el razonamiento del agente queda registrado para baseline, score y trazabilidad — no solo en la conversación.
+
+> **Nota de estado (2026-08-22).** La promesa de este párrafo — *baseline, score y trazabilidad* — la cumple **`codefit-baseline-record-verdict`**, no `confirm-surface`. `confirm-surface` es stateless por diseño (no recibe `root`, no puede escribir el baseline) y así se queda: la persistencia pertenece a la familia `baseline-*` (precedente del ADR 0013). El ciclo completo — persistir, reportar de vuelta en `scan-all`, y contar en el score — cerró en el ADR 0081 (H4, tres slices).
 
 ### Configuración en el cliente agente
 
