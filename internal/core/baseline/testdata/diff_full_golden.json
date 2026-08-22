@@ -15,6 +15,7 @@
       "Category": "authz",
       "File": "src/c.ts",
       "Snippet": "handler",
+      "AgentVerdicts": null,
       "Ack": null
     }
   ],
@@ -34,6 +35,7 @@
         "Category": "db-fk-no-index",
         "File": "prisma/schema.prisma",
         "Snippet": "userId",
+        "AgentVerdicts": null,
         "Ack": null
       },
       {
@@ -41,6 +43,7 @@
         "Category": "overfetch",
         "File": "src/a.ts",
         "Snippet": "select *",
+        "AgentVerdicts": null,
         "Ack": null
       },
       {
@@ -48,6 +51,7 @@
         "Category": "idor",
         "File": "src/b.ts",
         "Snippet": "findUnique",
+        "AgentVerdicts": null,
         "Ack": {
           "Reason": "owner check upstream",
           "At": "2026-01-02",
@@ -59,6 +63,7 @@
         "Category": "security",
         "File": "src/e.ts",
         "Snippet": "Possible hardcoded API key",
+        "AgentVerdicts": null,
         "Ack": null
       },
       {
@@ -66,6 +71,7 @@
         "Category": "overfetch",
         "File": "src/d.ts",
         "Snippet": "new snippet",
+        "AgentVerdicts": null,
         "Ack": null
       },
       {
@@ -73,6 +79,7 @@
         "Category": "authz",
         "File": "src/c.ts",
         "Snippet": "handler",
+        "AgentVerdicts": null,
         "Ack": null
       }
     ],

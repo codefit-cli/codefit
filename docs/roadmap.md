@@ -983,7 +983,7 @@ an actionable review on a real PlantaLinda PR.
 | **H1** | the practices dimension | 🔨 2 of 6 slices — see `docs/specs/practices-dimension.md` |
 | **H2** | tests quality + regression risk | ⬜ not started (H0 unblocked it) |
 | **H3** | code review — **the phase's close criterion** | ⬜ not started |
-| **H4** | the closing protocol — **the cycle does not close today** | ⬜ not started |
+| **H4** | the closing protocol — **the cycle does not close today** | 🔨 1 of 3 slices — see [ADR 0081](decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md) |
 
 H1's remaining slices: the sensor + `codefit-check-practices` (S3), the **TypeScript** rules
 that make it a product (S4), the per-rule severity config (S5), and the mandatory close —
@@ -1030,6 +1030,14 @@ answer to reach it is H4. Fixing the number without H4 is treating a symptom.
 - **Persistence belongs to the `baseline-*` family**, not to `confirm-surface`
   ([ADR 0013](decisions/0013-custom-authz-helper-registry.md) settled exactly this
   question for authz helpers, and leaned on confirm-surface being stateless to do it).
+
+**Slice 1 landed** ([ADR 0081](decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)):
+the baseline persists `items[].agent_verdicts` and the new `codefit-baseline-record-verdict`
+tool re-validates each verdict against a fresh re-analysis before recording it — never
+silencing the item (D1), never dropping a conflicting verdict (D2). Remaining: slice 2 wires
+the delta into `codefit-scan-all`'s response (R4/R5), slice 3 folds a still-observed
+`vulnerable` verdict into `scoring.Compute` (R6/R7) — the step that actually reframes the
+`score.global: 100` complaint above.
 
 Version line: Phase 3 targets `0.3.0`; work toward it tags `v0.3.0-alpha.N` (see
 `VERSIONING.md`).

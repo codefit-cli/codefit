@@ -150,3 +150,90 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 	t.Logf("WIRE DUPLICATION — the same %d-byte payload is carried twice: once as structured content and once as a text block, %d bytes on the wire in total",
 		len(structured), len(structured)+len(text.Text))
 }
+
+// TestServerProtocolEndToEnd_RecordVerdict is the runtime harness for H4 slice
+// 1: a real MCP client calls codefit-scan-security to get a REAL surface item
+// (never hand-built), then calls the new codefit-baseline-record-verdict tool
+// over the real protocol, and confirms the verdict round-tripped into the
+// committed baseline — proving the tool works end to end, not just through its
+// Go handler.
+func TestServerProtocolEndToEnd_RecordVerdict(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	root := t.TempDir()
+	mustWrite(t, root, "app/users/[id]/route.ts", `
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  return Response.json(await prisma.user.findUnique({ where: { id: params.id } }));
+}`)
+
+	serverT, clientT := mcpsdk.NewInMemoryTransports()
+	srv := mcp.NewServer()
+	go func() { _ = srv.Run(ctx, serverT) }()
+
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "codefit-itest", Version: "0"}, nil)
+	session, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect/handshake: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	scanRes, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "codefit-scan-security",
+		Arguments: map[string]any{"root": root, "language": "typescript"},
+	})
+	if err != nil || scanRes.IsError {
+		t.Fatalf("tools/call codefit-scan-security: err=%v isError=%v content=%+v", err, scanRes.IsError, scanRes.Content)
+	}
+	var scanOut mcp.ScanResponse
+	scanData, _ := json.Marshal(scanRes.StructuredContent)
+	if err := json.Unmarshal(scanData, &scanOut); err != nil {
+		t.Fatalf("decode structured scan-security result: %v (raw: %s)", err, scanData)
+	}
+	if len(scanOut.Surface) == 0 {
+		t.Fatal("fixture must produce at least one surface item for this test to anchor a verdict")
+	}
+	item := scanOut.Surface[0]
+
+	recRes, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "codefit-baseline-record-verdict",
+		Arguments: map[string]any{
+			"root": root, "language": "typescript",
+			"verdicts": []map[string]any{{
+				"surface_id": item.ID, "category": item.Category, "file": item.File, "line": item.Line,
+				"verdict": "vulnerable", "reasoning": "no ownership check before returning the record", "confidence": 0.8,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("tools/call codefit-baseline-record-verdict: %v", err)
+	}
+	if recRes.IsError {
+		t.Fatalf("codefit-baseline-record-verdict reported an error: %+v", recRes.Content)
+	}
+	var recOut mcp.BaselineRecordVerdictResponse
+	recData, _ := json.Marshal(recRes.StructuredContent)
+	if err := json.Unmarshal(recData, &recOut); err != nil {
+		t.Fatalf("decode structured record-verdict result: %v (raw: %s)", err, recData)
+	}
+	if len(recOut.Persisted) != 1 || len(recOut.Refused) != 0 {
+		t.Fatalf("want 1 persisted, 0 refused over the real protocol, got %+v", recOut)
+	}
+
+	b := loadBaseline(t, root)
+	found := false
+	for _, it := range b.Items {
+		if it.FP == recOut.Persisted[0].Fingerprint {
+			found = true
+			if len(it.AgentVerdicts) != 1 {
+				t.Errorf("want 1 verdict persisted to the committed baseline, got %d", len(it.AgentVerdicts))
+			}
+			if it.Ack != nil {
+				t.Errorf("D1 over the wire: recording a verdict must never silence the item, got Ack=%+v", it.Ack)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the verdict recorded over the real protocol did not round-trip into the committed .codefit-baseline")
+	}
+}

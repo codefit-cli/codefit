@@ -15,6 +15,31 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **New tool `codefit-baseline-record-verdict` persists an agent's reasoning about a
+  surface item across audits.** Affirms [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)
+  (H4, slice 1 of 3): until now `codefit-confirm-surface` validated a verdict and
+  returned a probabilistic finding, but persisted nothing — its request carries no
+  `root`, so the next audit reasoned the exact same items from zero. The new tool
+  re-validates each verdict against a FRESH re-analysis before persisting (a verdict
+  whose item no longer exists there is refused and named, never silently dropped;
+  reasons: `surface_id_mismatch`, `no_surface_item_at_anchor`, `unknown_verdict`,
+  `analysis_failed`), then appends it to `.codefit-baseline`'s new
+  `items[].agent_verdicts` field.
+
+  **Recording a verdict never ACCEPTS the item** — it creates no acknowledgement and
+  moves the item's visibility in neither direction; only a human accepts, via the
+  existing `codefit-baseline-accept`. Two agents disagreeing on the same item is not
+  an error: both verdicts are kept and the item can be checked for conflict. The
+  generated skill now teaches this tool and the safety discipline around it.
+
+  ⚠️ **Cross-version note**: an older codefit binary does not know about
+  `agent_verdicts` and silently drops it if it re-saves `.codefit-baseline` (ADR
+  0081, D6) — recoverable via `git diff`/`git revert` since the baseline is
+  committed, but real on repos shared across binary versions. `.codefit-baseline`'s
+  own header now carries this warning, and unrecognized top-level fields
+  round-trip through `Load`/`Save` unchanged so a FUTURE format addition does not
+  repeat this for binaries that already have this fix.
+
 - **`codefit-scan-all` and `codefit-scan-security` now declare which project-registered
   authz helpers codefit recognized for the language.** Affirms ADR
   [0013](docs/decisions/0013-custom-authz-helper-registry.md) (no new ADR): the registry

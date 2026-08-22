@@ -24,7 +24,7 @@ var deliberatelyNotInSkill = map[string]string{
 	"codefit-surface-authz":     "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
 	"codefit-surface-nplus1":    "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
 	"codefit-surface-overfetch": "low-level {files:[{path,content}]} entry point; the skill drives scan-all/scan-endpoint",
-	"codefit-confirm-surface":   "the agent-verdict closing protocol is Phase 3; the skill teaches it when it lands",
+	"codefit-confirm-surface":   "low-level, root-less, non-persisting entry point (stateless, no project identity) — the skill drives codefit-baseline-record-verdict, which persists across audits, instead",
 }
 
 // registeredTools returns the tool names the MCP server actually exposes, read
@@ -214,6 +214,56 @@ func TestSkillOmissionAllowlistHasNoGhosts(t *testing.T) {
 	for name := range deliberatelyNotInSkill {
 		if !registered[name] {
 			t.Errorf("deliberatelyNotInSkill names %q, which the server does not register — remove the stale entry", name)
+		}
+	}
+}
+
+// No agent-facing prose may promise that recording a verdict KEEPS an item
+// visible. Recording creates no acknowledgement — that is true and it is the
+// point — but the inference "therefore the item still appears on every scan"
+// is FALSE: that is the baseline's DETERMINISTIC rule, and a reasoned item is
+// SURFACE, which the baseline marks known and stops surfacing on its own
+// (package baseline's safeguard, predating agent verdicts).
+//
+// The claim was written once and copied to four places — the package doc, the
+// generated skill, this tool's description and its response note — because each
+// author read the neighbouring bullet instead of the one that applied. Three of
+// them are what an agent reads BEFORE it ever calls the tool, so a false
+// promise here is believed, not checked. The response note is measured against
+// a real scan-all cycle by
+// TestRecordVerdict_NoteClaimsNoMoreVisibilityThanTheNextScanDelivers; prose
+// cannot be measured, so it is locked here instead.
+func TestAgentFacingProseDoesNotPromiseVerdictsKeepItemsVisible(t *testing.T) {
+	forbidden := []string{
+		"actionable on every scan",
+		"appears on every scan",
+		"keeps appearing on every scan",
+		"remove the item from view",
+	}
+
+	skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{
+		"generated skill": string(skill),
+		"codefit-baseline-record-verdict description": toolDescription(t, "codefit-baseline-record-verdict"),
+	}
+
+	// Positive control: the probe must be able to find something, or a clean
+	// result would be indistinguishable from a broken search (CLAUDE.md).
+	for name, text := range sources {
+		if !strings.Contains(text, "codefit-baseline-accept") {
+			t.Fatalf("probe broken: %s does not even mention codefit-baseline-accept", name)
+		}
+	}
+
+	for name, text := range sources {
+		for _, claim := range forbidden {
+			if strings.Contains(text, claim) {
+				t.Errorf("%s promises %q. Recording a verdict does not control visibility — "+
+					"say it creates no acknowledgement, not that the item stays on screen.", name, claim)
+			}
 		}
 	}
 }
