@@ -102,6 +102,58 @@ score.global: 100
 Per the dogfood rule in `CLAUDE.md`, the project is named and the counts are published;
 nothing here locates a finding, names a function, a model or a file of that project.
 
+### Second field use, and the first one to run BEFORE a merge (2026-08-22)
+
+The H4 slice 1 branch was driven against two real projects before its PR was merged — the
+second of them, **bitacoras** (TypeScript/Next.js + Prisma and SQL migrations, 323 files),
+through the **compiled binary over MCP stdio**, not the Go handlers. That is the path an
+agent actually crosses: `tools/list`, the tool description, the wire, the note.
+
+```
+scan-all #1   actionable 22 · frontier 25 · baseline.new 152 · 108 surface items
+              security measured · db measured · score 98 (db 95, security 100)
+record        not_vulnerable -> persisted 1, refused 0
+scan-all #2   actionable 0 · known 152 · acknowledged 0
+```
+
+**It caught a defect that reading the code did not.** The tool's response note promised
+*"the item still appears on every scan until a human accepts it"* — and it does not: the
+baseline stops surfacing a known SURFACE item on its own. The claim was the DETERMINISTIC
+rule applied to a surface item. Its root was in `package baseline`'s doc comment, which
+contradicted its own SURFACE bullet three lines above, and from there the same sentence had
+been copied into the generated skill, the tool description and the response note — three
+surfaces an agent reads BEFORE it ever calls the tool, where a false promise is believed
+rather than checked. Fixed in the same PR (#158), with one control that MEASURES a real
+`scan-all` cycle and one that locks the prose.
+
+**Two method facts worth more than the bug:**
+
+1. **A response is an assertion.** This document's parent rule in `CLAUDE.md` — *"una
+   afirmación sobre ejecución exige ejecución"* — had never been pointed at what a response
+   *says about itself*. The first end-to-end probe measured "was anything silenced?" (no)
+   and stopped; it never asked whether the note's own claim held.
+2. **A too-narrow grep produced a false clean.** Searching the exact phrase found one file
+   and read as clean. Three more instances existed under different wording. This is the
+   `CLAUDE.md` rule about absence needing a positive probe, arriving from a direction that
+   rule had not named: not a broken search, a *narrow* one.
+
+**What the run confirmed rather than found:** a `not_vulnerable` verdict acknowledged
+nothing (0 acknowledged, both projects); two agents disagreeing kept BOTH verdicts and the
+item read as in conflict; every verdict was `by: agent`; and the refusal taxonomy is not a
+fiction — `surface_id_mismatch`, `unknown_verdict` and `no_surface_item_at_anchor` were each
+made to fire, the last by neutralising the code under an otherwise untouched anchor. The
+split is honest: `surface_id_mismatch` means the request contradicts itself,
+`no_surface_item_at_anchor` means the request is coherent and reality moved.
+
+One suspicion was raised and closed by measurement, not reasoning: the second scan reports
+`actionable: 0` beside `1 deterministic affirmation shown until accepted`. An affirmation
+counted but named nowhere would be under-reporting — the direction
+`docs/specs/audit-protocol.md`'s I3 calls unforgivable. It is named, in the DB dimension's
+own section rather than the endpoint buckets, per ADR 0020. `actionable` counts endpoints.
+
+The clone was temporary, under the scratchpad, prefix-guarded before any invocation, and
+removed. Same dogfood terms as above: named project, published counts, no located finding.
+
 ---
 
 ## P0 — codefit lies or breaks. Nothing ships before these.
