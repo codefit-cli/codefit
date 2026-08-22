@@ -132,8 +132,16 @@ func HandleBaselineRecordVerdict(req BaselineRecordVerdictRequest) (BaselineReco
 	return BaselineRecordVerdictResponse{
 		Persisted: persisted,
 		Refused:   refused,
-		Note: fmt.Sprintf("%d verdict(s) recorded, %d refused. Recording does not silence — the item still "+
-			"appears on every scan until a human accepts it via codefit-baseline-accept.", len(persisted), len(refused)),
+		// The note states ONLY what recording controls. It does NOT promise the
+		// item will surface again: the baseline decides that, and it stops
+		// surfacing known surface on its own — a rule that predates agent
+		// verdicts and that recording does not touch in either direction.
+		// Locked by TestRecordVerdict_NoteClaimsNoMoreVisibilityThanTheNextScanDelivers,
+		// which measures a real scan-all cycle rather than matching a slogan.
+		Note: fmt.Sprintf("%d verdict(s) recorded, %d refused. Recording is NOT accepting: it creates no "+
+			"acknowledgement, so nothing here counts as a human decision — only codefit-baseline-accept "+
+			"does that, and only a human runs it. Recording does not change whether the item surfaces on "+
+			"the next scan; the baseline decides that exactly as it did before.", len(persisted), len(refused)),
 	}, nil
 }
 

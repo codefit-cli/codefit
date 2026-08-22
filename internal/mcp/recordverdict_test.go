@@ -1,8 +1,10 @@
 package mcp_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/baseline"
@@ -197,5 +199,70 @@ func TestRecordVerdict_WholeRunFailureReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("an unsupported language must error, never a silent empty persist")
+	}
+}
+
+// The note may not promise VISIBILITY that the very next scan does not deliver.
+//
+// Recording a verdict creates no acknowledgement — that is D1, and it is true.
+// What the note must NOT claim is that the item "still appears on every scan":
+// that is the baseline's DETERMINISTIC rule. A reasoned item is SURFACE, which
+// the baseline marks known on first sight and stops surfacing afterwards
+// (package baseline's own safeguard, predating agent verdicts). Recording
+// changes neither direction — it does not silence, and it does not keep alive.
+//
+// This control does not string-match a slogan: it MEASURES visibility across a
+// real scan-all cycle and fails if the note asserts more than the measurement
+// supports. The check is deliberately generous — ANY mention of the item's file
+// anywhere in the response counts as "appears" — so a failure is evidence, not
+// a technicality. Measured on a real project before this test existed: the
+// reasoned item's file was absent from the next scan while the note promised it
+// would be there.
+func TestRecordVerdict_NoteClaimsNoMoreVisibilityThanTheNextScanDelivers(t *testing.T) {
+	root := copyFixture(t)
+
+	// First scan writes the baseline: everything new, nothing silenced yet.
+	if _, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"}); err != nil {
+		t.Fatalf("first scan-all: %v", err)
+	}
+
+	item := realSurfaceItem(t, root)
+	resp, err := mcp.HandleBaselineRecordVerdict(mcp.BaselineRecordVerdictRequest{
+		Root: root, Language: "typescript",
+		Verdicts: []surface.Confirmation{{
+			SurfaceID: item.ID, Category: item.Category, File: item.File, Line: item.Line,
+			Verdict: surface.VerdictNotVulnerable, Reasoning: "ownership is enforced by the caller", Confidence: 0.8,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("record-verdict: %v", err)
+	}
+	if len(resp.Persisted) != 1 {
+		t.Fatalf("fixture must persist exactly one verdict, got %+v", resp)
+	}
+
+	after, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatalf("scan-all after recording: %v", err)
+	}
+	wire, err := json.Marshal(after)
+	if err != nil {
+		t.Fatalf("marshal scan-all: %v", err)
+	}
+	stillNamed := strings.Contains(string(wire), item.File)
+
+	if !stillNamed {
+		for _, claim := range []string{"appears on every scan", "still appears"} {
+			if strings.Contains(resp.Note, claim) {
+				t.Errorf("the note claims %q, but the very next scan-all never names %s. "+
+					"Recording a verdict does not control visibility — the baseline does, and it stops "+
+					"surfacing known surface. A response may not assert what its own next call contradicts.\nnote: %s",
+					claim, item.File, resp.Note)
+			}
+		}
+	}
+	// Whatever the wording, the human path stays named: recording is not accepting.
+	if !strings.Contains(resp.Note, "codefit-baseline-accept") {
+		t.Errorf("the note must keep naming the human acceptance path, got: %s", resp.Note)
 	}
 }

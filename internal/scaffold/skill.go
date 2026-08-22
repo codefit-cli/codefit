@@ -246,8 +246,9 @@ re-validates each verdict against a FRESH re-analysis first: a verdict whose ite
 longer exists there is REFUSED and named in the response, never silently dropped.
 - **Recording a verdict never silences the item — only a human can, via
   ` + "`codefit-baseline-accept`" + `.** ` + "`vulnerable`" + ` may be recorded freely: it only adds alarm, the
-  safe direction. ` + "`not_vulnerable`" + ` does NOT remove the item from view — it stays
-  actionable on every scan until a human accepts it, exactly like any other item.
+  safe direction. ` + "`not_vulnerable`" + ` is a recommendation ON THE RECORD, never a
+  dismissal: it creates no acknowledgement and moves the item's visibility in NEITHER
+  direction — the baseline decides that exactly as it did before you recorded anything.
 - Two agents disagreeing on the same item is not an error: BOTH verdicts are kept, and
   the item is flagged in conflict for a human to look at. Never treat a later verdict as
   overriding an earlier one.

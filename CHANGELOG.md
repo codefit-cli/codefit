@@ -26,7 +26,8 @@ All notable changes to codefit are documented here. The format is based on
   `analysis_failed`), then appends it to `.codefit-baseline`'s new
   `items[].agent_verdicts` field.
 
-  **Recording a verdict never silences the item** — only a human does, via the
+  **Recording a verdict never ACCEPTS the item** — it creates no acknowledgement and
+  moves the item's visibility in neither direction; only a human accepts, via the
   existing `codefit-baseline-accept`. Two agents disagreeing on the same item is not
   an error: both verdicts are kept and the item can be checked for conflict. The
   generated skill now teaches this tool and the safety discipline around it.

@@ -12,10 +12,12 @@
 //     Silencing an affirmation is graver than silencing a question, so it needs the
 //     stronger safeguard.
 //   - AGENT VERDICT (an agent's reasoning about an item, confidence < 1.0) is
-//     RECORDED but NEVER silences on its own (D1, ADR 0081): it persists in
-//     Item.AgentVerdicts, always by:"agent", and the item keeps appearing on
-//     every scan exactly as if no verdict had been recorded, until a human
-//     accepts it through the same Accept path as any other item.
+//     RECORDED but never ACCEPTS on its own (D1, ADR 0081): it persists in
+//     Item.AgentVerdicts, always by:"agent", and leaves the item's safeguard
+//     exactly where the two rules above already put it — a surface item still
+//     goes known, an affirmation still shows until accepted. Recording moves
+//     nothing in either direction; only a human accepts, through the same
+//     Accept path as any other item.
 //
 // codefit never edits code — only this file.
 package baseline
