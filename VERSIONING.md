@@ -62,6 +62,24 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
+- **Unreleased on `main`: H4, the closing protocol, is CLOSED — and it is Phase 3
+  capability.** Three merged slices (#158, #160, #161, all under
+  [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)):
+  the baseline persists an agent's verdicts, `scan-all` reports them back, and a
+  confirmed `vulnerable` verdict on a still-observed item now counts toward
+  `score.global`. Unlike everything in `v0.2.9`, this is **not `0.2`-line debt** — it is
+  a capability the PRD puts in Phase 3, so **the next tag is a `v0.3.0-alpha.N`**, per
+  the Pre-releases rule above.
+
+  It also carries a **behaviour change** a release note must repeat, not bury:
+  `score.global` can DROP on upgrade with no code change, in any repo already carrying
+  such a verdict. That is the fix — the score previously counted only what codefit
+  affirms on its own — and the mitigation is a human accept.
+
+  Phase 3 after H4: `H0` shipped in `v0.2.7`, `H4` is closed, `H1` (practices) is 2 of
+  6 slices, and `H2`/`H3` have not started. The phase's close criterion is still `H3`
+  (`codefit-review-code` on a real PR), so `0.3.0` itself does not close yet.
+
 - **`v0.2.9` — a PATCH: no phase closes here.** The `0.2` line again, and the honest
   reason is that nothing landed since `v0.2.8` is Phase 3 capability: `codefit-coverage`
   became an index that serves prose by id (ADRs 0076–0078), `SEC-001` stopped affirming a
@@ -69,10 +87,11 @@ stage" — it does **not** claim `0.1.0` is done.
   Block A — the duplicated wire measured and declared rather than removed (ADR 0079),
   `db.surface` turned into an index served by a different tool (ADR 0080), a control that
   fails when a measured dimension is missing from the summary, and the built-in-only helper
-  scope of `codefit-surface-authz`/`-idor` stated where an agent reads it. Phase 3 stays
-  open: `H0` shipped in `v0.2.7`, `H1` (practices) is 2 of 6 slices, and `H2`/`H3`/`H4`
-  have not started — so the next MINOR is still `0.3.0`, and builds toward it will carry
-  `-alpha.N` as the Pre-releases rule requires.
+  scope of `codefit-surface-authz`/`-idor` stated where an agent reads it. Phase 3 stayed
+  open at that tag: `H0` shipped in `v0.2.7`, `H1` (practices) was 2 of 6 slices, and
+  `H2`/`H3`/`H4` had not started — so the next MINOR was still `0.3.0`, and builds toward
+  it carry `-alpha.N` as the Pre-releases rule requires. *(H4 closed after this tag — see
+  the bullet above; this one describes `v0.2.9` and is left as it was.)*
 
   **Recorded because it is the point of the tag, not a footnote:** this release closes a
   **132-commit, 8-day gap** in which real improvements sat unpublished while the installed

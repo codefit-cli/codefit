@@ -54,7 +54,9 @@ flowchart LR
   AGENT -->|"buckets + project context"| DEV
   CF <-.->|reads/writes| BL
   DEV -.->|"fix code → re-audit"| AGENT
-  AGENT -.->|accept / prune| BL
+  AGENT -.->|"record verdict (by: agent — never accepts)"| BL
+  AGENT -.->|"accept / prune (your decision)"| BL
+  BL -.->|"what was already reasoned"| AGENT
 
   style DEV stroke:#c89a4a,stroke-width:3px
   style AGENT stroke:#5a8cd8,stroke-width:3px
@@ -68,6 +70,13 @@ authz helper in the body") — never a verdict. The agent you already use suppli
 the intelligence, reasoning each item with the project's context. That is what
 democratizes auditing: anyone already coding with AI can audit without extra API
 keys or infrastructure.
+
+**And the loop closes.** What the agent concludes does not evaporate when the
+conversation ends: it is recorded in the baseline as the agent's verdict, handed
+back on the next scan so nothing is reasoned twice, and — when it confirms a real
+problem still present in the code — counted in the score. codefit still never
+produces a verdict of its own; it stores the agent's, marks it `by: agent`, and
+keeps the decision to accept it yours alone.
 
 **One full pass through the loop.** Same actors, same order as above — the
 developer asks, the agent orchestrates, codefit reports facts, the developer
@@ -106,6 +115,14 @@ independent audit layer that validates AI-generated code is secure and correct
 **before** it merges.
 
 ## Status — Phase 2 (the database dimension), OLAP closed
+
+**Phase 2 is the last phase that CLOSED. Phase 3 has started, and part of it is
+usable today**: the finding cache and `changed_files` scoping (H0), and the closing
+protocol (H4) — the agent records what it reasoned, `scan-all` hands it back, and a
+confirmed still-present problem counts in the score. The rest of Phase 3 — the
+practices, tests/regression and deep-review dimensions — is **not built**, and the
+phase does not close until `codefit-review-code` exists. See
+[docs/roadmap.md](docs/roadmap.md).
 
 **Reach is per dimension AND per language — read this before you install.**
 Security detection and surface mapping (IDOR, broken authorization, over-fetching,
@@ -411,10 +428,19 @@ rather than guessing at.
 The agent loads codefit's skill, calls `codefit-scan-all`, reads the three buckets
 (every endpoint named with what it takes to rank it), pulls the full concerns of the
 ones worth pursuing with `codefit-scan-endpoint`, reasons the surface with your
-project's context, and reports back. When you decide
-an item is a false positive it calls `codefit-baseline-accept` with your reason;
-after a fix it calls `codefit-baseline-prune`. You never leave the agent, and
-codefit never touches your code.
+project's context, and reports back. It then **records what it concluded** with
+`codefit-baseline-record-verdict`, so the reasoning survives the conversation
+instead of being redone from zero next time — and so the next scan can hand it
+back with `baseline.reasoned_items`. When you decide an item is a false positive
+it calls `codefit-baseline-accept` with your reason; after a fix it calls
+`codefit-baseline-prune`. You never leave the agent, and codefit never touches
+your code.
+
+**Recording is not deciding.** An agent's verdict is a recommendation on the
+record: it is stamped `by: agent`, it never acknowledges an item, and two agents
+disagreeing keeps both verdicts and raises the disagreement to you rather than
+picking a winner. Only a human accepts. What a confirmed `vulnerable` verdict
+*does* do is count toward the score — see [The baseline model](#the-baseline-model).
 
 ## Connect codefit
 
@@ -527,7 +553,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 
 | Tool | What it does |
 | --- | --- |
-| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta, plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. Every bucket **names** its endpoints with what it takes to rank them; the concern text is fetched on demand (deterministic findings come back in full). Carries a declared byte `budget` and says how many endpoints it withheld, if any. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
+| `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta (including `reasoned_by_agent` / `reasoned_items` / `in_conflict` — what agents already concluded, so nothing is reasoned twice), plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. Every bucket **names** its endpoints with what it takes to rank them; the concern text is fetched on demand (deterministic findings come back in full). Carries a declared byte `budget` and says how many endpoints it withheld, if any. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
 | `codefit-scan-endpoint` | Full detail of one file on demand — the concerns `scan-all` named but did not spell out, for **any** bucket. |
 | `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). Also takes the optional `changed_files`. |
 | `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser — and equally when every configured schema source was found but none of them could be read, so an unreadable schema is never reported as a clean one. |
@@ -539,7 +565,8 @@ codefit exposes its capabilities as MCP tools in three roles:
 
 | Tool | What it does |
 | --- | --- |
-| `codefit-baseline-list` | List tracked items (fingerprint, file, category, state) — `filter: known` for what's still pending. |
+| `codefit-baseline-list` | List tracked items (fingerprint, file, category, state, and any agent verdicts with their reasoning) — `filter: known` for what's still pending. |
+| `codefit-baseline-record-verdict` | Persist what an agent concluded about a surface item, so the answer survives the conversation. Re-validates each verdict against a fresh re-analysis first: one whose item is no longer there is **refused and named**, never silently dropped. Recording never *accepts* an item — only a human does, with `-accept`. Two agents disagreeing keeps **both** verdicts and flags the item in conflict. |
 | `codefit-baseline-accept` | Record a human's decision to accept an item (false positive / accepted debt) with a reason. |
 | `codefit-baseline-prune` | Drop items a refactor resolved (re-scans to confirm they're gone first). The re-scan is **always full** — it accepts no `changed_files`. |
 | `codefit-baseline-register-authz-helper` | Register a project-specific authorization helper so later scans recognize it (`known_authz_detected` becomes true where it is called). Clears the **authz** gap only — an IDOR/ownership item stays actionable. Requires a human decision and a reason. |
@@ -549,7 +576,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 
 | Tool | What it does |
 | --- | --- |
-| `codefit-confirm-surface` | Integrate the agent's verdicts: a confirmed item becomes a probabilistic finding anchored to it. |
+| `codefit-confirm-surface` | Integrate the agent's verdicts for one call: a confirmed item becomes a probabilistic finding anchored to it. **Stateless** — it persists nothing and takes no `root`. To make a verdict outlive the conversation use `codefit-baseline-record-verdict` instead. |
 | `codefit-coverage` | The coverage manifest for a language — what codefit audits vs. reasons over vs. does not cover. |
 
 ## Scoping a scan to the files you changed
@@ -717,6 +744,21 @@ re-scan only surfaces what changed. Key properties:
   `known` automatically. A deterministic finding (an *affirmation*, certainty 1.0) is
   **never auto-silenced** — it shows on every scan until a human accepts it with a
   reason. Silencing an affirmation is graver than silencing a question (ADR 0011).
+- **An agent's reasoning is recorded, and never decides.** When an agent answers a
+  surface question, `codefit-baseline-record-verdict` stores the verdict, the
+  reasoning and the confidence on the item, always stamped `by: agent` — the file's
+  one non-human author. Recording never acknowledges anything: **only a human
+  accepts**, and the asymmetry is the safeguard. Two agents disagreeing keeps both
+  verdicts and reports the item `in_conflict` for you to settle, rather than letting
+  the later answer overwrite the earlier one (ADR 0081).
+- **A confirmed `vulnerable` verdict counts toward the score.** If the item is still
+  observed and no human has accepted it, it is folded into `score.global` through the
+  same rules a live confirmation uses, so the number reflects what was *reasoned* and
+  not only what codefit affirms on its own. `not_vulnerable` counts for nothing: it
+  never removes, and never cancels a conflicting `vulnerable` on the same item. A
+  verdict on code that has since changed stops counting by itself — the content-hash
+  identity above is what makes that automatic. `blocked` is never affected by a
+  verdict; that gate stays reserved for deterministic critical security findings.
 - **codefit never edits your code** — only its own baseline file, and only via the
   agent acting on your decision (ADR 0012). The full decision history lives in
   `docs/decisions/`.
