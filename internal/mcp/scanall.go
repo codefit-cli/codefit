@@ -645,7 +645,22 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 			}
 		}
 	}
-	diff, delta := diffBaseline(prev, observedFrom(secRes, dbRes), scanned, scp)
+	// observed is hoisted so the baseline diff and the verdict fold consume the
+	// SAME set — recomputing it would let the two disagree about what this pass
+	// actually saw.
+	observed := observedFrom(secRes, dbRes)
+	diff, delta := diffBaseline(prev, observed, scanned, scp)
+
+	// The closing protocol's last step (ADR 0081 slice 3, R6/R7): a persisted
+	// `vulnerable` verdict on an item this pass STILL observes becomes scoring
+	// input, through the same surface.FindingFrom the live confirm path uses.
+	// This is what ADR 0021's "surface scores only after confirm-surface" meant
+	// and never had a mechanism for, and it is why score.global could read 100
+	// beside hundreds of open questions: not bad arithmetic, but a score computed
+	// where the only thing it could count was what codefit affirms on its own.
+	vs := verdictFindings(prev, observedFPs(observed), measured)
+	scored = append(scored, vs.Scored...)
+	delta.VerdictsNotScored, delta.VerdictsNotScoredNote = vs.NotScored, vs.Note
 
 	// Two presentations of the same diff: endpoints for security, a flat section for db.
 	actionable, clean, frontier := report.ClassifyEndpoints(filterEndpointsByBaseline(endpoints, diff))

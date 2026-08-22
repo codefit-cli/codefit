@@ -68,6 +68,22 @@ type BaselineDelta struct {
 	// AgentReasoningNote says so in words, so nothing is lost by the omission.
 	ReasonedWithheld   int `json:"reasoned_withheld,omitempty"`
 	InConflictWithheld int `json:"in_conflict_withheld,omitempty"`
+	// VerdictsNotScored counts persisted `vulnerable` verdicts that are still
+	// observed and NOT acked, and that the score nevertheless did not count —
+	// because the dimension they belong to was not measured on this run. The note
+	// names which dimension and why.
+	//
+	// Declaring beats dropping, and the alternative is worse than it sounds: the
+	// security sensor OWNS the nplus1 category, so a plain TypeScript project with
+	// no configured schema observes nplus1 surface while the db dimension never
+	// runs. Folding such a finding in would make scoring.Compute skip it silently
+	// (it iterates weights and passes over unmeasured dimensions) — under-reporting,
+	// the direction docs/specs/audit-protocol.md's I3 calls unforgivable. Appending
+	// the dimension to `measured` to compensate is worse still: it would claim a
+	// sensor ran that did not, and it is literally the M2 mutation
+	// summary_measured_completeness_test.go exists to catch.
+	VerdictsNotScored     int    `json:"verdicts_not_scored,omitempty"`
+	VerdictsNotScoredNote string `json:"verdicts_not_scored_note,omitempty"`
 	// AgentReasoningNote states WHY something was withheld, in this block's own
 	// words. Deliberately not reused from dbWithheldNote (a stated absence of any
 	// ranking axis) nor from the endpoint buckets (a bisected byte budget): here

@@ -1035,39 +1035,48 @@ an actionable review on a real PlantaLinda PR.
 | **H1** | the practices dimension | 🔨 2 of 6 slices — see `docs/specs/practices-dimension.md` |
 | **H2** | tests quality + regression risk | ⬜ not started (H0 unblocked it) |
 | **H3** | code review — **the phase's close criterion** | ⬜ not started |
-| **H4** | the closing protocol — writes and reads back; the SCORE still does not | 🔨 2 of 3 slices — see [ADR 0081](decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md) |
+| **H4** | the closing protocol — **the cycle closes** | ✅ 3 of 3 slices — see [ADR 0081](decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md) |
 
 H1's remaining slices: the sensor + `codefit-check-practices` (S3), the **TypeScript** rules
 that make it a product (S4), the per-rule severity config (S5), and the mandatory close —
 wiring it into `scan-all` (DoD, per ADR 0016).
 
-### H4 — measured 2026-08-18, and it outranks its position in this table
+### H4 — CLOSED 2026-08-22. Measured 2026-08-18, and it outranked its position in this table
 
-The closing protocol is listed last and is not last in importance. Measured against `main`:
+The closing protocol was listed last and was not last in importance. **The measurement
+below is the 2026-08-18 state, kept verbatim because it is what justified taking H4 out of
+turn — every one of its three findings is now fixed.** Measured against `main` on that day:
 
-- `codefit-confirm-surface` takes the agent's verdicts, validates them, returns
-  probabilistic findings — and **persists nothing**. Its request carries no `root`, so it
-  could not write a baseline even if it wanted to.
-- `scoring.Compute` is called in **exactly one place**, inside the scan, before the agent
-  has said anything.
-- The baseline stores `fp / category / file / snippet / acknowledged`. There is **no field
-  for what an agent concluded**, and `by:` is documented three times as *"always human:
-  codefit never acknowledges on its own"*.
+- `codefit-confirm-surface` took the agent's verdicts, validated them, returned
+  probabilistic findings — and **persisted nothing**. Its request carries no `root`, so it
+  could not write a baseline even if it wanted to. *(Still true of `confirm-surface`, and
+  deliberately so: persistence belongs to the `baseline-*` family, per ADR 0013's
+  precedent. `codefit-baseline-record-verdict` is where it lives now.)*
+- `scoring.Compute` was called in **exactly one place**, inside the scan, before the agent
+  had said anything. *(Still one place — the fold now runs before it, so what the agent
+  said is in its input.)*
+- The baseline stored `fp / category / file / snippet / acknowledged`. There was **no field
+  for what an agent concluded**. *(Now `items[].agent_verdicts`, always `by: agent`.)*
 
-So the agent reasons, answers, and the answer dies in the conversation. The next audit
-reasons the same items again. The PRD promises the opposite in §7:
+So the agent reasoned, answered, and the answer died in the conversation; the next audit
+reasoned the same items again. The PRD promises the opposite in §7:
 
 > *"Así el razonamiento del agente queda registrado para baseline, **score** y
 > trazabilidad — **no solo en la conversación**."*
 
 And [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md) already decided
 the dependency — *"surface scores only after confirm-surface"* — twenty-one ADRs ago. The
-decision exists; the mechanism does not.
+decision exists; the mechanism does not. **Slice 3 built it.**
 
-**This reframes the score complaint (issue #2).** `score.global: 100` beside 323 open
-questions is not a scoring defect: the score is emitted at a point in the protocol where
-the only thing it can count is deterministic affirmations, and the path for the agent's
-answer to reach it is H4. Fixing the number without H4 is treating a symptom.
+**This reframes the score complaint ([issue #2](https://github.com/codefit-cli/codefit/issues/2)).**
+`score.global: 100` beside 323 open questions was never a scoring defect: the score was
+emitted at a point in the protocol where the only thing it could count was deterministic
+affirmations, and the path for the agent's answer to reach it was H4. Fixing the number
+without H4 would have treated a symptom. **The path exists now** — a still-observed
+`vulnerable` verdict lowers `score.global`, so the number reflects what was reasoned and
+not only what codefit affirms alone. What it still does NOT do is drop for an
+*unanswered* question: an open surface item scores nothing until someone reasons it, which
+is the honest position — codefit maps, the agent reasons.
 
 **Design constraints already established, so H4 does not start from zero:**
 
@@ -1097,10 +1106,27 @@ answer to reach it is H4. Fixing the number without H4 is treating a symptom.
   before slice 2 the response gave an agent no way to learn that anything had ever been
   reasoned. The write half alone was not a closed loop.
 
-**Remaining: slice 3** folds a still-observed `vulnerable` verdict into `scoring.Compute`
-(R6/R7) — the step that actually reframes the `score.global: 100` complaint above, and the
-one that closes [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md)'s
-stated dependency.
+- **Slice 3 — the score consumes it (R6/R7/D4).** A persisted `vulnerable` verdict on an
+  item a scan STILL observes is folded into `scoring.Compute`, through the same
+  `surface.FindingFrom` a live confirmation uses. This closes
+  [ADR 0021](decisions/0021-by-dimension-scoring-wired-into-scan-all.md)'s stated
+  dependency — *"surface scores only after confirm-surface"* — twenty-one ADRs and one
+  phase after it was written, and it reframes the `score.global: 100` complaint above:
+  the arithmetic was never wrong, the score was simply computed where nothing but
+  codefit's own affirmations could reach it. **`score.global` can drop on upgrade with no
+  code change**, and the CHANGELOG says so as a behaviour change.
+
+  The asymmetry is the safeguard: `not_vulnerable` counts for nothing, never removes, and
+  never cancels a conflicting `vulnerable` on the same item. Only a human `Ack` silences.
+  `blocked` is untouched — an agent's probabilistic judgment must never reach the one gate
+  codefit deliberately gives no dial. A verdict whose dimension was not measured is
+  DECLARED in `baseline.verdicts_not_scored`, never folded and never dropped.
+
+**H4 is closed.** The cycle the PRD §7 promised — *"el razonamiento del agente queda
+registrado para baseline, **score** y trazabilidad — no solo en la conversación"* — runs
+end to end: the agent reasons, records, reads back what was already reasoned, and the score
+counts it. What remains open in P2 is H1, H2 and H3, and the phase's close criterion is
+still H3 (`codefit-review-code` on a real PR).
 
 Version line: Phase 3 targets `0.3.0`; work toward it tags `v0.3.0-alpha.N` (see
 `VERSIONING.md`).

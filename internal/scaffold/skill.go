@@ -261,6 +261,13 @@ longer exists there is REFUSED and named in the response, never silently dropped
   previous audit goes ` + "`known`" + ` and stops showing up in the endpoint buckets, so
   this block is the only place the response tells you it was answered. Reasoning it again
   costs the human context for nothing.
+- **Recording ` + "`vulnerable`" + ` now LOWERS the score.** A persisted vulnerable verdict on
+  an item still observed counts toward ` + "`score.global`" + `, so the number finally reflects
+  what was reasoned and not only what codefit affirms on its own. Say so before you record a
+  batch — it is the human's score. ` + "`not_vulnerable`" + ` counts for nothing: it never
+  removes, and never cancels a conflicting ` + "`vulnerable`" + ` on the same item.
+- ` + "`baseline.verdicts_not_scored`" + ` means codefit could NOT score a verdict because that
+  dimension's sensor did not run on this pass — never that it lost it. The note names which.
 - ` + "`baseline.in_conflict`" + ` is for the HUMAN, not for you. Those items have opposing
   verdicts from different passes. Surface them and say what each side concluded; never
   pick a winner and never record a third verdict to break the tie.
