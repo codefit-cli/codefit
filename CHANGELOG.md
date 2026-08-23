@@ -14,6 +14,17 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0-alpha.1] — 2026-08-23
+
+**First tag on the `0.3` line.** Phase 3 has started and this is the first
+release that carries Phase 3 *capability* rather than `0.2`-line debt: the
+closing protocol (H4) is complete. Per the Pre-releases rule in
+[VERSIONING.md](VERSIONING.md), work toward a MINOR carries the pre-release
+suffix on the target version — `0.3.0` does not close until `codefit-review-code`
+exists (H3, the phase's close criterion).
+
 ### Security
 - **Go toolchain `1.25.12` → `1.25.13`, closing FOUR standard-library
   vulnerabilities codefit's own code CALLS** — `GO-2026-6218` (`net/url`,

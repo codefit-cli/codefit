@@ -62,8 +62,24 @@ stage" — it does **not** claim `0.1.0` is done.
 
 ## Current state
 
-- **Unreleased on `main`: H4, the closing protocol, is CLOSED — and it is Phase 3
-  capability.** Three merged slices (#158, #160, #161, all under
+- **`v0.3.0-alpha.1` — the first tag on the `0.3` line, and the first that carries
+  Phase 3 CAPABILITY.** Everything in `v0.2.9` was `0.2`-line debt; H4 is not. Per
+  the Pre-releases rule above, work toward a MINOR carries the suffix on the
+  TARGET version, so this is `v0.3.0-alpha.1` and **not** a `v0.2.10`. `0.3.0`
+  itself does not close until `codefit-review-code` exists — H3 is the phase's
+  close criterion, and H1 (practices, 2 of 6 slices) and H2 have not finished.
+
+  Two things a reader of this tag must not miss:
+
+  - **⚠️ `score.global` can DROP on upgrade with no code change**, in any repo
+    already carrying a still-observed `vulnerable` agent verdict. That is the fix,
+    not a regression: the score previously counted only what codefit affirms on
+    its own. Mitigation is a human accept via `codefit-baseline-accept`.
+  - **Four CALLED standard-library vulnerabilities are closed here** (toolchain
+    `1.25.13`), plus `GO-2026-5024` in `golang.org/x/sys`. Anyone on `v0.2.9` or
+    earlier is running a binary built with a toolchain that has them.
+
+- **H4, the closing protocol, is CLOSED.** Three merged slices (#158, #160, #161, all under
   [ADR 0081](docs/decisions/0081-agent-verdicts-persist-in-the-baseline-and-never-silence.md)):
   the baseline persists an agent's verdicts, `scan-all` reports them back, and a
   confirmed `vulnerable` verdict on a still-observed item now counts toward
