@@ -489,6 +489,21 @@ func surfaceGap(it findings.SurfaceItem) (bool, string) {
 		if !it.StructuralFacts["known_authz_detected"] {
 			return true, gapAccess
 		}
+		// A detected guard answers the authz question only when it DECIDED
+		// something here. A helper whose RESULT IS DISCARDED gates nothing at
+		// this site, and clearing the gap on it was under-reporting — the
+		// direction audit-protocol's I3 calls unforgivable (issue #149).
+		//
+		// The two-value lookup is load-bearing, not defensive. A producer that
+		// never examined result usage omits the key, and an absent key reads as
+		// false: raising the gap on absence would make codefit assert "the
+		// result was not used" about a scan that never looked — the vacuous
+		// claim ADR 0067 forbids, and the exact reason the Go provider omits
+		// known_authz_detected against an empty helper set. Only a fact that is
+		// PRESENT and false raises the gap.
+		if used, stated := it.StructuralFacts["authz_result_used"]; stated && !used {
+			return true, gapAccess
+		}
 	case "overfetch":
 		if !it.StructuralFacts["field_limiting_detected"] {
 			return true, gapExposure

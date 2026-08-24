@@ -68,18 +68,31 @@ func TestHandleUnregisterAuthzHelper(t *testing.T) {
 // actionable (ownership is unverifiable from structure — a registered helper clears
 // the authz gap, never the IDOR one). No real IDOR is silenced.
 func TestHandleScanAll_RegisteredHelperClearsAuthzNotIDOR(t *testing.T) {
+	// FIXTURE CHANGED WITH ISSUE #149, and the reason matters more than the edit.
+	// Both handlers used to call the helper as a bare statement —
+	// `await requirePermission("admin");` — a DISCARDED result. That shape is
+	// exactly what #149 filed: it cleared the access gap while deciding nothing
+	// locally, so this test was inadvertently locking the bug in place, which is
+	// how the bug survived. The barrier this test exists to prove (a registered
+	// helper clears AUTHZ and never IDOR) is unrelated to result usage, so the
+	// fixture now uses a shape that demonstrably gates and the test keeps proving
+	// what it was written to prove. The discarded shape has its own controls:
+	// providers/typescript's TestAuthzResultUsed and core/report's
+	// TestAuthzGapRequiresTheGuardToDecideSomething.
 	fixture := func(root string) {
 		// authz-only: a sensitive mutation with no client identifier.
 		mustWrite(t, root, "app/admin/route.ts", `
 export async function POST(req: Request) {
-  await requirePermission("admin");
+  const allowed = await requirePermission("admin");
+  if (!allowed) return new Response("forbidden", { status: 403 });
   await prisma.setting.update({ where: { key: "x" }, data: { value: "y" } });
   return Response.json({ ok: true });
 }`)
 		// IDOR: a client id reaches a resource (ownership question), same helper.
 		mustWrite(t, root, "app/orders/[id]/route.ts", `
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  await requirePermission("orders:read");
+  const allowed = await requirePermission("orders:read");
+  if (!allowed) return new Response("forbidden", { status: 403 });
   return Response.json(await prisma.order.findUnique({ where: { id: params.id } }));
 }`)
 	}

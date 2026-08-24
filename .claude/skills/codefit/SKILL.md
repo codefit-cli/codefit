@@ -194,6 +194,15 @@ longer exists there is REFUSED and named in the response, never silently dropped
   verdicts from different passes. Surface them and say what each side concluded; never
   pick a winner and never record a third verdict to break the tie.
 
+## When a guard is called but decides nothing
+An authz item can carry `known_authz_detected: true` together with
+`authz_result_used: false`. That pair means the guard was CALLED and its answer went
+NOWHERE — nothing branches on it — so it gates nothing at that site and the item stays
+actionable. **Do not read it as "unprotected."** A helper that THROWS or REDIRECTS gates
+correctly with its result unused, and codefit cannot see the helper's body from the handler.
+Open the helper, see what it does on failure, and say which it is. If the key is ABSENT the
+language does not compute it — that is not a false, it is a question nobody asked.
+
 ## Custom authz helpers (teach codefit your project's auth)
 Read `security.recognized_authz_helpers` / `recognized_authz_helpers_note` (in
 `codefit-scan-all`'s response) directly for what codefit ALREADY recognizes for this
