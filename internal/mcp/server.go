@@ -20,7 +20,7 @@ import (
 const recognizedAuthzHelpersDescNote = " `recognized_authz_helpers` names the project-registered authz " +
 	"helper(s) codefit recognized for this language, and `recognized_authz_helpers_note` explains the " +
 	"count; a low or zero count there reflects codefit's KNOWLEDGE, not the project's actual guarding — " +
-	"read it before concluding known_authz_detected: false means unauthorized."
+	"read it before concluding known_authz_detected: false means unauthorized. Also read authz_result_used (TypeScript): known_authz_detected TRUE beside authz_result_used FALSE means a recognized guard was CALLED and its result went NOWHERE, so it gates nothing at that site — the item stays actionable. That is a fact, not a verdict: a helper that throws or redirects gates correctly with its result unused, and codefit cannot see the helper body from the handler. Check what the helper does on failure. The key is ABSENT for languages that do not compute it, and an absent fact is never read as false."
 
 // NewServer builds the codefit MCP server with its tools registered. Each tool is
 // a THIN adapter: it hands the SDK's typed request to the core handler that

@@ -122,7 +122,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **actionable even when an authz helper is present** — a session/permission check
   does not prove the caller owns *this* resource, which codefit cannot verify from
   structure (ADR 0006 amended). `known_authz_detected` gates the authz concern, never
-  the IDOR one.
+  the IDOR one — and since ADR 0082 it no longer gates it alone: see
+  `authz_result_used` below.
 - **Broken authorization.** [id: ts.broken-authorization] Route handlers **and Server Actions** that perform a
   sensitive operation — touch data or mutate state (a Prisma read/write, or an
   indirect service call) — mapped with a signal stating the operation and whether a
@@ -132,7 +133,20 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   endpoints devs often don't guard like endpoints). Matched by the structural
   operation, **never by route name** (a path without `admin` may still need
   authorization). The queryable fact `known_authz_detected=false` means "no known
-  authz pattern was detected here", **never** "this is unauthorized". The recognized
+  authz pattern was detected here", **never** "this is unauthorized". A second
+  fact, **`authz_result_used`**, says whether a detected guard actually DECIDED
+  something here — its result reached a branch, a return, an assignment or another
+  call, or a middleware guard ran before the handler. `known_authz_detected: true`
+  beside `authz_result_used: false` is the precise statement that **the guard was
+  called and its answer went nowhere**, so it gates nothing at that site, and the
+  authz gap stays open (ADR 0082). It is a FACT, not a verdict: a helper that
+  THROWS or REDIRECTS gates correctly with its result unused, and codefit cannot
+  see the helper's body from the handler — that is the agent's question, and the
+  signal states it in those words. **Declared limit:** `authz_result_used` is
+  computed for **TypeScript only**. The Go provider does not compute it and OMITS
+  the key rather than emitting a false one, so Go's authz gap is unchanged — an
+  absent fact never raises the gap, because asserting it would be a claim about a
+  scan that never looked (ADR 0067). The recognized
   helper set is **built-in (NextAuth-style) PLUS the project's own helpers**: the
   agent identifies a custom helper (`requirePermission`, `getCurrentUser`, …) by
   reasoning over the code, a human approves, and codefit persists it in the committed

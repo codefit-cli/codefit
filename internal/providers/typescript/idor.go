@@ -611,6 +611,81 @@ func collectAuthzCalls(body syntax.Node, recognized map[string]bool) []string {
 	return out
 }
 
+// authzCallsByUsage splits the recognized authz helper calls in body by whether
+// each call's RESULT IS USED — reached a branch, a return, an assignment, or
+// another call — or DISCARDED, i.e. the call stands alone as a statement.
+//
+// Why the split exists (issue #149): known_authz_detected CLEARS the access gap
+// (report.surfaceGap), so a handler that merely MENTIONS a guard was leaving the
+// actionable bucket even when the guard decided nothing there. That is
+// under-reporting, the direction audit-protocol's I3 calls unforgivable.
+//
+// Why this reports a FACT instead of concluding: a discarded result may still
+// gate. `await requireAuth()` is a common shape for a helper that THROWS or
+// REDIRECTS, and the helper's body is usually in another file — the frontier
+// (ADR 0005). codefit cannot answer it from the handler, so it states what it
+// saw and lets the agent reason.
+//
+// Usage is decided by SPAN, not by a parent pointer, which syntax.Node
+// deliberately does not expose: a call is discarded when its byte range is
+// exactly the expression of an expression_statement (unwrapping one await).
+// Anything else — a condition, an initializer, an argument, a return — consumes
+// the value.
+func authzCallsByUsage(body syntax.Node, recognized map[string]bool) (used, discarded []string) {
+	bare := bareStatementSpans(body)
+	walkTS(body, func(n syntax.Node) {
+		if n.Type() != "call_expression" {
+			return
+		}
+		fn := field(n, "function", 0)
+		if fn == nil {
+			return
+		}
+		var name string
+		switch fn.Type() {
+		case "identifier":
+			name = string(fn.Text())
+		case "member_expression":
+			if prop := field(fn, "property", 1); prop != nil {
+				name = string(prop.Text())
+			}
+		}
+		if !authzHelperSet[name] && !recognized[name] {
+			return
+		}
+		if bare[[2]int{n.StartByte(), n.EndByte()}] {
+			discarded = append(discarded, name)
+			return
+		}
+		used = append(used, name)
+	})
+	return used, discarded
+}
+
+// bareStatementSpans is the set of byte ranges that are an expression_statement's
+// own expression — the shapes whose value goes nowhere. One await is unwrapped,
+// so both `f()` and `await f()` register the CALL's span and not just the
+// await's.
+func bareStatementSpans(body syntax.Node) map[[2]int]bool {
+	spans := map[[2]int]bool{}
+	walkTS(body, func(n syntax.Node) {
+		if n.Type() != "expression_statement" || n.NamedChildCount() == 0 {
+			return
+		}
+		e := n.NamedChild(0)
+		if e == nil {
+			return
+		}
+		spans[[2]int{e.StartByte(), e.EndByte()}] = true
+		if e.Type() == "await_expression" && e.NamedChildCount() > 0 {
+			if inner := e.NamedChild(0); inner != nil {
+				spans[[2]int{inner.StartByte(), inner.EndByte()}] = true
+			}
+		}
+	})
+	return spans
+}
+
 // authzSignal phrases the authz fact: either which known helper was detected, or
 // that none was — with the searched set declared. A project-registered helper is
 // labelled as such (traceability: the agent/human sees WHY codefit now recognizes

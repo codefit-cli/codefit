@@ -14,7 +14,48 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+- **⚠️ An authorization helper whose RESULT IS DISCARDED no longer clears the access
+  gap** — closes [#149](https://github.com/codefit-cli/codefit/issues/149), affirms
+  [ADR 0082](docs/decisions/0082-a-detected-authz-helper-clears-the-gap-only-when-it-decided-something.md).
+  `known_authz_detected: true` cleared the gap for ANY call to a recognized helper,
+  so a handler that merely MENTIONED a guard left the `actionable` bucket even when
+  the guard decided nothing there:
+
+  ```ts
+  await requireOwner(params.id);          // result discarded — gates nothing here
+  return Response.json(await prisma.order.findUnique({ where: { id: params.id } }));
+  ```
+
+  That was **under-reporting** — a false all-clear, the direction
+  `docs/specs/audit-protocol.md`'s I3 calls unforgivable — and it was reachable in
+  ordinary use.
+
+  **The fix does not flip the boolean.** A discarded result may still gate: a helper
+  that THROWS or REDIRECTS is correct with its result unused, and its body is usually
+  in another file. So codefit reports both facts and hands the agent the question. A
+  new TypeScript structural fact, **`authz_result_used`**, says whether a detected
+  guard actually decided something — its result reached a branch, a return, an
+  assignment or another call, or a middleware guard ran first.
+  `known_authz_detected: true` beside `authz_result_used: false` is the precise
+  statement that the guard was called and its answer went nowhere; the signal says so
+  in words and never concludes the handler is unprotected.
+
+  ⚠️ **Behaviour change:** handlers whose only guard has a discarded result move from
+  `resolved_clean` back to `actionable`. On a project that uses throwing guards this
+  means MORE actionable items than before. That is the intended direction:
+  over-reporting a guard that throws is noise, under-reporting one that decides
+  nothing is a false all-clear.
+
+  **Go is unchanged.** It does not compute result usage and OMITS the key rather than
+  emitting a false one, and the gate raises the gap only when the fact is PRESENT and
+  false — treating an absent fact as false would assert something about a scan that
+  never looked (ADR 0067).
+
+  Recorded because it explains how the bug survived: an existing end-to-end test used
+  the discarded shape as its fixture while testing something orthogonal, so the suite
+  was green **because** the bug was in a fixture. That fixture now gates, with the
+  reason written into the test.
 
 ## [0.3.0-alpha.1] — 2026-08-23
 

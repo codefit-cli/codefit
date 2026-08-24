@@ -76,12 +76,22 @@ func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.S
 	if len(accesses) == 0 && len(indirect) == 0 {
 		return findings.SurfaceItem{}, false
 	}
-	bodyAuthz := dedupe(collectAuthzCalls(h.body, recognized))
+	usedAuthz, discardedAuthz := authzCallsByUsage(h.body, recognized)
+	bodyAuthz := dedupe(append(append([]string{}, usedAuthz...), discardedAuthz...))
 	mwAuthz := dedupe(middlewareAuthz(h, recognized))
+	// resultUsed answers "did a detected guard actually decide anything HERE?"
+	// A middleware guard counts: it runs BEFORE the handler by construction, so
+	// there is no result for the body to consume and asking whether one was used
+	// is the wrong question — answering "no" would turn every middleware-protected
+	// route actionable (issue #149).
+	resultUsed := len(usedAuthz) > 0 || len(mwAuthz) > 0
 
 	signals := []string{
 		operationSignal(h, accesses, indirect),
 		authzSignal(bodyAuthz, mwAuthz, recognized, authzScope(h), authzMwPrefix(h)),
+	}
+	if len(usedAuthz) == 0 && len(mwAuthz) == 0 && len(discardedAuthz) > 0 {
+		signals = append(signals, discardedAuthzSignal(dedupe(discardedAuthz)))
 	}
 	return findings.SurfaceItem{
 		Category:          "authz",
@@ -91,6 +101,14 @@ func authzItem(h tsHandler, file string, recognized map[string]bool) (findings.S
 		StructuralSignals: signals,
 		StructuralFacts: map[string]bool{
 			"known_authz_detected": len(bodyAuthz)+len(mwAuthz) > 0,
+			// authz_result_used: a detected guard actually DECIDED something here —
+			// its result reached a branch, a return, an assignment or another call,
+			// or a middleware guard ran before the handler. False beside
+			// known_authz_detected=true means the guard was CALLED and its answer
+			// went nowhere, which gates nothing locally (issue #149). It is not a
+			// verdict: the helper may throw or redirect, and its body is usually on
+			// the far side of the frontier — that is the agent's question.
+			"authz_result_used": resultUsed,
 			// local_access_detected: the sensitive operation is a local Prisma
 			// access (true) vs only an indirect service/repository call (false, the
 			// frontier). Shared with IDOR/overfetch so the synthesis can rank by
@@ -298,4 +316,16 @@ func isFrameworkCall(call syntax.Node) bool {
 		}
 	}
 	return false
+}
+
+// discardedAuthzSignal states the fact and hands over the exact question, never
+// a conclusion. It is emitted only when EVERY detected guard's result was
+// discarded and no middleware guard ran — with one gating call present there is
+// nothing to warn about.
+func discardedAuthzSignal(names []string) string {
+	return "The authorization helper call(s) " + strings.Join(names, ", ") +
+		" have their RESULT DISCARDED: nothing here branches on the answer, so the call gates " +
+		"nothing at this site. This is a structural fact, NOT a conclusion that the handler is " +
+		"unprotected — a helper that THROWS or REDIRECTS gates correctly with its result unused, " +
+		"and codefit cannot see the helper's body from here. Check what the helper does on failure."
 }
