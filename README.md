@@ -346,8 +346,22 @@ correct version and needs no Go toolchain.
 
 ### Option A — download the release binary (recommended)
 
+> **Take `v0.3.0-alpha.1` or newer, and read this before clicking "latest".**
+> GitHub's `/releases/latest` link **hides pre-releases**, so today it still points at
+> **`v0.2.9`** — and `v0.2.9` was built with Go `1.25.12`, a toolchain carrying **four
+> standard-library vulnerabilities that codefit's own code calls** (`net/url`,
+> `crypto/tls`, `encoding/asn1`, `net/http`). They are closed in `v0.3.0-alpha.1`,
+> along with `GO-2026-5024` in `golang.org/x/sys` that shipped inside the Windows
+> binary. Pick the newest tag from the full
+> [Releases](https://github.com/codefit-cli/codefit/releases) list, not the "latest"
+> shortcut.
+>
+> `alpha` marks the phase, not the stability: it means Phase 3 is underway and `0.3.0`
+> has not closed. What ships is gated the same way every release is — build, vet, race
+> tests, lint, `govulncheck` and a four-target cross-compile.
+
 Grab the archive for your platform from the
-[latest release](https://github.com/codefit-cli/codefit/releases/latest). This is the
+[Releases](https://github.com/codefit-cli/codefit/releases) page. This is the
 tagged build, so `codefit version` reports the real version, and it needs no Go.
 
 **Linux / macOS** (pick your target: `linux_amd64`, `linux_arm64`, `darwin_arm64`):
@@ -376,8 +390,8 @@ Heads up: this reports its version as `0.1.0-dev (commit none, built unknown)` b
 `go install` does not embed release metadata — the version is injected by ldflags only
 in the release build (GoReleaser) and in `make build`. The binary is **functionally
 identical** to the release. For the tagged version, download from
-[Releases](https://github.com/codefit-cli/codefit/releases/latest) or build from a
-checkout with `make build`.
+[Releases](https://github.com/codefit-cli/codefit/releases) — the full list, since the
+"latest" shortcut hides pre-releases — or build from a checkout with `make build`.
 
 ### Verify the install
 
