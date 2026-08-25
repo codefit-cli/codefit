@@ -49,14 +49,11 @@ flowchart LR
   BL[("baseline<br/>audit memory")]
 
   DEV -->|"'audit this project / these endpoints / this function'"| AGENT
-  AGENT -->|calls MCP tools| CF
-  CF -->|"structural FACTS<br/>3 buckets + delta"| AGENT
+  AGENT -->|"calls MCP tools<br/>scan · record verdict · accept / prune"| CF
+  CF -->|"structural FACTS<br/>3 buckets + delta<br/>+ what agents already reasoned"| AGENT
   AGENT -->|"buckets + project context"| DEV
-  CF <-.->|reads/writes| BL
+  CF <-.->|"reads / writes — the ONLY writer"| BL
   DEV -.->|"fix code → re-audit"| AGENT
-  AGENT -.->|"record verdict (by: agent — never accepts)"| BL
-  AGENT -.->|"accept / prune (your decision)"| BL
-  BL -.->|"what was already reasoned"| AGENT
 
   style DEV stroke:#c89a4a,stroke-width:3px
   style AGENT stroke:#5a8cd8,stroke-width:3px
@@ -90,15 +87,19 @@ sequenceDiagram
   participant BL as baseline
 
   Dev->>Agent: "audit this project / these endpoints / this function"
-  Agent->>CF: calls MCP tools
+  Agent->>CF: codefit-scan-all
   CF->>BL: reads code + baseline
-  CF-->>Agent: structural FACTS — 3 buckets + delta
+  CF-->>Agent: structural FACTS — 3 buckets + delta<br/>+ what agents already reasoned
   Note over CF: never judges, never edits code
-  Agent->>Agent: reasons buckets WITH project context
-  Agent-->>Dev: findings + recommendation
+  Agent->>Agent: reasons the surface WITH project context
+  Agent->>CF: codefit-baseline-record-verdict
+  CF->>BL: appends the verdict — by: agent
+  Note over CF,BL: recording never ACCEPTS: only a human does.<br/>Two agents disagreeing keeps BOTH verdicts.
+  Agent-->>Dev: findings + recommendation + any conflicts
   Dev->>Agent: decides — false positive / fix / resolved
-  Agent->>BL: accept / prune
-  Note over Dev,BL: fix code → re-audit (loop repeats)
+  Agent->>CF: codefit-baseline-accept / -prune
+  CF->>BL: records the HUMAN decision — by: human
+  Note over Dev,BL: fix code → re-audit. Next scan hands the reasoning back,<br/>and a still-present confirmed problem counts in the score.
 ```
 
 ## What problem it solves (and what it is NOT)

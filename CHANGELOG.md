@@ -14,6 +14,25 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Documentation
+- **The README's two diagrams now match the code.** The sequence diagram still
+  drew the loop as it was BEFORE the closing protocol — it ended at
+  `accept / prune`, with no step for recording a verdict and none for the
+  baseline handing the reasoning back. It now shows the full cycle, including
+  that recording never ACCEPTS and that a still-present confirmed problem counts
+  in the score.
+
+  Both diagrams also drew the AGENT writing the baseline **directly**. It does
+  not, and cannot: every baseline write goes through a codefit tool, and codefit
+  is the only writer — the invariant the README states in words two sections
+  later. The edges now route through codefit, which is what actually happens.
+
+- **The declared SHAPE limits of every TypeScript security rule** are now stated
+  in `COVERAGE.md` and in the provider manifest the agent reads, pinned by
+  `TestShapeCensus`. Nothing about detection changed; what changed is that the
+  limits are now KNOWN and written down instead of undiscovered. See the census
+  entry in `CLAUDE.md` for why they were invisible.
+
 ### Fixed
 - **⚠️ An authorization helper whose RESULT IS DISCARDED no longer clears the access
   gap** — closes [#149](https://github.com/codefit-cli/codefit/issues/149), affirms
