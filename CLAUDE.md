@@ -97,10 +97,60 @@ proteger nada.
 - Aplica también al trabajo delegado: **"los tests pasan" describe una suite, no
   un control.** Exigir la mutación y su salida.
 
+#### La mutación prueba que el test caza su blanco. NADA prueba que el blanco esté completo
+
+La mutación responde *"¿qué tendría que romperse para que esto falle?"*. Le falta
+el hermano, y su ausencia es el hueco más caro que este proyecto encontró:
+
+> **"¿Qué formas REALES existen que este check nunca va a ver?"**
+
+Un detector se verifica contra su propia definición y da verde por tautología. El
+test de una regla que declara `const $NAME = $VALUE` le pasa un `const` y pasa. No
+puede descubrir lo que falta, porque solo mira adentro del recorte. **El código
+hace exactamente lo que dice hacer; lo que nadie preguntó es si eso alcanza.**
+
+**Origen, medido:** `SEC-001` (TypeScript) declara **una sola forma** —
+`const $NAME = $VALUE`— mientras el mismo motor matchea propiedades de objeto sin
+problema (`SEC-080` lo hace) y **todas** las demás reglas TS usan `pattern-either`
+con varias. Censo de formas en un proyecto TypeScript real, contando dónde viven
+los strings estáticos:
+
+```
+const NAME = "literal"      (la ÚNICA que ve)      31
+{ name: "literal" }         (ciega)              1191   ← 38×
+class field = "literal"     (ciega)               316   ← 10×
+let/var NAME = "literal"    (ciega)                 7
+```
+
+La forma que alcanza es la más rara. No fue un límite de diseño ni un bug de
+implementación: **la cobertura se decidió desde la imaginación, no desde un
+censo.** Y como no se supo, tampoco se declaró: no está en `COVERAGE.md`.
+
+Las tres reglas que lo cierran:
+
+1. **El censo va en `explore`, antes de cerrar un detector.** Medir en UN proyecto
+   real dónde vive la cosa que el detector busca. Es un comando, no una auditoría.
+2. **La lista de NO-cobertura va en la spec, y de ahí a `COVERAGE.md`.** La
+   doctrina de "un 'no lo cubro' honesto no cuesta nada, uno no declarado cuesta la
+   confianza" ya existe para **capacidad**; falta aplicarla a **forma**.
+3. **Fixture negativo obligatorio.** Todo test de detector enumera las formas que
+   **NO** dispara, con su razón escrita. El instrumento ya existe y funciona:
+   `internal/core/namematch/crossprovider_test.go` hace exactamente esto para el eje
+   **vocabulario** — cada nombre con el veredicto de los dos motores, y una
+   divergencia solo se admite si está escrita. **Nunca se aplicó al eje formas.**
+   El hueco no es que falte la idea; es que la idea que ya existe se aplicó a un
+   solo eje.
+
+**Prioridad, y no es la intuitiva.** Un falso positivo es ruido; una forma que el
+detector nunca ve es un falso "todo limpio" — I3, imperdonable. Cuando compiten,
+gana cerrar la ceguera.
+
 ### SDD (Specification-Driven Development)
 
 - Cada componente nuevo arranca con una **mini-spec antes de codear**: qué hace,
-  qué recibe, qué devuelve, qué casos de borde maneja.
+  qué recibe, qué devuelve, qué casos de borde maneja. Si es un **detector**
+  (regla, sensor, mapeo de superficie), la spec incluye además **qué formas NO
+  ve**, con el censo que lo respalda — ver la regla del censo más arriba.
 - La spec se escribe como **doc comment en la interface/struct** antes de
   implementar.
 - Para features grandes: escribir la spec en `docs/specs/<componente>.md`

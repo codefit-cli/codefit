@@ -35,21 +35,24 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 		Language: "typescript",
 		Deterministic: append([]coverage.Entry{
 			{
-				ID:    "ts.hardcoded-secrets",
-				Claim: "Hardcoded secrets: a variable whose NAME looks like a credential (password, apiKey, token, secret, authToken, …) assigned a static string literal. codefit matches by the variable name plus a literal value — it does NOT scan values for the shape of an API key, a private key, or a connection string, so a hardcoded secret that is not tied to a credential-named variable is not caught here.",
+				ID:     "ts.hardcoded-secrets",
+				Claim:  "Hardcoded secrets: a variable whose NAME looks like a credential (password, apiKey, token, secret, authToken, …) assigned a static string literal. codefit matches by the variable name plus a literal value — it does NOT scan values for the shape of an API key, a private key, or a connection string, so a hardcoded secret that is not tied to a credential-named variable is not caught here.",
+				Detail: "Hardcoded secrets: a variable whose NAME looks like a credential assigned a static string literal. DECLARED SHAPE LIMIT, the widest one measured: the rule matches a const NAME = <string literal> declaration (and let). An OBJECT-LITERAL PROPERTY, a CLASS FIELD, a var, and a TYPE-ANNOTATED const are all SILENT. A shape census of a real TypeScript project counted 1191 object-literal string properties and 316 class-field string assignments against 31 const declarations with a string literal, so the shape this rule reaches is about 38x rarer than the one it does not. The engine is not the limit: the XSS rule matches an object property today. DECLARED NAME LIMIT: the credential name is matched as a raw SUBSTRING in TypeScript, so a name like tokenizer is reported as a credential; Go matches by component and does not. Both limits are pinned by TestShapeCensus.",
 			},
 			{
 				ID:     "ts.weak-crypto",
 				Claim:  "MD5 or SHA-1 hashing, called directly or through createHash, flagged wherever it appears; deciding whether a hash is security-relevant needs the data followed, which is surface. Also Math.random() assigned to a security-named variable.",
-				Detail: "Weak cryptography: MD5 or SHA-1 hashing — called directly (md5(x), sha1(x)) or via createHash('md5'|'sha1'). These are flagged WHEREVER they appear; a non-security use such as a cache key or an ETag may therefore be a false positive, because deciding whether a hash is security-relevant requires following the data, which is surface. Also flagged: Math.random() assigned to a security-named variable (token, nonce, salt, …), which is not a cryptographically secure source.",
+				Detail: "Weak cryptography: MD5 or SHA-1 hashing — called directly (md5(x), sha1(x)) or via createHash('md5'|'sha1'). These are flagged WHEREVER they appear; a non-security use such as a cache key or an ETag may therefore be a false positive, because deciding whether a hash is security-relevant requires following the data, which is surface. Also flagged: Math.random() assigned to a security-named variable (token, nonce, salt, …), which is not a cryptographically secure source. DECLARED SHAPE LIMIT: the Math.random() check declares a const T = ... declaration, so the same value in an OBJECT PROPERTY or in a RETURN is SILENT. Pinned by TestShapeCensus.",
 			},
 			{
-				ID:    "ts.dangerous-code-evaluation",
-				Claim: "Dangerous code evaluation: eval() or new Function() called with a non-constant argument — an identifier, a call, a concatenation, or an interpolated template. A constant string-literal argument is static code and is not flagged.",
+				ID:     "ts.dangerous-code-evaluation",
+				Claim:  "Dangerous code evaluation: eval() or new Function() called with a non-constant argument — an identifier, a call, a concatenation, or an interpolated template. A constant string-literal argument is static code and is not flagged.",
+				Detail: "Dangerous code evaluation: eval() or new Function() with a non-constant argument. A constant string-literal argument is static code and is not flagged. DECLARED LIMIT: the STRING form of setTimeout/setInterval, passing code as a string rather than a function, is also an evaluation channel and is NOT flagged — the rule declares eval and new Function only. Pinned by TestShapeCensus.",
 			},
 			{
-				ID:    "ts.sql-injection-inline",
-				Claim: "SQL injection built directly in the database call — a query passed to .query() or .execute() that is assembled inline by string concatenation or by an interpolated template literal, such as db.query(`SELECT ... ${userInput}`). When the query is assembled through an intermediate variable instead, that is surface (below), not here.",
+				ID:     "ts.sql-injection-inline",
+				Claim:  "SQL injection built directly in the database call — a query passed to .query() or .execute() that is assembled inline by string concatenation or by an interpolated template literal, such as db.query(`SELECT ... ${userInput}`). When the query is assembled through an intermediate variable instead, that is surface (below), not here.",
+				Detail: "SQL injection built directly in the database call, assembled inline by concatenation or by an interpolated template. Assembly through an intermediate variable is surface, not this rule. DECLARED METHOD-VOCABULARY LIMIT: only the method names .query() and .execute() are recognized, so other raw-SQL entry points stay SILENT even with an interpolated template — Prisma queryRawUnsafe, Knex raw, and better-sqlite3 prepare. This is NOT a shape limit: the interpolated template IS matched; the method name is what the rule does not recognize. Pinned by TestShapeCensus.",
 			},
 			{
 				ID:    "ts.xss-inline-inner-html",

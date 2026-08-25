@@ -48,24 +48,57 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 ### Deterministic — codefit affirms (certainty 1.0)
 
+> **Where each rule LOOKS, and where it does not.** Every deterministic rule
+> matches a declared syntactic SHAPE, so a real occurrence written in a shape the
+> rule does not declare is silent — no error, no warning, nothing. That reach is
+> now censused and pinned by `TestShapeCensus`
+> (`internal/providers/typescript/shape_census_test.go`), which enumerates the
+> shapes each rule reaches AND the shapes it does not, every silence carrying a
+> written reason. The limits below come from that census, not from reading the
+> patterns. Today it records **8 shapes reached and 11 silent**.
+
 - **Hardcoded secrets.** [id: ts.hardcoded-secrets] A variable whose **name** looks like a credential
   (`password`, `apiKey`, `token`, `secret`, `authToken`, …) assigned a static
   string literal. Matched by variable **name + literal value** — codefit does NOT
   scan values for the shape of an API key, private key, or connection string, so a
   hardcoded secret not tied to a credential-named variable is not caught here.
+  **Known limit — the SHAPE is narrow, and this is the widest gap measured:** the
+  rule declares `const $NAME = $VALUE` (and reaches `let`). An **object-literal
+  property** (`{ apiKey: "…" }`), a **class field**, a `var`, and a **type-annotated
+  const** (`const apiKey: string = "…"`) are all silent. A shape census of a real
+  TypeScript project counted **1191** object-literal string properties and **316**
+  class-field string assignments against **31** const-with-string-literal
+  declarations — the shape this rule reaches is roughly **38× rarer** than the one
+  it does not. The engine is not the limit: the XSS rule below matches an object
+  property today.
+- **Known limit — the credential NAME is matched as a raw substring** in
+  TypeScript, so `tokenizer` is reported as a credential (Go matches by component
+  and does not). Declared, with every divergence written down, in
+  `internal/core/namematch/crossprovider_test.go`.
 - **Weak cryptography.** [id: ts.weak-crypto] MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
   `createHash('md5'|'sha1')`. **Known limit:** these are flagged **wherever they
   appear**; a non-security use (a cache key, an ETag) may be a false positive,
   because deciding whether a hash is security-relevant means following the data
   (surface). Also flagged: `Math.random()` assigned to a security-named variable
   (`token`, `nonce`, `salt`, …) — not a cryptographically secure source.
+  **Known limit — same shape narrowness as hardcoded secrets:** the `Math.random()`
+  check declares `const $T = …`, so the same value in an **object property** or in a
+  **`return`** is silent.
 - **Dangerous code evaluation.** [id: ts.dangerous-code-evaluation] `eval()` / `new Function()` with a non-constant
   argument (an identifier, call, concatenation, or interpolated template). A
   constant string-literal argument is static code and is not flagged.
+  **Known limit:** the STRING form of `setTimeout`/`setInterval`
+  (`setTimeout("doThing()", 100)`) is also an evaluation channel and is **not**
+  flagged — the rule declares `eval` and `new Function` only.
 - **SQL injection — inline.** [id: ts.sql-injection-inline] A query passed to `.query()` / `.execute()`
   assembled **inline** by string concatenation or an interpolated template, e.g.
   ``db.query(`SELECT ... ${userInput}`)``. Assembly through an intermediate
   variable is **surface** (below).
+  **Known limit — the METHOD VOCABULARY is `query`/`execute` only.** Other raw-SQL
+  entry points are silent even with an interpolated template: Prisma's explicitly
+  unsafe **`$queryRawUnsafe`**, Knex's **`raw`**, and better-sqlite3's
+  **`prepare`**. This is not the shape limit above — the template IS matched; the
+  method name is what the rule does not recognize.
 - **XSS — inline.** [id: ts.xss-inline-inner-html] React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
