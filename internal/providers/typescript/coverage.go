@@ -55,8 +55,9 @@ func (*Provider) CoverageManifest() coverage.Manifest {
 				Detail: "SQL injection built directly in the database call, assembled inline by concatenation or by an interpolated template. Assembly through an intermediate variable is surface, not this rule. DECLARED METHOD-VOCABULARY LIMIT: only the method names .query() and .execute() are recognized, so other raw-SQL entry points stay SILENT even with an interpolated template — Prisma queryRawUnsafe, Knex raw, and better-sqlite3 prepare. This is NOT a shape limit: the interpolated template IS matched; the method name is what the rule does not recognize. Pinned by TestShapeCensus.",
 			},
 			{
-				ID:    "ts.xss-inline-inner-html",
-				Claim: "Cross-site scripting through React's dangerouslySetInnerHTML when the __html value is built inline — by concatenation or by an interpolated template. When __html is set from a plain variable, its safety depends on earlier sanitization, which is surface (below), not here; a constant __html is not flagged.",
+				ID:     "ts.xss-inline-inner-html",
+				Claim:  "Cross-site scripting through React's dangerouslySetInnerHTML when the __html value is built inline — by concatenation or by an interpolated template. When __html is set from a plain variable, its safety depends on earlier sanitization, which is surface (below), not here; a constant __html is not flagged.",
+				Detail: "Cross-site scripting through React dangerouslySetInnerHTML when the __html value is built inline, by concatenation or by an interpolated template. A plain-variable __html is surface; a constant __html is not flagged. DECLARED ARITY LIMIT, which applies to every object pattern: the matcher requires the property COUNT to match, so this rule reaches __html only when it is the object sole property; an object that also carries className or any other property is SILENT. The canonical JSX form is a one-property object, so the common case works. This follows from a DECLARED design decision, not a defect: reaching a property inside a larger object needs an ellipsis, which this engine deliberately does not support (PRD section 17). Pinned by TestShapeCensus.",
 			},
 		}, dbcoverage.Deterministic()...),
 		Reasoning: append([]coverage.Entry{

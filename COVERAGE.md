@@ -102,6 +102,15 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - **XSS — inline.** [id: ts.xss-inline-inner-html] React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
+  **Known limit — object ARITY, and it applies to every object pattern:** the
+  matcher requires the property **count** to match, so `{__html: …}` is reached
+  only when `__html` is the object's **sole** property. `{__html: …, className: …}`
+  is silent. The canonical JSX shape `dangerouslySetInnerHTML={{__html: h}}` **is**
+  a one-property object, so the common case works — but the limit is real, and it
+  is a consequence of a **declared design decision** rather than a defect: reaching
+  a property inside a larger object needs an ellipsis (`{..., $NAME: $VALUE, ...}`),
+  which this engine deliberately does not support (PRD §17, `rules/README.md`).
+  Pinned by `TestShapeCensus`.
 - **Table without a primary key (DB-050).** [id: DB-050] A model with no `@id`/`@@id`, read from
   the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
   (Flyway) migrations reconstructed to their final state (`database.schema_paths`).

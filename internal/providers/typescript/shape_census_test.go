@@ -112,6 +112,31 @@ var shapeCases = []shapeCase{
 		why: "GAP, same root: a return is not a const declaration.",
 	},
 
+	// ---- XSS, and THE ARITY LIMIT --------------------------------------------
+	//
+	// These rows exist because the arity limit was invisible: it affects a rule
+	// that ships today, and COVERAGE.md described that rule without it.
+	{
+		label: "dangerouslySetInnerHTML, interpolated, sole property",
+		src:   "f({__html: `<b>${x}</b>`});", want: "SEC-080",
+	},
+	{
+		label: "dangerouslySetInnerHTML, interpolated, TWO properties",
+		src:   "f({__html: `<b>${x}</b>`, className: \"x\"});", want: "",
+		why: "THE ARITY LIMIT, and it is a consequence of a DECLARED design decision rather than a " +
+			"bug: matchNode requires the named-child COUNT to be equal, so an object pattern with one " +
+			"pair matches only an object with exactly one pair. Reaching a property inside a larger " +
+			"object needs an ellipsis, and this engine deliberately has none (matcher.go, " +
+			"rules/README.md, PRD section 17). The canonical JSX shape is a one-property object, so " +
+			"the common case works — this row is here so the limit stops being invisible.",
+	},
+	{
+		label: "dangerouslySetInnerHTML, interpolated, THREE properties",
+		src:   "f({id: 1, __html: `<b>${x}</b>`, className: \"x\"});", want: "",
+		why: "Same arity limit. Two rows, not one, because a single row could be read as an " +
+			"off-by-one rather than as 'any object larger than the pattern'.",
+	},
+
 	// ---- eval ---------------------------------------------------------------
 	{label: "eval(x)", src: `eval(userInput);`, want: "SEC-014"},
 	{
