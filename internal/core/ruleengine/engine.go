@@ -23,6 +23,12 @@ type CompiledRule struct {
 
 // Compile parses each rule's pattern(s) via parse (a provider's parser, which
 // emits syntax.Node) and compiles the metavariable regexes.
+//
+// Compilation is strict and located, the same contract [LoadFS] enforces on the
+// YAML: a pattern that does not parse fails the whole compile with an error
+// naming the rule id, the operator, and the offending pattern text. It is not
+// enough to trust parse's error — see [compilePattern] for why a nil error does
+// not mean the pattern parsed.
 func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]CompiledRule, error) {
 	out := make([]CompiledRule, 0, len(rules))
 	for _, r := range rules {
@@ -73,10 +79,27 @@ func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]Compi
 // compilePattern parses a pattern string and unwraps it to the meaningful node
 // (a pattern like "foo($X)" parses as program > expression_statement >
 // call_expression; we match the call, not the wrappers).
+//
+// A nil error from parse is NOT proof the pattern parsed. tree-sitter — the
+// parser behind every syntax.Node today — is error-RECOVERING: given a pattern
+// it cannot parse it returns a TREE containing ERROR nodes rather than failing,
+// so err is nil and the pattern looks fine. The compiled rule then matches
+// nothing, forever, in silence. syntax.Node.HasError is the signal that reports
+// this, and consulting it here is the gate that makes loader.go's promise true
+// for the compile step as well: a broken rule can never enter the engine
+// silently, because a silent rule is a silent vulnerability.
 func compilePattern(src string, parse func(string) (syntax.Node, error)) (syntax.Node, error) {
 	root, err := parse(src)
 	if err != nil {
 		return nil, err
+	}
+	if root == nil {
+		return nil, fmt.Errorf("pattern %q: the parser returned no tree and no error", src)
+	}
+	if root.HasError() {
+		return nil, fmt.Errorf("pattern %q does not parse (the parsed tree contains a syntax error): "+
+			"the parser recovers instead of failing, so this pattern would compile cleanly and then "+
+			"match nothing — fix the pattern's syntax", src)
 	}
 	return unwrap(root), nil
 }

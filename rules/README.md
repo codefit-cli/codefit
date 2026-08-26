@@ -62,3 +62,21 @@ Severity is the rule's *natural* severity; the sensor adjusts it by
 `path_criticality` (a finding in a test file is re-weighted by
 `sensors.security.test_severity` — forced to `info` by default, RF-10), so rules
 never encode path context.
+
+## A pattern that does not parse is rejected, not accepted
+
+Every pattern string is parsed with the provider's own parser at compile time,
+and **a pattern whose parsed tree contains a syntax error fails the whole
+compile**, naming the rule id, the operator, and the offending pattern text.
+
+This is worth stating because the failure it prevents is invisible. tree-sitter
+is error-*recovering*: given `"eval($X"` it does not fail — it returns a tree
+containing an ERROR node. Without the check the rule compiles cleanly and then
+matches **nothing**, for the life of the process, with no error anywhere. A
+silent rule is a silent vulnerability, so a typo in a pattern is loud instead.
+
+Practical consequence for rule authors: if a rule fails to compile, the pattern
+is not valid code in that language. Wrap a fragment in whatever syntax makes it
+a complete expression — the way the XSS rules write an object literal as
+`"({__html: $Q})"`, since the parentheses are semantically transparent and get
+peeled off before matching.
