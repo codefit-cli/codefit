@@ -18,8 +18,11 @@ import (
 // SURFACE, never a deterministic finding, so the blast radius is a possible
 // surface item over unproven structure, never a false affirmation).
 //
-// Same go/ast walk discipline as internal/core/syntax/hasError_debt_test.go
-// (this project already parses its own Go source this way). Asserts TODAY's
+// Same go/ast walk discipline as internal/core/syntax/hasError_callsites_test.go
+// (this project already parses its own Go source this way; that file was
+// hasError_debt_test.go until its debt was paid, and it shows what this lock
+// should become if StructureProven() ever gains a consumer: an inverted census,
+// not a deletion). Asserts TODAY's
 // behavior: if this ever goes red because crossrules starts consulting
 // StructureProven(), that is the signal to delete this lock, update the
 // coverage manifest, and correct the completeness-note exception clause in
