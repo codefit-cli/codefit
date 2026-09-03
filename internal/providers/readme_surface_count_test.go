@@ -123,7 +123,7 @@ func extractBulletBlock(readme, anchor string) (string, error) {
 // every restatement in the file. Extended here rather than left undeclared.
 func TestReadmeSurfaceCategoryCount_MatchesTypeScriptCapability(t *testing.T) {
 	root := repoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "guide", "languages.md"))
 	if err != nil {
 		t.Fatalf("reading README.md: %v", err)
 	}

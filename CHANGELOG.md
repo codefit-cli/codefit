@@ -15,6 +15,22 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Documentation
+- **The README is now the newcomer's narrative, and the dense reference moved to
+  `docs/guide/`.** The old README opened with per-language reach tables and a
+  Phase-2 status header — accurate, and impenetrable to someone seeing the
+  project for the first time. It now explains the idea from zero (the problem, the
+  mechanical/judgment split, what codefit affirms vs what it asks, the memory)
+  with the two diagrams, an honest status strip, and a documentation index.
+  The moved content lost nothing: **[getting-started](docs/guide/getting-started.md)**
+  (install — including the pre-release "latest" warning — verify, connect,
+  quickstart), **[languages](docs/guide/languages.md)** (per-language/dimension
+  reach and the real-project measurements), **[tools](docs/guide/tools.md)**
+  (the MCP reference, scoping, the cache). The two README content locks
+  (`readme_init_markers_test.go`, `readme_surface_count_test.go`) now read
+  `docs/guide/languages.md`, where the prose they anchor on lives; `codefit init`'s
+  closing message points at the new guide.
+
+### Documentation
 - **The README's two diagrams now match the code.** The sequence diagram still
   drew the loop as it was BEFORE the closing protocol — it ended at
   `accept / prune`, with no step for recording a verdict and none for the

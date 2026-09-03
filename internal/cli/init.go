@@ -134,7 +134,7 @@ func formatReport(res scaffold.Result) string {
 
 	writeSchemaSection(&b, res)
 
-	fmt.Fprintln(&b, "\nNext: connect codefit over MCP (see README → \"Connect codefit\").")
+	fmt.Fprintln(&b, "\nNext: connect codefit over MCP (see docs/guide/getting-started.md → \"Connect codefit\").")
 	return b.String()
 }
 
