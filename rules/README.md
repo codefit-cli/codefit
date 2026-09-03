@@ -1,5 +1,10 @@
 # rules/
 
+> **Scope (ADR 0083):** this rule format and its matcher are the **TypeScript
+> provider's** detection mechanism, not codefit's cross-language architecture.
+> Each language owns its detector; Go, for example, uses hand-written `go/ast`
+> analysis and has no rule files.
+
 Declarative detection rules in a **subset of the Semgrep rule format** (see PRD
 section 17). These are codefit's deterministic security/best-practice rules:
 versioned with the binary, contributed by the community without writing Go, and

@@ -15,6 +15,27 @@ All notable changes to codefit are documented here. The format is based on
 ## [Unreleased]
 
 ### Documentation
+- **Decided: detection is per-language; the YAML rule engine is TypeScript's**
+  ([ADR 0083](docs/decisions/0083-detection-is-per-language-the-rule-engine-is-typescripts.md)).
+  Five language simulations (Java, Python, C#, Ruby, Rust) unanimously broke the
+  "rules by default everywhere" direction — the metavariable syntax and the core's
+  unwrap vocabulary are TypeScript-shaped, and rule files are ~4% of a provider
+  against ~79% hand-written surface mapping. What a new language plugs into: the
+  neutral models, the shared `namematch` vocabulary, and the shape-census
+  discipline. It brings its own detector, as Go already does. The ADR also
+  corrects the PRD's §1067 portability claim.
+- **The object ARITY limit is declared**: an object pattern with one member
+  matches only an object with exactly one member, so `SEC-079`/`SEC-080` reach
+  `__html` only when it is the object's sole property. A consequence of the
+  deliberate no-ellipsis design (PRD §17), now stated in `COVERAGE.md`, in the
+  agent-facing manifest, and pinned by two census rows — it had been invisible
+  because the canonical JSX shape happens to be a one-property object.
+- **The install path no longer hands new users the vulnerable build.** GitHub's
+  `/releases/latest` hides pre-releases, so it still resolved to `v0.2.9` — the
+  binary carrying the four called stdlib vulnerabilities fixed in
+  `v0.3.0-alpha.1`. Both README install references now point at the full
+  Releases list and say why, and the `v0.2.9` release itself carries a
+  superseded notice.
 - **The README is now the newcomer's narrative, and the dense reference moved to
   `docs/guide/`.** The old README opened with per-language reach tables and a
   Phase-2 status header — accurate, and impenetrable to someone seeing the
@@ -30,7 +51,6 @@ All notable changes to codefit are documented here. The format is based on
   `docs/guide/languages.md`, where the prose they anchor on lives; `codefit init`'s
   closing message points at the new guide.
 
-### Documentation
 - **The README's two diagrams now match the code.** The sequence diagram still
   drew the loop as it was BEFORE the closing protocol — it ended at
   `accept / prune`, with no step for recording a verdict and none for the
