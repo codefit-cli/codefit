@@ -29,8 +29,14 @@ rules:
   # Math.random() is not cryptographically secure. We fire only when the value
   # is assigned to a security-named variable — the name, present in the same
   # declarator subtree, is the local signal that the value is security-sensitive
-  # (ADR 0004). The two alternatives cover the bare call and the common
-  # .toString(radix) form; both bind $T so the name regex applies to either.
+  # (ADR 0004). The alternatives cover the bare call and the common
+  # .toString(radix) form; all bind $T so the name regex applies to any of them.
+  #
+  # `let` is DECLARED, for the same reason SEC-001 declares it: it used to be
+  # reached only because the matcher could not see a declaration keyword, and
+  # once the matcher compares node skeletons an undeclared shape is an
+  # undetected one. `var` stays out — a different node type, never matched, and
+  # recorded as a known gap in the shape census.
   - id: SEC-058
     message: "Math.random() used for a security value (token/nonce/salt)"
     suggestion: "Use crypto.randomBytes / crypto.randomUUID / webcrypto getRandomValues for security values"
@@ -39,5 +45,7 @@ rules:
     pattern-either:
       - "const $T = Math.random()"
       - "const $T = Math.random().toString($R)"
+      - "let $T = Math.random()"
+      - "let $T = Math.random().toString($R)"
     metavariable-regex:
       $T: "(?i)(token|secret|nonce|salt|^iv$|session|apikey|api_key|otp|password|csrf|seed)"

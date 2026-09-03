@@ -55,7 +55,7 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 > (`internal/providers/typescript/shape_census_test.go`), which enumerates the
 > shapes each rule reaches AND the shapes it does not, every silence carrying a
 > written reason. The limits below come from that census, not from reading the
-> patterns. Today it records **8 shapes reached and 11 silent**.
+> patterns. Today it records **11 shapes reached and 18 silent**.
 
 - **Hardcoded secrets.** [id: ts.hardcoded-secrets] A variable whose **name** looks like a credential
   (`password`, `apiKey`, `token`, `secret`, `authToken`, …) assigned a static
@@ -63,9 +63,9 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   scan values for the shape of an API key, private key, or connection string, so a
   hardcoded secret not tied to a credential-named variable is not caught here.
   **Known limit — the SHAPE is narrow, and this is the widest gap measured:** the
-  rule declares `const $NAME = $VALUE` (and reaches `let`). An **object-literal
-  property** (`{ apiKey: "…" }`), a **class field**, a `var`, and a **type-annotated
-  const** (`const apiKey: string = "…"`) are all silent. A shape census of a real
+  rule declares `const $NAME = $VALUE` and `let $NAME = $VALUE`. An
+  **object-literal property** (`{ apiKey: "…" }`), a **class field**, a `var`, and a
+  **type-annotated const** (`const apiKey: string = "…"`) are all silent. A shape census of a real
   TypeScript project counted **1191** object-literal string properties and **316**
   class-field string assignments against **31** const-with-string-literal
   declarations — the shape this rule reaches is roughly **38× rarer** than the one
@@ -82,8 +82,8 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   (surface). Also flagged: `Math.random()` assigned to a security-named variable
   (`token`, `nonce`, `salt`, …) — not a cryptographically secure source.
   **Known limit — same shape narrowness as hardcoded secrets:** the `Math.random()`
-  check declares `const $T = …`, so the same value in an **object property** or in a
-  **`return`** is silent.
+  check declares `const $T = …` and `let $T = …`, so the same value in an **object
+  property** or in a **`return`** is silent.
 - **Dangerous code evaluation.** [id: ts.dangerous-code-evaluation] `eval()` / `new Function()` with a non-constant
   argument (an identifier, call, concatenation, or interpolated template). A
   constant string-literal argument is static code and is not flagged.
@@ -99,6 +99,11 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   unsafe **`$queryRawUnsafe`**, Knex's **`raw`**, and better-sqlite3's
   **`prepare`**. This is not the shape limit above — the template IS matched; the
   method name is what the rule does not recognize.
+  **Concatenation means `+`.** This rule used to fire on ANY binary operator —
+  `-`, `*`, `%`, `/`, comparisons — because the matcher could not see an operator
+  token at all, so a SQL-injection finding could be **affirmed on a modulo**. Every
+  binary operator other than `+` is now correctly silent, pinned by the shape
+  census.
 - **XSS — inline.** [id: ts.xss-inline-inner-html] React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.

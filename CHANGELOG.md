@@ -70,6 +70,29 @@ All notable changes to codefit are documented here. The format is based on
   behaviour it cannot see (a census reads calls, not semantics) is locked separately
   and proven by mutation.
 
+- **⚠️ The rule matcher could not see an operator, so `SEC-010` affirmed SQL
+  injection on a modulo.** `matchNode` compared node type, then named-child
+  **count**, then children pairwise — and an operator token is not a named child.
+  A `binary_expression` for `+`, `-`, `*` and `%` therefore had the same type and
+  the same two named children, so `$DB.query($A + $B)` matched `db.query(a % b)`
+  and reported SQL injection at **confidence 1.0** — an AFFIRMATION, which the
+  baseline refuses to auto-silence. The same blindness made `typeof`/`void`/
+  `delete` interchangeable and `const` interchangeable with `let`.
+
+  The matcher now also compares each node's **skeleton**: its literal tokens, with
+  every named child cut out by byte range. That recovers the operator from what
+  `syntax.Node` already exposes, so no provider had to grow a method and the
+  interface stays minimal (ADR 0003). Formatting is normalized away — whitespace,
+  a trailing comma before a closing delimiter (Prettier's `trailingComma:"all"`),
+  and a trailing statement terminator — because treating those as shape would
+  trade one false positive for a class of false **negatives**.
+
+  This affects **every** rule. `SEC-001` and `SEC-058` reached `let` only through
+  the blindness, so both now **declare** `let` explicitly: the verdicts are
+  unchanged and the reason is honest. `SEC-079` shared `SEC-010`'s `$A + $B`
+  shape and its false positives, and is fixed by the same change. Pinned by
+  `TestShapeCensus`, which grows from 8 shapes reached / 11 silent to 11 / 18.
+
 - **⚠️ An authorization helper whose RESULT IS DISCARDED no longer clears the access
   gap** — closes [#149](https://github.com/codefit-cli/codefit/issues/149), affirms
   [ADR 0082](docs/decisions/0082-a-detected-authz-helper-clears-the-gap-only-when-it-decided-something.md).

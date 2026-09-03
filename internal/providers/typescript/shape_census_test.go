@@ -43,6 +43,47 @@ var shapeCases = []shapeCase{
 	// ---- SQL injection ------------------------------------------------------
 	{label: "query, concatenated with +", src: `db.query("SELECT * FROM t WHERE id = " + id);`, want: "SEC-010"},
 	{label: "query, interpolated template", src: "db.query(`SELECT * FROM t WHERE id = ${id}`);", want: "SEC-011"},
+	// The OPERATOR axis. SEC-010 declares concatenation; every other binary
+	// operator produces the same node type with the same two named children, so
+	// before the matcher compared node skeletons all of these fired SEC-010 —
+	// an AFFIRMATION at confidence 1.0, which the baseline refuses to
+	// auto-silence — on arithmetic that cannot build a string.
+	{label: "query, concatenated with + and no spaces", src: `db.query("SELECT * FROM t WHERE id ="+id);`, want: "SEC-010"},
+	{
+		// Prettier's default trailingComma:"all" writes exactly this.
+		label: "query, concatenated with + and a trailing comma",
+		src: `db.query(
+  "SELECT * FROM t WHERE id = " + id,
+);`,
+		want: "SEC-010",
+	},
+	{
+		label: "query, subtraction", src: `db.query(total - discount);`, want: "",
+		why: "CORRECT SILENCE, and it was a false AFFIRMATION until the matcher learned to " +
+			"read operators: subtraction cannot concatenate a string, so there is no inline " +
+			"query assembly to report.",
+	},
+	{
+		label: "query, multiplication", src: `db.query(a * b);`, want: "",
+		why: "CORRECT SILENCE, same root as subtraction.",
+	},
+	{
+		label: "query, modulo", src: `db.query(a % b);`, want: "",
+		why: "CORRECT SILENCE, same root as subtraction. This was the sharpest form of the " +
+			"defect: a SQL-injection finding affirmed on a modulo.",
+	},
+	{
+		label: "query, division", src: `db.query(a / b);`, want: "",
+		why: "CORRECT SILENCE, same root as subtraction.",
+	},
+	{
+		label: "query, comparison", src: `db.query(a > b);`, want: "",
+		why: "CORRECT SILENCE, same root: a comparison is a boolean, not an assembled query.",
+	},
+	{
+		label: "query, logical and", src: `db.query(a && b);`, want: "",
+		why: "CORRECT SILENCE, same root: && is a binary_expression too.",
+	},
 	{label: "query, awaited interpolated template", src: "await db.query(`SELECT * FROM t WHERE id = ${id}`);", want: "SEC-011"},
 	{
 		label: "query, bare variable", src: `db.query(q);`, want: "",
@@ -82,14 +123,21 @@ var shapeCases = []shapeCase{
 			"assignments, ~10x the shape SEC-001 reaches.",
 	},
 	{
+		// STILL fires, but for a different reason than it used to. It was reached
+		// by the operator blindness — the declaration keyword is not a named
+		// child, so every lexical_declaration looked alike and `const $NAME =
+		// $VALUE` caught `let` by the same accident that made `$A + $B` catch a
+		// modulo. secrets.yaml now DECLARES `let`, so the verdict is unchanged
+		// and the reason is honest.
 		label: "secret, let declaration", src: `let apiKey = "sk-live-abc";`, want: "SEC-001",
-		why: "",
 	},
 	{
 		label: "secret, var declaration", src: `var apiKey = "sk-live-abc";`, want: "",
-		why: "GAP, same root: the pattern names `const`. Rare in modern TypeScript (7 occurrences " +
-			"of any let/var string assignment in the censused project), so it is the least costly " +
-			"of the three — recorded so the list is complete, not because it is urgent.",
+		why: "GAP: `var` is a different node type (variable_declaration, not " +
+			"lexical_declaration), so it never matched and still does not — unlike `let`, which " +
+			"the rule now names explicitly. Rare in modern TypeScript (7 occurrences of any " +
+			"let/var string assignment in the censused project), so it is the least costly of " +
+			"the three — recorded so the list is complete, not because it is urgent.",
 	},
 	{
 		label: "secret, typed const", src: `const apiKey: string = "sk-live-abc";`, want: "",
@@ -100,7 +148,11 @@ var shapeCases = []shapeCase{
 
 	// ---- Insecure randomness ------------------------------------------------
 	{label: "Math.random, const", src: `const token = Math.random().toString(36);`, want: "SEC-058"},
-	{label: "Math.random, let", src: `let token = Math.random().toString(36);`, want: "SEC-058"},
+	{
+		// Same story as the `let` secret above: reached by accident before, named
+		// by crypto.yaml now. Verdict unchanged, reason honest.
+		label: "Math.random, let", src: `let token = Math.random().toString(36);`, want: "SEC-058",
+	},
 	{
 		label: "Math.random, object property",
 		src:   `const c = { token: Math.random().toString(36) };`, want: "",
@@ -143,6 +195,17 @@ var shapeCases = []shapeCase{
 		label: "setTimeout with a string body", src: `setTimeout("doThing()", 100);`, want: "",
 		why: "GAP: the string form of setTimeout/setInterval is an eval channel and SEC-014 " +
 			"declares eval and new Function only.",
+	},
+
+	// ---- XSS (dangerouslySetInnerHTML) --------------------------------------
+	// Present so the operator axis is pinned on a SECOND rule: SEC-079 shares
+	// SEC-010's `$A + $B` shape and shared its blindness, which is the evidence
+	// that the defect lived in the matcher and not in one rule's pattern.
+	{label: "__html, concatenated with +", src: `const p = {__html: a + b};`, want: "SEC-079"},
+	{
+		label: "__html, subtraction", src: `const p = {__html: a - b};`, want: "",
+		why: "CORRECT SILENCE, same operator-axis root as the SQL rows: SEC-079 declares " +
+			"concatenation, and subtraction cannot build markup.",
 	},
 }
 
