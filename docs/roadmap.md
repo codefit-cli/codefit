@@ -1133,6 +1133,19 @@ Version line: Phase 3 targets `0.3.0`; work toward it tags `v0.3.0-alpha.N` (see
 
 ---
 
+## Decided before the third language (2026-09-03)
+
+**Detection is per-language; the rule engine is TypeScript's**
+([ADR 0083](decisions/0083-detection-is-per-language-the-rule-engine-is-typescripts.md)).
+Five language simulations (Java, Python, C#, Ruby, Rust) unanimously broke the
+"rules by default everywhere" proposal — the metavariable syntax is a TypeScript
+lexical accident, the core's unwrap vocabulary is TypeScript-shaped, and the rule
+files are ~4% of a provider against ~79% hand-written surface mapping, measured
+four times independently. What a new language plugs into: the neutral models, the
+`namematch` vocabulary bound by the cross-provider case table, and the shape-census
+discipline. What it brings: its own detector, like Go already does. Two engine
+defects the simulations surfaced were fixed for TypeScript's sake (#173, #174).
+
 ## P3 — declared capability gaps
 
 Roughly forty open limits across security, the database dimension, the cache and the

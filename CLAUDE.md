@@ -268,7 +268,11 @@ había regla que consultar. Esta es esa regla.
   `LanguageProvider`.
 - **Agregar un lenguaje = implementar `LanguageProvider`**, sin tocar el núcleo,
   los sensores, el MCP server ni el reporting. Si agregar un lenguaje obliga a
-  tocar el núcleo, el diseño falló.
+  tocar el núcleo, el diseño falló. **Cada lenguaje es dueño de su mecanismo de
+  detección** (ADR 0083): el motor de reglas YAML es la implementación de
+  TypeScript, no la arquitectura cross-lenguaje — lo que se comparte es el modelo
+  neutro, el vocabulario de `namematch` (ligado por la tabla cross-provider) y la
+  disciplina del censo de formas.
 - **El MCP server es un adapter delgado**, no reimplementa lógica: traduce las
   llamadas a las tools (`codefit-scan-security`, `codefit-surface-*`,
   `codefit-scan-all`, `codefit-scan-endpoint`, `codefit-baseline-list` / `-accept` /
