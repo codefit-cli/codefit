@@ -70,6 +70,21 @@ All notable changes to codefit are documented here. The format is based on
   entry in `CLAUDE.md` for why they were invisible.
 
 ### Fixed
+
+- **The SQL-injection rules now reach Prisma's and Knex's raw entry points**
+  (`#170`). `SEC-010` (concatenation) and `SEC-011` (interpolated template) only
+  recognized `.query()` and `.execute()`, so an interpolated query through
+  Prisma's explicitly unsafe `$queryRawUnsafe` / `$executeRawUnsafe` or Knex's
+  `.raw()` was **silent** — a false all-clear, the direction the audit protocol's
+  I3 calls unforgivable. All five entry points are now matched.
+  What made this a measurement rather than a guess: a shape census over a real
+  Prisma project found the **safe TAGGED** ``$queryRaw`...` `` form 3 times and
+  the unsafe forms zero times. The tagged form parameterises its interpolations
+  and must never fire, so the widening's real risk was catching the *correct*
+  code, not missing the wrong code. Both tagged forms are now negative fixtures in
+  `TestShapeCensus`, proven by mutation. `better-sqlite3`'s `.prepare()` stays
+  silent and is declared as such in `COVERAGE.md` and in the coverage manifest the
+  agent reads.
 - **⚠️ A rule whose pattern does not parse is now REJECTED at compile time, instead
   of being accepted and matching nothing forever.** `ruleengine.Compile` decided a
   pattern was fine by looking at the parser's error — and that error is never set.
