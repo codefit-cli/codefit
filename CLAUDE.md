@@ -477,7 +477,10 @@ de oro: se edita la FUENTE, después se espeja.**
 
 | Doc | Rol | Cadencia | Notas |
 |-----|-----|----------|-------|
-| `README.md` | fuente | resumen | Capacidades usables HOY, install, tools, puntero a roadmap. |
+| `README.md` | fuente | resumen | La NARRATIVA para el recién llegado (problema → idea → cómo funciona → índice). Desde 2026-09 NO lleva las tablas densas: instalación, alcance por lenguaje y referencia de tools viven en `docs/guide/`. Mantiene la franja de estado honesta y el índice. |
+| `docs/guide/getting-started.md` | fuente | por cambio | Instalación (incluida la advertencia del "latest" pre-release), verificación, conexión MCP, quickstart. `codefit init` la nombra en su salida. |
+| `docs/guide/languages.md` | fuente | resumen | Alcance por lenguaje y dimensión + lo medido en proyectos reales. **Los dos candados de README ahora leen ESTE archivo** (`readme_init_markers_test.go`, `readme_surface_count_test.go`). |
+| `docs/guide/tools.md` | fuente | resumen | Referencia completa de tools MCP, scoping por `changed_files`, cache opt-in. |
 | `CHANGELOG.md` | fuente | resumen | Por release; lo realmente mergeado. Sin tags inventados. |
 | `VERSIONING.md` | fuente | resumen | SemVer↔fase + estado actual. |
 | `COVERAGE.md` | espejo (ver cadena) | resumen | Espejo 2º nivel, a mano. |

@@ -86,7 +86,7 @@ func backtickedTokens(s string) []string {
 // the file would fail on a true statement about a different capability.
 func TestReadmeInitMarkers_MatchTheRegistry(t *testing.T) {
 	root := repoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "guide", "languages.md"))
 	if err != nil {
 		t.Fatalf("reading README.md: %v", err)
 	}
