@@ -1,4 +1,36 @@
 rules:
+  # THE METHOD VOCABULARY, and the one distinction that must never blur.
+  #
+  # Both rules below recognise a fixed set of raw-SQL entry points. `query` and
+  # `execute` cover the generic drivers; Prisma's `$queryRawUnsafe` /
+  # `$executeRawUnsafe` and Knex's `raw` are the ORM-specific ones. The leading
+  # `$` in the Prisma names is a LITERAL here, not a metavariable: metavarRe
+  # requires an uppercase letter after the sigil (`^\$[A-Z]...`), and
+  # `$queryRawUnsafe` has a lowercase `q`. Verified before these patterns were
+  # written — the pattern matches the real call and does NOT collapse into a
+  # wildcard that would also match `.query`.
+  #
+  # WHAT MUST NEVER FIRE, and why it is the sharper half: Prisma's TAGGED
+  # `$queryRaw`SELECT ... ${id}`` PARAMETERISES its interpolations. It is the
+  # CORRECT way to write raw SQL in Prisma, and flagging it would be a false
+  # affirmation at confidence 1.0.
+  #
+  # What actually separates them, measured rather than assumed: BOTH forms parse
+  # to a `call_expression` with two named children — the node type is the SAME.
+  # The second child is what differs: `arguments` for the called form,
+  # `template_string` for the tagged one. So the patterns here reach the unsafe
+  # form and cannot reach the safe one, and the reason is one level deeper than
+  # "a different node". A census of a real Prisma
+  # project measured the tagged safe form THREE times and the unsafe forms ZERO
+  # times, so a careless widening would have produced three false positives and
+  # caught nothing. Both tagged shapes are pinned as negative fixtures in
+  # internal/providers/typescript/shape_census_test.go.
+  #
+  # DECLARED LIMIT: better-sqlite3's `.prepare()` is still not recognised. It is
+  # a genuinely different shape (the SQL is prepared, then run by a separate
+  # `.get()`/`.run()` call), and adding it without that second half would report
+  # the preparation rather than the execution. Declared, not silently omitted.
+
   # SQL injection — INLINE concatenation case (ADR 0004). The query string is
   # assembled with `+` right in the call argument. This is conclusive over the
   # call subtree: the concatenation is visible without following any variable.
@@ -12,6 +44,9 @@ rules:
     pattern-either:
       - "$DB.query($A + $B)"
       - "$DB.execute($A + $B)"
+      - "$DB.$queryRawUnsafe($A + $B)"
+      - "$DB.$executeRawUnsafe($A + $B)"
+      - "$DB.raw($A + $B)"
 
   # SQL injection — INLINE interpolated-template case. metavariable-regex keeps
   # only a template literal (starts with a backtick) that actually interpolates
@@ -26,5 +61,8 @@ rules:
     pattern-either:
       - "$DB.query($Q)"
       - "$DB.execute($Q)"
+      - "$DB.$queryRawUnsafe($Q)"
+      - "$DB.$executeRawUnsafe($Q)"
+      - "$DB.raw($Q)"
     metavariable-regex:
       $Q: '^`.*\$\{'

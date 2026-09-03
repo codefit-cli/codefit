@@ -90,15 +90,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **Known limit:** the STRING form of `setTimeout`/`setInterval`
   (`setTimeout("doThing()", 100)`) is also an evaluation channel and is **not**
   flagged — the rule declares `eval` and `new Function` only.
-- **SQL injection — inline.** [id: ts.sql-injection-inline] A query passed to `.query()` / `.execute()`
-  assembled **inline** by string concatenation or an interpolated template, e.g.
+- **SQL injection — inline.** [id: ts.sql-injection-inline] A query assembled
+  **inline** by string concatenation or an interpolated template, e.g.
   ``db.query(`SELECT ... ${userInput}`)``. Assembly through an intermediate
   variable is **surface** (below).
-  **Known limit — the METHOD VOCABULARY is `query`/`execute` only.** Other raw-SQL
-  entry points are silent even with an interpolated template: Prisma's explicitly
-  unsafe **`$queryRawUnsafe`**, Knex's **`raw`**, and better-sqlite3's
-  **`prepare`**. This is not the shape limit above — the template IS matched; the
-  method name is what the rule does not recognize.
+  **Recognized method vocabulary:** `.query()`, `.execute()`, Prisma's explicitly
+  unsafe **`$queryRawUnsafe`** / **`$executeRawUnsafe`**, and Knex's **`.raw()`**.
+  **Known limit — still silent:** better-sqlite3's **`prepare`**. This is a name
+  limit, not the shape limit above: the template IS matched; the method name is
+  what the rule does not recognize.
+  **Deliberately NOT matched — Prisma's TAGGED ``$queryRaw`...` ``.** The tagged
+  form **parameterises** its interpolations and is the *correct* way to write raw
+  SQL, so firing on it would be a false positive at certainty 1.0. This is not an
+  oversight but a measurement: a census of a real Prisma project found the tagged
+  form **3 times** and the unsafe forms **zero times**, so widening carelessly
+  would have produced three false affirmations and caught nothing. The two forms
+  parse to the same node type and differ only in their second child.
   **Concatenation means `+`.** This rule used to fire on ANY binary operator —
   `-`, `*`, `%`, `/`, comparisons — because the matcher could not see an operator
   token at all, so a SQL-injection finding could be **affirmed on a modulo**. Every

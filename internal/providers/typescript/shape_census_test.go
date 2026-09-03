@@ -92,14 +92,43 @@ var shapeCases = []shapeCase{
 	},
 	{
 		label: "prisma.$queryRawUnsafe, interpolated",
-		src:   "prisma.$queryRawUnsafe(`SELECT * FROM t WHERE id = ${id}`);", want: "",
-		why: "GAP. SEC-010/011 match the METHOD NAMES query/execute only, so Prisma's explicitly " +
-			"unsafe raw API is silent — on the ORM this project treats as its flagship stack. " +
-			"Not a shape limit: a method-vocabulary limit. Filed, not fixed here.",
+		src:   "prisma.$queryRawUnsafe(`SELECT * FROM t WHERE id = ${id}`);", want: "SEC-011",
 	},
 	{
-		label: "knex.raw, interpolated", src: "knex.raw(`SELECT * FROM t WHERE id = ${id}`);", want: "",
-		why: "GAP, same method-vocabulary root as $queryRawUnsafe: raw is not query/execute.",
+		label: "prisma.$executeRawUnsafe, interpolated",
+		src:   "prisma.$executeRawUnsafe(`DELETE FROM t WHERE id = ${id}`);", want: "SEC-011",
+	},
+	{
+		label: "prisma.$queryRawUnsafe, concatenated",
+		src:   `prisma.$queryRawUnsafe("SELECT * FROM t WHERE id = " + id);`, want: "SEC-010",
+	},
+	{
+		label: "prisma.$queryRaw TAGGED — SAFE, must stay silent",
+		src:   "prisma.$queryRaw`SELECT * FROM t WHERE id = ${id}`;", want: "",
+		why: "NOT a gap — the single most important negative fixture in this file. Prisma's TAGGED " +
+			"$queryRaw PARAMETERISES its interpolations; it is the CORRECT way to write raw SQL and " +
+			"firing on it would be a false positive at confidence 1.0. The census measured this shape " +
+			"3 times in a real Prisma project while the unsafe forms appeared ZERO times, so a careless " +
+			"widening would have produced 3 false affirmations and caught nothing at all. " +
+			"WHAT SEPARATES THE TWO FORMS, measured rather than assumed: both parse to a call_expression " +
+			"with two named children, so the node TYPE is identical. Only the second child differs — " +
+			"arguments for the called form, template_string for the tagged one. That is the whole basis " +
+			"of the distinction, and it is why call-shaped patterns cannot reach the tagged form. " +
+			"PROVEN BY MUTATION: adding a tagged pattern carrying this row's exact template text to " +
+			"SEC-010 turns this row and its $executeRaw twin RED. Reverting restores green. " +
+			"AIM IT AT SEC-010, NOT SEC-011, and this cost four wasted attempts to learn: SEC-011 " +
+			"carries a metavariable-regex on $Q, so a mutation injected there is swallowed by the " +
+			"regex before it can reach the fixture, and the green that comes back reads exactly like a " +
+			"weak test. It is not. A filter on the mutated rule silently disarms the mutation — when a " +
+			"row refuses to break, suspect the aim before the lock.",
+	},
+	{
+		label: "prisma.$executeRaw TAGGED — SAFE, must stay silent",
+		src:   "prisma.$executeRaw`DELETE FROM t WHERE id = ${id}`;", want: "",
+		why: "Same as $queryRaw tagged: parameterised, correct, must never fire.",
+	},
+	{
+		label: "knex.raw, interpolated", src: "knex.raw(`SELECT * FROM t WHERE id = ${id}`);", want: "SEC-011",
 	},
 	{
 		label: "better-sqlite3 prepare, interpolated",
