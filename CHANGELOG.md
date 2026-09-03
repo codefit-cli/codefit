@@ -34,6 +34,42 @@ All notable changes to codefit are documented here. The format is based on
   entry in `CLAUDE.md` for why they were invisible.
 
 ### Fixed
+- **⚠️ A rule whose pattern does not parse is now REJECTED at compile time, instead
+  of being accepted and matching nothing forever.** `ruleengine.Compile` decided a
+  pattern was fine by looking at the parser's error — and that error is never set.
+  tree-sitter is error-*recovering*: given a broken pattern it returns a TREE
+  containing ERROR nodes, with a nil error. Measured on `main` before the fix:
+
+  ```
+  Compile ACCEPTED 2 of 2 rules, including a malformed one. No error.
+    malformed pattern tree -> HasError() = true    <- the signal existed, and was correct
+    good pattern tree      -> HasError() = false
+    findings over a file the GOOD rule matches: 1  (only the good rule fired)
+  ```
+
+  The broken rule loaded, compiled, joined the engine, and then detected nothing for
+  the life of the process, with no error anywhere. That is exactly what
+  `ruleengine/loader.go`'s own doc comment says can never happen — *"a broken rule can
+  never enter the engine silently — a silent rule is a silent vulnerability"* — and
+  the promise held for the YAML but not for the pattern inside it.
+
+  `syntax.Node.HasError()` reported the condition correctly the whole time and **no
+  production path read it**. `compilePattern` now consults it and fails the compile
+  with a located error naming the rule id, the operator, and the offending pattern
+  text, for `pattern`, `pattern-either`, `pattern-not` and `pattern-inside` alike.
+
+  **No shipped rule was affected.** All 9 TypeScript security rules and all 15 of
+  their patterns parse clean and still fire; the corpus is now run through the gate,
+  rule by rule, as a test.
+
+  The `HasError()` debt lock in `internal/core/syntax` was **rewritten, not deleted**.
+  It used to assert the signal had ZERO production consumers — the point of a debt
+  lock being to keep an unused signal visible. The debt is paid, so the census is
+  inverted: it now requires exactly the implementation and the compile gate, goes red
+  if the gate is removed, and goes red if a third consumer appears unexamined. The
+  behaviour it cannot see (a census reads calls, not semantics) is locked separately
+  and proven by mutation.
+
 - **⚠️ An authorization helper whose RESULT IS DISCARDED no longer clears the access
   gap** — closes [#149](https://github.com/codefit-cli/codefit/issues/149), affirms
   [ADR 0082](docs/decisions/0082-a-detected-authz-helper-clears-the-gap-only-when-it-decided-something.md).

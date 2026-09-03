@@ -15,8 +15,12 @@ import (
 // design SS10, resolved decision #4: "a skipped test is a TODO, not a
 // control"). ONE syntactically invalid .go file aborts the ENTIRE sensor
 // walk — a stricter, opposite-direction failure mode from the TS parser's
-// per-node HasError() (declared, unconsumed, locked separately in
-// internal/core/syntax/hasError_debt_test.go). Asserts TODAY's actual
+// per-node HasError(), which recovers rather than failing and is consulted at
+// the rule-compile gate (census in internal/core/syntax/
+// hasError_callsites_test.go, behaviour in internal/core/ruleengine/
+// compilegate_test.go). That HasError() debt — declared and unconsumed when
+// this lock was written — is PAID; this Go-side lock is not, and stands.
+// Asserts TODAY's actual
 // behavior against the real production code path (security.Sensor.Run ->
 // filepath.WalkDir -> scanFile -> golang parse), not a description of it.
 //
