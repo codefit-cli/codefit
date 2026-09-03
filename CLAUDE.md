@@ -286,8 +286,10 @@ había regla que consultar. Esta es esa regla.
   vulnerabilidad — enumera *toda* la superficie auditable de cada categoría, para
   que el agente razone sin puntos ciegos (PRD §10).
 - **Motor de reglas:** matcher propio en Go que interpreta un **subset del formato
-  Semgrep** (operadores core: `pattern`, `pattern-either`, `patterns`,
-  `pattern-not`, `pattern-inside`, metavariables, `metavariable-regex`). **No** se
+  Semgrep** (operadores core: `pattern`, `pattern-either`,
+  `pattern-not`, `pattern-inside`, metavariables, `metavariable-regex`;
+  `patterns` (AND) está declarado en el shape pero NO implementado — documentado
+  en el PR #173). **No** se
   embebe OpenGrep/OCaml. **No** se implementa `mode: taint` — su función la cubre
   el razonamiento del agente sobre la superficie (PRD §17).
 - **CVEs:** vía **OSV.dev** (gratis, sin API key). codefit no mantiene base
