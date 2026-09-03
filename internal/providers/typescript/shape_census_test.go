@@ -138,18 +138,40 @@ var shapeCases = []shapeCase{
 
 	// ---- Hardcoded secrets --------------------------------------------------
 	{label: "secret, const declaration", src: `const apiKey = "sk-live-abc";`, want: "SEC-001"},
+	{label: "secret, object property (arity 1)", src: `const cfg = { apiKey: "sk-live-abc" };`, want: "SEC-001"},
 	{
-		label: "secret, object property", src: `const cfg = { apiKey: "sk-live-abc" };`, want: "",
-		why: "GAP, and the widest one measured: SEC-001 declares the single shape " +
-			"`const $NAME = $VALUE`. A shape census of a real TypeScript project counted 1191 " +
-			"object-literal string properties against 31 const-with-string-literal declarations — " +
-			"the shape it reaches is ~38x rarer than the one it does not. The engine is not the " +
-			"limit: SEC-080 matches an object property today.",
+		label: "secret, object property in a MULTI-property object",
+		src:   `const cfg = { baseUrl: "u", apiKey: "sk-live-abc", retries: 3 };`, want: "SEC-001",
+		why: "THE shape the census says a credential actually lives in. Across two real " +
+			"TypeScript projects every object holding a credential-named string property had " +
+			"arity 5, 5, 5 and 3 — four of four multi-property, ZERO at arity 1. Reaching it " +
+			"needed the scoped object ellipsis in the matcher, because the exact-arity rule " +
+			"could not be written.",
+	},
+	{
+		label: "object property, credential name but NON-string value",
+		src:   `const cfg = { baseUrl: "u", apiKey: readKey(), retries: 3 };`, want: "",
+		why: "the $VALUE metavariable-regex still demands a quoted literal; the ellipsis " +
+			"widened WHICH objects are reached, never what counts as a secret",
+	},
+	{
+		label: "multi-property object with no credential name",
+		src:   `const cfg = { baseUrl: "u", retries: 3, label: "x" };`, want: "",
+		why: "subset matching must not degrade into matching any object — the $NAME regex " +
+			"is what still decides, and this row is what proves it",
 	},
 	{
 		label: "secret, class field", src: `class C { apiKey = "sk-live-abc"; }`, want: "",
-		why: "GAP, same root as the object property. Same census counted 316 class-field string " +
-			"assignments, ~10x the shape SEC-001 reaches.",
+		why: "THE GAP THAT REMAINS after the object ellipsis closed the object one, and the " +
+			"largest still open: the same census counted 316 class-field string assignments, " +
+			"about 10x the const shape the rule already reached. It is NOT the arity problem " +
+			"the ellipsis solved, and that was measured rather than assumed — the pattern " +
+			"`class $C { $NAME = $VALUE }` finds ZERO even in a class with a SINGLE field, so " +
+			"widening the ellipsis to class bodies would not reach it either. The pattern " +
+			"unwraps to class_declaration (unwrap peels only program, expression_statement and " +
+			"parenthesized_expression), and a rule cannot address the public_field_definition " +
+			"node on its own. Closing it needs a different mechanism, not another alternative. " +
+			"Tracked separately so this row is a declared limit and not a silent one.",
 	},
 	{
 		// STILL fires, but for a different reason than it used to. It was reached
@@ -160,20 +182,8 @@ var shapeCases = []shapeCase{
 		// and the reason is honest.
 		label: "secret, let declaration", src: `let apiKey = "sk-live-abc";`, want: "SEC-001",
 	},
-	{
-		label: "secret, var declaration", src: `var apiKey = "sk-live-abc";`, want: "",
-		why: "GAP: `var` is a different node type (variable_declaration, not " +
-			"lexical_declaration), so it never matched and still does not — unlike `let`, which " +
-			"the rule now names explicitly. Rare in modern TypeScript (7 occurrences of any " +
-			"let/var string assignment in the censused project), so it is the least costly of " +
-			"the three — recorded so the list is complete, not because it is urgent.",
-	},
-	{
-		label: "secret, typed const", src: `const apiKey: string = "sk-live-abc";`, want: "",
-		why: "GAP: a type annotation changes the declarator's shape and the pattern stops matching. " +
-			"Zero occurrences in the censused project, so its prevalence is UNMEASURED here — " +
-			"recorded as a shape fact, with no claim about how common it is.",
-	},
+	{label: "secret, var declaration", src: `var apiKey = "sk-live-abc";`, want: "SEC-001"},
+	{label: "secret, typed const", src: `const apiKey: string = "sk-live-abc";`, want: "SEC-001"},
 
 	// ---- Insecure randomness ------------------------------------------------
 	{label: "Math.random, const", src: `const token = Math.random().toString(36);`, want: "SEC-058"},
@@ -203,7 +213,7 @@ var shapeCases = []shapeCase{
 	},
 	{
 		label: "dangerouslySetInnerHTML, interpolated, TWO properties",
-		src:   "f({__html: `<b>${x}</b>`, className: \"x\"});", want: "",
+		src:   "f({__html: `<b>${x}</b>`, className: \"x\"});", want: "SEC-080",
 		why: "THE ARITY LIMIT, and it is a consequence of a DECLARED design decision rather than a " +
 			"bug: matchNode requires the named-child COUNT to be equal, so an object pattern with one " +
 			"pair matches only an object with exactly one pair. Reaching a property inside a larger " +
@@ -213,7 +223,7 @@ var shapeCases = []shapeCase{
 	},
 	{
 		label: "dangerouslySetInnerHTML, interpolated, THREE properties",
-		src:   "f({id: 1, __html: `<b>${x}</b>`, className: \"x\"});", want: "",
+		src:   "f({id: 1, __html: `<b>${x}</b>`, className: \"x\"});", want: "SEC-080",
 		why: "Same arity limit. Two rows, not one, because a single row could be read as an " +
 			"off-by-one rather than as 'any object larger than the pattern'.",
 	},
