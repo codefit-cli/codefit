@@ -2,7 +2,10 @@ package ruleengine
 
 import (
 	"fmt"
+	"github.com/codefit-cli/codefit/internal/core/namematch"
 	"regexp"
+	"sort"
+	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/syntax"
@@ -13,12 +16,14 @@ import (
 // ruleengine never parses source itself — Compile receives a parse function
 // from the active provider, so the engine stays parser-agnostic.
 type CompiledRule struct {
-	rule      Rule
-	pattern   syntax.Node   // the unwrapped node for `pattern`
-	either    []syntax.Node // `pattern-either` (OR of base patterns)
-	not       syntax.Node   // `pattern-not` (exclusion)
-	inside    syntax.Node   // `pattern-inside` (the match must be within this)
-	metavarRe map[string]*regexp.Regexp
+	rule    Rule
+	pattern syntax.Node   // the unwrapped node for `pattern`
+	either  []syntax.Node // `pattern-either` (OR of base patterns)
+	not     syntax.Node   // `pattern-not` (exclusion)
+	inside  syntax.Node   // `pattern-inside` (the match must be within this)
+	// constraints are the per-metavariable gates from metavariable-regex and
+	// metavariable-name, merged. See [metavarname] in matcher.go.
+	constraints constraints
 }
 
 // Compile parses each rule's pattern(s) via parse (a provider's parser, which
@@ -61,15 +66,29 @@ func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]Compi
 			}
 			cr.inside = node
 		}
-		if len(r.MetavariableRegex) > 0 {
-			cr.metavarRe = make(map[string]*regexp.Regexp, len(r.MetavariableRegex))
-			for mv, expr := range r.MetavariableRegex {
-				re, err := regexp.Compile(expr)
-				if err != nil {
-					return nil, fmt.Errorf("rule %s: metavariable-regex %q: %w", r.ID, expr, err)
-				}
-				cr.metavarRe[mv] = re
+		if n := len(r.MetavariableRegex) + len(r.MetavariableName); n > 0 {
+			cr.constraints = make(constraints, n)
+		}
+		for mv, expr := range r.MetavariableRegex {
+			re, err := regexp.Compile(expr)
+			if err != nil {
+				return nil, fmt.Errorf("rule %s: metavariable-regex %q: %w", r.ID, expr, err)
 			}
+			c := cr.constraints[mv]
+			c.re = re
+			cr.constraints[mv] = c
+		}
+		for mv, vocab := range r.MetavariableName {
+			build, known := metavarVocabularies[vocab]
+			if !known {
+				return nil, fmt.Errorf("rule %s: metavariable-name %s: unknown vocabulary %q (known: %s) — "+
+					"a rule that named an unknown vocabulary would compile cleanly and then match "+
+					"nothing, and nobody would ever be told",
+					r.ID, mv, vocab, strings.Join(knownVocabularies(), ", "))
+			}
+			c := cr.constraints[mv]
+			c.set = build()
+			cr.constraints[mv] = c
 		}
 		out = append(out, cr)
 	}
@@ -182,9 +201,11 @@ func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 		return nil, false
 	}
 	// metavariable-regex: each named metavariable's bound text must match.
-	for mv, re := range cr.metavarRe {
+	// A metavariable named by a constraint but never bound is a REJECTION, not a
+	// pass: the rule asked a question about something the match never produced.
+	for mv, c := range cr.constraints {
 		text, ok := binds[mv]
-		if !ok || !re.MatchString(text) {
+		if !ok || !c.ok(text) {
 			return nil, false
 		}
 	}
@@ -195,14 +216,14 @@ func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 func baseMatch(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 	if cr.pattern != nil {
 		binds := map[string]string{}
-		if matchNode(cr.pattern, node, binds, cr.metavarRe) {
+		if matchNode(cr.pattern, node, binds, cr.constraints) {
 			return binds, true
 		}
 		return nil, false
 	}
 	for _, alt := range cr.either {
 		binds := map[string]string{}
-		if matchNode(alt, node, binds, cr.metavarRe) {
+		if matchNode(alt, node, binds, cr.constraints) {
 			return binds, true
 		}
 	}
@@ -232,4 +253,22 @@ func walk(n syntax.Node, visit func(syntax.Node)) {
 	for i := 0; i < n.NamedChildCount(); i++ {
 		walk(n.NamedChild(i), visit)
 	}
+}
+
+// metavarVocabularies is the closed set of name vocabularies a rule may ask for.
+// It is closed on purpose: an open registry would let a rule name anything and
+// discover at runtime that it matches nothing. Each entry is a function rather
+// than a value because a vocabulary is built per call and must not be shared
+// mutable state between rules.
+var metavarVocabularies = map[string]func() map[string]bool{
+	"credential": namematch.Credential,
+}
+
+func knownVocabularies() []string {
+	out := make([]string, 0, len(metavarVocabularies))
+	for k := range metavarVocabularies {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
