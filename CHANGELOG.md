@@ -24,12 +24,12 @@ All notable changes to codefit are documented here. The format is based on
   neutral models, the shared `namematch` vocabulary, and the shape-census
   discipline. It brings its own detector, as Go already does. The ADR also
   corrects the PRD's §1067 portability claim.
-- **The object ARITY limit is declared**: an object pattern with one member
-  matches only an object with exactly one member, so `SEC-079`/`SEC-080` reach
-  `__html` only when it is the object's sole property. A consequence of the
-  deliberate no-ellipsis design (PRD §17), now stated in `COVERAGE.md`, in the
-  agent-facing manifest, and pinned by two census rows — it had been invisible
-  because the canonical JSX shape happens to be a one-property object.
+- **The object ARITY limit was declared, and is now CLOSED** — see the ellipsis
+  entry under *Fixed*. It is left in this list because declaring it is what made
+  it fixable: an object pattern with one member matched only an object with
+  exactly one member, so `SEC-079`/`SEC-080` reached `__html` only when it was
+  the object's sole property. It had been invisible because the canonical JSX
+  shape happens to be a one-property object.
 - **The install path no longer hands new users the vulnerable build.** GitHub's
   `/releases/latest` hides pre-releases, so it still resolved to `v0.2.9` — the
   binary carrying the four called stdlib vulnerabilities fixed in
@@ -70,6 +70,36 @@ All notable changes to codefit are documented here. The format is based on
   entry in `CLAUDE.md` for why they were invisible.
 
 ### Fixed
+
+- **A hardcoded secret in a config object is no longer invisible** (`#169`), and
+  neither is `dangerouslySetInnerHTML` on an element that carries a second
+  attribute. `SEC-001` declared one shape, `const $NAME = $VALUE`, so a
+  credential written any other way produced **nothing** — the false-all-clear
+  direction I3 calls unforgivable.
+  The obvious fix does not work, and the census is what proved it. Across two
+  real TypeScript projects, every object holding a credential-named string
+  property had arity **5, 5, 5 and 3** — four of four multi-property, **none** at
+  arity 1 — while the matcher compared property COUNT. An `({$NAME: $VALUE})`
+  alternative would have reached zero of them.
+  So the rule engine gains **one ellipsis, scoped to object properties**
+  ([ADR 0084](docs/decisions/0084-the-rule-engine-gets-one-ellipsis-scoped-to-object-properties.md)),
+  spelled `({...$REST, $NAME: $VALUE})`. It is zero-or-more, it does not bind,
+  and it is **opt-in per pattern** — a pattern without a spread keeps exact-arity
+  matching, so the behaviour of no existing rule changed.
+  It is spelled `...$REST` rather than Semgrep's `...` because that was measured:
+  a bare ellipsis inside an object does not parse in TypeScript, so the compile
+  gate rejects it. A spread of a metavariable is ordinary TypeScript.
+  `SEC-001` now also reaches `var` and a type-annotated `const`/`let`. A **class
+  field stays silent** and is declared: 316 occurrences in the same census, and
+  measured *not* to be the arity problem — a class pattern finds zero even with a
+  single field, so it needs a different mechanism and is tracked separately.
+- **`metavariable-regex` now steers the match instead of filtering its first
+  answer.** A subset match has many valid assignments where an exact-arity match
+  had one; returning the first and filtering afterwards meant `$NAME` bound to
+  whichever property came first, the regex rejected it, and the credential three
+  properties later was never considered — under-reporting produced by the fix for
+  under-reporting. A binding that violates its regex is now rejected at bind time
+  and the search backtracks.
 
 - **The SQL-injection rules now reach Prisma's and Knex's raw entry points**
   (`#170`). `SEC-010` (concatenation) and `SEC-011` (interpolated template) only

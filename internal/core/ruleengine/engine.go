@@ -137,7 +137,7 @@ func Match(rules []CompiledRule, root syntax.Node, file string) []findings.Findi
 		var insideRanges [][2]int
 		if cr.inside != nil {
 			walk(root, func(n syntax.Node) {
-				if matchNode(cr.inside, n, map[string]string{}) {
+				if matchNode(cr.inside, n, map[string]string{}, nil) {
 					insideRanges = append(insideRanges, [2]int{n.StartByte(), n.EndByte()})
 				}
 			})
@@ -178,7 +178,7 @@ func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 		return nil, false
 	}
 	// pattern-not: if the node also matches the excluded pattern, drop it.
-	if cr.not != nil && matchNode(cr.not, node, map[string]string{}) {
+	if cr.not != nil && matchNode(cr.not, node, map[string]string{}, nil) {
 		return nil, false
 	}
 	// metavariable-regex: each named metavariable's bound text must match.
@@ -195,14 +195,14 @@ func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 func baseMatch(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 	if cr.pattern != nil {
 		binds := map[string]string{}
-		if matchNode(cr.pattern, node, binds) {
+		if matchNode(cr.pattern, node, binds, cr.metavarRe) {
 			return binds, true
 		}
 		return nil, false
 	}
 	for _, alt := range cr.either {
 		binds := map[string]string{}
-		if matchNode(alt, node, binds) {
+		if matchNode(alt, node, binds, cr.metavarRe) {
 			return binds, true
 		}
 	}

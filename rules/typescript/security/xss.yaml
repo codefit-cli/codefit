@@ -2,14 +2,21 @@ rules:
   # XSS via React dangerouslySetInnerHTML — INLINE concatenation case (ADR 0004).
   # We match the {__html: $A + $B} object directly, not the JSX element: __html is
   # React's unambiguous signal for raw-HTML injection, and matching the object
-  # makes the rule independent of how many other attributes the element carries.
+  # makes the rule independent of how many other attributes the ELEMENT carries.
   # The pattern is written parenthesized so it isolates the object literal.
+  #
+  # It was NOT independent of how many properties the OBJECT carries, and that
+  # limit was never declared anywhere. Both rules fired only when __html was the
+  # object's SOLE property; `{__html: h, className: "x"}` was silent. The
+  # canonical JSX shape happens to be a one-property object, so the common case
+  # worked by coincidence and the gap stayed invisible. The `...$REST` ellipsis
+  # closes it — zero-or-more, so the one-property case still matches.
   - id: SEC-079
     message: "XSS: HTML concatenated inline into dangerouslySetInnerHTML"
     suggestion: "Sanitize with DOMPurify before setting __html, or render escaped text instead of raw HTML"
     severity: high
     dimension: security
-    pattern: "({__html: $A + $B})"
+    pattern: "({...$REST, __html: $A + $B})"
 
   # XSS via dangerouslySetInnerHTML — INLINE interpolated-template case.
   # metavariable-regex keeps only a template literal (starts with a backtick) that
@@ -20,6 +27,6 @@ rules:
     suggestion: "Sanitize with DOMPurify before setting __html; never interpolate untrusted values into raw HTML"
     severity: high
     dimension: security
-    pattern: "({__html: $Q})"
+    pattern: "({...$REST, __html: $Q})"
     metavariable-regex:
       $Q: '^`.*\$\{'

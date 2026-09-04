@@ -62,15 +62,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   string literal. Matched by variable **name + literal value** — codefit does NOT
   scan values for the shape of an API key, private key, or connection string, so a
   hardcoded secret not tied to a credential-named variable is not caught here.
-  **Known limit — the SHAPE is narrow, and this is the widest gap measured:** the
-  rule declares `const $NAME = $VALUE` and `let $NAME = $VALUE`. An
-  **object-literal property** (`{ apiKey: "…" }`), a **class field**, a `var`, and a
-  **type-annotated const** (`const apiKey: string = "…"`) are all silent. A shape census of a real
-  TypeScript project counted **1191** object-literal string properties and **316**
-  class-field string assignments against **31** const-with-string-literal
-  declarations — the shape this rule reaches is roughly **38× rarer** than the one
-  it does not. The engine is not the limit: the XSS rule below matches an object
-  property today.
+  **Shapes reached:** `const`, `let`, `var`, a **type-annotated** `const`/`let`
+  (`const apiKey: string = "…"`), and an **object-literal property**
+  (`{ baseUrl: "…", apiKey: "…", retries: 3 }`) at any position, in an object of
+  any size. The object shape needed an engine change, not another pattern: a
+  census across two real TypeScript projects measured every object holding a
+  credential-named string property at arity **5, 5, 5 and 3** — four of four
+  multi-property, **none** at arity 1 — so an exact-arity pattern would have
+  reached nothing. See the scoped object ellipsis in `rules/README.md`.
+  **Known limit — a CLASS FIELD is silent**, and it is now the only shape gap
+  left as well as the largest still open: the same census counted **316**
+  class-field string assignments, about **10×** the `const` shape. It is *not*
+  the arity problem the ellipsis solved, and that was measured rather than
+  assumed — the pattern `class $C { $NAME = $VALUE }` finds **zero** even in a
+  class with a **single** field, because a rule cannot address the
+  `public_field_definition` node on its own. Closing it needs a different
+  mechanism, not another alternative.
 - **Known limit — the credential NAME is matched as a raw substring** in
   TypeScript, so `tokenizer` is reported as a credential (Go matches by component
   and does not). Declared, with every divergence written down, in
@@ -114,15 +121,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 - **XSS — inline.** [id: ts.xss-inline-inner-html] React `dangerouslySetInnerHTML` whose `__html` is built
   **inline** by concatenation or an interpolated template. A plain-variable
   `__html` (sanitized earlier?) is **surface**; a constant `__html` is not flagged.
-  **Known limit — object ARITY, and it applies to every object pattern:** the
-  matcher requires the property **count** to match, so `{__html: …}` is reached
-  only when `__html` is the object's **sole** property. `{__html: …, className: …}`
-  is silent. The canonical JSX shape `dangerouslySetInnerHTML={{__html: h}}` **is**
-  a one-property object, so the common case works — but the limit is real, and it
-  is a consequence of a **declared design decision** rather than a defect: reaching
-  a property inside a larger object needs an ellipsis (`{..., $NAME: $VALUE, ...}`),
-  which this engine deliberately does not support (PRD §17, `rules/README.md`).
-  Pinned by `TestShapeCensus`.
+  **The object-arity limit is CLOSED.** These rules used to reach `__html` only
+  when it was the object's **sole** property, so `{__html: …, className: …}` was
+  silent — and that limit was never declared anywhere. The canonical JSX shape
+  `dangerouslySetInnerHTML={{__html: h}}` **is** a one-property object, so the
+  common case worked by coincidence and the gap stayed invisible. The scoped
+  object ellipsis (`rules/README.md`) now reaches `__html` at any position in an
+  object of any size, and being zero-or-more it still matches the one-property
+  form. Pinned by `TestShapeCensus`.
 - **Table without a primary key (DB-050).** [id: DB-050] A model with no `@id`/`@@id`, read from
   the configured schema — a Prisma `schema.prisma` **or** a directory of SQL-DDL
   (Flyway) migrations reconstructed to their final state (`database.schema_paths`).

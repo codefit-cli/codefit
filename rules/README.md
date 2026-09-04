@@ -21,9 +21,49 @@ rules/
 ```
 
 Supported operators (core subset): `pattern`, `pattern-either`, `pattern-not`,
-`pattern-inside`, metavariables (`$VAR`), `metavariable-regex`. **No ellipsis
-(`...`)** and **no `mode: taint`** / `pattern-sources`/`sinks`/`sanitizers` —
-that role is covered by the agent reasoning over mapped surface.
+`pattern-inside`, metavariables (`$VAR`), `metavariable-regex`. **No `mode:
+taint`** / `pattern-sources`/`sinks`/`sanitizers` — that role is covered by the
+agent reasoning over mapped surface.
+
+### The one ellipsis: object properties, spelled `...$REST`
+
+Semgrep's general ellipsis is still **not** supported. Objects are the single
+exception, because without it an object pattern was unusable in practice: the
+matcher compares the property **count**, so `({apiKey: $V})` reached only an
+object with exactly one property. A census across two real TypeScript projects
+measured every object holding a credential-named string property at arity **5,
+5, 5 and 3** — four of four multi-property, none at arity 1.
+
+```yaml
+- "({...$REST, $NAME: $VALUE})"   # any position, object of any size
+```
+
+**It is spelled `...$REST`, not Semgrep's `...`, and that was measured rather
+than chosen.** Since the compile gate, a pattern whose parse tree contains an
+ERROR node is rejected — and the TypeScript parser cannot parse a bare ellipsis
+inside an object literal:
+
+| written as | parses |
+| --- | --- |
+| `{..., $NAME: $VALUE}` | **HasError** → rejected at compile |
+| `{$NAME: $VALUE, ...}` | **HasError** → rejected at compile |
+| `{...$REST, $NAME: $VALUE}` | clean → `object[spread_element, pair]` |
+
+A spread of a metavariable is ordinary TypeScript, so it survives the gate.
+
+Three things to know when you use it:
+
+- **It is zero-or-more**, so one alternative covers `{apiKey: "x"}` and a
+  credential buried in a five-property config object. Never write a separate
+  single-pair alternative.
+- **The marker does not bind.** `$REST` is punctuation; a `metavariable-regex`
+  naming it constrains nothing.
+- **It is opt-in per pattern.** A pattern without a spread keeps exact-arity
+  matching, unchanged. That is what makes it safe: adding it changed the
+  behaviour of no existing rule.
+
+Full semantics and the reasoning are in `[objectsubset]` in
+`internal/core/ruleengine/matcher.go`.
 
 ## When is something a rule, and when is it surface? (read before adding a rule)
 
