@@ -21,9 +21,42 @@ rules/
 ```
 
 Supported operators (core subset): `pattern`, `pattern-either`, `pattern-not`,
-`pattern-inside`, metavariables (`$VAR`), `metavariable-regex`. **No `mode:
+`pattern-inside`, metavariables (`$VAR`), `metavariable-regex`,
+`metavariable-name`. **No `mode:
 taint`** / `pattern-sources`/`sinks`/`sanitizers` — that role is covered by the
 agent reasoning over mapped surface.
+
+### `metavariable-name`: match an identifier by name COMPONENT
+
+Not a Semgrep operator — codefit's own, and it exists because a regex cannot do
+the job.
+
+```yaml
+metavariable-name:
+  $NAME: credential
+```
+
+`$NAME` matches only if the identifier carries a member of the named vocabulary
+as a **name component**: `accessToken` and `API_KEY` fire, `tokenizer` and
+`subtokenizer` do not.
+
+**Why not a regex.** SEC-001 used an unanchored `metavariable-regex` for `$NAME`,
+so any identifier merely *containing* a credential word was affirmed at certainty
+1.0 — `const tokenizer = "whitespace"` was reported as a hardcoded secret. Fixing
+it needs the word anchored to a component boundary, and Go's regexp is **RE2: no
+lookbehind, no lookahead**. Asserting what precedes `token` is exactly what RE2
+cannot express, and enumerating the case variants multiplies every alternative by
+every boundary.
+
+**The vocabularies are a closed set** — today only `credential`, which is
+`namematch.Credential()`, the same words Go's name gate consumes. An unknown
+vocabulary is a **compile error**, because a rule that named one and matched
+nothing would tell nobody. Adding a vocabulary means adding it to
+`metavarVocabularies` in `internal/core/ruleengine/engine.go`.
+
+**It composes.** A metavariable may carry a name constraint and a regex at once;
+both must hold. And like `metavariable-regex`, it is consulted at bind time, so
+it steers the object-subset search rather than filtering its first answer.
 
 ### The one ellipsis: object properties, spelled `...$REST`
 

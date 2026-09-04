@@ -75,12 +75,18 @@ func TestMatchSetScanOrder(t *testing.T) {
 // The set is PLURAL-FOLDED, and the fold is pinned here in full rather than
 // computed: computing the expectation from the same helper the code uses would
 // assert nothing. Twelve tokens, each with its regular plural, is what the fold
-// is allowed to produce — a thirteenth stem or a second inflection rule shows up
+// is allowed to produce — a fourteenth stem or a second inflection rule shows up
 // here as a diff.
+//
+// "credential" is the thirteenth stem, admitted by issue #152 with a measurement
+// rather than by inference: it is the one true positive TypeScript would have
+// lost by switching $NAME from substring to component matching, and it closes a
+// divergence the cross-provider table had already declared.
 func TestCredentialSet(t *testing.T) {
 	want := []string{
 		"accesskey", "accesskeys", "accesstoken", "accesstokens",
-		"apikey", "apikeys", "encryptionkey", "encryptionkeys",
+		"apikey", "apikeys", "credential", "credentials",
+		"encryptionkey", "encryptionkeys",
 		"passwd", "passwds", "password", "passwords",
 		"privatekey", "privatekeys", "pwd", "pwds",
 		"refreshtoken", "refreshtokens", "secret", "secrets",
@@ -107,7 +113,7 @@ func TestPluralFoldIsSEC001Only(t *testing.T) {
 	union := namematch.DB053Union()
 	secval := namematch.SecurityValue()
 
-	for _, tok := range []string{"passwords", "secrets", "tokens", "apikeys", "privatekeys"} {
+	for _, tok := range []string{"passwords", "secrets", "tokens", "apikeys", "privatekeys", "credentials"} {
 		if !cred[tok] {
 			t.Errorf("Credential() is missing %q — the plural fired before component matching and its loss was undeclared", tok)
 		}
@@ -120,7 +126,7 @@ func TestPluralFoldIsSEC001Only(t *testing.T) {
 	}
 	// The fold widens SPELLINGS, never the vocabulary: a stem that was
 	// deliberately refused does not get in through its plural.
-	for _, tok := range []string{"publickey", "publickeys", "keys", "credentials", "ssns"} {
+	for _, tok := range []string{"publickey", "publickeys", "keys", "ssns"} {
 		if cred[tok] {
 			t.Errorf("Credential() contains %q — the fold admitted a stem the vocabulary refuses", tok)
 		}

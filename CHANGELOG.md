@@ -71,6 +71,38 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **`const tokenizer = "whitespace"` is no longer reported as a hardcoded
+  credential** (`#152`). `SEC-001` constrained `$NAME` with an **unanchored**
+  regex, so any identifier merely *containing* a credential word matched — and
+  not as a soft signal: as an **affirmation at certainty 1.0**, the class the
+  baseline refuses to auto-silence, so it came back on every scan until a human
+  accepted it by hand.
+  Go had fixed this in [ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md)
+  by matching name **components**; TypeScript could not, because a rule could
+  only express a regex. It now can: **`metavariable-name`**
+  ([ADR 0085](docs/decisions/0085-the-credential-vocabulary-is-shared-not-copied.md))
+  constrains a metavariable against the shared `namematch` vocabulary — the same
+  words and the same matcher Go uses.
+  It is an operator and not a better regex, and that was measured: Go's regexp is
+  RE2, with no lookbehind, so `token` cannot be anchored to a camelCase boundary
+  (`accessToken` yes, `subtokenizer` no).
+  Measured over 41 names, the switch kills **9** false affirmations —
+  `tokenizer`, `secretariat`, `passwordless`, `subtokenizer` among them — and
+  loses **zero** true positives, including the `API_KEY` case ADR 0075 warned
+  about (`lower("API_KEY")` does not contain `apikey`).
+- **`const credential = "abc123"` now fires in Go, where it was silent.** It was
+  the one true positive the TypeScript regex carried that the shared vocabulary
+  did not, so closing `#152` required adding it — which fixed the matching gap in
+  Go at the same time. It joins `securityOnlyTokens`, never `credentialShared`,
+  so `DB053Union()` — frozen across 29 corpora (ADR 0047) — is provably
+  unchanged.
+- **The cross-provider divergence list is empty**, and the class cannot return by
+  drift: both providers are now the same function of the same set. One
+  **declared narrowing** came with it — an all-lowercase concatenation has no
+  boundary to tokenize on, so `secretkey` is now silent in both (`secretKey`,
+  `secret_key`, `SECRET_KEY` all fire). Declared in the case table and in
+  `COVERAGE.md`.
+
 - **A hardcoded secret in a config object is no longer invisible** (`#169`), and
   neither is `dangerouslySetInnerHTML` on an element that carries a second
   attribute. `SEC-001` declared one shape, `const $NAME = $VALUE`, so a
