@@ -343,19 +343,75 @@ ADRs no se cargan solos en sesión — leerlos explícitamente antes de empezar.
   de mergear:
 
   ```bash
-  gh pr view <N> --json body -q .body | rg -q 'Generated with|Co-Authored|🤖|Claude Code'
+  gh pr view <N> --json body -q .body > /tmp/body.txt
+  rg -c 'ALGO-QUE-SI-ESTA' /tmp/body.txt          # control positivo, primero
+  rg -n '(?m)^\s*Co-Authored-By:|🤖\s*Generated with|Generated with \[Claude Code\]' /tmp/body.txt
   echo "attribution-exit=$?"   # 1 = limpio
   ```
 
-  Con **control positivo** — un patrón que sí esté en ese cuerpo — porque si no
-  un `exit=1` puede significar "no hay atribución" o "la búsqueda está rota", y
-  son indistinguibles.
+  El **control positivo** va primero y no es opcional: sin él, un `exit=1`
+  significa "no hay atribución" o "la búsqueda está rota", y son
+  indistinguibles. Y va **a un archivo**, no por pipe: `cmd | rg ...; echo $?`
+  devuelve el exit del ÚLTIMO comando del pipe, así que un `sort`/`head` al final
+  se come el resultado y la sonda miente sin avisar.
+
+  ### El patrón busca la FIRMA, no el nombre — y esto está medido
+
+  Un patrón ancho no es una sonda estricta, es una sonda **rota**: entrena a
+  ignorarla. Medido sobre los 164 PR del repo:
+
+  | patrón | salta en | falsos positivos |
+  |---|---|---|
+  | `Generated with\|Co-Authored\|🤖\|Claude Code` (el que estaba acá) | 20 | **11** |
+  | `Co-Authored-By\|🤖\|Generated with [Claude Code]` | 15 | **6** |
+  | el de arriba, anclado a línea y con los dos puntos | **9** | **0** |
+
+  Los falsos positivos no son casos raros, son **el trabajo normal de este
+  proyecto**:
+
+  - codefit es un server MCP que **Claude Code consume**, así que los PR nombran
+    al cliente para decir contra qué se midió (`#20`, `#28`, `#107`, `#120`).
+  - la plantilla de PR **pregunta por la atribución**, y marcarla como cumplida
+    escribe la frase: `- [x] Conventional commits, no Co-Authored-By` (`#70`,
+    `#71`, `#72`, `#102`, `#103`, `#104`). La sonda saltaba **justamente en los
+    PR que declaraban estar limpios**.
+  - `#76` enumera `Co-Authored` como término de búsqueda dentro de una lista.
+
+  El ancla `^` con los dos puntos separa el *trailer* real de la mención: el
+  trailer se escribe `Co-Authored-By:` al principio de línea; la mención va
+  entrecomillada y sin dos puntos.
+
+  ### El límite que NINGÚN patrón resuelve: uso vs. mención
+
+  Ni el patrón afinado es perfecto, y se descubrió del modo más directo posible:
+  **salta en el cuerpo del PR que introdujo esta misma corrección**, porque para
+  explicar las firmas hay que escribirlas. Un artefacto cuyo TEMA es la
+  atribución va a disparar siempre.
+
+  Eso es conducta **correcta**, no un defecto: la sonda marca para que un humano
+  lea, y leyendo se resuelve en dos segundos. Lo que sí sería un defecto es
+  seguir estrechando el patrón hasta que deje de ver una firma real por estar
+  entrecomillada — ahí se pierde lo único que la sonda existe para cazar.
+
+  **Regla:** si el artefacto habla de atribución, la sonda salta y se leen los
+  hits. Si no habla de atribución, un hit es una fuga. La sonda no decide; acota
+  lo que hay que mirar de 164 PR a unos pocos.
+
+  Es el mismo modo de falla que esta doctrina ya registra para `CLUSTER`
+  matcheando `PRIMARY KEY CLUSTERED`: **un patrón demasiado ancho confirma
+  conclusiones equivocadas.** La diferencia es que acá el falso positivo apunta a
+  los PR más cumplidores, que es la peor forma posible de equivocarse.
 
   **Origen:** en el PR #132 la línea se coló solo en el cuerpo del PR. Los seis
   PR anteriores y todos los commits estaban limpios. No fue descuido de la regla:
   las sondas existentes miraban los commits y el diff, y ahí nunca estuvo. Es el
   mismo punto ciego que la regla de dogfood sobre proyectos ajenos ya declara
   para el cuerpo del PR — dos fugas distintas por el mismo agujero.
+
+  **Deuda declarada, anterior a esta regla:** los cuerpos de `#34`–`#39` y
+  `#64`–`#66` (9 PR ya mergeados) todavía llevan el pie `🤖 Generated with`. Son
+  previos a que la regla existiera y nunca se limpiaron. Se declara acá para que
+  la próxima barrida no lo lea como una fuga nueva.
 
 ---
 
