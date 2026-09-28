@@ -50,6 +50,15 @@ var piiShared = map[string]bool{
 // three are not.
 var securityOnlyTokens = map[string]bool{
 	"accesskey": true, "signingkey": true, "encryptionkey": true,
+	// "credential" lives here and NOT in credentialShared because a credential
+	// is not a DB-053 sensitive column name, and credentialShared feeds
+	// DB053Union(), frozen across 29 corpora (ADR 0047) nobody can re-measure.
+	// It closes a divergence the cross-provider table already declared: the
+	// TypeScript regex carried a literal "credential" alternative that this set
+	// never had, so `const credential = "abc123"` fired in TS and was SILENT in
+	// Go. Measured over 41 names, it is the ONE true positive TypeScript would
+	// have lost by switching from substring to component matching (issue #152).
+	"credential": true,
 }
 
 // securityValueTokens is SEC-050's OWN vocabulary: crypto MATERIAL, not

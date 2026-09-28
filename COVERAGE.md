@@ -78,10 +78,18 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   class with a **single** field, because a rule cannot address the
   `public_field_definition` node on its own. Closing it needs a different
   mechanism, not another alternative.
-- **Known limit — the credential NAME is matched as a raw substring** in
-  TypeScript, so `tokenizer` is reported as a credential (Go matches by component
-  and does not). Declared, with every divergence written down, in
-  `internal/core/namematch/crossprovider_test.go`.
+  **The NAME is matched by COMPONENT**, through the shared `namematch`
+  vocabulary — the same words and the same matcher Go uses. `tokenizer`,
+  `secretariat`, `passwordless` and `subtokenizer` are correctly **silent**.
+  Until `v0.3.0` the name was matched as a raw **substring**, so all four were
+  affirmed as hardcoded credentials at certainty 1.0.
+  **Known limit — an ALL-LOWERCASE CONCATENATION** carries no boundary to
+  tokenize on, so `secretkey` is silent. `secretKey`, `secret_key` and
+  `SECRET_KEY` all fire. This limit is now **shared with Go** rather than
+  divergent from it; that single spelling used to fire in TypeScript through the
+  substring matcher, and losing it is a **declared narrowing**, accepted because
+  the same matcher was what affirmed `tokenizer`. Every cross-provider verdict is
+  enumerated in `internal/core/namematch/crossprovider_test.go`.
 - **Weak cryptography.** [id: ts.weak-crypto] MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
   `createHash('md5'|'sha1')`. **Known limit:** these are flagged **wherever they
   appear**; a non-security use (a cache key, an ETag) may be a false positive,

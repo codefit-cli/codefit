@@ -2,6 +2,8 @@ package ruleengine
 
 import (
 	"regexp"
+
+	"github.com/codefit-cli/codefit/internal/core/namematch"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/syntax"
@@ -45,7 +47,46 @@ func Matches(pattern, code syntax.Node) (map[string]string, bool) {
 //
 // nil means unconstrained, which is what `pattern-inside` and `pattern-not` pass:
 // they answer a yes/no question about the node and bind nothing the rule reads.
-type constraints map[string]*regexp.Regexp
+type constraints map[string]constraint
+
+// [metavarname] A constraint on one metavariable: a regex, a name vocabulary, or
+// both. When both are present BOTH must hold — a rule that affirmed on half its
+// evidence would be worse than one that did not compile.
+//
+// The vocabulary arm exists because a regex cannot express it. SEC-001 used an
+// unanchored regex for $NAME, so `const tokenizer = "whitespace"` was affirmed
+// as a hardcoded credential at confidence 1.0 (issue #152) — the loudest and
+// stickiest output codefit has, on a word that merely contains "token". Go had
+// already fixed this by matching name COMPONENTS through namematch (ADR 0075);
+// a rule could not, because a rule could only say "regex".
+//
+// AND IT IS NOT A REGEX THAT WAS MISSING. Go's regexp is RE2: no lookbehind, no
+// lookahead. Anchoring "token" to a component boundary requires asserting what
+// precedes it — accessToken yes, subtokenizer no — and RE2 cannot. Enumerating
+// the case variants instead multiplies every alternative by every boundary and
+// is unreadable long before it is correct.
+//
+// namematch is reachable from the core because it names no provider: it is the
+// shared vocabulary the cross-provider case table binds. The rule engine is
+// TypeScript's detection mechanism (ADR 0083), but the WORDS are the same words
+// Go looks for, and keeping them in one place is what stops the two drifting
+// apart again.
+type constraint struct {
+	re  *regexp.Regexp
+	set map[string]bool // a namematch vocabulary; nil when unconstrained by name
+}
+
+func (c constraint) ok(text string) bool {
+	if c.re != nil && !c.re.MatchString(text) {
+		return false
+	}
+	if c.set != nil {
+		if _, hit := namematch.MatchSet(text, c.set); !hit {
+			return false
+		}
+	}
+	return true
+}
 
 func matchNode(pattern, code syntax.Node, binds map[string]string, cs constraints) bool {
 	if pattern == nil || code == nil {
@@ -59,7 +100,7 @@ func matchNode(pattern, code syntax.Node, binds map[string]string, cs constraint
 		if prev, seen := binds[name]; seen {
 			return prev == text
 		}
-		if re, constrained := cs[name]; constrained && !re.MatchString(text) {
+		if c, constrained := cs[name]; constrained && !c.ok(text) {
 			return false
 		}
 		binds[name] = text

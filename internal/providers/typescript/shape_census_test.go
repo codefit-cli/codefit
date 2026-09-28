@@ -183,6 +183,56 @@ var shapeCases = []shapeCase{
 		label: "secret, let declaration", src: `let apiKey = "sk-live-abc";`, want: "SEC-001",
 	},
 	{label: "secret, var declaration", src: `var apiKey = "sk-live-abc";`, want: "SEC-001"},
+
+	// ---- SEC-001, the NAME axis (issue #152) -------------------------------
+	// The rows above vary the SHAPE the name is written in. These vary the NAME
+	// itself, and they are the axis that was never censused: $NAME was matched
+	// by unanchored substring, so any identifier merely CONTAINING a credential
+	// word was affirmed at confidence 1.0. Measured over 41 names, the switch to
+	// component matching kills 9 such names and costs zero true positives.
+	{
+		label: "NOT a secret: tokenizer", src: `const tokenizer = "whitespace";`, want: "",
+		why: "issue #152 verbatim. It contains \"token\" and is not a credential. This was " +
+			"an AFFIRMATION at confidence 1.0 — the class the baseline refuses to auto-silence " +
+			"(ADR 0011), so it reappeared on every scan until a human accepted it by hand. The " +
+			"loudest and stickiest thing codefit can emit, on a tokenizer.",
+	},
+	{
+		label: "NOT a secret: secretariat", src: `const secretariat = "un";`, want: "",
+		why: "NOT a gap — a required silence. It contains \"secret\" and tokenizes to the single " +
+			"component \"secretariat\", which is not in the vocabulary. Firing here would be a " +
+			"false affirmation at confidence 1.0.",
+	},
+	{
+		label: "NOT a secret: passwordless", src: `const passwordless = "on";`, want: "",
+		why: "NOT a gap — a required silence, and the sharpest of the three: it contains " +
+			"\"password\" and names the feature that means there ISN'T one.",
+	},
+	{
+		label: "NOT a secret: subtokenizer", src: `const subtokenizer = "x";`, want: "",
+		why: "NOT a gap — a required silence. It carries \"token\" in the MIDDLE of a component, " +
+			"which is precisely what a regex cannot exclude in RE2: excluding it needs a lookbehind, " +
+			"and that is why this is an operator and not a better regex.",
+	},
+	{
+		label: "NOT a secret: tokenizer as an object property",
+		src:   `const cfg = { baseUrl: "u", tokenizer: "ws", n: 1 };`, want: "",
+		why: "the object ellipsis shipped one release earlier, so the substring defect had just " +
+			"been handed every config object in the project. Widening the SHAPE axis without " +
+			"fixing the NAME axis multiplies a false positive rather than adding one.",
+	},
+	{
+		label: "still a secret: API_KEY", src: `const API_KEY = "sk-live-abc";`, want: "SEC-001",
+		why: "the trap ADR 0075 measured in Go: lower(\"API_KEY\") is \"api_key\", which does NOT " +
+			"contain \"apikey\", so deleting the substring arm without a component matcher costs " +
+			"real findings. This row is what proves the replacement is a repair and not a trade.",
+	},
+	{
+		label: "still a secret: credential", src: `const credential = "abc123";`, want: "SEC-001",
+		why: "the ONE true positive the substring regex carried that the component vocabulary " +
+			"did not. Closing #152 required adding it to namematch — which also fixed the " +
+			"matching silent gap in Go, where this declaration fired nothing at all.",
+	},
 	{label: "secret, typed const", src: `const apiKey: string = "sk-live-abc";`, want: "SEC-001"},
 
 	// ---- Insecure randomness ------------------------------------------------

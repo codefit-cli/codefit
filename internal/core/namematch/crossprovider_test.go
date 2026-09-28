@@ -1,7 +1,6 @@
 package namematch_test
 
 import (
-	"regexp"
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/namematch"
@@ -80,13 +79,12 @@ var crossCases = []crossCase{
 	{name: "accesstokens", goFires: true, tsFires: true},
 	{name: "refreshtokens", goFires: true, tsFires: true},
 	{
-		name: "signingKeys", goFires: true, tsFires: false,
-		divergence: "The plural of a Go-only RESTORATION inherits its divergence exactly: " +
-			"TS's $NAME has no signing_key alternative, so neither spelling fires there.",
+		name: "signingKeys", goFires: true, tsFires: true,
+		divergence: "",
 	},
 	{
-		name: "encryptionKeys", goFires: true, tsFires: false,
-		divergence: "Same as signingKeys — TS's $NAME lacks the encryption_key alternative.",
+		name: "encryptionKeys", goFires: true, tsFires: true,
+		divergence: "",
 	},
 	// The fold's false-positive side, stated as rows rather than argued in a
 	// comment. publickey is refused by the vocabulary, so its plural is refused
@@ -96,10 +94,8 @@ var crossCases = []crossCase{
 	{name: "keys", goFires: false, tsFires: false},
 	{name: "keyboards", goFires: false, tsFires: false},
 	{
-		name: "tokenizers", goFires: false, tsFires: true,
-		divergence: "The plural of the tokenizer row, and the same reason: TS's substring " +
-			"match sees \"token\" inside it, Go sees one component. Carried here so the " +
-			"plural fold is shown NOT to have reopened the substring class.",
+		name: "tokenizers", goFires: false, tsFires: false,
+		divergence: "",
 	},
 
 	// --- Agreement: names neither engine treats as a credential. ---
@@ -108,33 +104,40 @@ var crossCases = []crossCase{
 	{name: "description", goFires: false, tsFires: false},
 
 	// --- Divergence, each with its reason. ---
+	//
+	// EMPTY SINCE ISSUE #152, and that is the result rather than an oversight.
+	// Every row below used to disagree because the two providers asked for the
+	// same words through two different mechanisms — a component matcher in Go, an
+	// unanchored regex in TypeScript. They now ask through ONE, so the class
+	// cannot return by drift: only by editing SEC-001's declaration, which
+	// tsNameVocabulary fails on. The rows stay, because they are the enumerated
+	// evidence that these specific names get these specific verdicts.
 	{
-		name: "tokenizer", goFires: false, tsFires: true,
-		divergence: "TS matches $NAME as an unanchored SUBSTRING, so \"token\" inside " +
-			"\"tokenizer\" fires. Go matches by component and \"tokenizer\" is one " +
-			"component. This is the exact false-affirmation class SEC-001 (go) was " +
-			"changed to stop producing; TS carries it as known debt, not as a decision.",
+		name: "tokenizer", goFires: false, tsFires: false,
+		divergence: "",
 	},
 	{
 		name: "monkeyIndex", goFires: false, tsFires: false,
 		divergence: "",
 	},
 	{
-		name: "signingKey", goFires: true, tsFires: false,
-		divergence: "Go RESTORES this: the deleted bare-\"key\" arm affirmed it today at " +
-			"Confidence 1.0, so dropping it would be a silent miss introduced by a " +
-			"false-positive fix. TS's $NAME has no signing_key alternative. Widening " +
-			"TS is separate, measured work.",
+		name: "signingKey", goFires: true, tsFires: true,
+		divergence: "",
 	},
 	{
-		name: "encryptionKey", goFires: true, tsFires: false,
-		divergence: "Same restoration as signingKey; TS's $NAME lacks the alternative.",
+		name: "encryptionKey", goFires: true, tsFires: true,
+		divergence: "",
 	},
 	{
-		name: "credential", goFires: false, tsFires: true,
-		divergence: "TS's $NAME carries a literal \"credential\" alternative. Go's set does " +
-			"not: it is an unmeasured admission into an AFFIRMATION channel, deferred " +
-			"to measured widening work rather than added by inference.",
+		name: "credential", goFires: true, tsFires: true,
+		divergence: "",
+	},
+	{
+		// The plural of the row above, carried by the fold. TS's unanchored
+		// regex reaches it as a substring of "credentials"; Go reaches it as a
+		// folded component. Same verdict, and after #152 the same mechanism.
+		name: "credentials", goFires: true, tsFires: true,
+		divergence: "",
 	},
 	{
 		name: "authToken", goFires: true, tsFires: true,
@@ -149,12 +152,20 @@ var crossCases = []crossCase{
 		divergence: "",
 	},
 	{
-		name: "secretkey", goFires: false, tsFires: true,
-		divergence: "Go's DECLARED limit (namematch.LimitLowercaseConcatenation): an " +
-			"all-lowercase concatenation carries no boundary to tokenize on. TS's " +
-			"substring match happens to catch it. Declared as a gap rather than " +
-			"closed, because the substring matcher that would close it is what " +
-			"reported enum constants as credentials at Confidence 1.0.",
+		// THE ONE ROW WHERE CONVERGENCE COST SOMETHING, recorded here rather than
+		// absorbed. Go's declared limit (namematch.LimitLowercaseConcatenation)
+		// is that an all-lowercase concatenation carries no boundary to tokenize
+		// on. TypeScript's substring matcher happened to catch it; the shared
+		// matcher does not, so `const secretkey = "…"` went from firing in TS to
+		// silent in both.
+		//
+		// That is a NARROWING, and an undeclared one is not permitted here — so
+		// it is declared in this row and in COVERAGE.md. It is ACCEPTED because
+		// the mechanism that carried this single spelling is the same one that
+		// affirmed `tokenizer` as a credential at confidence 1.0: keeping it
+		// would have meant keeping nine false affirmations with it.
+		name: "secretkey", goFires: false, tsFires: false,
+		divergence: "",
 	},
 }
 
@@ -166,7 +177,24 @@ var crossCases = []crossCase{
 // Every failure path is t.Fatal, never a nil regex. A nil or zero-value regex
 // quietly matches nothing, which would render every tsFires:false row green
 // while proving nothing at all — the exact vacuum this binding exists to close.
-func tsNameRegex(t *testing.T) *regexp.Regexp {
+// WHAT THIS BINDING BECAME (issue #152). It used to load SEC-001's $NAME REGEX
+// and compare its verdicts against Go's component matcher — two mechanisms, one
+// vocabulary written twice, and the table was the only thing keeping them in
+// step. It stopped keeping them in step in one case it faithfully recorded:
+// `tokenizer` fired in TS and not in Go, an affirmation at confidence 1.0 on a
+// word that merely contains "token".
+//
+// TypeScript now declares the SHARED vocabulary directly, so the two columns are
+// the same function of the same set and that divergence class cannot come back
+// by drift — only by someone editing this declaration, which is exactly what
+// this function now fails on. The table did not become redundant: it became the
+// enumerated evidence that specific real names get specific verdicts, and
+// Control 3 still refuses to let a vocabulary token ship with no row.
+//
+// Every failure path is t.Fatal, never a nil set. A nil set quietly matches
+// nothing, which would render every tsFires:false row green while proving
+// nothing at all — the exact vacuum this binding exists to close.
+func tsNameVocabulary(t *testing.T) map[string]bool {
 	t.Helper()
 	loaded, err := ruleengine.LoadFS(rules.FS, "typescript/security")
 	if err != nil {
@@ -179,15 +207,22 @@ func tsNameRegex(t *testing.T) *regexp.Regexp {
 		if r.ID != "SEC-001" {
 			continue
 		}
-		expr, ok := r.MetavariableRegex["$NAME"]
+		if expr, ok := r.MetavariableRegex["$NAME"]; ok {
+			t.Fatalf("SEC-001 constrains $NAME with a REGEX again (%q). That is the substring "+
+				"defect of issue #152 returning: an unanchored regex affirms `tokenizer` as a "+
+				"credential at confidence 1.0, and RE2 cannot anchor to a component boundary. "+
+				"$NAME must use metavariable-name.", expr)
+		}
+		vocab, ok := r.MetavariableName["$NAME"]
 		if !ok {
-			t.Fatalf("SEC-001 has no $NAME metavariable-regex; it declares %v", r.MetavariableRegex)
+			t.Fatalf("SEC-001 does not constrain $NAME by name at all; it declares metavariable-name=%v. "+
+				"Without it the rule affirms a hardcoded credential for ANY identifier.", r.MetavariableName)
 		}
-		re, err := regexp.Compile(expr)
-		if err != nil {
-			t.Fatalf("SEC-001 $NAME %q does not compile: %v", expr, err)
+		if vocab != "credential" {
+			t.Fatalf("SEC-001 constrains $NAME against vocabulary %q, not \"credential\". The whole "+
+				"point of the shared vocabulary is that both providers ask for the same words.", vocab)
 		}
-		return re
+		return namematch.Credential()
 	}
 	t.Fatalf("no rule with id SEC-001 in typescript/security (%d rules loaded)", len(loaded))
 	return nil
@@ -196,16 +231,20 @@ func tsNameRegex(t *testing.T) *regexp.Regexp {
 // TestCrossProviderNameGate runs the four controls that make drift impossible
 // rather than merely discouraged.
 func TestCrossProviderNameGate(t *testing.T) {
-	re := tsNameRegex(t)
-
-	// Positive control on the loader itself: if this regex matched nothing, the
-	// whole TS column would be a constant false and every agreement row would
-	// pass by vacuum.
-	if !re.MatchString("password") {
-		t.Fatalf("vacuum: TS $NAME %q does not match \"password\" — the loaded regex is not the credential vocabulary", re.String())
+	tsVocab := tsNameVocabulary(t)
+	tsFires := func(name string) bool {
+		_, hit := namematch.MatchSet(name, tsVocab)
+		return hit
 	}
-	if re.MatchString("userId") {
-		t.Fatalf("vacuum: TS $NAME %q matches \"userId\" — the loaded regex matches everything", re.String())
+
+	// Positive control on the loader itself: if this matched nothing, the whole
+	// TS column would be a constant false and every agreement row would pass by
+	// vacuum. And the negative half, so it is not a constant true either.
+	if !tsFires("password") {
+		t.Fatalf("vacuum: TS $NAME does not fire on \"password\" — the loaded vocabulary is not the credential set")
+	}
+	if tsFires("userId") {
+		t.Fatalf("vacuum: TS $NAME fires on \"userId\" — the loaded vocabulary matches everything")
 	}
 
 	cred := namematch.Credential()
@@ -227,7 +266,7 @@ func TestCrossProviderNameGate(t *testing.T) {
 		if goGot != c.goFires {
 			t.Errorf("%q: Go name gate fires=%v, table declares %v", c.name, goGot, c.goFires)
 		}
-		tsGot := re.MatchString(c.name)
+		tsGot := tsFires(c.name)
 		if tsGot != c.tsFires {
 			t.Errorf("%q: TS $NAME fires=%v, table declares %v", c.name, tsGot, c.tsFires)
 		}

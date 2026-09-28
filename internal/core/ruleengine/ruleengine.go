@@ -20,6 +20,11 @@ type Rule struct {
 	PatternNot        string            `yaml:"pattern-not,omitempty"`
 	PatternInside     string            `yaml:"pattern-inside,omitempty"`
 	MetavariableRegex map[string]string `yaml:"metavariable-regex,omitempty"`
+	// MetavariableName constrains a metavariable by NAME COMPONENT against a
+	// named vocabulary (today: "credential"), which a regex cannot express —
+	// RE2 has no lookbehind, so "token" cannot be anchored to a camelCase
+	// boundary. See [metavarname] in matcher.go.
+	MetavariableName map[string]string `yaml:"metavariable-name,omitempty"`
 }
 
 // Engine matches rules against a parsed file and emits deterministic findings.
