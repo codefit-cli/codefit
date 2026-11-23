@@ -132,17 +132,25 @@ type sec001Site struct {
 // evidence: the replacement vocabulary added no new site anywhere in the tree,
 // and the one surviving layer-2 site (secretFile) still fires, now on the
 // component "secret" rather than on a substring.
+//
+// ONE SITE ADDED WITH internal/core/valueshape (issue #148): its test spells
+// AWS's published example access key ID, the fixture that pins the env-var-name
+// guard's underscore requirement. It is a layer-1 site in a _test.go file, like
+// every other entry here. The same literal in that package's production
+// comments is NOT pinned and must not be: there it blocks the self-audit, which
+// is how the gate caught it.
 var wantSEC001 = map[sec001Site]int{
-	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:          3,
-	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}: 1,
-	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:         2,
-	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:      1,
-	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:          1,
-	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                 2,
-	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:    5,
-	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}: 2,
-	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:    1,
-	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}: 5,
+	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:           3,
+	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}:  1,
+	{"internal/core/valueshape/valueshape_test.go", "A string matching a known API-key format is present in the source."}: 1,
+	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:          2,
+	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:       1,
+	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:           1,
+	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                  2,
+	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:     5,
+	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}:  2,
+	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:     1,
+	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}:  5,
 }
 
 // TestSelfAuditSEC001Census is the enumeration control TestSelfAudit lacks. It

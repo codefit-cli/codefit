@@ -141,7 +141,9 @@
 //
 // One further declared limit, inside FormEnvVarName itself: a value made only
 // of uppercase letters, digits and underscores, WITH at least one underscore,
-// IS vetoed. `AKIAIOSFODNN7EXAMPLE` (AWS access key ID shape) and
+// IS vetoed. An AWS access key ID (the published example one is the fixture
+// in valueshape_test.go; it is not spelled here because SEC-001's layer 1
+// matches that format in any source text, comments included) and
 // `JBSWY3DPEHPK3PXP` (base32 TOTP secret shape) both keep firing precisely
 // because neither carries an underscore — the guard requires one specifically
 // so it does not swallow either of those real secret shapes, and that

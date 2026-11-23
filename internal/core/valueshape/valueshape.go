@@ -38,7 +38,7 @@ var urlSchemePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
 var urnPattern = regexp.MustCompile(`(?i)^urn:[a-z0-9][a-z0-9-]{0,31}:\S+$`)
 
 // envVarNamePattern requires at least one underscore, on purpose: it is what
-// keeps `AKIAIOSFODNN7EXAMPLE` and base32 TOTP secrets like
+// keeps an AWS access key ID and base32 TOTP secrets like
 // `JBSWY3DPEHPK3PXP` firing. Both are SCREAMING-CASE-shaped, and both are
 // real secrets this project has measured — see doc.go.
 var envVarNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`)
@@ -203,7 +203,7 @@ var filePathExtensions = map[string]bool{
 //     hypothetical, bucket.
 //   - A secret made only of uppercase letters, digits and underscores WITH at
 //     least one underscore IS vetoed by FormEnvVarName. That is a declared
-//     limit, not an oversight: `AKIAIOSFODNN7EXAMPLE` (no underscore) and
+//     limit, not an oversight: an AWS access key ID (no underscore) and
 //     `JBSWY3DPEHPK3PXP` (base32, no underscore) both keep firing precisely
 //     because they lack the underscore this guard requires.
 //   - A secret-bearing URL whose token part is SHORTER than
