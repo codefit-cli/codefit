@@ -17,7 +17,7 @@ import (
 //	metavariable-value-veto:
 //	  $VALUE: not-a-credential
 //
-// WHAT IT SOLVES (issue #148, ADR 0086). SEC-001 affirmed any quoted
+// WHAT IT SOLVES (issue #148, ADR 0086, ADR 0087). SEC-001 affirmed any quoted
 // literal under a credential-named binding at confidence 1.0, so `const
 // secretFile = "lib/config.ts"` was reported as a hardcoded secret. The Go
 // provider already asks internal/core/valueshape whether the literal proves it

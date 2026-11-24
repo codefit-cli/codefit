@@ -9,13 +9,14 @@ import (
 	"github.com/codefit-cli/codefit/internal/mcp"
 )
 
-// The SEC-001 value veto (ADR 0086) is applied by the Go provider and NOT yet by
-// the TypeScript one (issue #148). Both halves of that sentence are coverage
-// claims, and both must reach an agent through the real codefit-coverage
-// handler — not only through COVERAGE.md, which no agent reads. A limit declared
-// in a provider but never rendered is as silent, from the agent's side, as no
-// limit at all; a divergence declared only in the human mirror is the
-// mirror-ahead-of-source defect this project's doc map exists to prevent.
+// The SEC-001 value veto (ADR 0086) is applied by BOTH providers: Go in its own
+// go/ast code, TypeScript through the rule-engine operator
+// metavariable-value-veto (ADR 0087, issue #148). Both are coverage claims, and
+// both must reach an agent through the real codefit-coverage handler — not only
+// through COVERAGE.md, which no agent reads. A limit declared in a provider but
+// never rendered is as silent, from the agent's side, as no limit at all; a
+// claim declared only in the human mirror is the mirror-ahead-of-source defect
+// this project's doc map exists to prevent.
 //
 // The assertions use markers written independently of the providers' constants
 // (the ADR number, the issue number, the valueshape form names) rather than
@@ -51,13 +52,13 @@ func TestCoverage_GoSEC001ServesBothDeclaredLimits(t *testing.T) {
 	}
 }
 
-// TestCoverage_TypeScriptSEC001DeclaresItDoesNotApplyTheValueVeto locks the
-// TypeScript side of the same divergence in the SOURCE the handler serves (the
-// hand-written CoverageManifest, ts.hardcoded-secrets): an agent asking about
-// TypeScript's SEC-001 must learn that a credential-named binding holding a URL,
-// a URN, an environment-variable name or a file path is STILL reported there,
-// unlike in Go, and that this is temporary and tracked.
-func TestCoverage_TypeScriptSEC001DeclaresItDoesNotApplyTheValueVeto(t *testing.T) {
+// TestCoverage_TypeScriptSEC001AppliesTheValueVeto locks the TypeScript side in
+// the SOURCE the handler serves (the hand-written CoverageManifest,
+// ts.hardcoded-secrets): an agent asking about TypeScript's SEC-001 must learn
+// that the value veto applies there, through which operator, with which limits,
+// and that the divergence the previous text declared is gone. A stale "does NOT
+// apply" sentence left beside the new one would tell the agent both things.
+func TestCoverage_TypeScriptSEC001AppliesTheValueVeto(t *testing.T) {
 	const id = "ts.hardcoded-secrets"
 	resp := coverageOf(t, mcp.CoverageRequest{Language: "typescript", Detail: []string{id}})
 	if resp.Derived {
@@ -72,19 +73,38 @@ func TestCoverage_TypeScriptSEC001DeclaresItDoesNotApplyTheValueVeto(t *testing.
 	}
 
 	for _, marker := range []string{
-		"does NOT apply the value veto",
+		"applies the value veto",
+		"metavariable-value-veto",
 		"ADR 0086",
+		"ADR 0087",
+		"internal/core/valueshape",
+		"is not reported at all",
+		"NOT REPORTED",
 		"STILL REPORTED",
-		"temporary",
-		"issue #148",
+		"concatenation",
 	} {
 		if !strings.Contains(detail, marker) {
-			t.Errorf("%s does not declare the Go/TypeScript value-veto divergence (missing %q):\n%s", id, marker, detail)
+			t.Errorf("%s does not declare the TypeScript value veto (missing %q):\n%s", id, marker, detail)
 		}
 	}
 	for _, form := range valueshape.Forms() {
 		if !strings.Contains(detail, string(form)) {
-			t.Errorf("%s does not name the form %q that Go vetoes and TypeScript still reports:\n%s", id, form, detail)
+			t.Errorf("%s does not name the vetoed form %q:\n%s", id, form, detail)
+		}
+	}
+	// The limit text is the shared constant, cited and not retyped. Checked
+	// beside the independent markers above, never instead of them: an emptied
+	// constant would satisfy this line alone.
+	if valueshape.DeclaredLimit == "" || !strings.Contains(detail, valueshape.DeclaredLimit) {
+		t.Errorf("%s does not carry valueshape.DeclaredLimit verbatim:\n%s", id, detail)
+	}
+	for _, stale := range []string{
+		"does NOT apply the value veto",
+		"DIVERGES from Go",
+		"divergence is temporary",
+	} {
+		if strings.Contains(detail, stale) {
+			t.Errorf("%s still carries the pre-#148 divergence text %q, which is now false:\n%s", id, stale, detail)
 		}
 	}
 }

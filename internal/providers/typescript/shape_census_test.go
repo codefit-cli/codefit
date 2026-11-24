@@ -235,6 +235,23 @@ var shapeCases = []shapeCase{
 	},
 	{label: "secret, typed const", src: `const apiKey: string = "sk-live-abc";`, want: "SEC-001"},
 
+	// ---- SEC-001, the VALUE axis (issue #148, ADR 0086, ADR 0087) ----------
+	// The rows above vary the shape and the name. These vary the VALUE, which
+	// the rule used to accept whole as long as it was a quoted literal.
+	{
+		label: "NOT a secret: a credential name holding a file path",
+		src:   `const secretFile = "lib/config.ts";`, want: "",
+		why: "NOT a gap — a required silence, and issue #148 verbatim. The value proves it is a " +
+			"path to a file, and the rule's metavariable-value-veto asks internal/core/valueshape, " +
+			"the function Go asks. Firing here was an affirmation at confidence 1.0 about a value " +
+			"that had just said what it is.",
+	},
+	{
+		label: "still a secret: a credential name holding a URL with userinfo",
+		src:   `const dbPassword = "postgres://user:pass@db.example.com/app";`, want: "SEC-001",
+		why: "the veto proves nothing about a URL whose userinfo IS a credential, so the match is kept",
+	},
+
 	// ---- Insecure randomness ------------------------------------------------
 	{label: "Math.random, const", src: `const token = Math.random().toString(36);`, want: "SEC-058"},
 	{

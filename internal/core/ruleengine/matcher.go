@@ -50,8 +50,9 @@ func Matches(pattern, code syntax.Node) (map[string]string, bool) {
 type constraints map[string]constraint
 
 // [metavarname] A constraint on one metavariable: a regex, a name vocabulary, a
-// value veto, or any combination. When both are present BOTH must hold — a rule that affirmed on half its
-// evidence would be worse than one that did not compile.
+// value veto, or any combination. When more than one is present ALL must hold —
+// a rule that affirmed on half its evidence would be worse than one that did not
+// compile.
 //
 // The vocabulary arm exists because a regex cannot express it. SEC-001 used an
 // unanchored regex for $NAME, so `const tokenizer = "whitespace"` was affirmed

@@ -100,7 +100,8 @@ environment-variable name, a path ending in a known file extension (ADR 0086).
 - **The predicates are a closed set** — today only `not-a-credential`. Adding
   one means adding it to `valueVetoes` in
   `internal/core/ruleengine/valueveto.go`. Full semantics in `[valueveto]`
-  there.
+  there, and the decision in
+  [ADR 0087](../docs/decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md).
 
 ### The one ellipsis: object properties, spelled `...$REST`
 

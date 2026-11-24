@@ -90,14 +90,28 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   substring matcher, and losing it is a **declared narrowing**, accepted because
   the same matcher was what affirmed `tokenizer`. Every cross-provider verdict is
   enumerated in `internal/core/namematch/crossprovider_test.go`.
-  **Known limit — the VALUE is not inspected, and here TypeScript diverges from
-  Go.** Any non-empty string literal under a credential name is affirmed, so
-  `const secretFile = "lib/config.ts"` and `const apiKey = "STRIPE_API_KEY"`
-  both fire at certainty 1.0. The Go provider now stays silent when the literal's
+  **The VALUE is inspected, as in Go.** SEC-001 stays silent when the literal's
   own shape proves it is a URL, a URN, an environment-variable name or a file
-  path ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md));
-  **TypeScript does not apply that value veto yet.** The divergence is temporary
-  and tracked in issue `#148`.
+  path ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)),
+  so `const secretFile = "lib/config.ts"` is no longer affirmed at certainty
+  1.0. The rule reaches the same function Go calls through the rule-engine
+  operator `metavariable-value-veto`
+  ([ADR 0087](docs/decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md)):
+  the bound literal is decoded as **one JavaScript string** — single or double
+  quotes, `\n`-style escapes, `\0`, `\xHH`, `\uHHHH` with surrogate pairs,
+  `\u{…}`, line continuations, identity escapes such as `\/` — before the
+  predicate reads it, so `"…?api_key\x3dabc"` keeps firing. The veto applies at
+  every shape above, the object property included, and belongs to one pair: in
+  `{ secretFile: "lib/config.ts", apiKey: "…" }` the credential still fires.
+  **What the veto does not decide:** a value that is not exactly one literal (a
+  concatenation such as `"a" + "b"`) or uses an escape the decoder refuses (a
+  legacy octal escape, a lone surrogate, a malformed escape) proves nothing and
+  **keeps firing**; and a shape SEC-001 does not reach — a class field, a
+  template literal, a parenthesized or `as`-cast value, a bare assignment, a
+  destructuring default — is neither vetoed nor reported. The veto's own limits,
+  in both directions, are the same as Go's and are listed under the Go
+  provider's hardcoded-secrets entry below; they are served to an agent by
+  `codefit-coverage` from one shared text (`valueshape.DeclaredLimit`).
 - **Weak cryptography.** [id: ts.weak-crypto] MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
   `createHash('md5'|'sha1')`. **Known limit:** these are flagged **wherever they
   appear**; a non-security use (a cache key, an ETag) may be a false positive,
@@ -2105,5 +2119,9 @@ Both directions are locked by tests through the real provider
 (`internal/providers/golang/valueveto_test.go`) and served to an agent by
 `codefit-coverage` on `SEC-001`'s own entry, next to the name gate's
 all-lowercase-concatenation limit (`internal/providers/golang/capability.go`).
-**TypeScript does not apply this veto yet** — see its hardcoded-secrets entry
-above; the divergence is temporary and tracked in issue `#148`.
+**TypeScript applies the same veto**, through the rule-engine operator
+`metavariable-value-veto`, with the same limits — see its hardcoded-secrets entry
+above and `internal/providers/typescript/valueveto_test.go`. Its served text adds
+one precision the Go text lacks: `__SECRET__` keeps firing because the
+environment-variable-name pattern needs an upper-case letter first and allows no
+leading, trailing or doubled underscore.

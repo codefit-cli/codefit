@@ -72,6 +72,37 @@ All notable changes to codefit are documented here. The format is based on
 ### Fixed
 
 - **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
+  credential — in TypeScript either** (`#148`). The TypeScript `SEC-001` rule
+  now asks the same predicate the Go provider asks
+  (`internal/core/valueshape`, [ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)),
+  through a new rule-engine operator, `metavariable-value-veto`
+  ([ADR 0087](docs/decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md)):
+  a credential-named binding whose literal proves it is a URL with no secret in
+  it, a URN, an environment-variable name or a path ending in a known file
+  extension emits nothing, at every shape the rule reaches — `const`, `let`,
+  `var`, a typed `const`/`let`, an object property. The literal is **decoded as
+  JavaScript** first, so `"…?api_key\x3dabc"` (a URL carrying `api_key=abc`)
+  keeps firing; a concatenation, a legacy octal escape or a lone surrogate does
+  not decode, proves nothing and keeps firing. The veto runs while the match is
+  being bound, so in one object a vetoed pair never hides a credential beside
+  it. Measured with the pre-change and the post-change provider: on a planted
+  file carrying the four forms and `"s3cr3t"` at each of the six shapes,
+  **30 → 6** — the 24 that stop are the four forms at the six shapes, and the six
+  `"s3cr3t"` controls keep firing. The in-repo TypeScript testdata (26 files)
+  carries no `SEC-001` before or after. The veto's limits are Go's, declared in
+  both directions on `ts.hardcoded-secrets` in `codefit-coverage` and in
+  `COVERAGE.md`; shapes the rule does not reach (class fields, templates,
+  parenthesized or `as`-cast values, bare assignments, destructuring defaults)
+  are neither vetoed nor reported. **For a committed baseline:** a TypeScript
+  `SEC-001` reported on such a literal becomes `gone`, and
+  `codefit-baseline-prune` drops it.
+- **A misspelled key in a rule file is a load error, not a silent drop.** The
+  rule loader skipped any key it did not know, so a rule carrying
+  `metavariable-regx:` loaded cleanly and lost its constraint. Unknown keys are
+  now rejected at every level, naming the file, the line and the key. Every
+  shipped rule file was checked to load under the strict decoder first; none
+  relied on an unknown key.
+- **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
   credential — in Go** (`#148`). `SEC-001`'s name gate was right
   ([ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md))
   and nothing constrained the **value** beyond "a non-empty string", so a
@@ -109,9 +140,7 @@ All notable changes to codefit are documented here. The format is based on
   paths without a known extension keep firing. All
   of it is on `SEC-001`'s own `codefit-coverage` entry for Go and in
   `COVERAGE.md`.
-  **TypeScript does not apply the veto yet** — the same line still fires there.
-  The divergence is temporary, written down in `COVERAGE.md`, and closes with the
-  rest of `#148`.
+  TypeScript applies the same veto since the entry above.
 - **`const tokenizer = "whitespace"` is no longer reported as a hardcoded
   credential** (`#152`). `SEC-001` constrained `$NAME` with an **unanchored**
   regex, so any identifier merely *containing* a credential word matched — and

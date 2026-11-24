@@ -228,6 +228,40 @@ func tsNameVocabulary(t *testing.T) map[string]bool {
 	return nil
 }
 
+// TestSEC001DeclaresTheValueVetoOnValue is the structural lock for the VALUE
+// axis (issue #148, ADR 0087), the sibling of tsNameVocabulary above: it reads
+// SEC-001 from the REAL embedded YAML and fails unless the rule asks the shared
+// value predicate about $VALUE. Go applies valueshape.NotACredential in its own
+// code; TypeScript reaches the same function only through this declaration, so
+// deleting it would bring the Go/TypeScript value divergence back silently. The
+// verdict-by-verdict parity table for the value axis is separate work (T5).
+func TestSEC001DeclaresTheValueVetoOnValue(t *testing.T) {
+	loaded, err := ruleengine.LoadFS(rules.FS, "typescript/security")
+	if err != nil {
+		t.Fatalf("loading typescript/security rules from the embedded FS: %v", err)
+	}
+	for _, r := range loaded {
+		if r.ID != "SEC-001" {
+			continue
+		}
+		predicate, ok := r.MetavariableValueVeto["$VALUE"]
+		if !ok {
+			t.Fatalf("SEC-001 does not veto $VALUE (metavariable-value-veto=%v): a credential-named "+
+				"binding holding a URL or a file path would be affirmed at confidence 1.0 in "+
+				"TypeScript while Go stays silent on it", r.MetavariableValueVeto)
+		}
+		if predicate != "not-a-credential" {
+			t.Fatalf("SEC-001 vetoes $VALUE with %q, not \"not-a-credential\": the two providers "+
+				"must ask the same predicate", predicate)
+		}
+		if len(r.MetavariableValueVeto) != 1 {
+			t.Errorf("SEC-001 vetoes more than $VALUE: %v", r.MetavariableValueVeto)
+		}
+		return
+	}
+	t.Fatalf("no rule with id SEC-001 in typescript/security (%d rules loaded)", len(loaded))
+}
+
 // TestCrossProviderNameGate runs the four controls that make drift impossible
 // rather than merely discouraged.
 func TestCrossProviderNameGate(t *testing.T) {

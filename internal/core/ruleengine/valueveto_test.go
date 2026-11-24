@@ -8,7 +8,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/ruleengine"
 )
 
-// SPEC (issue #148) — `metavariable-value-veto`, a constraint that
+// SPEC (issue #148, ADR 0087) — `metavariable-value-veto`, a constraint that
 // DROPS a match when the value bound to a metavariable proves, by its own shape,
 // that it is something the rule is not about.
 //
