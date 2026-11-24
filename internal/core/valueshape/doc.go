@@ -97,6 +97,14 @@
 // package's own doctrine (see WHAT THIS DOES NOT SEE below) refuses to make
 // without new measurement in the other direction.
 //
+// Widening the token-like guard to host labels, query keys, fragment keys and
+// encoded path segments (2026-11-23) was re-measured with the real sensor over
+// the same corpus: the predicate's counts stay 100 / 46 / 18 / 1, and no
+// previously silenced value fires again. None of those 100 URLs carries a
+// query, a fragment or a percent-escape, and their longest host label is 15
+// bytes, so that zero measures the host-label position only; the other three
+// positions have no instance in the corpus to be noisy on.
+//
 // Four buckets above are exactly the four Forms this package closes: URL,
 // URN, SCREAMING_SNAKE env-var name, path with extension. The rest are
 // DELIBERATELY left firing, with the reason each was rejected as a guard:
@@ -163,13 +171,56 @@
 // this guard existed — a false affirmation this package would otherwise still
 // be shipping.
 //
-// The guard: FormURL does NOT veto when any path segment (`u.Path` split on
-// "/"), any decoded query value, or any decoded fragment value (both via
-// url.ParseQuery, since a fragment is where OAuth's implicit flow puts a
-// token) is token-like — see isTokenLike. Token-like requires ALL of: at
-// least 16 bytes, at least one ASCII letter, AND at least one ASCII digit.
-// Both letter and digit are required, deliberately: a value with only one of
-// the two is a declared, measured limit, not an oversight —
+// The guard: FormURL does NOT veto when ANY of the following pieces of the URL
+// is token-like (see isTokenLike, the single definition of "token-like" in
+// this package):
+//
+//   - a HOST LABEL: u.Hostname() split on "." — the port is not part of it,
+//     and a host that is an IP literal (IPv4, or IPv6 with or without
+//     brackets and zone) is skipped as a whole, because an IPv6 address is
+//     long and mixes letters and digits without being a secret. A function
+//     URL whose first label is the secret
+//     (`https://<token>.lambda-url.<region>.on.aws/`) is the shape this
+//     closes.
+//   - a PATH SEGMENT: the ESCAPED path split on "/", each segment then
+//     decoded as a whole. Splitting before decoding is what keeps an encoded
+//     separator from hiding a token: `/hook/9f8e7d6c5b%2F4a39281706` is ONE
+//     segment, decoded to `9f8e7d6c5b/4a39281706` (21 bytes), where splitting
+//     the decoded path would leave two pieces each shorter than the minimum.
+//     A segment that fails to decode is inspected in its escaped form.
+//   - a QUERY KEY or QUERY VALUE, both decoded (url.ParseQuery). Keys are
+//     inspected whether or not they carry a value. A bare key
+//     (`feed.ics?<token>`) parses as a key with an empty value, so a guard
+//     that read only values never saw it. Keys that DO carry a value are
+//     inspected too, deliberately: nothing in the URL grammar stops a token
+//     from sitting in the key position (`?<token>=1`), url.ParseQuery cannot
+//     tell `?k` from `?k=`, and the only cost is a long parameter NAME that
+//     mixes letters and digits — noise, never a silenced secret.
+//   - a FRAGMENT KEY or FRAGMENT VALUE, read the same way as the query, since
+//     OAuth's implicit flow puts a token there. It starts from the ESCAPED
+//     fragment (url.URL.EscapedFragment), exactly as the query starts from
+//     RawQuery: split on the literal "&" and "=" first, then each piece decoded
+//     once. url.URL.Fragment is already decoded, and parsing it would turn an
+//     encoded "&" or "=" into a real separator: `#9f8e7d6c5b%264a39281706` is
+//     ONE 21-byte key, where the decoded fragment would split into two short
+//     ones. A fragment that is NOT a list of pairs — a hash route
+//     `#/invite/<token>`, a bare `#<token>` — reads as one key with no value,
+//     and that key is inspected WHOLE. That covers it piece by piece as well: a
+//     piece that is token-like makes the whole token-like (it is at least as
+//     long and carries the same letter and digit), so no piece of such a
+//     fragment escapes inspection.
+//
+// The credential-named-parameter check (carriesCredential) is a different
+// question and reads the DECODED fragment on purpose: `#access_token%3Dabc`
+// denotes `access_token=abc` once decoded, and keeps firing.
+//
+// A query or fragment that fails url.ParseQuery is never vetoed at all (see
+// carriesCredential), so a parse failure cannot hide a token here either.
+//
+// Token-like requires ALL of: at least 16 bytes, at least one ASCII letter,
+// AND at least one ASCII digit. Both letter and digit are required,
+// deliberately: a value with only one of the two is a declared, measured
+// limit, not an oversight —
 //
 //   - a long ALL-LETTER segment (`openid-configuration`, from
 //     `https://accounts.google.com/.well-known/openid-configuration`) is a
@@ -182,11 +233,43 @@
 //     short to be distinguished from an ordinary path component, and must
 //     stay vetoed.
 //
-// So the declared limit is exactly this: a secret-bearing URL whose token
-// part is SHORTER than 16 bytes, or carries no ASCII digit at all, is still
-// vetoed as FormURL — the guard has no shape to act on in either case. This
-// trades a rare short-or-all-letter embedded secret for never mistaking a
-// long identifier or a long descriptive path segment for one, mirroring the
-// same trade-off FormEnvVarName already makes with its own underscore
-// requirement, above.
+// The same thresholds apply in every position. These stay vetoed, each for
+// the reason given, and are pinned in valueshape_test.go's VETOED table:
+//
+//   - a long all-letter host label (`https://authorizationserver.example.com`)
+//     — a descriptive name, no digit;
+//   - a fragment anchor with a digit but under 16 bytes (`#section-2`);
+//   - a bare query flag (`?debug`), short and letters only;
+//   - a version-like path (`/api/v2/resources`), every segment short;
+//   - a port (`:8443`) and an IPv6 literal host (`[2001:db8::8a2e:370:7334]`)
+//     — not a label at all.
+//
+// So the declared limit, after inspecting every position above, is exactly
+// this — a secret-bearing URL is still vetoed as FormURL when its token
+// part:
+//
+//   - is SHORTER than 16 bytes, in whatever position it sits;
+//   - lacks an ASCII letter or lacks an ASCII digit (an all-letter token; an
+//     all-digit one);
+//   - is cut by the URL's own literal separators — "." between host labels,
+//     a literal "/" between path segments, a literal "&" or "=" in a query or
+//     fragment — into pieces that are each shorter than 16 bytes. Only an
+//     ENCODED separator inside one piece is undone, in the path, the query and
+//     the fragment alike (see above); a literal one is the URL's real
+//     structure, and nothing about it distinguishes a token cut in two from two
+//     short pieces.
+//
+// The guard has no shape to act on in any of those cases. This trades a rare
+// short, single-class or pre-cut embedded secret for never mistaking a long
+// identifier or a long descriptive name for one, mirroring the same trade-off
+// FormEnvVarName already makes with its own underscore requirement, above.
+//
+// # FormFilePath and a bare file name
+//
+// FormFilePath requires no separator: a single `word.ext` with a listed
+// extension (`server.key`, `Hunter2024.db`) IS vetoed. That is a declared
+// limit, not an oversight: a secret that happens to end in a dot plus a known
+// extension has, by shape, the form of a file name, and is not reported. The
+// extension list is closed so a JWT or a base64 blob cannot reach it; a
+// password chosen to look like a file name can.
 package valueshape

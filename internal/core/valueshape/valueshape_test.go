@@ -49,6 +49,21 @@ func TestNotACredential_Vetoed(t *testing.T) {
 		{`https://accounts.google.com/.well-known/openid-configuration`, FormURL}, // long segment, letters only, no digit — must stay vetoed
 		{`https://login.microsoftonline.com/common/oauth2/v2.0/token`, FormURL},   // segments carry digits but none reach the length floor — must stay vetoed
 		{`https://api.example.com/v1/users/12345678901234567890`, FormURL},        // a long all-digit segment is an id, not a secret — must stay vetoed
+		// Negative fixture for the positions B1 added to the token-like guard
+		// (host label, bare/keyed query key, non-pair fragment, encoded
+		// separator). Each must STAY vetoed after the guard inspects them; the
+		// comment is the reason.
+		{`https://authorizationserver.example.com/token`, FormURL},              // a 19-byte host label of letters only: a descriptive name, no digit
+		{`https://ec2-12-34-56-78.compute-1.amazonaws.com/`, FormURL},           // host labels mix letters and digits but none reaches 16 bytes
+		{`https://api.example.com:8443/v1/users`, FormURL},                      // the port is not a host label
+		{`https://[2001:db8::8a2e:370:7334]:8443/v1`, FormURL},                  // an IPv6 literal host: 23 bytes of hex and colons, skipped as an address
+		{`http://[fe80::1ff:fe23:4567:890a%25eth0]/status`, FormURL},            // an IPv6 literal with a zone: still an address, still skipped
+		{`https://docs.example.com/guide#section-2`, FormURL},                   // a fragment anchor with a digit, under 16 bytes
+		{`https://app.example.com/#/settings/notifications`, FormURL},           // a hash route of letters only
+		{`https://api.example.com/v1/items?debug`, FormURL},                     // a bare query flag: short, letters only
+		{`https://api.example.com/v1/items?page=2&include_archived=1`, FormURL}, // query keys are inspected; these are names without a digit
+		{`https://api.example.com/api/v2/resources`, FormURL},                   // a version-like path: every segment short
+		{`https://example.com/files/report%2Fq3.pdf`, FormURL},                  // an encoded separator inside a short segment: decoded whole, still 13 bytes
 	}
 
 	firedForm := make(map[Form]bool, len(Forms()))
@@ -189,6 +204,80 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			value:  `https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage`,
 			reason: "a Telegram bot-token URL: the token lives in a path segment together with the literal 'bot' prefix",
 		},
+		// B1: the four positions the token-like guard did not inspect. Every
+		// row here was vetoed as FormURL before the guard read it.
+		{
+			value:  `https://k9f8e7d6c5b4a3928170.lambda-url.us-east-1.on.aws/`,
+			reason: "a function URL: the secret is the first HOST LABEL (20 bytes, letters and digits)",
+		},
+		{
+			value:  `https://abcdefg1234567hijklmn890opqrs.lambda-url.us-east-2.on.aws/`,
+			reason: "a function URL whose host label is a 29-byte token",
+		},
+		{
+			value:  `https://k9f8e7d6c5b4a3928170.api.example.com`,
+			reason: "a token-like HOST LABEL with no path at all",
+		},
+		{
+			value:  `https://k9f8e7d6c5b4a3928170.api.example.com/v1`,
+			reason: "a token-like HOST LABEL in front of an ordinary path",
+		},
+		{
+			value:  `https://k9f8e7d6c5b4a3928170.example.com:8443/v1`,
+			reason: "a token-like HOST LABEL with a port: the port is stripped, the label is still read",
+		},
+		{
+			value:  `https://eo1a2b3c4d5e6f7g8.m.pipedream.net`,
+			reason: "a request-bin URL: the secret is a 17-byte HOST LABEL",
+		},
+		{
+			value:  `https://app.example.com/#/invite/9f8e7d6c5b4a39281706`,
+			reason: "a hash-route invite link: the fragment is not key=value, so it reads as one valueless key, inspected whole",
+		},
+		{
+			value:  `https://app.example.com/login#9f8e7d6c5b4a39281706`,
+			reason: "a bare token as the whole FRAGMENT",
+		},
+		{
+			value:  `https://app.example.com/login#Ab12Cd34Ef56Gh78Ij90`,
+			reason: "a bare token as the whole FRAGMENT, mixed case",
+		},
+		{
+			value:  `https://app.example.com/#9f8e7d6c5b%264a39281706`,
+			reason: "an encoded '&' inside a bare FRAGMENT: the fragment is split before it is decoded, so the 21-byte token stays whole, exactly as it does in the query",
+		},
+		{
+			value:  `https://app.example.com/#9f8e7d6c5b%3D4a39281706`,
+			reason: "an encoded '=' inside a bare FRAGMENT: split before decoding, so it cannot cut the 21-byte token into a short key and a short value",
+		},
+		{
+			value:  `https://app.example.com/cb#access_token%3Dabc`,
+			reason: "the credential-named-parameter check reads the DECODED fragment, so an encoded '=' still yields access_token=abc — the token-like fix does not touch this check",
+		},
+		{
+			value:  `https://cal.example.com/feed.ics?9f8e7d6c5b4a39281706`,
+			reason: "a calendar feed URL: the secret is a BARE QUERY KEY with no '='",
+		},
+		{
+			value:  `https://cal.example.com/private/feed.ics?Ab12Cd34Ef56Gh78Ij90`,
+			reason: "a BARE QUERY KEY token after a two-segment path",
+		},
+		{
+			value:  `https://api.example.com/v1/items?page=2&9f8e7d6c5b4a39281706`,
+			reason: "a BARE QUERY KEY token after an ordinary pair",
+		},
+		{
+			value:  `https://api.example.com/v1/items?9f8e7d6c5b4a39281706=1`,
+			reason: "a token in the KEY position of a pair that carries a value",
+		},
+		{
+			value:  `https://example.com/hook/9f8e7d6c5b%2F4a39281706`,
+			reason: "an encoded '/' inside ONE path segment: decoded whole it is 21 bytes; split after decoding it would be two short pieces",
+		},
+		{
+			value:  `https://img.example.com/s/qL8%2Fz3%2BxW9v%2Fk2N%3D/photo.jpg`,
+			reason: "a base64 token percent-encoded into one path segment: decoded whole it is 16 bytes with letters and digits",
+		},
 		{
 			value:  `cache:key.json`,
 			reason: "':' is outside the file-path charset even without '//' — the charset guard, not just the scheme-and-authority check, must reject it despite the valid .json extension",
@@ -210,6 +299,43 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			}
 			if form, ok := NotACredential(tc.value); ok {
 				t.Errorf("NotACredential(%q) = (%q, true), want (_, false): %s", tc.value, form, tc.reason)
+			}
+		})
+	}
+}
+
+// TestNotACredential_DeclaredBlindSpots locks what the veto still hides after
+// the token-like guard inspects every URL position: each value here COULD be a
+// real secret and IS vetoed. doc.go declares every row; if one starts firing,
+// the declaration became false and must change in the same commit.
+func TestNotACredential_DeclaredBlindSpots(t *testing.T) {
+	cases := []struct {
+		value string
+		form  Form
+		limit string
+	}{
+		{`https://abc123def456.example.com/`, FormURL, "a token-like host label shorter than 16 bytes"},
+		{`https://api.example.com/hook/abc123`, FormURL, "a path token shorter than 16 bytes"},
+		{`https://app.example.com/#/invite/abc123`, FormURL, "a fragment token shorter than 16 bytes"},
+		{`https://api.example.com/hook/abcdefghijklmnopqrstuvwx`, FormURL, "a 24-byte path token with no digit"},
+		{`https://api.example.com/v1/k/AbCd%2FEfGh%2BIjKl%2FMnOp%2FQrSt`, FormURL, "an encoded token whose DECODED form has no digit — the hex of '%2F' is encoding, not content"},
+		{`https://api.example.com/hook/9f8e7d6c/5b4a39281706`, FormURL, "a token cut by a literal '/' into two segments each shorter than 16 bytes"},
+		{`https://9f8e7d6c.5b4a39281706.example.com/`, FormURL, "a token cut by '.' into two host labels each shorter than 16 bytes"},
+		{`https://app.example.com/#9f8e7d6c5b&4a39281706`, FormURL, "a token cut by a literal '&' in a fragment into two keys each shorter than 16 bytes"},
+		{`https://app.example.com/#9f8e7d6c5b=4a39281706`, FormURL, "a token cut by a literal '=' in a fragment into a key and a value each shorter than 16 bytes"},
+		{`https://cal.example.com/feed.ics?9f8e7d6c5b&4a39281706`, FormURL, "a token cut by a literal '&' in a query into two keys each shorter than 16 bytes"},
+		{`https://app.example.com/#1234567890123456%2541`, FormURL, "a fragment is decoded once: '%2541' denotes the three characters '%41', not the letter 'A', so this token has no letter"},
+		{`Hunter2024.db`, FormFilePath, "a bare word.ext with a listed extension and no separator has the shape of a file name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			if tc.limit == "" {
+				t.Fatalf("blind-spot fixture %q carries no declared limit", tc.value)
+			}
+			form, ok := NotACredential(tc.value)
+			if !ok || form != tc.form {
+				t.Errorf("NotACredential(%q) = (%q, %v), want (%q, true) — then the declared limit is false: %s",
+					tc.value, form, ok, tc.form, tc.limit)
 			}
 		})
 	}

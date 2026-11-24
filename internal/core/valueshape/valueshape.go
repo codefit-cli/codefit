@@ -1,6 +1,7 @@
 package valueshape
 
 import (
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -80,29 +81,79 @@ func isTokenLike(s string) bool {
 
 // carriesTokenLike reports whether u — a URL that has already passed every
 // other FormURL guard — has the secret itself sitting in plain sight: any
-// PATH SEGMENT, any QUERY VALUE, or any FRAGMENT VALUE that is token-like.
-// This is what a credential-named-key check alone cannot see: a Slack webhook
-// URL, a Discord webhook URL, an S3 presigned URL, an Azure SAS URL, and a
-// Telegram bot-token URL each carry the secret in a position whose KEY (or
-// lack of one, for a path segment) namematch's credential vocabulary was
-// never meant to recognise.
+// HOST LABEL, any PATH SEGMENT, any QUERY KEY or VALUE, or any FRAGMENT KEY or
+// VALUE that is token-like. This is what a credential-named-key check alone
+// cannot see: webhook, presigned, SAS, bot-token, function and feed URLs each
+// carry the secret in a position whose KEY (or lack of one) namematch's
+// credential vocabulary was never meant to recognise. doc.go states, position
+// by position, what is read and what is not.
+//
+// Every position starts from its ESCAPED form, so it is split on its literal
+// separators first and decoded once per piece: an encoded separator stays
+// inside its piece and cannot cut a token. The fragment is read through
+// u.EscapedFragment(), not u.Fragment, for exactly that reason — u.Fragment is
+// already decoded, and url.ParseQuery would decode and split it a second time.
 func carriesTokenLike(u *url.URL) bool {
-	for _, segment := range strings.Split(u.Path, "/") {
-		if isTokenLike(segment) {
+	return hostHasTokenLikeLabel(u.Hostname()) ||
+		pathHasTokenLikeSegment(u.EscapedPath()) ||
+		queryHasTokenLike(u.RawQuery) ||
+		queryHasTokenLike(u.EscapedFragment())
+}
+
+// hostHasTokenLikeLabel reports whether any DNS label of host (already
+// stripped of its port and brackets by url.URL.Hostname) is token-like. An IP
+// literal is not a name and is skipped whole: an IPv6 address is long and
+// mixes hex letters and digits without being a secret.
+func hostHasTokenLikeLabel(host string) bool {
+	if _, err := netip.ParseAddr(host); err == nil {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if isTokenLike(label) {
 			return true
 		}
 	}
-	return queryHasTokenLikeValue(u.RawQuery) || queryHasTokenLikeValue(u.Fragment)
+	return false
 }
 
-// queryHasTokenLikeValue reports whether any DECODED value in raw — parsed as
-// a query string, which is also how a URL fragment carrying OAuth-implicit-
-// flow parameters is read — is token-like. A raw string that fails to parse
-// is treated as NOT carrying a token-like value here: NotACredential's
-// "when in doubt, do not veto" rule is already enforced earlier, by
-// carriesCredential, which runs before this check and blocks the veto outright
-// on the same parse failure.
-func queryHasTokenLikeValue(raw string) bool {
+// pathHasTokenLikeSegment reports whether any segment of escapedPath is
+// token-like once decoded. It splits BEFORE decoding, so an encoded "/" (%2F)
+// stays inside its segment and cannot cut a token into pieces shorter than
+// tokenLikeMinLength. A segment that does not decode is read as written.
+//
+// Every piece the decoded path splits into is a substring of one decoded
+// segment, so this sees everything a split of the decoded path saw.
+func pathHasTokenLikeSegment(escapedPath string) bool {
+	for _, segment := range strings.Split(escapedPath, "/") {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			decoded = segment
+		}
+		if isTokenLike(decoded) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryHasTokenLike reports whether any DECODED key or value in raw — an
+// ESCAPED query string or fragment, parsed as a query string, which is also
+// how a URL fragment is read — is token-like. raw must not be decoded already:
+// url.ParseQuery splits on the literal "&" and "=" and then decodes each piece,
+// and a pre-decoded string would turn an encoded separator into a real one.
+//
+// Keys are read as well as values. A bare key (`?<token>`) and a fragment that
+// is not a list of pairs (`#/invite/<token>`, `#<token>`) both parse as one key
+// with an empty value, and are read WHOLE: any piece of them that is token-like
+// makes the whole token-like. A key that carries a value is read too, because
+// nothing stops a token from sitting there, and the cost is noise, not
+// blindness.
+//
+// A raw string that fails to parse is treated as NOT carrying a token-like
+// part here: NotACredential's "when in doubt, do not veto" rule is already
+// enforced earlier, by carriesCredential, which runs before this check and
+// blocks the veto outright on the same parse failure.
+func queryHasTokenLike(raw string) bool {
 	if raw == "" {
 		return false
 	}
@@ -110,7 +161,10 @@ func queryHasTokenLikeValue(raw string) bool {
 	if err != nil {
 		return false
 	}
-	for _, vals := range values {
+	for key, vals := range values {
+		if isTokenLike(key) {
+			return true
+		}
 		for _, v := range vals {
 			if isTokenLike(v) {
 				return true
@@ -166,10 +220,13 @@ var filePathExtensions = map[string]bool{
 //     (`user:pass@` is itself a credential), neither its query string nor its
 //     URL fragment (parsed the same way, since OAuth's implicit flow puts the
 //     token there) has a key matching namematch's credential vocabulary with a
-//     NON-EMPTY value, AND no PATH SEGMENT, QUERY VALUE, or FRAGMENT VALUE is
-//     token-like (see isTokenLike): a webhook or presigned-URL secret sitting
-//     in the path or in a query value whose key namematch does not recognise
-//     (Slack, Discord, S3, Azure SAS, Telegram bot tokens) must still be seen.
+//     NON-EMPTY value, AND no HOST LABEL (IP literals skipped), PATH SEGMENT,
+//     QUERY KEY or VALUE, or FRAGMENT KEY or VALUE is token-like (see
+//     isTokenLike; every position is split before it is decoded, so an
+//     encoded "/", "&" or "=" cannot cut a token):
+//     a webhook, presigned, function or feed URL whose secret sits in the
+//     host, the path, a bare query key, a hash route or a query value whose
+//     key namematch does not recognise must still be seen.
 //  2. FormURN — `urn:<namespace-id>:<namespace-specific-string>`,
 //     case-insensitive.
 //  3. FormEnvVarName — SCREAMING_SNAKE, requiring at least one underscore.
@@ -207,12 +264,17 @@ var filePathExtensions = map[string]bool{
 //     `JBSWY3DPEHPK3PXP` (base32, no underscore) both keep firing precisely
 //     because they lack the underscore this guard requires.
 //   - A secret-bearing URL whose token part is SHORTER than
-//     tokenLikeMinLength (16 bytes), or has no ASCII digit at all, IS still
-//     vetoed by FormURL — the token-like guard has no evidence to act on.
-//     This is a declared limit of the guard added to close the webhook/
-//     presigned-URL gap, not an oversight: it trades a rare short or
-//     all-letter secret for never mistaking a long identifier (a numeric id)
-//     or a long descriptive path segment (`openid-configuration`) for one.
+//     tokenLikeMinLength (16 bytes), lacks an ASCII letter or an ASCII digit,
+//     or is cut by the URL's own literal separators ("." between host labels,
+//     "/" between path segments, "&" or "=" in a query or fragment) into
+//     pieces each shorter than 16 bytes, IS still vetoed by FormURL — in any position,
+//     the token-like guard has no evidence to act on. This is a declared
+//     limit, not an oversight: it trades a rare short, single-class or
+//     pre-cut secret for never mistaking a long identifier (a numeric id) or
+//     a long descriptive name (`openid-configuration`) for one.
+//   - A bare file name with a listed extension and no separator
+//     (`Hunter2024.db`) IS vetoed by FormFilePath: a secret that ends in a
+//     dot plus a known extension has the shape of a file name.
 func NotACredential(value string) (Form, bool) {
 	if value == "" {
 		return "", false
