@@ -21,6 +21,15 @@ correct version and needs no Go toolchain.
 > [Releases](https://github.com/codefit-cli/codefit/releases) list, not the "latest"
 > shortcut.
 >
+> **No release yet carries the next fix.** `v0.3.0-alpha.1` was built with Go
+> `1.25.13`, and eleven more standard-library vulnerabilities that codefit's code
+> calls were published against it from October 2026 on (`net/http`, `crypto/tls`,
+> `crypto/x509`, `net/textproto`). None of them has a `1.25.x` fix. `main` requires
+> Go `1.26.11`, where all eleven are closed, but no tag has been cut from it yet.
+> Until one is, the way to get it is building `main` from a checkout with
+> `make build`, on a local Go older than `1.26.11` (it fetches `go1.26.11`) or on
+> `1.27.4`+ — see Option B for why `1.27.0`–`1.27.3` is not enough.
+>
 > `alpha` marks the phase, not the stability: it means Phase 3 is underway and `0.3.0`
 > has not closed. What ships is gated the same way every release is — build, vet, race
 > tests, lint, `govulncheck` and a four-target cross-compile.
@@ -57,6 +66,22 @@ in the release build (GoReleaser) and in `make build`. The binary is **functiona
 identical** to the release. For the tagged version, download from
 [Releases](https://github.com/codefit-cli/codefit/releases) — the full list, since the
 "latest" shortcut hides pre-releases — or build from a checkout with `make build`.
+
+Which Go compiles that binary matters: its standard library goes inside it. Today
+`@latest` resolves to `v0.2.9` (the module proxy skips pre-release tags), which
+asks only for Go 1.25 and builds with whatever Go you have — so run it on Go
+`1.26.11`+ or `1.27.4`+; older patches carry standard-library vulnerabilities
+codefit's code calls. `main` declares `go 1.26.11`, and a version that carries that
+line behaves like a checkout build of `main` (`make build`):
+
+- **local Go older than 1.26.11**, default `GOTOOLCHAIN=auto`: it downloads and
+  builds with `go1.26.11`;
+- **local Go newer than 1.26.11**: it builds with itself, so it must be `1.27.4`
+  or later to be free of those vulnerabilities;
+- **older Go with `GOTOOLCHAIN=local`**: the build is refused (`requires go >=
+  1.26.11 (running go …; GOTOOLCHAIN=local)`).
+
+`@latest` reaches that line only once a non-pre-release tag is cut from `main`.
 
 ### Verify the install
 

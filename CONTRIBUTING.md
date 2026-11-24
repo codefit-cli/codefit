@@ -6,8 +6,20 @@ new language.
 
 ## Development setup
 
-Requirements: **Go 1.25+** (the MCP SDK requires it; the build toolchain is
-pinned to a patch ≥ 1.25.2 in `go.mod`). Docker is optional (only the complexity
+Requirements: **Go 1.26.11+**, set by the `go 1.26.11` line in `go.mod` (it
+closes eleven standard-library vulnerabilities codefit's code calls; see the
+CHANGELOG). What your local Go does with that line:
+
+- **Older than 1.26.11**, default `GOTOOLCHAIN=auto`: it downloads and uses
+  `go1.26.11`, `make build` included. The download goes through the Go module
+  proxy, so offline or with `GOPROXY=off`, and no cached copy, the build fails
+  (`toolchain not available`).
+- **Newer than 1.26.11**: it builds with itself. Use `1.27.4` or later — `1.27.0`
+  to `1.27.3` still carry some of those eleven.
+- **Older, with `GOTOOLCHAIN=local`**: the build is refused
+  (`go.mod requires go >= 1.26.11 (running go 1.25.13; GOTOOLCHAIN=local)`).
+
+CI and the release build pin `1.26.11`. Docker is optional (only the complexity
 sensor needs it). No C toolchain is required — codefit builds with
 `CGO_ENABLED=0`.
 
