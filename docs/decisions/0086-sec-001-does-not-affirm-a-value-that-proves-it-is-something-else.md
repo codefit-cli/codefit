@@ -208,9 +208,11 @@ leaves, because the shape cannot be told apart from a secret's:
 - a path with no known extension — the form anchors on a closed list and never
   guesses from structure. A bare `/` proves nothing: AWS's published example
   secret access key contains one;
-- header names, and placeholders that are not SCREAMING_SNAKE;
-- hex and base64 blobs, JWTs and STS-style tokens, which are what the rule is
-  for.
+- header names, and placeholders that are not SCREAMING_SNAKE with an
+  underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`).
+
+Hex and base64 blobs, JWTs and STS-style tokens also keep firing. They are not
+noise: they are what the rule is for.
 
 ## Consequences
 

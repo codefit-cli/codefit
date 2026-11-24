@@ -102,8 +102,7 @@ func hardcodedSecret(name string, value ast.Expr) bool {
 	if !ok || val == "" || !looksSecret(name) {
 		return false
 	}
-	// stringLit succeeded, so value is a *ast.BasicLit of Kind STRING.
-	return !provesNotACredential(value.(*ast.BasicLit))
+	return !provesNotACredential(value)
 }
 
 // limitValueVeto is the DECLARED consequence of the value veto, rendered to
@@ -133,10 +132,11 @@ const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own 
 	"bytes. STILL REPORTED " +
 	"although it is often not a secret, because its shape is indistinguishable from " +
 	"one: short test literals, short identifiers, prose, paths without a known " +
-	"extension, header names."
+	"extension, header names, placeholders that are not SCREAMING_SNAKE with an " +
+	"underscore (changeme, <token>, TODO, __SECRET__)."
 
-// provesNotACredential reports whether lit — a string literal — denotes a
-// string whose shape proves it is not a credential.
+// provesNotACredential reports whether value — the expression the name gate
+// accepted — denotes a string whose shape proves it is not a credential.
 //
 // The predicate is handed the string the literal DENOTES, not its source text:
 // `"…?api_key\x3dabc"` denotes a URL carrying api_key=abc, and reading the
@@ -144,9 +144,23 @@ const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own 
 // literal that cannot be unquoted denotes the empty string here, which proves
 // nothing, so it does not veto.
 //
-// Every guard, and every form the veto does not see, lives in
-// internal/core/valueshape. Nothing about them is restated here.
-func provesNotACredential(lit *ast.BasicLit) bool {
+// An expression that is not a *ast.BasicLit proves nothing either, and does not
+// veto: the finding fires. The name gate's stringLit accepts only a
+// *ast.BasicLit today, so the parser never reaches that branch; it is there so
+// that widening stringLit (to a parenthesized literal, or a folded
+// concatenation) cannot turn into a panic during a scan. If stringLit is ever
+// widened to accept another node kind, those literals will fire WITHOUT the
+// value veto until this function learns to read them.
+//
+// Every guard lives in internal/core/valueshape, and this function applies
+// none of its own. limitValueVeto, above, restates the guards and their limits
+// in prose, because it is the text codefit-coverage serves to an agent; it is
+// kept in step with valueshape's doc comments by hand.
+func provesNotACredential(value ast.Expr) bool {
+	lit, ok := value.(*ast.BasicLit)
+	if !ok {
+		return false
+	}
 	denoted, _ := strconv.Unquote(lit.Value)
 	_, vetoed := valueshape.NotACredential(denoted)
 	return vetoed

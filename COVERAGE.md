@@ -2098,7 +2098,8 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
   be told apart from one: short test literals (`"s3cr3t"` must fire — a
   credential has no length floor), short identifiers, prose (a passphrase is a
   secret with spaces), paths without a known extension, header names
-  (`X-Api-Key`), and placeholders that are not SCREAMING_SNAKE.
+  (`X-Api-Key`), and placeholders that are not SCREAMING_SNAKE with an
+  underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`).
 
 Both directions are locked by tests through the real provider
 (`internal/providers/golang/valueveto_test.go`) and served to an agent by

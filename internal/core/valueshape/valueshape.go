@@ -44,12 +44,21 @@ var urnPattern = regexp.MustCompile(`(?i)^urn:[a-z0-9][a-z0-9-]{0,31}:\S+$`)
 // real secrets this project has measured — see doc.go.
 var envVarNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`)
 
-// tokenLikeMinLength is the length threshold isTokenLike anchors on. It is a
-// measured value, not a placeholder: raising it to 64 stops catching real
-// webhook/SAS/bot-token secrets whose token segment is shorter than that
-// (Slack's is 24 characters), and lowering it to 8 has no effect on the
-// current fixtures — but either direction is a real behavior change, which is
-// why it is pinned by mutation (see valueshape_test.go, M10).
+// tokenLikeMinLength is the length threshold isTokenLike anchors on. Each
+// statement below was observed by changing this constant and running this
+// package's tests and the Go provider's:
+//
+//   - At 15, the VETOED row whose host label `ec2-12-34-56-78` is 15 bytes
+//     fails; at 17, the keeps-firing row whose decoded path segment is a
+//     16-byte base64 token fails. The value is pinned to the byte, from both
+//     sides.
+//   - At 8, three VETOED rows start firing (that host label, the fragment
+//     `section-2`, the decoded path segment `report/q3.pdf`), and seven
+//     declared blind spots stop being vetoed: a 12-byte host label, a 14-byte
+//     hash route, and every token cut by a literal '/', '.', '&' or '=' into
+//     pieces of 8 to 12 bytes.
+//   - At 64, 22 keeps-firing rows are vetoed, among them the Slack webhook
+//     URL, whose secret path segment is 24 bytes.
 const tokenLikeMinLength = 16
 
 // isTokenLike reports whether s has the shape of an opaque secret embedded in
@@ -149,17 +158,19 @@ func pathHasTokenLikeSegment(escapedPath string) bool {
 // nothing stops a token from sitting there, and the cost is noise, not
 // blindness.
 //
-// A raw string that fails to parse is treated as NOT carrying a token-like
-// part here: NotACredential's "when in doubt, do not veto" rule is already
-// enforced earlier, by carriesCredential, which runs before this check and
-// blocks the veto outright on the same parse failure.
+// A raw string that fails to parse is reported as carrying a token-like part:
+// what this function cannot read is not proof that no token is there, so it
+// answers in the direction that does not veto. It answers so on its own.
+// carriesCredential makes the same choice for its own input, but it reads the
+// DECODED fragment where this reads the escaped one, so neither function's
+// answer may rest on the other's.
 func queryHasTokenLike(raw string) bool {
 	if raw == "" {
 		return false
 	}
 	values, err := url.ParseQuery(raw)
 	if err != nil {
-		return false
+		return true
 	}
 	for key, vals := range values {
 		if isTokenLike(key) {
@@ -257,7 +268,8 @@ var filePathExtensions = map[string]bool{
 //     FormEnvVarName, and no extension fails FormFilePath.
 //   - Placeholders (`YOUR_CLIENT_SECRET`) DO veto here, as an env-var name —
 //     see the census in doc.go for why that is a measured, not a
-//     hypothetical, bucket.
+//     hypothetical, bucket. A placeholder that is not SCREAMING_SNAKE with an
+//     underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`) does not veto.
 //   - A secret made only of uppercase letters, digits and underscores WITH at
 //     least one underscore IS vetoed by FormEnvVarName. That is a declared
 //     limit, not an oversight: an AWS access key ID (no underscore) and

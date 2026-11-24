@@ -125,7 +125,8 @@
 //     reason is concrete: AWS's own published example secret access key,
 //     `wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY`, contains '/' (and '+'). A
 //     '/'-only guard would have silenced the exact string AWS publishes to
-//     demonstrate what a real key looks like.
+//     demonstrate what a real key looks like. A path with no listed
+//     extension (`/etc/secrets/db`) keeps firing for the same reason.
 //   - text with spaces — a prose-veto guard was PROPOSED and DROPPED
 //     2026-09-28, before it was ever implemented: a passphrase is a secret
 //     WITH spaces ("correct horse battery staple"), and the measured yield
@@ -138,8 +139,9 @@
 //     FormFilePath.
 //   - placeholder — a name like `YOUR_CLIENT_SECRET` IS vetoed here, but only
 //     because it happens to also be SCREAMING_SNAKE-shaped; a placeholder
-//     that is not (`<your-secret-here>`) is not covered by any guard in this
-//     package and keeps firing.
+//     that is not SCREAMING_SNAKE with an underscore (`changeme`, `<token>`,
+//     `TODO`, `__SECRET__`) is not covered by any guard in this package and
+//     keeps firing.
 //   - path with extension — the one Go bucket this package DOES close, and
 //     the bucket that motivated this feature (`lib/config.ts`).
 //   - "other" (Go: 2, uncategorized) — not investigated further; the census
@@ -214,8 +216,10 @@
 // question and reads the DECODED fragment on purpose: `#access_token%3Dabc`
 // denotes `access_token=abc` once decoded, and keeps firing.
 //
-// A query or fragment that fails url.ParseQuery is never vetoed at all (see
-// carriesCredential), so a parse failure cannot hide a token here either.
+// A query or fragment that fails url.ParseQuery is never vetoed, so a parse
+// failure cannot hide a token here either. Both guards answer that way on
+// their own input: carriesCredential on the decoded fragment, the token-like
+// guard on the escaped one. Neither relies on the other having refused first.
 //
 // Token-like requires ALL of: at least 16 bytes, at least one ASCII letter,
 // AND at least one ASCII digit. Both letter and digit are required,

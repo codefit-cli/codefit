@@ -242,6 +242,25 @@ func TestSEC001ValueVetoKeepsFiring(t *testing.T) {
 			value:  "https://img.example.com/s/qL8%2Fz3%2BxW9v%2Fk2N%3D/photo.jpg",
 			reason: "a base64 token percent-encoded into one path segment",
 		},
+		// A query or fragment url.ParseQuery rejects: no token and no
+		// credential name, so the parse failure is the only thing that keeps
+		// each of these firing.
+		{
+			value:  "https://api.example.com/v1/items?page=2;sort=asc",
+			reason: "a query url.ParseQuery rejects (a literal ';'): what the guards cannot read is not proof of innocence",
+		},
+		{
+			value:  "https://api.example.com/v1/items?q=%zz",
+			reason: "a query with an invalid percent-escape: url.Parse accepts it and url.ParseQuery rejects it",
+		},
+		{
+			value:  "https://app.example.com/#/settings;tab=2",
+			reason: "a fragment url.ParseQuery rejects (a literal ';')",
+		},
+		{
+			value:  "https://app.example.com/#a%3Bb",
+			reason: "a fragment whose decoded form ('a;b') url.ParseQuery rejects, although its escaped form parses",
+		},
 		{
 			value:  "correct horse battery staple",
 			reason: "a passphrase is a secret with spaces; the prose veto was dropped, so prose keeps firing as declared noise",
@@ -269,6 +288,14 @@ func TestSEC001ValueVetoKeepsFiring(t *testing.T) {
 		{
 			value:  "<your-secret-here>",
 			reason: "a placeholder that is not SCREAMING_SNAKE: no form covers it",
+		},
+		{
+			value:  "changeme",
+			reason: "a lowercase placeholder: by shape indistinguishable from a real short secret",
+		},
+		{
+			value:  "TODO",
+			reason: "an all-caps placeholder with no underscore: env-var-name requires one, so it keeps firing",
 		},
 	}
 

@@ -286,6 +286,25 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			value:  `secret.jsonx`,
 			reason: "the closed extension list is anchored to the TRUE trailing extension — 'jsonx' is not itself listed, even though it contains '.json' as a substring",
 		},
+		// A query or fragment that url.ParseQuery rejects is evidence the
+		// guards cannot read. None of these carries a token or a credential
+		// name: the parse failure is the only thing that keeps them firing.
+		{
+			value:  `https://api.example.com/v1/items?page=2;sort=asc`,
+			reason: "a query url.ParseQuery rejects (a literal ';'): what the guards cannot read is not proof of innocence",
+		},
+		{
+			value:  `https://api.example.com/v1/items?q=%zz`,
+			reason: "a query with an invalid percent-escape: url.Parse accepts it and url.ParseQuery rejects it",
+		},
+		{
+			value:  `https://app.example.com/#/settings;tab=2`,
+			reason: "a fragment url.ParseQuery rejects (a literal ';'), in its escaped form and in its decoded form alike",
+		},
+		{
+			value:  `https://app.example.com/#a%3Bb`,
+			reason: "a fragment whose escaped form parses but whose decoded form ('a;b') does not: the credential-name check reads the decoded form, and that parse failure alone keeps this firing",
+		},
 		{
 			value:  ``,
 			reason: "the empty string establishes nothing",
@@ -299,6 +318,33 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			}
 			if form, ok := NotACredential(tc.value); ok {
 				t.Errorf("NotACredential(%q) = (%q, true), want (_, false): %s", tc.value, form, tc.reason)
+			}
+		})
+	}
+}
+
+// TestParseFailureDoesNotVetoInEitherGuard pins each URL guard's OWN answer to
+// a query or fragment it cannot parse. Both must answer in the direction that
+// does not veto, each on its own. Through NotACredential the two cannot be told
+// apart for the three keeps-firing rows whose query or fragment fails to parse
+// in both its escaped and its decoded form (`?page=2;sort=asc`, `?q=%zz`,
+// `#/settings;tab=2`): those rows fail only when BOTH guards are wrong. The
+// `#a%3Bb` row is caught by carriesCredential alone, because its escaped
+// fragment parses and its decoded one does not. queryHasTokenLike on its own is
+// observable only through this test.
+func TestParseFailureDoesNotVetoInEitherGuard(t *testing.T) {
+	unparseable := []string{
+		"page=2;sort=asc", // a literal ';'
+		"q=%zz",           // an invalid percent-escape
+		"/settings;tab=2", // a hash route with a literal ';'
+	}
+	for _, raw := range unparseable {
+		t.Run(raw, func(t *testing.T) {
+			if !carriesCredential(raw) {
+				t.Errorf("carriesCredential(%q) = false, want true: an unparseable query is not proof it carries no credential", raw)
+			}
+			if !queryHasTokenLike(raw) {
+				t.Errorf("queryHasTokenLike(%q) = false, want true: an unparseable query is not proof it carries no token", raw)
 			}
 		})
 	}
