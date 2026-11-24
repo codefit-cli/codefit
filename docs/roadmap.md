@@ -600,7 +600,8 @@ See [ADR 0072](decisions/0072-a-configured-schema-path-always-leaves-a-trace.md)
    reads like a measurement. It is pre-existing and byte-identical before and after this change,
    but this change makes it **fire more often**, because the total zero-resolution case now lands
    on exactly that shape. Moving it to a pointer is a JSON contract change that deserves its own
-   controls; bundling it here would have made a failing control ambiguous. Open.
+   controls; bundling it here would have made a failing control ambiguous. Open, grown to five
+   fields, and tracked as **P0-15** ([issue #151](https://github.com/codefit-cli/codefit/issues/151)).
 2. **Nested schema trees.** `flywayOrderedSQL` lists one level deep, so a directory whose `.sql`
    sit in a subdirectory resolves to zero files. The *lie* is closed (it reports not-measured with
    the path named); the *capability* is deferred, because recursing without a cross-directory
@@ -741,6 +742,30 @@ false-positive side measured — zero new sites in the AST census over codefit's
    divergence row with a written reason in the cross-provider case table, which loads TS's regex
    from the real embedded YAML rather than copying it. Widening or narrowing TS is separate,
    measured work.
+
+**2026-11-23 — the VALUE half, closed for Go and still open for TypeScript (issue `#148`).** The
+name gate above decides which identifiers are credentials; nothing constrained the value beyond
+"a non-empty string", so `const secretFile = "lib/config.ts"` was affirmed at Confidence 1.0 —
+the same failure this entry is about, through the other operand. The Go provider now withholds
+SEC-001 when the literal's own shape proves it is a URL, a URN, an environment-variable name or
+a file path (one shared core predicate, `internal/core/valueshape`;
+[ADR 0086](decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)).
+On codefit's own tree that is 24 SEC-001 going to 23, with no other census entry moving.
+**TypeScript does not apply the veto yet**: the same line still fires there. That divergence is
+declared in `COVERAGE.md` and stays open until the TypeScript rule reaches the same predicate.
+
+### P0-15 — a not-measured `codefit-scan-db` response emits five zeros that read like measurements — [issue #151](https://github.com/codefit-cli/codefit/issues/151)
+
+P0-11's first follow-up, grown. A response that correctly says `"measured": false` still
+serialises `count`, `withheld`, `score`, `bytes` and `index_bytes` as `0`, because they are plain
+`int` without `omitempty`. ADR 0069's rule — *a zero means codefit looked and found nothing; a null
+means nobody looked* — is what this breaks, and `"score": 0` reads as the worst possible audit when
+nothing was audited. `"withheld": 0` also arrives without `withheld_note`, against ADR 0080's
+contract for that field. It started as one field; ADR 0080 added four more with the same pattern.
+
+It is a JSON contract change for every consumer of `codefit-scan-db`, so it gets its own controls
+rather than riding on an unrelated change. The issue holds the reproduction and the expected
+shape; this entry only orders it.
 
 ---
 

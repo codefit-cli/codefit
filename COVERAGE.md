@@ -90,6 +90,14 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   substring matcher, and losing it is a **declared narrowing**, accepted because
   the same matcher was what affirmed `tokenizer`. Every cross-provider verdict is
   enumerated in `internal/core/namematch/crossprovider_test.go`.
+  **Known limit — the VALUE is not inspected, and here TypeScript diverges from
+  Go.** Any non-empty string literal under a credential name is affirmed, so
+  `const secretFile = "lib/config.ts"` and `const apiKey = "STRIPE_API_KEY"`
+  both fire at certainty 1.0. The Go provider now stays silent when the literal's
+  own shape proves it is a URL, a URN, an environment-variable name or a file
+  path ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md));
+  **TypeScript does not apply that value veto yet.** The divergence is temporary
+  and tracked in issue `#148`.
 - **Weak cryptography.** [id: ts.weak-crypto] MD5 or SHA-1 hashing — `md5(x)`, `sha1(x)`, or
   `createHash('md5'|'sha1')`. **Known limit:** these are flagged **wherever they
   appear**; a non-security use (a cache key, an ETag) may be a false positive,
@@ -2047,3 +2055,54 @@ The Go provider audits codefit itself (self-audit in CI): static security
 (hardcoded secrets, weak crypto) and best-practice detectors via `go/ast`, plus
 authorization surface for HTTP handlers. A full prose manifest like the one above
 lands when the Go provider emits one.
+
+**Hardcoded secrets (`SEC-001`) — what the Go check affirms, and what it does
+not.** It fires when an identifier whose **name** denotes a credential — matched
+by name component through the shared `namematch` vocabulary
+([ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md)) —
+is bound to a non-empty string literal, in an assignment, a `const`/`var`
+declaration, or a composite-literal field. It then asks whether the **value**
+proves it is something else, and stays silent when it does
+([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)):
+`const secretFile = "lib/config.ts"` used to be affirmed as a hardcoded
+credential at certainty 1.0 and is no longer reported. The veto is a proof,
+never a suspicion, and it covers exactly four forms (`internal/core/valueshape`):
+
+- a **URL** with a scheme and a host — unless it carries userinfo
+  (`scheme://user:pass@…`), a credential-named query or fragment parameter with a
+  value (`?api_key=…`), or anything token-like (16+ bytes with a letter and a
+  digit: a webhook, presigned, function or feed URL *is* the secret) in any of
+  these positions: a host label (the port and IP-literal hosts excluded), a path
+  segment, a query key or value (a bare `?<token>` included), or a fragment key
+  or value (a fragment that is not `key=value`, such as `#/invite/<token>`, is
+  read whole). Every position is split before it is decoded, so an encoded `%2F`,
+  `%26` or `%3D` cannot cut a token in two. Any of those keeps firing.
+- a **URN** (`urn:…`).
+- an **environment-variable name** — SCREAMING_SNAKE with at least one
+  underscore (`STRIPE_API_KEY` is the name of a secret, not its content).
+- a **file path** ending in a known file extension, from a closed list.
+
+A vetoed literal emits **nothing**: no finding at a lower severity or
+confidence, and no surface item. Whatever still fires does so exactly as before.
+
+**Known limits of the veto, declared in both directions.**
+
+- *Not reported, although it may be a secret:* an all-caps value containing an
+  underscore (it has the shape of an environment-variable name); a bare file
+  name with a known extension and no separator, such as `Hunter2024.db` (it has
+  the shape of a file name); and a URL whose embedded token is shorter than 16
+  bytes, lacks either a letter or a digit, or is cut by the URL's own literal
+  separators — dots between host labels, slashes between path segments, `&` or
+  `=` in a query or fragment — into pieces each shorter than 16 bytes.
+- *Still reported, although it is often not a secret,* because its shape cannot
+  be told apart from one: short test literals (`"s3cr3t"` must fire — a
+  credential has no length floor), short identifiers, prose (a passphrase is a
+  secret with spaces), paths without a known extension, header names
+  (`X-Api-Key`), and placeholders that are not SCREAMING_SNAKE.
+
+Both directions are locked by tests through the real provider
+(`internal/providers/golang/valueveto_test.go`) and served to an agent by
+`codefit-coverage` on `SEC-001`'s own entry, next to the name gate's
+all-lowercase-concatenation limit (`internal/providers/golang/capability.go`).
+**TypeScript does not apply this veto yet** — see its hardcoded-secrets entry
+above; the divergence is temporary and tracked in issue `#148`.

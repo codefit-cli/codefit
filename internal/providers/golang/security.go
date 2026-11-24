@@ -3,8 +3,10 @@ package golang
 import (
 	"go/ast"
 	"go/token"
+	"strconv"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/valueshape"
 )
 
 // securityChecks runs every static security detector over a parsed file.
@@ -55,7 +57,7 @@ func checkSecretAssign(p *parsed, a *ast.AssignStmt, add func(findings.Finding))
 		if !ok {
 			continue
 		}
-		if val, ok := stringLit(a.Rhs[i]); ok && val != "" && looksSecret(ident.Name) {
+		if hardcodedSecret(ident.Name, a.Rhs[i]) {
 			add(secretFinding(p, ident.Name, ident.Pos()))
 		}
 	}
@@ -66,7 +68,7 @@ func checkSecretValueSpec(p *parsed, v *ast.ValueSpec, add func(findings.Finding
 		if i >= len(v.Values) {
 			continue
 		}
-		if val, ok := stringLit(v.Values[i]); ok && val != "" && looksSecret(name.Name) {
+		if hardcodedSecret(name.Name, v.Values[i]) {
 			add(secretFinding(p, name.Name, name.Pos()))
 		}
 	}
@@ -77,9 +79,77 @@ func checkSecretKeyValue(p *parsed, kv *ast.KeyValueExpr, add func(findings.Find
 	if !ok {
 		return
 	}
-	if val, ok := stringLit(kv.Value); ok && val != "" && looksSecret(key.Name) {
+	if hardcodedSecret(key.Name, kv.Value) {
 		add(secretFinding(p, key.Name, key.Pos()))
 	}
+}
+
+// hardcodedSecret is SEC-001's whole decision for one name/value pair, shared
+// by the three AST shapes that can carry one (assignment, value spec, composite
+// literal field) so they cannot disagree.
+//
+// It asks two questions, in this order:
+//
+//  1. The NAME gate (ADR 0075): value is a non-empty string literal and name
+//     denotes a credential (looksSecret). Unchanged.
+//  2. The VALUE veto (ADR 0086): the literal's own shape does not prove it is
+//     something else — see provesNotACredential.
+//
+// A vetoed pair is not a finding of any kind: nothing is emitted, at any
+// severity or confidence. What still fires does so exactly as before.
+func hardcodedSecret(name string, value ast.Expr) bool {
+	val, ok := stringLit(value)
+	if !ok || val == "" || !looksSecret(name) {
+		return false
+	}
+	// stringLit succeeded, so value is a *ast.BasicLit of Kind STRING.
+	return !provesNotACredential(value.(*ast.BasicLit))
+}
+
+// limitValueVeto is the DECLARED consequence of the value veto, rendered to
+// agents by codefit-coverage through Capability(). It lives beside the code
+// that applies the veto and is cited from capability.go by reference.
+//
+// It states both directions, because both are true of the code below: what the
+// veto hides (a real secret that has one of the four shapes) and what it leaves
+// firing (everything a shape cannot tell apart from a secret).
+const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own shape " +
+	"proves it is not a credential (ADR 0086, internal/core/valueshape; forms url, " +
+	"urn, env-var-name, file-path): a URL with a scheme and a host, no userinfo, no " +
+	"credential-named query or fragment parameter carrying a value, and nothing " +
+	"token-like (16+ bytes with a letter and a digit) in any host label (an IP-literal " +
+	"host is skipped whole, never read as labels), decoded path segment, query key or " +
+	"value, or fragment key or value (each position is split before it is decoded, so " +
+	"an encoded slash, ampersand or equals sign cannot cut a token, and a fragment " +
+	"that is not key=value is read whole); a urn: URN; a SCREAMING_SNAKE name with at " +
+	"least one underscore; a path ending in a known file extension. Such a literal is " +
+	"not reported at all. " +
+	"Declared, not fixed, in both directions. NOT REPORTED although it may be a " +
+	"secret: an all-caps value containing an underscore; a bare file name with a " +
+	"known extension and no separator (Hunter2024.db); and a URL whose embedded " +
+	"token is shorter than 16 bytes, lacks either a letter or a digit, or is cut by " +
+	"the URL's own literal separators (dots between host labels, slashes between " +
+	"path segments, & or = in a query or fragment) into pieces each shorter than 16 " +
+	"bytes. STILL REPORTED " +
+	"although it is often not a secret, because its shape is indistinguishable from " +
+	"one: short test literals, short identifiers, prose, paths without a known " +
+	"extension, header names."
+
+// provesNotACredential reports whether lit — a string literal — denotes a
+// string whose shape proves it is not a credential.
+//
+// The predicate is handed the string the literal DENOTES, not its source text:
+// `"…?api_key\x3dabc"` denotes a URL carrying api_key=abc, and reading the
+// characters between the quotes instead would lose the '=' and veto it. A
+// literal that cannot be unquoted denotes the empty string here, which proves
+// nothing, so it does not veto.
+//
+// Every guard, and every form the veto does not see, lives in
+// internal/core/valueshape. Nothing about them is restated here.
+func provesNotACredential(lit *ast.BasicLit) bool {
+	denoted, _ := strconv.Unquote(lit.Value)
+	_, vetoed := valueshape.NotACredential(denoted)
+	return vetoed
 }
 
 func secretFinding(p *parsed, name string, pos token.Pos) findings.Finding {

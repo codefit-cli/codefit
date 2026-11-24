@@ -71,6 +71,47 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
+  credential — in Go** (`#148`). `SEC-001`'s name gate was right
+  ([ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md))
+  and nothing constrained the **value** beyond "a non-empty string", so a
+  credential-named identifier holding a file path, a URL, a URN or the *name* of
+  an environment variable was affirmed at certainty 1.0 — the class the baseline
+  refuses to auto-silence.
+  The Go provider now asks one shared core predicate,
+  `internal/core/valueshape`, whether the literal's own shape **proves** it is
+  something else, and emits nothing when it does
+  ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)).
+  It is a veto and not a classifier: four forms, each with the guards that keep a
+  real secret firing. A URL with userinfo, with a credential-named query or
+  fragment parameter carrying a value, or with anything token-like (16+ bytes
+  with a letter and a digit) in a host label, a path segment, a query key or
+  value, or a fragment — a webhook, presigned, function or feed URL *is* the
+  secret — is **not** vetoed. The path is split before it is decoded, so an
+  encoded `%2F` cannot cut a token into short pieces, and a fragment that is not
+  `key=value` (`#/invite/…`) is read whole. Neither is a value vetoed merely for
+  containing `/`: AWS's published example secret access key contains one.
+  Measured with the pre-change and the post-change sensor over the same trees. On
+  codefit's own tree, **24 → 23** `SEC-001`, the one site being the false
+  affirmation above. On a planted file carrying one case per constraint and one
+  per vetoed form, **21 → 9**: the 12 that stop are the four forms at each of the
+  three AST shapes, and all nine constraint cases — `"s3cr3t"` at each shape, the
+  AWS example key, a hex blob, a base64 blob, an STS-style token, a URL with
+  userinfo, a URL with `?api_key=…` — keep firing at certainty 1.0.
+  **For a committed baseline:** a `SEC-001` that had been reported on such a
+  literal is no longer emitted, so its baseline entry becomes `gone` — stale, not
+  wrong — and `codefit-baseline-prune` drops it. Nothing that keeps firing moves.
+  **Declared, not fixed:** an all-caps secret containing an underscore, a bare
+  file name with a known extension and no separator (`Hunter2024.db`), and a URL
+  whose embedded token is shorter than 16 bytes, lacks either a letter or a
+  digit, or is cut by the URL's own literal separators into pieces each shorter
+  than 16 bytes, are vetoed; short test literals, short identifiers, prose and
+  paths without a known extension keep firing. All
+  of it is on `SEC-001`'s own `codefit-coverage` entry for Go and in
+  `COVERAGE.md`.
+  **TypeScript does not apply the veto yet** — the same line still fires there.
+  The divergence is temporary, written down in `COVERAGE.md`, and closes with the
+  rest of `#148`.
 - **`const tokenizer = "whitespace"` is no longer reported as a hardcoded
   credential** (`#152`). `SEC-001` constrained `$NAME` with an **unanchored**
   regex, so any identifier merely *containing* a credential word matched — and
