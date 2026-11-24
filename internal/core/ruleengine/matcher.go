@@ -49,8 +49,8 @@ func Matches(pattern, code syntax.Node) (map[string]string, bool) {
 // they answer a yes/no question about the node and bind nothing the rule reads.
 type constraints map[string]constraint
 
-// [metavarname] A constraint on one metavariable: a regex, a name vocabulary, or
-// both. When both are present BOTH must hold — a rule that affirmed on half its
+// [metavarname] A constraint on one metavariable: a regex, a name vocabulary, a
+// value veto, or any combination. When both are present BOTH must hold — a rule that affirmed on half its
 // evidence would be worse than one that did not compile.
 //
 // The vocabulary arm exists because a regex cannot express it. SEC-001 used an
@@ -71,9 +71,14 @@ type constraints map[string]constraint
 // TypeScript's detection mechanism (ADR 0083), but the WORDS are the same words
 // Go looks for, and keeping them in one place is what stops the two drifting
 // apart again.
+//
+// A third arm, veto, comes from metavariable-value-veto and rejects a binding
+// whose VALUE proves it is something the rule is not about. All present arms
+// must hold. See [valueveto] in valueveto.go.
 type constraint struct {
-	re  *regexp.Regexp
-	set map[string]bool // a namematch vocabulary; nil when unconstrained by name
+	re   *regexp.Regexp
+	set  map[string]bool // a namematch vocabulary; nil when unconstrained by name
+	veto valueVeto       // nil when no value veto is declared
 }
 
 func (c constraint) ok(text string) bool {
@@ -84,6 +89,9 @@ func (c constraint) ok(text string) bool {
 		if _, hit := namematch.MatchSet(text, c.set); !hit {
 			return false
 		}
+	}
+	if c.veto != nil && c.veto(text) {
+		return false
 	}
 	return true
 }

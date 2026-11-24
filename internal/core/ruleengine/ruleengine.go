@@ -25,6 +25,11 @@ type Rule struct {
 	// RE2 has no lookbehind, so "token" cannot be anchored to a camelCase
 	// boundary. See [metavarname] in matcher.go.
 	MetavariableName map[string]string `yaml:"metavariable-name,omitempty"`
+	// MetavariableValueVeto drops a match when the VALUE bound to a
+	// metavariable proves, by its own shape, that it is something the rule is
+	// not about (today: "not-a-credential", internal/core/valueshape). See
+	// [valueveto] in valueveto.go.
+	MetavariableValueVeto map[string]string `yaml:"metavariable-value-veto,omitempty"`
 }
 
 // Engine matches rules against a parsed file and emits deterministic findings.
