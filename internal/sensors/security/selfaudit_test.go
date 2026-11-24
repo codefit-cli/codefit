@@ -87,6 +87,18 @@ func TestSelfAudit(t *testing.T) {
 	}
 }
 
+// signingKey is the census's planted layer-2 site: a credential NAME bound to a
+// short literal, in this file, so that the self-audit always has one AST
+// name-gate emission to find.
+//
+// It is ADR 0075's own constraint, verbatim — a credential has no length floor —
+// and so it is also the value veto's sharpest negative: "s3cr3t" has no shape
+// that proves anything, and must keep firing. It is driven here through the
+// whole sensor over the real tree rather than through the provider alone. If a
+// future value guard silences it, the census fails on a missing site AND on the
+// vacuum guard, and neither can be mistaken for an unrelated edit.
+const signingKey = "s3cr3t"
+
 // sec001Site identifies one SEC-001 emission site WITHOUT its line number.
 // Line is deliberately excluded: it churns on every unrelated edit above the
 // finding, which would make this control a maintenance tax that gets deleted
@@ -132,17 +144,42 @@ type sec001Site struct {
 // evidence: the replacement vocabulary added no new site anywhere in the tree,
 // and the one surviving layer-2 site (secretFile) still fires, now on the
 // component "secret" rather than on a substring.
+//
+// ONE SITE ADDED WITH internal/core/valueshape (issue #148): its test spells
+// AWS's published example access key ID, the fixture that pins the env-var-name
+// guard's underscore requirement. It is a layer-1 site in a _test.go file, like
+// every other entry here. The same literal in that package's production
+// comments is NOT pinned and must not be: there it blocks the self-audit, which
+// is how the gate caught it.
+//
+// THE LAST NATURAL LAYER-2 SITE WENT WITH THE VALUE VETO (ADR 0086, issue #148).
+// secretFile in internal/mcp/baseline_loop_test.go holds "lib/config.ts": the
+// name gate matched the component "secret" and the provider affirmed a file
+// path as a hardcoded credential. The Go provider now asks
+// internal/core/valueshape whether the literal proves it is something else, and
+// a path ending in a known extension does. Measured with the pre-change and the
+// post-change sensor over the same tree, before signingKey below was planted:
+// 24 SEC-001 before, 23 after, and that one site is the whole difference — no
+// layer-1 site moved.
+//
+// Its removal left the tree with NO layer-2 site, which the vacuum guard in
+// TestSelfAuditSEC001Census cannot tell apart from a name gate that stopped
+// running. signingKey below is the site planted to keep that guard meaningful,
+// and it is pinned like any other.
 var wantSEC001 = map[sec001Site]int{
-	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:          3,
-	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}: 1,
-	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:         2,
-	{"internal/mcp/baseline_loop_test.go", "The value assigned to 'secretFile' looks like a hardcoded credential."}:      1,
-	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:          1,
-	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                 2,
-	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:    5,
-	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}: 2,
-	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:    1,
-	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}: 5,
+	{"internal/core/cache/cache_test.go", "A string matching a known API-key format is present in the source."}:           3,
+	{"internal/core/findings/fingerprint_test.go", "A string matching a known API-key format is present in the source."}:  1,
+	{"internal/core/valueshape/valueshape_test.go", "A string matching a known API-key format is present in the source."}: 1,
+	{"internal/mcp/baseline_loop_test.go", "A string matching a known API-key format is present in the source."}:          2,
+	{"internal/mcp/changedfiles_test.go", "A string matching a known API-key format is present in the source."}:           1,
+	{"internal/mcp/score_test.go", "A string matching a known API-key format is present in the source."}:                  2,
+	{"internal/sensors/security/cache_test.go", "A string matching a known API-key format is present in the source."}:     5,
+	{"internal/sensors/security/keepwarn_test.go", "A string matching a known API-key format is present in the source."}:  2,
+	{"internal/sensors/security/scope_test.go", "A string matching a known API-key format is present in the source."}:     1,
+	{"internal/sensors/security/security_test.go", "A string matching a known API-key format is present in the source."}:  5,
+
+	// The planted layer-2 site: see signingKey.
+	{"internal/sensors/security/selfaudit_test.go", "The value assigned to 'signingKey' looks like a hardcoded credential."}: 1,
 }
 
 // TestSelfAuditSEC001Census is the enumeration control TestSelfAudit lacks. It
@@ -184,7 +221,8 @@ func TestSelfAuditSEC001Census(t *testing.T) {
 		t.Fatal("vacuum: no layer-1 (regex shape) SEC-001 at all — security.go's layer1Secrets is not running")
 	}
 	if layer2 == 0 {
-		t.Fatal("vacuum: no layer-2 (AST name) SEC-001 at all — the Go provider's name gate is not running")
+		t.Fatalf("vacuum: no layer-2 (AST name) SEC-001 at all — the Go provider's name gate is not running, "+
+			"or it stopped reporting the planted site (signingKey = %q)", signingKey)
 	}
 
 	for site, want := range wantSEC001 {

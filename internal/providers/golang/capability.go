@@ -43,6 +43,14 @@ func (*Provider) Capability() providers.Capability {
 					// because there is only one string.
 					Limit: namematch.LimitLowercaseConcatenation,
 				},
+				{
+					ID: "SEC-001",
+					// The VALUE half (ADR 0086), cited by reference for the same
+					// reason: the const lives in security.go beside the veto it
+					// describes. A literal the veto silences is otherwise
+					// indistinguishable, to an agent, from "no credential here".
+					Limit: limitValueVeto,
+				},
 			},
 		},
 		Practices: providers.RuleSet{
