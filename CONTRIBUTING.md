@@ -6,16 +6,17 @@ new language.
 
 ## Development setup
 
-Requirements: **Go 1.26.11+**, set by the `go 1.26.11` line in `go.mod` (it
-closes eleven standard-library vulnerabilities codefit's code calls; see the
-CHANGELOG). What your local Go does with that line:
+Requirements: **at least Go 1.26.11** to build, set by the `go 1.26.11` line in
+`go.mod` (it closes eleven standard-library vulnerabilities codefit's code calls;
+see the CHANGELOG). Newer is not automatically free of them: `1.27.0`–`1.27.3`
+are not (second case below). What your local Go does with that line:
 
 - **Older than 1.26.11**, default `GOTOOLCHAIN=auto`: it downloads and uses
   `go1.26.11`, `make build` included. The download goes through the Go module
   proxy, so offline or with `GOPROXY=off`, and no cached copy, the build fails
   (`toolchain not available`).
-- **Newer than 1.26.11**: it builds with itself. Use `1.27.4` or later — `1.27.0`
-  to `1.27.3` still carry some of those eleven.
+- **Newer than 1.26.11**: it builds with itself. On the 1.27 line, use `1.27.4`
+  or later — `1.27.0` to `1.27.3` still carry some of those eleven.
 - **Older, with `GOTOOLCHAIN=local`**: the build is refused
   (`go.mod requires go >= 1.26.11 (running go 1.25.13; GOTOOLCHAIN=local)`).
 

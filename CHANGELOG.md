@@ -34,8 +34,8 @@ All notable changes to codefit are documented here. The format is based on
   makes an older local Go fetch `go1.26.11` there. What a local Go does with it,
   for a checkout build and for `go install module@version` alike: older than
   `1.26.11` with the default `GOTOOLCHAIN=auto`, it downloads and builds with
-  `go1.26.11`; newer, it builds with itself, so it must be `1.27.4`+
-  (`1.27.0`–`1.27.3` still carry some of the eleven); older with
+  `go1.26.11`; newer, it builds with itself, so on the 1.27 line it must be
+  `1.27.4`+ (`1.27.0`–`1.27.3` still carry some of the eleven); older with
   `GOTOOLCHAIN=local`, the build is refused (`requires go >= 1.26.11`). The
   cost: anyone building or importing codefit now needs Go `1.26.11`, and the
   code is checked as Go 1.26 language (`go vet` and `golangci-lint` report the
