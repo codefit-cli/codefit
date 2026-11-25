@@ -3,7 +3,6 @@ package golang
 import (
 	"go/ast"
 	"go/token"
-	"strconv"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/valueshape"
@@ -88,11 +87,12 @@ func checkSecretKeyValue(p *parsed, kv *ast.KeyValueExpr, add func(findings.Find
 // by the three AST shapes that can carry one (assignment, value spec, composite
 // literal field) so they cannot disagree.
 //
-// It asks two questions, in this order:
+// It asks two questions, in this order, of ONE decoded value — the string the
+// literal denotes, from stringLit:
 //
 //  1. The NAME gate (ADR 0075): value is a non-empty string literal and name
-//     denotes a credential (looksSecret). Unchanged.
-//  2. The VALUE veto (ADR 0086): the literal's own shape does not prove it is
+//     denotes a credential (looksSecret).
+//  2. The VALUE veto (ADR 0086): the value's own shape does not prove it is
 //     something else — see provesNotACredential.
 //
 // A vetoed pair is not a finding of any kind: nothing is emitted, at any
@@ -102,7 +102,7 @@ func hardcodedSecret(name string, value ast.Expr) bool {
 	if !ok || val == "" || !looksSecret(name) {
 		return false
 	}
-	return !provesNotACredential(value)
+	return !provesNotACredential(val)
 }
 
 // limitValueVeto is the DECLARED consequence of the value veto, rendered to
@@ -121,32 +121,18 @@ const limitValueVeto = "The Go provider applies the value veto at every site SEC
 	"valueshape.NotACredential, the function TypeScript's metavariable-value-veto calls. " +
 	valueshape.DeclaredLimit
 
-// provesNotACredential reports whether value — the expression the name gate
-// accepted — denotes a string whose shape proves it is not a credential.
+// provesNotACredential reports whether denoted — the string a literal the name
+// gate accepted DENOTES, as stringLit decoded it — has a shape that proves it
+// is not a credential.
 //
-// The predicate is handed the string the literal DENOTES, not its source text:
+// It must be the denoted string, not the literal's source text:
 // `"…?api_key\x3dabc"` denotes a URL carrying api_key=abc, and reading the
-// characters between the quotes instead would lose the '=' and veto it. A
-// literal that cannot be unquoted denotes the empty string here, which proves
-// nothing, so it does not veto.
-//
-// An expression that is not a *ast.BasicLit proves nothing either, and does not
-// veto: the finding fires. The name gate's stringLit accepts only a
-// *ast.BasicLit today, so the parser never reaches that branch; it is there so
-// that widening stringLit (to a parenthesized literal, or a folded
-// concatenation) cannot turn into a panic during a scan. If stringLit is ever
-// widened to accept another node kind, those literals will fire WITHOUT the
-// value veto until this function learns to read them.
+// characters between the quotes instead would lose the '=' and veto it.
 //
 // Every guard lives in internal/core/valueshape, and this function applies
 // none of its own. limitValueVeto, above, serves their limits to an agent by
 // citing valueshape.DeclaredLimit, so there is no prose here to keep in step.
-func provesNotACredential(value ast.Expr) bool {
-	lit, ok := value.(*ast.BasicLit)
-	if !ok {
-		return false
-	}
-	denoted, _ := strconv.Unquote(lit.Value)
+func provesNotACredential(denoted string) bool {
 	_, vetoed := valueshape.NotACredential(denoted)
 	return vetoed
 }

@@ -108,6 +108,23 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A Go string literal made only of quote characters is now reported under a
+  credential name** (`#148`). `SEC-001`'s name gate read a literal by trimming
+  quote and backtick characters from its source text, so `` signingKey = `""` ``
+  (a raw string denoting two double quotes), or an interpreted literal holding
+  only backticks, read as empty and emitted nothing, while the value veto decoded the same literal with
+  `strconv.Unquote`. The gate now decodes, once, and the veto reads that same
+  value. A credential has no length floor and no alphabet (ADR 0075), so these
+  fire at certainty 1.0 like any value that proves nothing; an empty literal
+  (`""` or a raw empty one), a number and a rune literal stay silent. Measured
+  with the pre-change and the post-change Go provider over every Go file of
+  this repository plus a generated corpus of 4,361 files (every site, every
+  vetoed and keeps-firing form, escapes, raw strings, placeholders):
+  **2,524 → 2,704** findings, all 180 added being quote-only literals
+  under a credential name, none removed; this repository's own files move by
+  none. The TypeScript provider is untouched (its in-repo testdata: 0 → 0).
+  **For a committed baseline:** a Go project holding such a literal sees one
+  new `SEC-001`.
 - **`codefit-coverage` serves one text for `SEC-001`'s value-veto limits in
   both languages** (`#148`). The Go entry carried a hand-written copy of the
   limits, which had drifted from the shared `valueshape.DeclaredLimit` that

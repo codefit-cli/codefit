@@ -499,3 +499,55 @@ func TestSEC001EmptyLiteralIsStillQuiet(t *testing.T) {
 		}
 	}
 }
+
+// TestSEC001QuoteOnlyLiteralFires pins that the name gate reads the string the
+// literal DENOTES, the same string the value veto reads. A raw string literal
+// made only of double quotes, or an interpreted one made only of backticks,
+// denotes a non-empty string. The gate used to trim quote and backtick
+// characters from the source text instead of decoding it, saw nothing left, and
+// emitted no SEC-001 for these; a credential has no length floor and no
+// alphabet (ADR 0075), so they fire like any other value that proves nothing.
+func TestSEC001QuoteOnlyLiteralFires(t *testing.T) {
+	cases := []struct {
+		lit     string // Go source, quotes included
+		denotes string
+	}{
+		{lit: "`\"\"`", denotes: `""`},
+		{lit: "`\"`", denotes: `"`},
+		{lit: "\"``\"", denotes: "``"},
+	}
+	for _, tc := range cases {
+		// Verified by content: the row must denote what it says, or it pins
+		// some other literal.
+		if got, err := strconv.Unquote(tc.lit); err != nil || got != tc.denotes {
+			t.Errorf("fixture %s denotes %q (err %v), want %q", tc.lit, got, err, tc.denotes)
+			continue
+		}
+		for _, site := range sec001Sites {
+			t.Run(tc.lit+"/"+site.shape, func(t *testing.T) {
+				fs := sec001Of(t, site.src(gatedName, tc.lit))
+				if len(fs) != 1 {
+					t.Fatalf("got %d SEC-001, want 1 — %s denotes the non-empty string %q", len(fs), tc.lit, tc.denotes)
+				}
+				if fs[0].Confidence != 1.0 || fs[0].Severity != findings.SeverityHigh {
+					t.Errorf("got confidence %v severity %q, want 1.0 and %q", fs[0].Confidence, fs[0].Severity, findings.SeverityHigh)
+				}
+			})
+		}
+	}
+}
+
+// TestSEC001EmptyAndNonStringLiteralsStayQuiet keeps the rest of the name
+// gate's value condition where it was when the gate started decoding: a raw
+// empty literal denotes the empty string, and a number or a rune literal is not
+// a string at all. None of them is reported.
+func TestSEC001EmptyAndNonStringLiteralsStayQuiet(t *testing.T) {
+	for _, lit := range []string{"``", "42", "3.14", "'a'"} {
+		for _, site := range sec001Sites {
+			requireSiteReachesTheGate(t, site)
+			if fs := sec001Of(t, site.src(gatedName, lit)); len(fs) != 0 {
+				t.Errorf("%s / %s: SEC-001 fired on a value that is not a non-empty string: %+v", lit, site.shape, fs)
+			}
+		}
+	}
+}

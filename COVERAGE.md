@@ -2075,7 +2075,10 @@ not.** It fires when an identifier whose **name** denotes a credential — match
 by name component through the shared `namematch` vocabulary
 ([ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md)) —
 is bound to a non-empty string literal, in an assignment, a `const`/`var`
-declaration, or a composite-literal field. It then asks whether the **value**
+declaration, or a composite-literal field. "Non-empty" is judged on the string
+the literal denotes (escapes decoded once, by `strconv.Unquote`), the same string
+the value veto reads: a raw literal made only of double quotes, or one made only
+of backticks, is non-empty and fires. It then asks whether the **value**
 proves it is something else, and stays silent when it does
 ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)):
 `const secretFile = "lib/config.ts"` used to be affirmed as a hardcoded
