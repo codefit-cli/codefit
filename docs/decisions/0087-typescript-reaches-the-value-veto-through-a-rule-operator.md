@@ -76,14 +76,32 @@ match would have bound the first pair, dropped the whole object and reported
 nothing: a false all-clear. Pinned by a test that fails under exactly that
 mutation.
 
-### 4. Every way it could do nothing is a compile error
+### 4. Every way it could do nothing by how it is written is a compile error
 
 - an unknown predicate name;
 - a key that is not a metavariable (`VALUE`, `$value`);
 - a metavariable that some base alternative never binds, the `...$REST` ellipsis
   marker included. The engine treats a constrained metavariable that was never
   bound as a rejection, so such a key would make that alternative — or the whole
-  rule — silent forever.
+  rule — silent forever;
+- a metavariable that stands, in some base alternative, where a whole string
+  literal cannot. Written inside a string pattern (`f("$V")`), a template or a
+  regex, a metavariable binds the contents without their quotes, which never
+  decode; in a shorthand property, a member name or a declaration name it never
+  holds a string. Compile proves the opposite by example, with the provider's
+  own parser: every occurrence of the metavariable is rewritten as a string
+  literal, and the result must still parse, still match, bind the metavariable
+  to that literal, and carry the literal's characters in no node that is not the
+  literal or a wrapper of it (a literal type wraps one). Each case above is a
+  test, and so are the accepted ones: an argument, a spread, an object key, a
+  template substitution, a literal type.
+
+  This was added after an independent verification compiled
+  `f("$V")` with a veto on `$V`, and the veto never fired.
+
+What compile does not check is a rule whose OTHER constraints admit no value the
+predicate would veto, a regex demanding one exact literal for instance. The veto
+is then inert because the rule says so, not because of where it was written.
 
 ### 5. The rule loader rejects unknown keys
 

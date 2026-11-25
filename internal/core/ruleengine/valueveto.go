@@ -2,6 +2,7 @@ package ruleengine
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf16"
@@ -26,8 +27,10 @@ import (
 // second implementation would be a second place to be wrong. This operator makes
 // the rule call the SAME function.
 //
-// WHAT IT RECEIVES. The source text bound to the metavariable, quotes included —
-// what [Matches] binds for any node.
+// WHAT IT RECEIVES. The source text of the whole code node bound to the
+// metavariable — for a string literal, its quotes included. That is what
+// [Matches] binds for any node; compile guarantees the node can be a whole
+// string literal and not a piece of one (see the last bullet below).
 //
 // HOW IT DECIDES. The text is decoded as ONE JavaScript string literal by
 // [decodeJSStringLiteral]. Only when decoding succeeds AND the predicate returns
@@ -54,7 +57,17 @@ import (
 //   - a metavariable that some base alternative never binds. [evalRule] treats a
 //     constrained metavariable that was never bound as a rejection, so such a
 //     key would make that alternative — or the whole rule — silent forever. The
-//     object ellipsis marker (`$REST`) never binds and is rejected the same way.
+//     object ellipsis marker (`$REST`) never binds and is rejected the same way;
+//   - a metavariable that stands, in some base alternative, where a whole string
+//     literal cannot: inside a string, a template or a regex (it would bind the
+//     contents, without quotes, which never decode), or in a shorthand property,
+//     a member name or a declaration name (which never hold a string). Proved by
+//     example in [literalCannotStandThere], with the provider's own parser.
+//
+// What compile does NOT check: another constraint on the same metavariable that
+// admits no value the predicate would veto (a regex demanding one exact literal,
+// say). The veto is then inert because the rule says so, not because of where
+// the metavariable stands.
 //
 // WHAT IT DOES NOT SEE is whatever never reaches the metavariable: the rule's
 // own patterns decide that, and a value outside them is neither vetoed nor
@@ -92,7 +105,7 @@ func knownValueVetoes() []string {
 // compileValueVetoes validates r.MetavariableValueVeto against the compiled base
 // alternatives and installs each veto on its metavariable's constraint. Keys are
 // visited in sorted order so the first error reported is deterministic.
-func compileValueVetoes(r Rule, bases []syntax.Node, cs constraints) error {
+func compileValueVetoes(r Rule, bases []syntax.Node, cs constraints, parse func(string) (syntax.Node, error)) error {
 	keys := make([]string, 0, len(r.MetavariableValueVeto))
 	for k := range r.MetavariableValueVeto {
 		keys = append(keys, k)
@@ -118,12 +131,114 @@ func compileValueVetoes(r Rule, bases []syntax.Node, cs constraints) error {
 					"a constrained metavariable that is never bound rejects every match, so that "+
 					"alternative would be silent forever", r.ID, mv, baseSource(r, i))
 			}
+			if reason := literalCannotStandThere(baseSource(r, i), base, mv, parse); reason != "" {
+				return fmt.Errorf("rule %s: metavariable-value-veto %s: in base pattern `%s` it does not stand "+
+					"where a string literal can stand (%s) — the veto would compile and never fire. A "+
+					"metavariable inside a string, a template or a regex binds the contents without their "+
+					"quotes, which never decode; a declaration name, a member name or a shorthand property "+
+					"never holds a string at all", r.ID, mv, baseSource(r, i), reason)
+			}
 		}
 		c := cs[mv]
 		c.veto = veto
 		cs[mv] = c
 	}
 	return nil
+}
+
+// vetoProbe is the string literal literalCannotStandThere writes in place of a
+// vetoed metavariable. Any literal would do; this one cannot occur by accident.
+const vetoProbe = `"codefitValueVetoProbe"`
+
+// literalCannotStandThere proves that the veto on mv can fire in pattern, or
+// says why not. It rewrites every occurrence of mv in the pattern's source as a
+// string literal and requires three things of the result: it still parses
+// without error; the compiled pattern still matches it; and mv is then bound to
+// that literal NODE — its whole source, quotes included — and not to a piece of
+// another node that happens to carry the same characters, at ANY occurrence.
+//
+// It is a proof by example, not a list of node types, so it is the parser that
+// decides where a string literal may stand. Measured against the TypeScript
+// parser: inside a string, a template or a regex the rewrite either stops
+// parsing or binds a fragment; in a shorthand property, a member name or a
+// declaration name it stops parsing; as an argument, a spread, an object key, a
+// template substitution, an object property value or a literal type it binds
+// the literal.
+//
+// An empty result means the veto can fire there.
+func literalCannotStandThere(src string, pattern syntax.Node, mv string, parse func(string) (syntax.Node, error)) string {
+	occurrence := regexp.MustCompile(`(^|[^A-Za-z0-9_$])` + regexp.QuoteMeta(mv) + `([^A-Za-z0-9_$]|$)`)
+	rewritten := src
+	for {
+		// Loop because adjacent occurrences share the separator between them.
+		next := occurrence.ReplaceAllString(rewritten, "${1}"+vetoProbe+"${2}")
+		if next == rewritten {
+			break
+		}
+		rewritten = next
+	}
+	// compilePattern is the compile gate every pattern passes: it refuses a
+	// tree that parsed with an error, because the parser recovers instead of
+	// failing. No pattern measured so far reaches a wrong verdict without that
+	// refusal — the checks below reject each broken rewrite too — so here it is
+	// a second gate, not the only one.
+	code, err := compilePattern(rewritten, parse)
+	if err != nil {
+		return fmt.Sprintf("written as a string literal there, the pattern `%s` does not parse", rewritten)
+	}
+	probe, err := compilePattern(vetoProbe, parse)
+	if err != nil {
+		return "the parser does not read a plain string literal, so nothing can be proved"
+	}
+	literalType := probe.Type()
+
+	binds := map[string]string{}
+	if !matchNode(pattern, code, binds, nil) {
+		return fmt.Sprintf("the pattern does not match `%s`", rewritten)
+	}
+	// Also a second gate: with every occurrence rewritten, no measured pattern
+	// binds mv to anything but the probe once it matched. It stays because the
+	// property it states — mv receives the literal — is the one the veto needs.
+	if binds[mv] != vetoProbe {
+		return fmt.Sprintf("in `%s` it binds %q instead of the literal", rewritten, binds[mv])
+	}
+	// Every node that reads as the probe must be the literal or wrap it (a
+	// literal TYPE wraps a string node with the same text). A node that reads as
+	// the probe without containing the literal is a fragment of something else —
+	// a string's contents, a template piece, a regex body — and a metavariable
+	// bound there receives text without its own quotes. One such occurrence is
+	// enough to reject, because the first occurrence is the one that binds.
+	literals, fragments := 0, 0
+	walk(code, func(n syntax.Node) {
+		if string(n.Text()) != vetoProbe {
+			return
+		}
+		switch {
+		case n.Type() == literalType:
+			literals++
+		case !containsLiteral(n, literalType):
+			fragments++
+		}
+	})
+	if fragments > 0 || literals == 0 {
+		return fmt.Sprintf("in `%s` the literal's characters are part of another node, not a string literal", rewritten)
+	}
+	return ""
+}
+
+// containsLiteral reports whether a descendant of n is a literalType node whose
+// text is the probe.
+func containsLiteral(n syntax.Node, literalType string) bool {
+	for i := 0; i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+		if c == nil {
+			continue
+		}
+		if (c.Type() == literalType && string(c.Text()) == vetoProbe) || containsLiteral(c, literalType) {
+			return true
+		}
+	}
+	return false
 }
 
 // baseSource returns the source text of the i-th base alternative, for errors.

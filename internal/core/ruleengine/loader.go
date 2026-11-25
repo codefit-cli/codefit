@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -85,14 +86,33 @@ func decodeRuleFile(data []byte) ([]Rule, error) {
 		if errors.Is(err, io.EOF) {
 			return nil, nil
 		}
-		var typeErr *yaml.TypeError
-		if errors.As(err, &typeErr) {
+		if hasUnknownKey(err) {
 			return nil, fmt.Errorf("a key the loader does not know is rejected, so a misspelled "+
 				"operator cannot be dropped in silence: %w", err)
 		}
 		return nil, err
 	}
 	return doc.Rules, nil
+}
+
+// hasUnknownKey reports whether err is a yaml.TypeError listing at least one
+// unknown field. The same error type also carries duplicate keys and values of
+// the wrong type, which are different mistakes and must not be explained as a
+// misspelled key. yaml.v3 exposes no structured field for the cause, so the
+// message it writes for an unknown field ("field X not found in type T") is
+// what is read; if that wording ever changes, the explanation is dropped and
+// the error itself still names the file, the line and the key.
+func hasUnknownKey(err error) bool {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return false
+	}
+	for _, msg := range typeErr.Errors {
+		if strings.Contains(msg, " not found in type ") {
+			return true
+		}
+	}
+	return false
 }
 
 var validSeverity = map[findings.Severity]bool{

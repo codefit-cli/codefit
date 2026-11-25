@@ -91,7 +91,7 @@ func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]Compi
 			c.set = build()
 			cr.constraints[mv] = c
 		}
-		if err := compileValueVetoes(r, cr.bases(), cr.constraints); err != nil {
+		if err := compileValueVetoes(r, cr.bases(), cr.constraints, parse); err != nil {
 			return nil, err
 		}
 		out = append(out, cr)

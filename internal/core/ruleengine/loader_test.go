@@ -217,3 +217,56 @@ func TestLoadFS_EveryShippedRuleFileLoadsStrictly(t *testing.T) {
 		t.Fatal("vacuum: no shipped rule files were found")
 	}
 }
+
+// TestLoadFS_OtherYAMLErrorsAreNotBlamedOnAnUnknownKey: the unknown-key wording
+// is for unknown keys only. A duplicate key, a value of the wrong type and a
+// top-level list are different mistakes, and each keeps an accurate message:
+// the file, and the YAML error with its line.
+func TestLoadFS_OtherYAMLErrorsAreNotBlamedOnAnUnknownKey(t *testing.T) {
+	const unknownKeyWording = "a key the loader does not know"
+	cases := []struct {
+		name      string
+		body      string
+		wantInErr []string
+	}{
+		{
+			name: "duplicate key",
+			body: "rules:\n  - id: SEC-9\n    id: SEC-10\n    message: x\n    severity: high\n" +
+				"    dimension: security\n    pattern: \"eval($X)\"\n",
+			wantInErr: []string{"bad.yaml", "line", "id"},
+		},
+		{
+			name: "value of the wrong type",
+			body: "rules:\n  - id: SEC-9\n    message: x\n    severity: high\n    dimension: security\n" +
+				"    pattern-either: \"eval($X)\"\n",
+			wantInErr: []string{"bad.yaml", "line", "cannot unmarshal"},
+		},
+		{
+			name:      "top-level list",
+			body:      "- id: SEC-9\n  message: x\n",
+			wantInErr: []string{"bad.yaml", "line", "cannot unmarshal"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ruleengine.LoadFS(dir(map[string]string{"sec/bad.yaml": tc.body}), "sec")
+			if err == nil {
+				t.Fatalf("%s: LoadFS accepted it", tc.name)
+			}
+			for _, want := range tc.wantInErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: error %q missing %q", tc.name, err.Error(), want)
+				}
+			}
+			if strings.Contains(err.Error(), unknownKeyWording) {
+				t.Errorf("%s: error blames an unknown key, which is not the cause: %q", tc.name, err.Error())
+			}
+		})
+	}
+	// The unknown-key case keeps its wording, so the row above is not passing
+	// because the wording disappeared everywhere.
+	_, err := ruleengine.LoadFS(dir(map[string]string{"sec/bad.yaml": "rules:\n  - id: SEC-9\n    patern: x\n"}), "sec")
+	if err == nil || !strings.Contains(err.Error(), unknownKeyWording) {
+		t.Errorf("an unknown key lost its wording: %v", err)
+	}
+}

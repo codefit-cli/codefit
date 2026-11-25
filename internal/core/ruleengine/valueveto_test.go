@@ -247,6 +247,95 @@ func TestValueVetoCompileErrors(t *testing.T) {
 	}
 }
 
+// vetoOnly is a rule carrying ONLY a value veto: no regex, no name constraint.
+func vetoOnly(pattern, mv string) ruleengine.Rule {
+	return ruleengine.Rule{
+		ID: "T-POS", Message: "m", Severity: "high", Dimension: "security",
+		Pattern:               pattern,
+		MetavariableValueVeto: map[string]string{mv: "not-a-credential"},
+	}
+}
+
+// TestValueVetoRejectsAMetavariableThatCannotHoldALiteral (B1). A metavariable
+// written INSIDE a string pattern binds the string's contents, without quotes;
+// the decoder refuses unquoted text, so such a veto would compile and then
+// never fire. The same is true wherever the metavariable stands in a place a
+// whole string literal cannot: inside a template or a regex, a shorthand
+// property, a member name, a declaration name. Compile proves the opposite for
+// every accepted veto — written as a string literal, that spot still parses,
+// still matches, and binds the literal itself — and rejects the rest, naming
+// the rule, the metavariable and the pattern.
+func TestValueVetoRejectsAMetavariableThatCannotHoldALiteral(t *testing.T) {
+	rejected := []struct {
+		pattern, mv, why string
+	}{
+		{`f("$V")`, "$V", "B1 verbatim: inside a double-quoted string it binds the contents"},
+		{`f('$V')`, "$V", "inside a single-quoted string"},
+		{"f(`$V`)", "$V", "inside a template, a string fragment again"},
+		{`f(/$V/)`, "$V", "inside a regex literal it binds the regex pattern text"},
+		{`({"$K": 1})`, "$K", "inside a quoted property key"},
+		{`({$V})`, "$V", "a shorthand property can only be an identifier"},
+		{`foo.$V`, "$V", "a member name can only be an identifier"},
+		{`const $NAME = $VALUE`, "$NAME", "a declaration name can only be an identifier or a pattern"},
+		{`f('$V', $V)`, "$V", "the first occurrence binds string contents, so the veto never decodes, " +
+			"although the second occurrence could hold a literal"},
+	}
+	for _, tc := range rejected {
+		t.Run("rejects "+tc.pattern, func(t *testing.T) {
+			_, err := ruleengine.Compile([]ruleengine.Rule{vetoOnly(tc.pattern, tc.mv)}, tsParse)
+			if err == nil {
+				t.Fatalf("Compile accepted a veto that can never fire — %s", tc.why)
+			}
+			for _, want := range []string{"T-POS", tc.mv, tc.pattern, "where a string literal"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+
+	// Where a whole string literal CAN stand, the veto compiles and fires.
+	accepted := []struct {
+		pattern, mv, vetoed, kept string
+	}{
+		{`f($V)`, "$V", `f("lib/a.ts");`, `f("s3cr3t");`},
+		{"f(`${$V}`)", "$V", "f(`${\"lib/a.ts\"}`);", "f(`${\"s3cr3t\"}`);"},
+		{`({$K: 1})`, "$K", `const o = {"lib/a.ts": 1};`, `const o = {"s3cr3t": 1};`},
+		{`f(...$V)`, "$V", `f(..."lib/a.ts");`, `f(..."s3cr3t");`},
+		{`const x: $T = 1`, "$T", `const x: "lib/a.ts" = 1;`, `const x: "s3cr3t" = 1;`},
+	}
+	for _, tc := range accepted {
+		t.Run("accepts "+tc.pattern, func(t *testing.T) {
+			compiled, err := ruleengine.Compile([]ruleengine.Rule{vetoOnly(tc.pattern, tc.mv)}, tsParse)
+			if err != nil {
+				t.Fatalf("Compile rejected a veto on a spot that holds a literal: %v", err)
+			}
+			if got := vetoMatches(t, compiled, tc.kept); got != 1 {
+				t.Errorf("control %s -> %d findings, want 1", tc.kept, got)
+			}
+			if got := vetoMatches(t, compiled, tc.vetoed); got != 0 {
+				t.Errorf("%s -> %d findings, want 0 — the veto must fire here", tc.vetoed, got)
+			}
+		})
+	}
+}
+
+// TestValueVetoOnlyRule: a rule whose ONLY constraint is the veto compiles and
+// runs. The constraints map is sized from every constraint kind; leaving the
+// veto out of that count would write to a nil map at compile time.
+func TestValueVetoOnlyRule(t *testing.T) {
+	compiled, err := ruleengine.Compile([]ruleengine.Rule{vetoOnly(`readKey($V)`, "$V")}, tsParse)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if got := vetoMatches(t, compiled, `readKey("s3cr3t");`); got != 1 {
+		t.Errorf("veto-only rule on a plain value -> %d findings, want 1", got)
+	}
+	if got := vetoMatches(t, compiled, `readKey("lib/config.ts");`); got != 0 {
+		t.Errorf("veto-only rule on a file path -> %d findings, want 0", got)
+	}
+}
+
 // TestValueVetoAbsentChangesNothing: a rule without the operator matches exactly
 // as before, file path included. The veto is opt-in per rule.
 func TestValueVetoAbsentChangesNothing(t *testing.T) {
@@ -316,6 +405,10 @@ func TestDecodeJSStringLiteral(t *testing.T) {
 
 		good(`"😀"`, "\U0001F600"),
 		bad(`"\uD83D"`),
+		bad(`"\uD83DA"`),
+		bad(`"\uD83Dabcdefgh"`),
+		bad(`"\u{100000041}"`),
+		bad(`"\u{FFFFFFFFF}"`),
 		bad(`"\uD83Dx"`),
 		bad(`"\uD83DA"`),
 		bad(`"\uDE00"`),

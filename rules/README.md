@@ -93,10 +93,15 @@ environment-variable name, a path ending in a known file extension (ADR 0086).
   the first pair is rejected while it is being bound, and the search reaches the
   credential behind it. A filter after the match would have dropped the object.
 - **It is checked at compile time.** An unknown predicate, a key that is not a
-  metavariable, and a metavariable that some base alternative never binds (the
-  `...$REST` marker included) are compile errors. The last one matters most: a
-  constraint on a metavariable that is never bound rejects every match, so that
-  alternative would go silent.
+  metavariable, a metavariable that some base alternative never binds (the
+  `...$REST` marker included), and a metavariable that stands where a whole
+  string literal cannot are compile errors. A constraint on a metavariable that
+  is never bound rejects every match, so that alternative would go silent. And a
+  metavariable written inside a string pattern — `f("$V")` — binds the string's
+  contents without their quotes, which never decode, so the veto would never
+  fire; the same holds inside a template or a regex, and a shorthand property, a
+  member name or a declaration name never holds a string. Put the metavariable
+  where the whole literal goes: `f($V)`.
 - **The predicates are a closed set** — today only `not-a-credential`. Adding
   one means adding it to `valueVetoes` in
   `internal/core/ruleengine/valueveto.go`. Full semantics in `[valueveto]`
