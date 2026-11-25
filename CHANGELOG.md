@@ -198,8 +198,8 @@ All notable changes to codefit are documented here. The format is based on
   literal is no longer emitted, so its baseline entry becomes `gone` — stale, not
   wrong — and `codefit-baseline-prune` drops it. Nothing that keeps firing moves.
   **Declared, not fixed:** a secret that matches the environment-variable-name
-  pattern (an upper-case letter first, then upper-case letters and digits, at
-  least one underscore, none leading, trailing or doubled), a bare
+  pattern (an ASCII upper-case letter first, then ASCII upper-case letters and
+  digits, at least one underscore, none leading, trailing or doubled), a bare
   file name with a known extension and no separator (`Hunter2024.db`), and a URL
   whose embedded token is shorter than 16 bytes, lacks either a letter or a
   digit, or is cut by the URL's own literal separators into pieces each shorter

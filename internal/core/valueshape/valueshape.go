@@ -48,8 +48,8 @@ const DeclaredLimit = "SEC-001 stays silent when the string literal's own shape 
 	"name with at least one underscore; a path ending in a known file extension. Such a " +
 	"literal is not reported at all. " +
 	"Declared, not fixed, in both directions. NOT REPORTED although it may be a secret: a " +
-	"value that matches the environment-variable-name pattern (an upper-case letter first, " +
-	"then upper-case letters and digits, at least one underscore, none leading, trailing or " +
+	"value that matches the environment-variable-name pattern (an ASCII upper-case letter " +
+	"first, then ASCII upper-case letters and digits, at least one underscore, none leading, trailing or " +
 	"doubled), whatever it holds; a bare file name with a known extension and no " +
 	"separator (Hunter2024.db); and a URL whose embedded token is shorter than 16 bytes, lacks " +
 	"either a letter or a digit, or is cut by the URL's own literal separators (dots between " +
@@ -302,11 +302,11 @@ var filePathExtensions = map[string]bool{
 //   - Placeholders (`YOUR_CLIENT_SECRET`) DO veto here, as an env-var name —
 //     see the census in doc.go for why that is a measured, not a
 //     hypothetical, bucket. A placeholder that does not match envVarNamePattern
-//     (an upper-case letter first, at least one underscore, none leading,
-//     trailing or doubled) does not veto: `changeme`, `<token>`, `TODO`, and
+//     (an ASCII upper-case letter first, at least one underscore, none
+//     leading, trailing or doubled) does not veto: `changeme`, `<token>`, `TODO`, and
 //     `__SECRET__`, whose underscores are all leading or trailing.
-//   - A secret that matches envVarNamePattern (an upper-case letter first,
-//     then upper-case letters and digits, at least one underscore, none
+//   - A secret that matches envVarNamePattern (an ASCII upper-case letter
+//     first, then ASCII upper-case letters and digits, at least one underscore, none
 //     leading, trailing or doubled) IS vetoed by FormEnvVarName. That is a declared
 //     limit, not an oversight: an AWS access key ID (no underscore) and
 //     `JBSWY3DPEHPK3PXP` (base32, no underscore) both keep firing precisely

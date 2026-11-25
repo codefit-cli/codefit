@@ -178,9 +178,10 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 		},
 		// The placeholders and malformed underscore names DeclaredLimit names
 		// as STILL REPORTED, pinned here at the predicate and not only through
-		// the providers: each misses envVarNamePattern (an upper-case letter
-		// first, then upper-case letters and digits, at least one underscore,
-		// none leading, trailing or doubled) for the reason written beside it.
+		// the providers: each misses envVarNamePattern (an ASCII upper-case
+		// letter first, then ASCII upper-case letters and digits, at least one
+		// underscore, none leading, trailing or doubled) for the reason written
+		// beside it.
 		{
 			value:  `__SECRET__`,
 			reason: "all-caps with underscores, but every underscore is leading or trailing: no upper-case letter first",
@@ -357,6 +358,52 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 				t.Errorf("NotACredential(%q) = (%q, true), want (_, false): %s", tc.value, form, tc.reason)
 			}
 		})
+	}
+}
+
+// TestNotACredential_NonASCIIKeepsFiring pins that envVarNamePattern is ASCII
+// only, which is what DeclaredLimit says ("an ASCII upper-case letter first,
+// then ASCII upper-case letters and digits"). Each value is upper-case by
+// Unicode and shaped like an environment-variable name, and each keeps firing.
+//
+// The values are written as \u escapes. Every row must really carry a byte at
+// or above 0x80: a row that arrived decoded into plain ASCII, or was retyped as
+// a lookalike, would test the ASCII pattern instead of its edge, so the loop
+// refuses it.
+func TestNotACredential_NonASCIIKeepsFiring(t *testing.T) {
+	cases := []struct {
+		value  string
+		reason string
+	}{
+		{"\u00c9_B", "an E with acute accent first: upper-case, but not an ASCII upper-case letter"},
+		{"\u0391_B", "a Greek capital alpha first: upper-case, but not an ASCII upper-case letter"},
+		{"A_\uff11", "a fullwidth digit one after the underscore: a digit, but not an ASCII digit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			if tc.reason == "" {
+				t.Fatalf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			}
+			nonASCII := false
+			for i := 0; i < len(tc.value); i++ {
+				if tc.value[i] >= 0x80 {
+					nonASCII = true
+				}
+			}
+			if !nonASCII {
+				t.Fatalf("row %q has no byte at or above 0x80, so it does not test the pattern's ASCII edge", tc.value)
+			}
+			if form, ok := NotACredential(tc.value); ok {
+				t.Errorf("NotACredential(%q) = (%q, true), want (_, false): %s", tc.value, form, tc.reason)
+			}
+		})
+	}
+	// The served sentence must keep saying ASCII: without it, the three values
+	// above read as not reported while they fire.
+	const ascii = "(an ASCII upper-case letter first, then ASCII upper-case letters and digits,"
+	if !strings.Contains(strings.Join(strings.Fields(DeclaredLimit), " "), ascii) {
+		t.Errorf("DeclaredLimit no longer says the environment-variable-name pattern is ASCII only (missing %q):\n%s",
+			ascii, DeclaredLimit)
 	}
 }
 

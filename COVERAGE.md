@@ -2105,8 +2105,9 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
 **Known limits of the veto, declared in both directions.**
 
 - *Not reported, although it may be a secret:* a value that matches the
-  environment-variable-name pattern — an upper-case letter first, then upper-case
-  letters and digits, at least one underscore, none leading, trailing or doubled —
+  environment-variable-name pattern — an ASCII upper-case letter first, then ASCII
+  upper-case letters and digits, at least one underscore, none leading, trailing or
+  doubled —
   whatever it holds (it has the shape of an environment-variable name); a bare file
   name with a known extension and no separator, such as `Hunter2024.db` (it has
   the shape of a file name); and a URL whose embedded token is shorter than 16
