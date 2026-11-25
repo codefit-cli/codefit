@@ -14,6 +14,43 @@ All notable changes to codefit are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- **⚠️ Minimum Go raised: `go 1.25.0` → `go 1.26.11`, closing ELEVEN
+  standard-library vulnerabilities codefit's own code CALLS** — `GO-2026-6603`,
+  `GO-2026-6605`, `GO-2026-6607`, `GO-2026-6608`, `GO-2026-6610`,
+  `GO-2026-6611`, `GO-2026-6612`, `GO-2026-6613`, `GO-2026-6617`,
+  `GO-2026-6809` and `GO-2026-6859`, in `net/http`, `crypto/tls`, `crypto/x509`
+  and `net/textproto`/`mime/multipart`. Nine are fixed in `go1.26.9`, one in
+  `go1.26.10`, one in `go1.26.11`; **none has a `1.25.x` fix**, so this is a
+  minor-line move, not a patch bump. The `dependency vulnerabilities` check has
+  failed on `main` since 2026-10-12, every run scanning `go1.25.13`: on nine of
+  these advisories at first, ten from 2026-10-26 (`GO-2026-6809`) and all eleven
+  from 2026-11-16 (`GO-2026-6859`). The `go` line and
+  all four workflow pins now name `1.26.11`; `go mod tidy` dropped the
+  `toolchain` line, which the `go` line made redundant.
+
+  Why the `go` line and not only the `toolchain` line: `go install module@version`
+  ignores a `toolchain` line but honours the `go` line, so only the `go` line
+  makes an older local Go fetch `go1.26.11` there. What a local Go does with it,
+  for a checkout build and for `go install module@version` alike: older than
+  `1.26.11` with the default `GOTOOLCHAIN=auto`, it downloads and builds with
+  `go1.26.11`; newer, it builds with itself, so on the 1.27 line it must be
+  `1.27.4`+ (`1.27.0`–`1.27.3` still carry some of the eleven); older with
+  `GOTOOLCHAIN=local`, the build is refused (`requires go >= 1.26.11`). The
+  cost: anyone building or importing codefit now needs Go `1.26.11`, and the
+  code is checked as Go 1.26 language (`go vet` and `golangci-lint` report the
+  same zero findings as before).
+
+  Verified by measurement: `govulncheck` (v1.10.0) against `go1.25.13` exits 3
+  with exactly those eleven IDs, and the same binary against `go1.26.11` reports
+  `No vulnerabilities found`.
+
+  **Not yet in a release.** `v0.3.0-alpha.1` and every earlier tag were built
+  with `go1.25.13` or older. `go install …@latest` resolves to `v0.2.9` today (the
+  module proxy skips pre-release tags), which still declares `go 1.25.0` and
+  builds with your local Go, so this change reaches `@latest` only once a
+  non-pre-release tag is cut.
+
 ### Documentation
 - **Decided: detection is per-language; the YAML rule engine is TypeScript's**
   ([ADR 0083](docs/decisions/0083-detection-is-per-language-the-rule-engine-is-typescripts.md)).
