@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"strings"
 
 	"github.com/codefit-cli/codefit/internal/core/namematch"
@@ -128,12 +129,31 @@ func looksSecurityValue(name string) bool {
 	return ok
 }
 
-// stringLit returns the unquoted value of a string literal expression and
-// whether expr was indeed a string literal.
+// stringLit returns the string a string literal expression DENOTES — its
+// escapes decoded and its quotes removed, by strconv.Unquote — and whether expr
+// was indeed a string literal. It is the provider's only decode of a literal:
+// SEC-001's name gate and its value veto both read what it returns.
+//
+// It used to trim quote and backtick characters from the source text instead,
+// so a literal made only of them — a raw string holding only double quotes, an
+// interpreted one holding only backticks — read as empty, and a literal with an
+// escape read as its source text.
+//
+// A literal the parser accepted always unquotes: the scanner enforces the
+// escape grammar strconv.Unquote decodes (a probe over 412,128 parsed literals
+// built from escapes, quotes, control bytes and invalid UTF-8 found no
+// exception). Should one ever fail, its source text is returned instead, quotes
+// included. That text is non-empty and starts with a quote, which no
+// valueshape form accepts, so SEC-001 still fires: an unreadable value is not
+// proof of anything.
 func stringLit(expr ast.Expr) (string, bool) {
 	lit, ok := expr.(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
 		return "", false
 	}
-	return strings.Trim(lit.Value, "`\""), true
+	denoted, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return lit.Value, true
+	}
+	return denoted, true
 }

@@ -94,14 +94,25 @@ environment-variable name, a path ending in a known file extension (ADR 0086).
   credential behind it. A filter after the match would have dropped the object.
 - **It is checked at compile time.** An unknown predicate, a key that is not a
   metavariable, a metavariable that some base alternative never binds (the
-  `...$REST` marker included), and a metavariable that stands where a whole
-  string literal cannot are compile errors. A constraint on a metavariable that
-  is never bound rejects every match, so that alternative would go silent. And a
-  metavariable written inside a string pattern — `f("$V")` — binds the string's
-  contents without their quotes, which never decode, so the veto would never
-  fire; the same holds inside a template or a regex, and a shorthand property, a
-  member name or a declaration name never holds a string. Put the metavariable
-  where the whole literal goes: `f($V)`.
+  `...$REST` marker included), and a metavariable at a spot where the compile
+  check cannot write a whole string literal are compile errors. A constraint on
+  a metavariable that is never bound rejects every match, so that alternative
+  would go silent. And a metavariable written inside a string pattern —
+  `f("$V")` — binds the string's contents without their quotes, which never
+  decode, so the veto would never fire; the same holds inside a template or a
+  regex, and a shorthand property, a member name or a declaration name never
+  holds a string. Put the metavariable where the whole literal goes: `f($V)`.
+  The check writes a string literal at the spot and asks the parser, so it is
+  the embedded TypeScript grammar that decides, not the language: a veto on a
+  default parameter value (`function $F($P = $V) {}`) is rejected today
+  although TypeScript allows a string there, because that grammar reports an
+  untyped parameter whose default is a literal as a syntax error, whatever the
+  literal (`function f(p = 1) {}` included), in a function declaration and in a
+  class method alike; a typed default (`p: string = "x"`) and an identifier,
+  object or array default (`opts = {}`) parse without error. The rejection is a
+  located compile error, never a veto that silently does nothing. A parse error
+  in a file being analysed is a separate, pre-existing problem, tracked outside
+  the rule format.
 - **The predicates are a closed set** — today only `not-a-credential`. Adding
   one means adding it to `valueVetoes` in
   `internal/core/ruleengine/valueveto.go`. Full semantics in `[valueveto]`

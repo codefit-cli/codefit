@@ -103,7 +103,8 @@ func TestSEC001ValueVetoIsQuietForEveryFormAtEverySite(t *testing.T) {
 		// The fixture is verified by its CONTENT: it must be the form it is
 		// filed under, or this row would pass for an unrelated reason.
 		if got, vetoed := valueshape.NotACredential(value); !vetoed || got != form {
-			t.Fatalf("fixture %q is filed under %q but valueshape says (%q, %v)", value, form, got, vetoed)
+			t.Errorf("fixture %q is filed under %q but valueshape says (%q, %v)", value, form, got, vetoed)
+			continue
 		}
 		for _, site := range sec001Sites {
 			t.Run(string(form)+"/"+site.shape, func(t *testing.T) {
@@ -297,16 +298,26 @@ func TestSEC001ValueVetoKeepsFiring(t *testing.T) {
 			value:  "TODO",
 			reason: "an all-caps placeholder with no underscore: env-var-name requires one, so it keeps firing",
 		},
+		{
+			value:  "<token>",
+			reason: "an angle-bracket placeholder: no form covers it",
+		},
+		{
+			value:  "__SECRET__",
+			reason: "env-var-name needs an upper-case letter first and allows no leading, trailing or doubled underscore",
+		},
 	}
 
 	for _, tc := range cases {
 		if tc.reason == "" {
-			t.Fatalf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			t.Errorf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			continue
 		}
 		// Verified by content: if valueshape ever starts vetoing this value the
 		// failure names the predicate, not the provider.
 		if form, vetoed := valueshape.NotACredential(tc.value); vetoed {
-			t.Fatalf("fixture %q is filed as keeps-firing and valueshape vetoes it as %q", tc.value, form)
+			t.Errorf("fixture %q is filed as keeps-firing and valueshape vetoes it as %q", tc.value, form)
+			continue
 		}
 		for _, site := range sec001Sites {
 			t.Run(tc.value+"/"+site.shape, func(t *testing.T) {
@@ -383,7 +394,8 @@ func TestSEC001ValueVetoDeclaredBlindSpots(t *testing.T) {
 	}
 	for _, tc := range cases {
 		if got, vetoed := valueshape.NotACredential(tc.value); !vetoed || got != tc.form {
-			t.Fatalf("fixture %q is filed under %q but valueshape says (%q, %v)", tc.value, tc.form, got, vetoed)
+			t.Errorf("fixture %q is filed under %q but valueshape says (%q, %v)", tc.value, tc.form, got, vetoed)
+			continue
 		}
 		for _, site := range sec001Sites {
 			t.Run(tc.value+"/"+site.shape, func(t *testing.T) {
@@ -402,12 +414,18 @@ func TestSEC001ValueVetoDeclaredBlindSpots(t *testing.T) {
 //
 // The first row is the one that matters: in source text an escaped '=' leaves
 // the credential-named query parameter with no value, and the URL would be
-// vetoed while the program holds `…?api_key=abc123`.
+// vetoed while the program holds `…?api_key=abc`.
+//
+// The value after the '=' is three bytes on purpose. Read as source text, the
+// query is the single key `api_key\x3dabc`, 14 bytes: too short for the
+// token-like guard, and a credential-named key with no value, so ONLY decoding
+// makes this row fire. A value of 16 or more bytes would make that undecoded key
+// token-like and the row would fire with or without decoding, pinning nothing.
 func TestSEC001ValueVetoReadsTheValueNotItsSourceText(t *testing.T) {
-	const escapedEquals = `"https://api.example.com/v1?api_key\x3dabc123"`
+	const escapedEquals = `"https://api.example.com/v1?api_key\x3dabc"`
 	for _, site := range sec001Sites {
 		if fs := sec001Of(t, site.src(gatedName, escapedEquals)); len(fs) != 1 {
-			t.Errorf("%s: got %d SEC-001, want 1 — the literal denotes a URL carrying api_key=abc123",
+			t.Errorf("%s: got %d SEC-001, want 1 — the literal denotes a URL carrying api_key=abc",
 				site.shape, len(fs))
 		}
 	}
@@ -478,6 +496,58 @@ func TestSEC001EmptyLiteralIsStillQuiet(t *testing.T) {
 		requireSiteReachesTheGate(t, site)
 		if fs := sec001Of(t, site.src(gatedName, `""`)); len(fs) != 0 {
 			t.Errorf("%s: SEC-001 fired on an empty literal: %+v", site.shape, fs)
+		}
+	}
+}
+
+// TestSEC001QuoteOnlyLiteralFires pins that the name gate reads the string the
+// literal DENOTES, the same string the value veto reads. A raw string literal
+// made only of double quotes, or an interpreted one made only of backticks,
+// denotes a non-empty string. The gate used to trim quote and backtick
+// characters from the source text instead of decoding it, saw nothing left, and
+// emitted no SEC-001 for these; a credential has no length floor and no
+// alphabet (ADR 0075), so they fire like any other value that proves nothing.
+func TestSEC001QuoteOnlyLiteralFires(t *testing.T) {
+	cases := []struct {
+		lit     string // Go source, quotes included
+		denotes string
+	}{
+		{lit: "`\"\"`", denotes: `""`},
+		{lit: "`\"`", denotes: `"`},
+		{lit: "\"``\"", denotes: "``"},
+	}
+	for _, tc := range cases {
+		// Verified by content: the row must denote what it says, or it pins
+		// some other literal.
+		if got, err := strconv.Unquote(tc.lit); err != nil || got != tc.denotes {
+			t.Errorf("fixture %s denotes %q (err %v), want %q", tc.lit, got, err, tc.denotes)
+			continue
+		}
+		for _, site := range sec001Sites {
+			t.Run(tc.lit+"/"+site.shape, func(t *testing.T) {
+				fs := sec001Of(t, site.src(gatedName, tc.lit))
+				if len(fs) != 1 {
+					t.Fatalf("got %d SEC-001, want 1 — %s denotes the non-empty string %q", len(fs), tc.lit, tc.denotes)
+				}
+				if fs[0].Confidence != 1.0 || fs[0].Severity != findings.SeverityHigh {
+					t.Errorf("got confidence %v severity %q, want 1.0 and %q", fs[0].Confidence, fs[0].Severity, findings.SeverityHigh)
+				}
+			})
+		}
+	}
+}
+
+// TestSEC001EmptyAndNonStringLiteralsStayQuiet keeps the rest of the name
+// gate's value condition where it was when the gate started decoding: a raw
+// empty literal denotes the empty string, and a number or a rune literal is not
+// a string at all. None of them is reported.
+func TestSEC001EmptyAndNonStringLiteralsStayQuiet(t *testing.T) {
+	for _, lit := range []string{"``", "42", "3.14", "'a'"} {
+		for _, site := range sec001Sites {
+			requireSiteReachesTheGate(t, site)
+			if fs := sec001Of(t, site.src(gatedName, lit)); len(fs) != 0 {
+				t.Errorf("%s / %s: SEC-001 fired on a value that is not a non-empty string: %+v", lit, site.shape, fs)
+			}
 		}
 	}
 }

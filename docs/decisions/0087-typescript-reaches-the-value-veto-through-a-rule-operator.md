@@ -185,3 +185,11 @@ in both columns:
 - **Keep the lenient loader and lint the rule files instead.** The loader is the
   only code that runs on every rule file in every build; a separate lint is a
   second place to forget.
+
+## Notes
+
+2026-11-25: The compile-time check above lets the parser decide where a string literal may stand, so it is only as accurate as the grammar. A veto on a default parameter value (`function $F($P = $V) {}`) is rejected today although TypeScript allows a string there: the embedded TypeScript grammar reports a string-literal default parameter as a syntax error, in a pattern and in a source file alike, so the rewrite fails to parse. The rejection is a located compile error, the safe direction. It is pinned by `TestValueVetoOnADefaultParameterIsRejectedToday`, and no shipped rule puts a veto there.
+
+2026-11-25: §6 is superseded on one point. Go no longer serves its own copy of the limits: `limitValueVeto` is now a Go-specific sentence followed by `valueshape.DeclaredLimit`, so the two providers serve one text and the difference §6 describes is gone (see the dated note at the end of [ADR 0086](0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)).
+
+2026-11-25: The first note above narrows the cause too far. The compile check writes a string literal at `$V`, and the embedded grammar reports an UNTYPED parameter whose default is a literal as a syntax error, whatever the literal: measured with a string, a number and a boolean (`function f(p = 1) {}` included), in a function declaration and in a class method. The same grammar parses a typed default (`p: string = "x"`) and an identifier, object or array default (`opts = {}`) without error. So `function $F($P = $V) {}`, written with a literal at `$V`, does not parse, and a veto there is rejected at compile time; that is why the position cannot carry a veto today. A parse error in a file being analysed is a separate, pre-existing problem, tracked outside this change.

@@ -2075,7 +2075,10 @@ not.** It fires when an identifier whose **name** denotes a credential — match
 by name component through the shared `namematch` vocabulary
 ([ADR 0075](docs/decisions/0075-sec-001-affirms-only-what-the-name-established.md)) —
 is bound to a non-empty string literal, in an assignment, a `const`/`var`
-declaration, or a composite-literal field. It then asks whether the **value**
+declaration, or a composite-literal field. "Non-empty" is judged on the string
+the literal denotes (escapes decoded once, by `strconv.Unquote`), the same string
+the value veto reads: a raw literal made only of double quotes, or an interpreted
+literal made only of backticks, is non-empty and fires. It then asks whether the **value**
 proves it is something else, and stays silent when it does
 ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)):
 `const secretFile = "lib/config.ts"` used to be affirmed as a hardcoded
@@ -2101,8 +2104,11 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
 
 **Known limits of the veto, declared in both directions.**
 
-- *Not reported, although it may be a secret:* an all-caps value containing an
-  underscore (it has the shape of an environment-variable name); a bare file
+- *Not reported, although it may be a secret:* a value that matches the
+  environment-variable-name pattern — an ASCII upper-case letter first, then ASCII
+  upper-case letters and digits, at least one underscore, none leading, trailing or
+  doubled —
+  whatever it holds (it has the shape of an environment-variable name); a bare file
   name with a known extension and no separator, such as `Hunter2024.db` (it has
   the shape of a file name); and a URL whose embedded token is shorter than 16
   bytes, lacks either a letter or a digit, or is cut by the URL's own literal
@@ -2112,8 +2118,9 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
   be told apart from one: short test literals (`"s3cr3t"` must fire — a
   credential has no length floor), short identifiers, prose (a passphrase is a
   secret with spaces), paths without a known extension, header names
-  (`X-Api-Key`), and placeholders that are not SCREAMING_SNAKE with an
-  underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`).
+  (`X-Api-Key`), and placeholders that do not match that pattern: `changeme`,
+  `<token>`, `TODO`, and `__SECRET__`, whose underscores are all leading or
+  trailing. All four are pinned through the real provider.
 
 Both directions are locked by tests through the real provider
 (`internal/providers/golang/valueveto_test.go`) and served to an agent by
@@ -2121,7 +2128,6 @@ Both directions are locked by tests through the real provider
 all-lowercase-concatenation limit (`internal/providers/golang/capability.go`).
 **TypeScript applies the same veto**, through the rule-engine operator
 `metavariable-value-veto`, with the same limits — see its hardcoded-secrets entry
-above and `internal/providers/typescript/valueveto_test.go`. Its served text adds
-one precision the Go text lacks: `__SECRET__` keeps firing because the
-environment-variable-name pattern needs an upper-case letter first and allows no
-leading, trailing or doubled underscore.
+above and `internal/providers/typescript/valueveto_test.go`. Both providers serve
+ONE text for those limits, `valueshape.DeclaredLimit`, each after a sentence of
+its own saying how its literal reaches the predicate; neither keeps a copy.

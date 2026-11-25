@@ -738,10 +738,14 @@ false-positive side measured — zero new sites in the AST census over codefit's
    only because the rule was measured byte-identical over 29 corpora. **No credential-name
    corpus exists**, and the error directions are opposite — DB-052's admission SILENCES,
    SEC-001's AFFIRMS. Deferred with its reason, not forgotten.
-3. **TypeScript's `$NAME` still matches by substring**, so `tokenizer` fires there. Carried as a
-   divergence row with a written reason in the cross-provider case table, which loads TS's regex
-   from the real embedded YAML rather than copying it. Widening or narrowing TS is separate,
-   measured work.
+3. ~~**TypeScript's `$NAME` still matches by substring**, so `tokenizer` fires there.~~ **Closed
+   (issue `#152`, PR `#181`).** TypeScript's `SEC-001` no longer constrains `$NAME` with a regex: it
+   declares `metavariable-name: {$NAME: credential}`, the same component vocabulary Go matches
+   through `namematch`, so `const tokenizer = "whitespace"` is silent in both. The cross-provider
+   case table (`internal/core/namematch/crossprovider_test.go`) loads that declaration from the
+   real embedded YAML and fails if `$NAME` is ever constrained by a regex again. The cost of the
+   switch is declared there and in `COVERAGE.md`: an all-lowercase concatenation such as
+   `secretkey` went from firing in TypeScript to silent in both.
 
 **2026-11-23 — the VALUE half, closed for Go and still open for TypeScript (issue `#148`).** The
 name gate above decides which identifiers are credentials; nothing constrained the value beyond

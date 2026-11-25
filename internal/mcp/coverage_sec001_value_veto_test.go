@@ -45,10 +45,15 @@ func TestCoverage_GoSEC001ServesBothDeclaredLimits(t *testing.T) {
 			t.Errorf("SEC-001's served detail does not carry the value-veto limit (missing %q):\n%s", marker, detail)
 		}
 	}
-	for _, form := range valueshape.Forms() {
-		if !strings.Contains(detail, string(form)) {
-			t.Errorf("SEC-001's served detail does not name the vetoed form %q:\n%s", form, detail)
-		}
+	// The forms are not checked here by substring: "urn" is satisfied by "a urn:
+	// URN" and "url" by "a URL", so a form dropped from the list would still
+	// pass. valueshape's own test parses DeclaredLimit's form list as a set and
+	// compares it with Forms(); what this handler test owes is that the served
+	// detail carries that constant verbatim. Checked beside the independent
+	// markers above, never instead of them: an emptied constant would satisfy
+	// this line alone.
+	if valueshape.DeclaredLimit == "" || !strings.Contains(detail, valueshape.DeclaredLimit) {
+		t.Errorf("SEC-001's served detail does not carry valueshape.DeclaredLimit verbatim:\n%s", detail)
 	}
 }
 

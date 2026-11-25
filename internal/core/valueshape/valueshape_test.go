@@ -1,6 +1,7 @@
 package valueshape
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -175,6 +176,40 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			value:  `CLIENT_SECRET=abc`,
 			reason: "'=' is outside the env-var-name charset — this is a NAME=VALUE pair, not a bare name",
 		},
+		// The placeholders and malformed underscore names DeclaredLimit names
+		// as STILL REPORTED, pinned here at the predicate and not only through
+		// the providers: each misses envVarNamePattern (an ASCII upper-case
+		// letter first, then ASCII upper-case letters and digits, at least one
+		// underscore, none leading, trailing or doubled) for the reason written
+		// beside it.
+		{
+			value:  `__SECRET__`,
+			reason: "all-caps with underscores, but every underscore is leading or trailing: no upper-case letter first",
+		},
+		{
+			value:  `A__B`,
+			reason: "all-caps with an underscore, but the underscore is doubled",
+		},
+		{
+			value:  `ABC_DEF_`,
+			reason: "all-caps with an underscore, but one underscore is trailing",
+		},
+		{
+			value:  `_SECRET`,
+			reason: "all-caps with an underscore, but the underscore is leading: no upper-case letter first",
+		},
+		{
+			value:  `<token>`,
+			reason: "a placeholder in angle brackets: lower case, '<' and '>' fail every guard",
+		},
+		{
+			value:  `changeme`,
+			reason: "a lower-case placeholder with no underscore: fails env-var-name, and no dot fails file-path",
+		},
+		{
+			value:  `TODO`,
+			reason: "an all-caps placeholder with no underscore: env-var-name requires one",
+		},
 		{
 			value:  `Bearer abc123`,
 			reason: "whitespace disqualifies every guard — prose keeps firing",
@@ -326,6 +361,52 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 	}
 }
 
+// TestNotACredential_NonASCIIKeepsFiring pins that envVarNamePattern is ASCII
+// only, which is what DeclaredLimit says ("an ASCII upper-case letter first,
+// then ASCII upper-case letters and digits"). Each value is upper-case by
+// Unicode and shaped like an environment-variable name, and each keeps firing.
+//
+// The values are written as \u escapes. Every row must really carry a byte at
+// or above 0x80: a row that arrived decoded into plain ASCII, or was retyped as
+// a lookalike, would test the ASCII pattern instead of its edge, so the loop
+// refuses it.
+func TestNotACredential_NonASCIIKeepsFiring(t *testing.T) {
+	cases := []struct {
+		value  string
+		reason string
+	}{
+		{"\u00c9_B", "an E with acute accent first: upper-case, but not an ASCII upper-case letter"},
+		{"\u0391_B", "a Greek capital alpha first: upper-case, but not an ASCII upper-case letter"},
+		{"A_\uff11", "a fullwidth digit one after the underscore: a digit, but not an ASCII digit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			if tc.reason == "" {
+				t.Fatalf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			}
+			nonASCII := false
+			for i := 0; i < len(tc.value); i++ {
+				if tc.value[i] >= 0x80 {
+					nonASCII = true
+				}
+			}
+			if !nonASCII {
+				t.Fatalf("row %q has no byte at or above 0x80, so it does not test the pattern's ASCII edge", tc.value)
+			}
+			if form, ok := NotACredential(tc.value); ok {
+				t.Errorf("NotACredential(%q) = (%q, true), want (_, false): %s", tc.value, form, tc.reason)
+			}
+		})
+	}
+	// The served sentence must keep saying ASCII: without it, the three values
+	// above read as not reported while they fire.
+	const ascii = "(an ASCII upper-case letter first, then ASCII upper-case letters and digits,"
+	if !strings.Contains(strings.Join(strings.Fields(DeclaredLimit), " "), ascii) {
+		t.Errorf("DeclaredLimit no longer says the environment-variable-name pattern is ASCII only (missing %q):\n%s",
+			ascii, DeclaredLimit)
+	}
+}
+
 // TestParseFailureDoesNotVetoInEitherGuard pins each URL guard's OWN answer to
 // a query or fragment it cannot parse. Both must answer in the direction that
 // does not veto, each on its own. Through NotACredential the two cannot be told
@@ -390,6 +471,10 @@ func TestNotACredential_DeclaredBlindSpots(t *testing.T) {
 	}
 }
 
+// declaredFormList is the shape DeclaredLimit uses to enumerate its forms:
+// "forms a, b, c" — lowercase names joined by ", ".
+var declaredFormList = regexp.MustCompile(`forms ([a-z-]+(?:, [a-z-]+)*)`)
+
 // TestDeclaredLimitStatesBothDirectionsForEveryForm locks the served limit text
 // a provider manifest cites by reference. It must name every form the
 // predicate vetoes, the decision that owns it, and both costs: what it hides
@@ -399,10 +484,26 @@ func TestDeclaredLimitStatesBothDirectionsForEveryForm(t *testing.T) {
 	if DeclaredLimit == "" {
 		t.Fatal("DeclaredLimit is empty: every manifest that cites it would serve no limit")
 	}
+	// Each form must be named AS ITSELF, in the text's own form list. A plain
+	// substring check is satisfied by prose that merely contains the letters —
+	// "urn" by "a urn: URN", "url" by "a URL" — so a form dropped from the list
+	// would still pass. The list is parsed and compared as a set, both ways.
+	lists := declaredFormList.FindAllStringSubmatch(DeclaredLimit, -1)
+	if len(lists) != 1 {
+		t.Fatalf("DeclaredLimit carries %d form lists (\"forms a, b, …\"), want exactly 1:\n%s", len(lists), DeclaredLimit)
+	}
+	declared := make(map[string]bool)
+	for _, name := range strings.Split(lists[0][1], ", ") {
+		declared[name] = true
+	}
 	for _, form := range Forms() {
-		if !strings.Contains(DeclaredLimit, string(form)) {
-			t.Errorf("DeclaredLimit does not name the form %q", form)
+		if !declared[string(form)] {
+			t.Errorf("DeclaredLimit's form list does not name %q, which NotACredential vetoes: %v", form, declared)
 		}
+		delete(declared, string(form))
+	}
+	for extra := range declared {
+		t.Errorf("DeclaredLimit's form list names %q, which Forms() does not declare", extra)
 	}
 	for _, marker := range []string{"ADR 0086", "internal/core/valueshape", "is not reported at all",
 		"NOT REPORTED", "STILL REPORTED", "16 bytes", "Hunter2024.db", "changeme"} {
@@ -413,6 +514,38 @@ func TestDeclaredLimitStatesBothDirectionsForEveryForm(t *testing.T) {
 	for _, provider := range []string{"(go)", "(typescript)"} {
 		if strings.Contains(DeclaredLimit, provider) {
 			t.Errorf("DeclaredLimit names a provider %q; each manifest says who applies it", provider)
+		}
+	}
+	// "an all-caps value containing an underscore" was the NOT REPORTED
+	// wording until 2026-11-25, and it contradicted the STILL REPORTED list:
+	// __SECRET__, A__B and ABC_DEF_ are all-caps with underscores and fire.
+	if strings.Contains(DeclaredLimit, "all-caps value containing an underscore") {
+		t.Errorf("DeclaredLimit still says every all-caps value with an underscore is not reported, "+
+			"which __SECRET__ contradicts:\n%s", DeclaredLimit)
+	}
+}
+
+// stillReportedPlaceholders is the shape DeclaredLimit uses to list the
+// placeholders that keep firing: "do not match that pattern: a, b, c." —
+// names joined by ", ", closed by the sentence's period.
+var stillReportedPlaceholders = regexp.MustCompile(`do not match that pattern: ([^.]+)\.`)
+
+// TestDeclaredLimitPlaceholdersKeepFiring reads the STILL REPORTED placeholder
+// list out of the served text and asks the predicate about each one, so the
+// text cannot name a placeholder the veto in fact silences.
+func TestDeclaredLimitPlaceholdersKeepFiring(t *testing.T) {
+	lists := stillReportedPlaceholders.FindAllStringSubmatch(DeclaredLimit, -1)
+	if len(lists) != 1 {
+		t.Fatalf("DeclaredLimit carries %d placeholder lists (\"do not match that pattern: a, b.\"), want exactly 1:\n%s",
+			len(lists), DeclaredLimit)
+	}
+	names := strings.Split(lists[0][1], ", ")
+	if len(names) < 4 {
+		t.Fatalf("the placeholder list parsed into %d names, want at least 4: %q", len(names), names)
+	}
+	for _, name := range names {
+		if form, vetoed := NotACredential(name); vetoed {
+			t.Errorf("DeclaredLimit says %q is STILL REPORTED, but NotACredential vetoes it as %q", name, form)
 		}
 	}
 }

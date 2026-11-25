@@ -3,7 +3,6 @@ package golang
 import (
 	"go/ast"
 	"go/token"
-	"strconv"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/valueshape"
@@ -88,11 +87,12 @@ func checkSecretKeyValue(p *parsed, kv *ast.KeyValueExpr, add func(findings.Find
 // by the three AST shapes that can carry one (assignment, value spec, composite
 // literal field) so they cannot disagree.
 //
-// It asks two questions, in this order:
+// It asks two questions, in this order, of ONE decoded value — the string the
+// literal denotes, from stringLit:
 //
 //  1. The NAME gate (ADR 0075): value is a non-empty string literal and name
-//     denotes a credential (looksSecret). Unchanged.
-//  2. The VALUE veto (ADR 0086): the literal's own shape does not prove it is
+//     denotes a credential (looksSecret).
+//  2. The VALUE veto (ADR 0086): the value's own shape does not prove it is
 //     something else — see provesNotACredential.
 //
 // A vetoed pair is not a finding of any kind: nothing is emitted, at any
@@ -102,66 +102,40 @@ func hardcodedSecret(name string, value ast.Expr) bool {
 	if !ok || val == "" || !looksSecret(name) {
 		return false
 	}
-	return !provesNotACredential(value)
+	return !provesNotACredential(val)
 }
 
 // limitValueVeto is the DECLARED consequence of the value veto, rendered to
 // agents by codefit-coverage through Capability(). It lives beside the code
 // that applies the veto and is cited from capability.go by reference.
 //
-// It states both directions, because both are true of the code below: what the
-// veto hides (a real secret that has one of the four shapes) and what it leaves
-// firing (everything a shape cannot tell apart from a secret).
-const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own shape " +
-	"proves it is not a credential (ADR 0086, internal/core/valueshape; forms url, " +
-	"urn, env-var-name, file-path): a URL with a scheme and a host, no userinfo, no " +
-	"credential-named query or fragment parameter carrying a value, and nothing " +
-	"token-like (16+ bytes with a letter and a digit) in any host label (an IP-literal " +
-	"host is skipped whole, never read as labels), decoded path segment, query key or " +
-	"value, or fragment key or value (each position is split before it is decoded, so " +
-	"an encoded slash, ampersand or equals sign cannot cut a token, and a fragment " +
-	"that is not key=value is read whole); a urn: URN; a SCREAMING_SNAKE name with at " +
-	"least one underscore; a path ending in a known file extension. Such a literal is " +
-	"not reported at all. " +
-	"Declared, not fixed, in both directions. NOT REPORTED although it may be a " +
-	"secret: an all-caps value containing an underscore; a bare file name with a " +
-	"known extension and no separator (Hunter2024.db); and a URL whose embedded " +
-	"token is shorter than 16 bytes, lacks either a letter or a digit, or is cut by " +
-	"the URL's own literal separators (dots between host labels, slashes between " +
-	"path segments, & or = in a query or fragment) into pieces each shorter than 16 " +
-	"bytes. STILL REPORTED " +
-	"although it is often not a secret, because its shape is indistinguishable from " +
-	"one: short test literals, short identifiers, prose, paths without a known " +
-	"extension, header names, placeholders that are not SCREAMING_SNAKE with an " +
-	"underscore (changeme, <token>, TODO, __SECRET__)."
+// It is a Go-specific prefix — which sites apply the veto and what reaches the
+// predicate — followed by valueshape.DeclaredLimit, the one copy of what the
+// veto does and does not see, in both directions, that the TypeScript manifest
+// cites too. Restating that text here by hand is how the two drifted before.
+// The prefix carries no form list of its own: TestCapability_SEC001DeclaresTheValueVeto
+// parses exactly one, the constant's. Its SITE list is parsed too, and
+// TestCapability_SEC001ValueVetoPrefixNamesEverySiteTheVetoRunsAt holds it
+// equal to the node types securityChecks dispatches to a secret check, with
+// the veto observed at each of them through the real provider.
+const limitValueVeto = "The Go provider applies the value veto at every site SEC-001 reaches " +
+	"(an assignment, a const or var spec, a composite-literal element keyed by an identifier): the string the " +
+	"literal denotes, escapes decoded by strconv.Unquote, is handed to " +
+	"valueshape.NotACredential, the function TypeScript's metavariable-value-veto calls. " +
+	valueshape.DeclaredLimit
 
-// provesNotACredential reports whether value — the expression the name gate
-// accepted — denotes a string whose shape proves it is not a credential.
+// provesNotACredential reports whether denoted — the string a literal the name
+// gate accepted DENOTES, as stringLit decoded it — has a shape that proves it
+// is not a credential.
 //
-// The predicate is handed the string the literal DENOTES, not its source text:
+// It must be the denoted string, not the literal's source text:
 // `"…?api_key\x3dabc"` denotes a URL carrying api_key=abc, and reading the
-// characters between the quotes instead would lose the '=' and veto it. A
-// literal that cannot be unquoted denotes the empty string here, which proves
-// nothing, so it does not veto.
-//
-// An expression that is not a *ast.BasicLit proves nothing either, and does not
-// veto: the finding fires. The name gate's stringLit accepts only a
-// *ast.BasicLit today, so the parser never reaches that branch; it is there so
-// that widening stringLit (to a parenthesized literal, or a folded
-// concatenation) cannot turn into a panic during a scan. If stringLit is ever
-// widened to accept another node kind, those literals will fire WITHOUT the
-// value veto until this function learns to read them.
+// characters between the quotes instead would lose the '=' and veto it.
 //
 // Every guard lives in internal/core/valueshape, and this function applies
-// none of its own. limitValueVeto, above, restates the guards and their limits
-// in prose, because it is the text codefit-coverage serves to an agent; it is
-// kept in step with valueshape's doc comments by hand.
-func provesNotACredential(value ast.Expr) bool {
-	lit, ok := value.(*ast.BasicLit)
-	if !ok {
-		return false
-	}
-	denoted, _ := strconv.Unquote(lit.Value)
+// none of its own. limitValueVeto, above, serves their limits to an agent by
+// citing valueshape.DeclaredLimit, so there is no prose here to keep in step.
+func provesNotACredential(denoted string) bool {
 	_, vetoed := valueshape.NotACredential(denoted)
 	return vetoed
 }

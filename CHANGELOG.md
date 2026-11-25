@@ -108,6 +108,34 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **A Go string literal made only of quote characters is now reported under a
+  credential name** (`#148`). `SEC-001`'s name gate read a literal by trimming
+  quote and backtick characters from its source text, so `` signingKey = `""` ``
+  (a raw string denoting two double quotes), or an interpreted literal holding
+  only backticks, read as empty and emitted nothing, while the value veto decoded the same literal with
+  `strconv.Unquote`. The gate now decodes, once, and the veto reads that same
+  value. A credential has no length floor and no alphabet (ADR 0075), so these
+  fire at certainty 1.0 like any value that proves nothing; an empty literal
+  (`""` or a raw empty one), a number and a rune literal stay silent. Measured
+  with the pre-change and the post-change Go provider over every Go file of
+  this repository plus a generated corpus of 4,361 files (every site, every
+  vetoed and keeps-firing form, escapes, raw strings, placeholders):
+  **2,524 → 2,704** findings, all 180 added being quote-only literals
+  under a credential name, none removed; this repository's own files move by
+  none. The TypeScript provider is untouched (its in-repo testdata: 0 → 0).
+  **For a committed baseline:** a Go project holding such a literal sees one
+  new `SEC-001`.
+- **`codefit-coverage` serves one text for `SEC-001`'s value-veto limits in
+  both languages** (`#148`). The Go entry carried a hand-written copy of the
+  limits, which had drifted from the shared `valueshape.DeclaredLimit` that
+  TypeScript cites: it gave the wrong reason for `__SECRET__` firing. It now
+  serves one Go-specific sentence followed by that same constant. The four
+  placeholders the text promises keep firing (`changeme`, `<token>`, `TODO`,
+  `__SECRET__`) are now all pinned through the real Go provider; before, only
+  two were. The shared text's "not reported" sentence now states the pattern the
+  environment-variable-name form vetoes; it said "an all-caps value containing
+  an underscore", which `__SECRET__`, `A__B` and `ABC_DEF_` contradict — all
+  three fire. No verdict moves: this changes the served text, not what fires.
 - **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
   credential — in TypeScript either** (`#148`). The TypeScript `SEC-001` rule
   now asks the same predicate the Go provider asks
@@ -169,7 +197,9 @@ All notable changes to codefit are documented here. The format is based on
   **For a committed baseline:** a `SEC-001` that had been reported on such a
   literal is no longer emitted, so its baseline entry becomes `gone` — stale, not
   wrong — and `codefit-baseline-prune` drops it. Nothing that keeps firing moves.
-  **Declared, not fixed:** an all-caps secret containing an underscore, a bare
+  **Declared, not fixed:** a secret that matches the environment-variable-name
+  pattern (an ASCII upper-case letter first, then ASCII upper-case letters and
+  digits, at least one underscore, none leading, trailing or doubled), a bare
   file name with a known extension and no separator (`Hunter2024.db`), and a URL
   whose embedded token is shorter than 16 bytes, lacks either a letter or a
   digit, or is cut by the URL's own literal separators into pieces each shorter

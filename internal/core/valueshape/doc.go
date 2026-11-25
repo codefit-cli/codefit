@@ -139,9 +139,11 @@
 //     FormFilePath.
 //   - placeholder — a name like `YOUR_CLIENT_SECRET` IS vetoed here, but only
 //     because it happens to also be SCREAMING_SNAKE-shaped; a placeholder
-//     that is not SCREAMING_SNAKE with an underscore (`changeme`, `<token>`,
-//     `TODO`, `__SECRET__`) is not covered by any guard in this package and
-//     keeps firing.
+//     that does not match the environment-variable-name pattern (an
+//     upper-case letter first, at least one underscore, none leading,
+//     trailing or doubled) is not covered by any guard in this package and
+//     keeps firing: `changeme`, `<token>`, `TODO`, and `__SECRET__`, whose
+//     underscores are all leading or trailing.
 //   - path with extension — the one Go bucket this package DOES close, and
 //     the bucket that motivated this feature (`lib/config.ts`).
 //   - "other" (Go: 2, uncategorized) — not investigated further; the census
