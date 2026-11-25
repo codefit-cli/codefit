@@ -370,7 +370,7 @@ func decodeEscape(text string, i int, b *strings.Builder) (int, bool) {
 		if r == utf8.RuneError && size <= 1 {
 			return 0, false
 		}
-		if r == ' ' || r == ' ' {
+		if r == lineSeparator || r == paragraphSeparator {
 			return i + size, true // line continuation
 		}
 		b.WriteRune(r) // identity escape
@@ -401,14 +401,14 @@ func decodeUnicodeEscape(text string, i int, b *strings.Builder) (int, bool) {
 	}
 	next := i + 4
 	switch {
-	case v >= 0xDC00 && v <= 0xDFFF:
+	case isLowSurrogate(v):
 		return 0, false // a low surrogate with no high one before it
-	case v >= 0xD800 && v <= 0xDBFF:
+	case isHighSurrogate(v):
 		if next+6 > len(text) || text[next] != '\\' || text[next+1] != 'u' {
 			return 0, false // a lone high surrogate
 		}
 		low, ok := parseHex(text, next+2, 4)
-		if !ok || low < 0xDC00 || low > 0xDFFF {
+		if !ok || !isLowSurrogate(low) {
 			return 0, false
 		}
 		b.WriteRune(utf16.DecodeRune(rune(v), rune(low)))
@@ -418,8 +418,13 @@ func decodeUnicodeEscape(text string, i int, b *strings.Builder) (int, bool) {
 	return next, true
 }
 
-// parseHex reads exactly n hex digits starting at text[i]. n may be large for
-// `\u{…}`, so the value is capped as it grows and reported as too large.
+// parseHex reads exactly n hex digits starting at text[i], and returns false
+// only when fewer than n bytes remain or one of them is not a hex digit. n may
+// be large for `\u{…}`, so the value stops growing once it exceeds
+// utf8.MaxRune: the result is then SOME value above utf8.MaxRune, not the one
+// the digits spell, and the remaining digits are still validated. parseHex does
+// not reject that value; the caller owns the range check ([decodeUnicodeEscape]
+// compares the result with utf8.MaxRune).
 func parseHex(text string, i, n int) (uint32, bool) {
 	if n <= 0 || i+n > len(text) {
 		return 0, false
@@ -445,6 +450,21 @@ func parseHex(text string, i, n int) (uint32, bool) {
 	return v, true
 }
 
-func isSurrogate(v uint32) bool { return v >= 0xD800 && v <= 0xDFFF }
+// The UTF-16 surrogate ranges, written once. A high surrogate must be followed
+// by a low one for a \uHHHH pair to denote a code point; either half alone has
+// no UTF-8 form.
+func isHighSurrogate(v uint32) bool { return v >= 0xD800 && v <= 0xDBFF }
+
+func isLowSurrogate(v uint32) bool { return v >= 0xDC00 && v <= 0xDFFF }
+
+func isSurrogate(v uint32) bool { return isHighSurrogate(v) || isLowSurrogate(v) }
+
+// The two line terminators beyond LF and CR. After a backslash, each is a line
+// continuation and denotes nothing. Named, because written raw they render as
+// blanks.
+const (
+	lineSeparator      = '\u2028' // U+2028 LINE SEPARATOR
+	paragraphSeparator = '\u2029' // U+2029 PARAGRAPH SEPARATOR
+)
 
 func isDecimalDigit(c byte) bool { return c >= '0' && c <= '9' }

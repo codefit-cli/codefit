@@ -1,7 +1,11 @@
 package ruleengine_test
 
 import (
+	"fmt"
 	"io/fs"
+	"path"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -182,39 +186,130 @@ func TestLoadFS_EmptyFileStillLoadsAsNoRules(t *testing.T) {
 	}
 }
 
-// TestLoadFS_EveryShippedRuleFileLoadsStrictly loads each embedded rule file ON
-// ITS OWN under the strict decoder, so a shipped file relying on a key the
-// loader does not know fails here by name instead of hiding inside the corpus.
-// It is the proof the strict loader was allowed to land on: if any shipped file
-// had carried an unknown key, that rule had been silently missing it.
-func TestLoadFS_EveryShippedRuleFileLoadsStrictly(t *testing.T) {
-	const shippedDir = "typescript/security"
-	entries, err := fs.ReadDir(rules.FS, shippedDir)
+// strictLoadReport is what checkEveryRuleFileLoadsStrictly observed.
+type strictLoadReport struct {
+	dirs     []string // every directory holding at least one rule file
+	visited  int      // rule files loaded on their own
+	present  int      // rule files the walk found, counted apart from the loads
+	failures []string // one line per file that did not load, or loaded no rules
+}
+
+// checkEveryRuleFileLoadsStrictly walks fsys, finds every directory holding a
+// *.yaml rule file, and loads each such file ON ITS OWN under the strict
+// decoder, then the whole directory as production does. A file that does not
+// load, or loads zero rules, is a failure named by its path.
+func checkEveryRuleFileLoadsStrictly(t *testing.T, fsys fs.FS) strictLoadReport {
+	t.Helper()
+	var rep strictLoadReport
+	byDir := map[string][]string{}
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".yaml") {
+			return nil
+		}
+		rep.present++
+		byDir[path.Dir(p)] = append(byDir[path.Dir(p)], p)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("reading %s: %v", shippedDir, err)
+		t.Fatalf("walking the rules FS: %v", err)
 	}
-	var files int
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
-			continue
+	for d := range byDir {
+		rep.dirs = append(rep.dirs, d)
+	}
+	sort.Strings(rep.dirs)
+	for _, d := range rep.dirs {
+		perFile := 0
+		for _, p := range byDir[d] {
+			rep.visited++
+			data, err := fs.ReadFile(fsys, p)
+			if err != nil {
+				t.Fatalf("reading %s: %v", p, err)
+			}
+			one := dir(map[string]string{"only/" + path.Base(p): string(data)})
+			loaded, err := ruleengine.LoadFS(one, "only")
+			switch {
+			case err != nil:
+				rep.failures = append(rep.failures, fmt.Sprintf("%s does not load under strict decoding: %v", p, err))
+			case len(loaded) == 0:
+				rep.failures = append(rep.failures, p+" loaded zero rules")
+			}
+			perFile += len(loaded)
 		}
-		files++
-		data, err := fs.ReadFile(rules.FS, shippedDir+"/"+e.Name())
+		// The directory as a whole, the way the provider loads it.
+		whole, err := ruleengine.LoadFS(fsys, d)
 		if err != nil {
-			t.Fatalf("reading %s: %v", e.Name(), err)
-		}
-		one := dir(map[string]string{"only/" + e.Name(): string(data)})
-		loaded, err := ruleengine.LoadFS(one, "only")
-		if err != nil {
-			t.Errorf("shipped rule file %s does not load under strict decoding: %v", e.Name(), err)
-			continue
-		}
-		if len(loaded) == 0 {
-			t.Errorf("shipped rule file %s loaded zero rules", e.Name())
+			rep.failures = append(rep.failures, fmt.Sprintf("directory %s does not load: %v", d, err))
+		} else if len(whole) != perFile {
+			rep.failures = append(rep.failures, fmt.Sprintf("directory %s loads %d rules, its files one by one %d",
+				d, len(whole), perFile))
 		}
 	}
-	if files == 0 {
-		t.Fatal("vacuum: no shipped rule files were found")
+	return rep
+}
+
+// TestLoadFS_EveryShippedRuleFileLoadsStrictly loads each embedded rule file,
+// in EVERY directory of the embedded rules FS that holds one, ON ITS OWN under
+// the strict decoder, so a shipped file relying on a key the loader does not
+// know fails here by name instead of hiding inside the corpus. It is the proof
+// the strict loader was allowed to land on: if any shipped file had carried an
+// unknown key, that rule had been silently missing it.
+func TestLoadFS_EveryShippedRuleFileLoadsStrictly(t *testing.T) {
+	rep := checkEveryRuleFileLoadsStrictly(t, rules.FS)
+	for _, f := range rep.failures {
+		t.Error(f)
+	}
+	// Positive control: every rule file the walk found was loaded, and there was
+	// at least one. Counted against the walk, not a number written here, so a
+	// rule file added in a new directory is covered without editing this test.
+	if rep.present == 0 || rep.visited != rep.present {
+		t.Fatalf("vacuum: loaded %d rule files of %d found in %v", rep.visited, rep.present, rep.dirs)
+	}
+	t.Logf("loaded %d rule files strictly, in %v", rep.visited, rep.dirs)
+}
+
+// TestLoadFS_StrictWalkCatchesAPlantedKey proves the walk above bites: a copy
+// of the embedded rules with one unknown key planted in one file, and one file
+// added in a directory the shipped tree does not have, must report exactly that
+// file and visit the new directory.
+func TestLoadFS_StrictWalkCatchesAPlantedKey(t *testing.T) {
+	plant := fstest.MapFS{}
+	var victim string
+	err := fs.WalkDir(rules.FS, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(rules.FS, p)
+		if err != nil {
+			return err
+		}
+		if victim == "" && strings.HasSuffix(p, ".yaml") && strings.Contains(string(data), "\n    message:") {
+			victim = p
+			data = []byte(strings.Replace(string(data), "\n    message:", "\n    mesage: planted\n    message:", 1))
+		}
+		plant[p] = &fstest.MapFile{Data: data}
+		return nil
+	})
+	if err != nil || victim == "" {
+		t.Fatalf("building the planted copy: victim %q, err %v", victim, err)
+	}
+	plant["planted/elsewhere/one.yaml"] = &fstest.MapFile{Data: []byte(
+		"rules:\n  - id: SEC-9\n    message: m\n    severity: high\n    dimension: security\n    pattern: \"eval($X)\"\n")}
+
+	rep := checkEveryRuleFileLoadsStrictly(t, plant)
+	var named int
+	for _, f := range rep.failures {
+		if strings.Contains(f, victim) && strings.Contains(f, "mesage") {
+			named++
+		}
+	}
+	if named == 0 {
+		t.Errorf("the planted key in %s was not reported; failures: %v", victim, rep.failures)
+	}
+	if !slices.Contains(rep.dirs, "planted/elsewhere") || rep.visited != rep.present {
+		t.Errorf("the walk did not reach every directory: visited %d of %d in %v", rep.visited, rep.present, rep.dirs)
 	}
 }
 

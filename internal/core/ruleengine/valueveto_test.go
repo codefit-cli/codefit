@@ -28,9 +28,12 @@ import (
 // goes on to the real credential. A filter applied after the match would have
 // dropped the whole object, a false all-clear.
 //
-// WHAT FAILS AT COMPILE. An unknown predicate, a key that is not a metavariable,
-// and a metavariable some base alternative never binds. Each one would otherwise
-// compile and then either never veto or make the rule silent.
+// WHAT FAILS AT COMPILE. An unknown predicate; a key that is not a
+// metavariable; a metavariable some base alternative never binds; and a
+// metavariable that stands, in some base alternative, where a whole string
+// literal cannot (inside a string, a template or a regex; a shorthand property,
+// a member name or a declaration name). Each one would otherwise compile and
+// then either never veto or make the rule silent.
 
 // vetoForms is one TypeScript shape per alternative the rule below declares,
 // mirroring the six SEC-001 alternatives. name and lit are spliced in as source.
@@ -138,7 +141,7 @@ func TestValueVetoDecodesBeforeItDecides(t *testing.T) {
 		{`"https:\/\/api.example.com\/v1\/users"`, 0,
 			"`\\/` is an identity escape: the literal denotes a plain URL. Trimming the quotes instead " +
 				"hands the predicate `https:\\/\\/…`, which has no scheme, and the match fires"},
-		{`"lib/config.ts"`, 0, "a \\u escape denotes the '/' of a file path"},
+		{`"lib\u002fconfig.ts"`, 0, "a \\u escape denotes the '/' of a file path"},
 		{`"https://api.example.com/v1?api_key\x3dabc"`, 1,
 			"the literal denotes `?api_key=abc`, a credential-named parameter carrying a value. Trimming " +
 				"the quotes leaves `api_key\\x3dabc`, a parameter with no value, and would veto it"},
@@ -148,11 +151,25 @@ func TestValueVetoDecodesBeforeItDecides(t *testing.T) {
 		{`"https://api.example.com/\uD800"`, 1, "a lone surrogate does not decode, so it proves nothing"},
 	}
 	for _, tc := range cases {
+		// A row whose reason speaks of an escape must carry one: see the guard
+		// in TestDecodeJSStringLiteral for how such a row lost its backslash.
+		if mentionsAnEscape(tc.why) && !strings.Contains(tc.lit, `\`) {
+			t.Errorf("row %s speaks of an escape but carries no backslash — it pins plain text", tc.lit)
+			continue
+		}
 		src := "const apiKey = " + tc.lit + ";"
 		if got := vetoMatches(t, compiled, src); got != tc.want {
 			t.Errorf("%s -> %d findings, want %d — %s", src, got, tc.want, tc.why)
 		}
 	}
+}
+
+// mentionsAnEscape reports whether a row's stated reason claims it exercises a
+// backslash escape (an escape class, a surrogate or a line continuation). Such
+// a row must carry a backslash in its literal, or it pins nothing it claims.
+func mentionsAnEscape(reason string) bool {
+	r := strings.ToLower(reason)
+	return strings.Contains(r, "escape") || strings.Contains(r, "surrogate") || strings.Contains(r, "continuation")
 }
 
 // TestValueVetoComposesWithNameAndRegex: the name vocabulary, the regex and the
@@ -350,32 +367,63 @@ func TestValueVetoAbsentChangesNothing(t *testing.T) {
 	}
 }
 
-// TestDecodeJSStringLiteral pins the decoder's grammar, one escape class per
-// row, including every input it must REFUSE. A refusal is the safe answer: the
+// TestDecodeJSStringLiteral pins the decoder's grammar, one section per escape
+// class, including every input it must REFUSE. A refusal is the safe answer: the
 // veto then proves nothing and the match is kept.
 func TestDecodeJSStringLiteral(t *testing.T) {
 	type row struct {
-		src  string
-		want string
-		ok   bool
+		class string // the grammar class the row exercises; set by section
+		src   string
+		want  string
+		ok    bool
 	}
-	good := func(src, want string) row { return row{src, want, true} }
-	bad := func(src string) row { return row{src, "", false} }
-	cases := []row{
+	good := func(src, want string) row { return row{src: src, want: want, ok: true} }
+	bad := func(src string) row { return row{src: src} }
+	var cases []row
+	section := func(class string, rows ...row) {
+		for _, r := range rows {
+			r.class = class
+			cases = append(cases, r)
+		}
+	}
+	// CLASSES THAT NAME AN ESCAPE. A row filed under one of these must reach the
+	// decoder WITH a backslash in it. Without this guard a row can claim to pin
+	// an escape while carrying only the character the escape denotes: the
+	// escape decoded before it ever reached the decoder (an interpreted Go
+	// string, or the text decoded on its way into this file), and the row tests
+	// plain text under an escape's name. That happened to three rows here.
+	escapeClasses := map[string]bool{
+		"single-character escape": true,
+		`\0 and decimal escapes`:  true,
+		`\xHH`:                    true,
+		`\uHHHH`:                  true,
+		`\u{H…}`:                  true,
+		"surrogate pair":          true,
+		"line continuation":       true,
+		"identity escape":         true,
+	}
+	// The other classes, named so a misspelled section cannot slip past the
+	// guard by being in neither set.
+	plainClasses := map[string]bool{"plain": true, "not one literal": true}
+	section("plain",
 		good(`"abc"`, "abc"),
 		good(`'abc'`, "abc"),
 		good(`""`, ""),
 		good(`"it's"`, "it's"),
 		good(`'say "x"'`, `say "x"`),
 		good(`"é"`, "é"),
+	)
 
+	section("single-character escape",
 		good(`"a\nb"`, "a\nb"),
 		good(`"a\rb"`, "a\rb"),
 		good(`"a\tb"`, "a\tb"),
 		good(`"a\bb"`, "a\bb"),
 		good(`"a\fb"`, "a\fb"),
 		good(`"a\vb"`, "a\vb"),
+	)
 
+	section(`\0 and decimal escapes`,
 		good(`"\0"`, "\x00"),
 		good(`"\0a"`, "\x00a"),
 		bad(`"\00"`),
@@ -384,17 +432,28 @@ func TestDecodeJSStringLiteral(t *testing.T) {
 		bad(`"\7"`),
 		bad(`"\8"`),
 		bad(`"\9"`),
+	)
 
+	section(`\xHH`,
 		good(`"\x41"`, "A"),
 		good(`"\x3d"`, "="),
 		good(`"\xe9"`, "é"),
 		bad(`"\x4"`),
 		bad(`"\xZZ"`),
+	)
 
-		good(`"A"`, "A"),
-		good(`"/"`, "/"),
+	section(`\uHHHH`,
+		good(`"\u0041"`, "A"),
+		good(`"\u002F"`, "/"),
+		good(`"\u00e9"`, "é"),
+		good(`"a\u0041b"`, "aAb"),
+		good(`"\uD7FF"`, "\uD7FF"), // the last code unit below the surrogate range
+		good(`"\uE000"`, "\uE000"), // the first code unit above it
 		bad(`"\u004"`),
 		bad(`"\u00G1"`),
+	)
+
+	section(`\u{H…}`,
 		good(`"\u{41}"`, "A"),
 		good(`"\u{1F600}"`, "\U0001F600"),
 		good(`"\u{000041}"`, "A"),
@@ -402,23 +461,36 @@ func TestDecodeJSStringLiteral(t *testing.T) {
 		bad(`"\u{110000}"`),
 		bad(`"\u{41"`),
 		bad(`"\u{D800}"`),
-
-		good(`"😀"`, "\U0001F600"),
-		bad(`"\uD83D"`),
-		bad(`"\uD83DA"`),
-		bad(`"\uD83Dabcdefgh"`),
 		bad(`"\u{100000041}"`),
 		bad(`"\u{FFFFFFFFF}"`),
-		bad(`"\uD83Dx"`),
-		bad(`"\uD83DA"`),
-		bad(`"\uDE00"`),
+	)
 
+	section("surrogate pair",
+		good(`"\uD83D\uDE00"`, "\U0001F600"),
+		good(`"\uD800\uDC00"`, "\U00010000"), // the lowest pair
+		good(`"\uDBFF\uDFFF"`, "\U0010FFFF"), // the highest pair
+		good(`"a\uD83D\uDE00b"`, "a\U0001F600b"),
+		bad(`"\uD83D"`),         // a lone high surrogate at the end
+		bad(`"\uD83Dx"`),        // a high surrogate, then a plain character
+		bad(`"\uD83Dabcdefgh"`), // a high surrogate, then six plain characters
+		bad(`"\uD83D\u0041"`),   // a high surrogate, then a \u escape that is not a low one
+		bad(`"\uD83D\uDBFF"`),   // ... just below the low range: another high surrogate
+		bad(`"\uD83D\uE000"`),   // ... just above the low range
+		bad(`"\uD83D\uDE0"`),    // ... a malformed \u escape
+		bad(`"\uD83D\u{DE00}"`), // the low half as \u{…}, which is refused as a surrogate
+		bad(`"\uDE00"`),         // a lone low surrogate
+		bad(`"\uDE00\uD83D"`),   // a pair written in the wrong order
+	)
+
+	section("line continuation",
 		good("\"a\\\nb\"", "ab"),
 		good("\"a\\\r\nb\"", "ab"),
 		good("\"a\\\rb\"", "ab"),
-		good("\"a\\ b\"", "ab"),
-		good("\"a\\ b\"", "ab"),
+		good("\"a\\\u2028b\"", "ab"), // U+2028 LINE SEPARATOR
+		good("\"a\\\u2029b\"", "ab"), // U+2029 PARAGRAPH SEPARATOR
+	)
 
+	section("identity escape",
 		good(`"\/"`, "/"),
 		good(`"\'"`, "'"),
 		good(`'\''`, "'"),
@@ -426,7 +498,9 @@ func TestDecodeJSStringLiteral(t *testing.T) {
 		good(`"\\"`, `\`),
 		good(`"\q"`, "q"),
 		good(`"\é"`, "é"),
+	)
 
+	section("not one literal",
 		bad(``),
 		bad(`"`),
 		bad(`abc`),
@@ -438,9 +512,23 @@ func TestDecodeJSStringLiteral(t *testing.T) {
 		bad(`"abc\"`),
 		bad("\"a\nb\""),
 		bad("\"a\rb\""),
+	)
+	seen := map[string]bool{}
+	for _, tc := range cases {
+		if !escapeClasses[tc.class] && !plainClasses[tc.class] {
+			t.Errorf("row %q is filed under %q, a class neither set declares", tc.src, tc.class)
+		}
+		if seen[tc.src] {
+			t.Errorf("row %q appears twice: one of the two was meant to pin something else", tc.src)
+		}
+		seen[tc.src] = true
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%q", tc.src), func(t *testing.T) {
+			if escapeClasses[tc.class] && !strings.Contains(tc.src, `\`) {
+				t.Fatalf("row %q is filed under %s but carries no backslash: the decoder never sees "+
+					"the escape the row claims to pin, only the text it denotes", tc.src, tc.class)
+			}
 			got, ok := ruleengine.DecodeJSStringLiteral(tc.src)
 			if ok != tc.ok || got != tc.want {
 				t.Errorf("decode(%s) = (%q, %v), want (%q, %v)", tc.src, got, ok, tc.want, tc.ok)

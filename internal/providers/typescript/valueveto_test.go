@@ -218,6 +218,15 @@ func TestTSSEC001ValueVetoReadsTheDecodedValue(t *testing.T) {
 		{`"https://api.example.com/v1/\uD800"`, 1, "a lone surrogate has no UTF-8 form; refused, so it proves nothing"},
 	}
 	for _, tc := range cases {
+		// A row whose reason speaks of an escape must carry a backslash: an
+		// escape decoded before it reached this file leaves only the character it
+		// denotes, and the row then pins plain text under an escape's name.
+		if r := strings.ToLower(tc.reason); (strings.Contains(r, "escape") ||
+			strings.Contains(r, "surrogate") || strings.Contains(r, "continuation")) &&
+			!strings.Contains(tc.lit, `\`) {
+			t.Errorf("row %s speaks of an escape but carries no backslash — it pins plain text", tc.lit)
+			continue
+		}
 		for _, site := range tsSites {
 			t.Run(tc.lit+"/"+site.shape, func(t *testing.T) {
 				requireTSSiteReachesTheGate(t, site)
