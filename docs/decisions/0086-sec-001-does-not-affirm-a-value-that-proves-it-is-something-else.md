@@ -259,3 +259,5 @@ API-key formats) are untouched. Layer 1 never looks at a name, and no value
 shape vetoes it.
 
 2026-11-24: TypeScript now reaches this predicate through the rule-engine operator `metavariable-value-veto`, and the divergence §6 declared is closed — see [ADR 0087](0087-typescript-reaches-the-value-veto-through-a-rule-operator.md).
+
+2026-11-25: The Go provider no longer serves a hand-written copy of this ADR's limits. Its `SEC-001` value-veto limit (`limitValueVeto`) is now one Go-specific sentence followed by `valueshape.DeclaredLimit`, the text the TypeScript manifest already cited, so both providers serve one text. That text replaces the wording of "Still reported" above on one point: a placeholder keeps firing when it does not match the environment-variable-name pattern (an upper-case letter first, at least one underscore, none leading, trailing or doubled). "Not SCREAMING_SNAKE with an underscore" did not explain `__SECRET__`, which has underscores but only leading and trailing ones. All four placeholders (`changeme`, `<token>`, `TODO`, `__SECRET__`) are now pinned through the real provider in both languages.

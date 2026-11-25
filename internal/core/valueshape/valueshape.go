@@ -31,12 +31,12 @@ func Forms() []Form {
 // of restating it by hand. It names no provider: each manifest says who applies
 // the veto and how its literal reaches NotACredential, then appends this.
 //
-// The TypeScript manifest cites it. The Go provider still serves its own copy,
-// limitValueVeto in internal/providers/golang/security.go, which differs in one
-// place: its placeholder sentence says "not SCREAMING_SNAKE with an
-// underscore", which does not explain why __SECRET__ keeps firing. This text
-// states the pattern instead. Every statement here is pinned through the real
-// providers by their valueveto tests.
+// Both providers cite it: the TypeScript manifest (ts.hardcoded-secrets in
+// internal/providers/typescript/coverage.go) and the Go capability
+// (limitValueVeto in internal/providers/golang/security.go). Neither keeps a
+// copy of its own, so there is one text to keep true. Every statement here is
+// pinned through the real providers by their valueveto tests, the four
+// placeholders included.
 const DeclaredLimit = "SEC-001 stays silent when the string literal's own shape proves it is " +
 	"not a credential (ADR 0086, internal/core/valueshape; forms url, urn, env-var-name, " +
 	"file-path): a URL with a scheme and a host, no userinfo, no credential-named query or " +
@@ -76,21 +76,21 @@ var urnPattern = regexp.MustCompile(`(?i)^urn:[a-z0-9][a-z0-9-]{0,31}:\S+$`)
 // real secrets this project has measured — see doc.go.
 var envVarNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$`)
 
-// tokenLikeMinLength is the length threshold isTokenLike anchors on. Each
-// statement below was observed by changing this constant and running this
-// package's tests and the Go provider's:
+// tokenLikeMinLength is the length threshold isTokenLike anchors on. It is
+// pinned to the byte, from both sides, by two rows that sit exactly on the
+// boundary:
 //
-//   - At 15, the VETOED row whose host label `ec2-12-34-56-78` is 15 bytes
-//     fails; at 17, the keeps-firing row whose decoded path segment is a
-//     16-byte base64 token fails. The value is pinned to the byte, from both
-//     sides.
-//   - At 8, three VETOED rows start firing (that host label, the fragment
-//     `section-2`, the decoded path segment `report/q3.pdf`), and seven
-//     declared blind spots stop being vetoed: a 12-byte host label, a 14-byte
-//     hash route, and every token cut by a literal '/', '.', '&' or '=' into
-//     pieces of 8 to 12 bytes.
-//   - At 64, 22 keeps-firing rows are vetoed, among them the Slack webhook
-//     URL, whose secret path segment is 24 bytes.
+//   - Below it: the VETOED row `https://ec2-12-34-56-78.compute-1.amazonaws.com/`
+//     in TestNotACredential_Vetoed, whose longest host label is 15 bytes. At 15
+//     that row starts firing.
+//   - At it: the keeps-firing row `https://img.example.com/s/qL8%2Fz3%2BxW9v%2Fk2N%3D/photo.jpg`
+//     in TestNotACredential_KeepsFiring (and in the Go provider's
+//     TestSEC001ValueVetoKeepsFiring), whose decoded path segment is a
+//     16-byte base64 token. At 17 that row is vetoed.
+//
+// Every other row that depends on the threshold sits further from it, so
+// moving the constant by more than one byte fails more rows; how many depends
+// on the tables, not on this comment, and is not counted here.
 const tokenLikeMinLength = 16
 
 // isTokenLike reports whether s has the shape of an opaque secret embedded in
@@ -300,8 +300,10 @@ var filePathExtensions = map[string]bool{
 //     FormEnvVarName, and no extension fails FormFilePath.
 //   - Placeholders (`YOUR_CLIENT_SECRET`) DO veto here, as an env-var name —
 //     see the census in doc.go for why that is a measured, not a
-//     hypothetical, bucket. A placeholder that is not SCREAMING_SNAKE with an
-//     underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`) does not veto.
+//     hypothetical, bucket. A placeholder that does not match envVarNamePattern
+//     (an upper-case letter first, at least one underscore, none leading,
+//     trailing or doubled) does not veto: `changeme`, `<token>`, `TODO`, and
+//     `__SECRET__`, whose underscores are all leading or trailing.
 //   - A secret made only of uppercase letters, digits and underscores WITH at
 //     least one underscore IS vetoed by FormEnvVarName. That is a declared
 //     limit, not an oversight: an AWS access key ID (no underscore) and

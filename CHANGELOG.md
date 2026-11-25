@@ -108,6 +108,14 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **`codefit-coverage` serves one text for `SEC-001`'s value-veto limits in
+  both languages** (`#148`). The Go entry carried a hand-written copy of the
+  limits, which had drifted from the shared `valueshape.DeclaredLimit` that
+  TypeScript cites: it gave the wrong reason for `__SECRET__` firing. It now
+  serves one Go-specific sentence followed by that same constant. The four
+  placeholders the text promises keep firing (`changeme`, `<token>`, `TODO`,
+  `__SECRET__`) are now all pinned through the real Go provider; before, only
+  two were. No verdict moves: this changes the served text, not what fires.
 - **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
   credential — in TypeScript either** (`#148`). The TypeScript `SEC-001` rule
   now asks the same predicate the Go provider asks

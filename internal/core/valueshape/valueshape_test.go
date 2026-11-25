@@ -1,6 +1,7 @@
 package valueshape
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -390,6 +391,10 @@ func TestNotACredential_DeclaredBlindSpots(t *testing.T) {
 	}
 }
 
+// declaredFormList is the shape DeclaredLimit uses to enumerate its forms:
+// "forms a, b, c" — lowercase names joined by ", ".
+var declaredFormList = regexp.MustCompile(`forms ([a-z-]+(?:, [a-z-]+)*)`)
+
 // TestDeclaredLimitStatesBothDirectionsForEveryForm locks the served limit text
 // a provider manifest cites by reference. It must name every form the
 // predicate vetoes, the decision that owns it, and both costs: what it hides
@@ -399,10 +404,26 @@ func TestDeclaredLimitStatesBothDirectionsForEveryForm(t *testing.T) {
 	if DeclaredLimit == "" {
 		t.Fatal("DeclaredLimit is empty: every manifest that cites it would serve no limit")
 	}
+	// Each form must be named AS ITSELF, in the text's own form list. A plain
+	// substring check is satisfied by prose that merely contains the letters —
+	// "urn" by "a urn: URN", "url" by "a URL" — so a form dropped from the list
+	// would still pass. The list is parsed and compared as a set, both ways.
+	lists := declaredFormList.FindAllStringSubmatch(DeclaredLimit, -1)
+	if len(lists) != 1 {
+		t.Fatalf("DeclaredLimit carries %d form lists (\"forms a, b, …\"), want exactly 1:\n%s", len(lists), DeclaredLimit)
+	}
+	declared := make(map[string]bool)
+	for _, name := range strings.Split(lists[0][1], ", ") {
+		declared[name] = true
+	}
 	for _, form := range Forms() {
-		if !strings.Contains(DeclaredLimit, string(form)) {
-			t.Errorf("DeclaredLimit does not name the form %q", form)
+		if !declared[string(form)] {
+			t.Errorf("DeclaredLimit's form list does not name %q, which NotACredential vetoes: %v", form, declared)
 		}
+		delete(declared, string(form))
+	}
+	for extra := range declared {
+		t.Errorf("DeclaredLimit's form list names %q, which Forms() does not declare", extra)
 	}
 	for _, marker := range []string{"ADR 0086", "internal/core/valueshape", "is not reported at all",
 		"NOT REPORTED", "STILL REPORTED", "16 bytes", "Hunter2024.db", "changeme"} {

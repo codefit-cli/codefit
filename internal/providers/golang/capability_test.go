@@ -88,6 +88,14 @@ func TestCapability_SEC001DeclaresTheValueVeto(t *testing.T) {
 	for extra := range declared {
 		t.Errorf("the value-veto limit's form list names %q, which valueshape does not declare", extra)
 	}
+	// The limit text is the shared constant, cited and not retyped: the Go
+	// provider adds only how its literal reaches the predicate. Checked beside
+	// the form-list parse above, never instead of it: an emptied constant would
+	// satisfy this line alone, and a second hand-written copy beside the
+	// constant would carry a second form list, which declaredForms refuses.
+	if valueshape.DeclaredLimit == "" || !strings.Contains(veto, valueshape.DeclaredLimit) {
+		t.Errorf("the Go value-veto limit does not carry valueshape.DeclaredLimit verbatim:\n%s", veto)
+	}
 	if !slices.Contains(limits, namematch.LimitLowercaseConcatenation) {
 		t.Error("declaring the value veto dropped SEC-001's name-gate limit (ADR 0075)")
 	}

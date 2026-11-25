@@ -107,7 +107,8 @@ func TestTSSEC001ValueVetoIsQuietForEveryFormAtEverySite(t *testing.T) {
 			continue
 		}
 		if got, vetoed := valueshape.NotACredential(value); !vetoed || got != form {
-			t.Fatalf("fixture %q is filed under %q but valueshape says (%q, %v)", value, form, got, vetoed)
+			t.Errorf("fixture %q is filed under %q but valueshape says (%q, %v)", value, form, got, vetoed)
+			continue
 		}
 		for _, site := range tsSites {
 			for quote, lit := range map[string]string{"double": dq(t, value), "single": sq(t, value)} {
@@ -176,10 +177,12 @@ func TestTSSEC001ValueVetoKeepsFiring(t *testing.T) {
 	}
 	for _, tc := range cases {
 		if tc.reason == "" {
-			t.Fatalf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			t.Errorf("negative fixture %q carries no reason — every keeps-firing row must say why", tc.value)
+			continue
 		}
 		if form, vetoed := valueshape.NotACredential(tc.value); vetoed {
-			t.Fatalf("fixture %q is filed as keeps-firing and valueshape vetoes it as %q", tc.value, form)
+			t.Errorf("fixture %q is filed as keeps-firing and valueshape vetoes it as %q", tc.value, form)
+			continue
 		}
 		for _, site := range tsSites {
 			t.Run(tc.value+"/"+site.shape, func(t *testing.T) {
@@ -258,7 +261,8 @@ func TestTSSEC001ValueVetoDeclaredBlindSpots(t *testing.T) {
 	}
 	for _, tc := range cases {
 		if got, vetoed := valueshape.NotACredential(tc.value); !vetoed || got != tc.form {
-			t.Fatalf("fixture %q is filed under %q but valueshape says (%q, %v)", tc.value, tc.form, got, vetoed)
+			t.Errorf("fixture %q is filed under %q but valueshape says (%q, %v)", tc.value, tc.form, got, vetoed)
+			continue
 		}
 		for _, site := range tsSites {
 			t.Run(tc.value+"/"+site.shape, func(t *testing.T) {

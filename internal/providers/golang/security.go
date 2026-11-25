@@ -109,31 +109,17 @@ func hardcodedSecret(name string, value ast.Expr) bool {
 // agents by codefit-coverage through Capability(). It lives beside the code
 // that applies the veto and is cited from capability.go by reference.
 //
-// It states both directions, because both are true of the code below: what the
-// veto hides (a real secret that has one of the four shapes) and what it leaves
-// firing (everything a shape cannot tell apart from a secret).
-const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own shape " +
-	"proves it is not a credential (ADR 0086, internal/core/valueshape; forms url, " +
-	"urn, env-var-name, file-path): a URL with a scheme and a host, no userinfo, no " +
-	"credential-named query or fragment parameter carrying a value, and nothing " +
-	"token-like (16+ bytes with a letter and a digit) in any host label (an IP-literal " +
-	"host is skipped whole, never read as labels), decoded path segment, query key or " +
-	"value, or fragment key or value (each position is split before it is decoded, so " +
-	"an encoded slash, ampersand or equals sign cannot cut a token, and a fragment " +
-	"that is not key=value is read whole); a urn: URN; a SCREAMING_SNAKE name with at " +
-	"least one underscore; a path ending in a known file extension. Such a literal is " +
-	"not reported at all. " +
-	"Declared, not fixed, in both directions. NOT REPORTED although it may be a " +
-	"secret: an all-caps value containing an underscore; a bare file name with a " +
-	"known extension and no separator (Hunter2024.db); and a URL whose embedded " +
-	"token is shorter than 16 bytes, lacks either a letter or a digit, or is cut by " +
-	"the URL's own literal separators (dots between host labels, slashes between " +
-	"path segments, & or = in a query or fragment) into pieces each shorter than 16 " +
-	"bytes. STILL REPORTED " +
-	"although it is often not a secret, because its shape is indistinguishable from " +
-	"one: short test literals, short identifiers, prose, paths without a known " +
-	"extension, header names, placeholders that are not SCREAMING_SNAKE with an " +
-	"underscore (changeme, <token>, TODO, __SECRET__)."
+// It is a Go-specific prefix — which sites apply the veto and what reaches the
+// predicate — followed by valueshape.DeclaredLimit, the one copy of what the
+// veto does and does not see, in both directions, that the TypeScript manifest
+// cites too. Restating that text here by hand is how the two drifted before.
+// The prefix carries no form list of its own: TestCapability_SEC001DeclaresTheValueVeto
+// parses exactly one, the constant's.
+const limitValueVeto = "The Go provider applies the value veto at every site SEC-001 reaches " +
+	"(an assignment, a const or var spec, a composite-literal element keyed by an identifier): the string the " +
+	"literal denotes, escapes decoded by strconv.Unquote, is handed to " +
+	"valueshape.NotACredential, the function TypeScript's metavariable-value-veto calls. " +
+	valueshape.DeclaredLimit
 
 // provesNotACredential reports whether value — the expression the name gate
 // accepted — denotes a string whose shape proves it is not a credential.
@@ -153,9 +139,8 @@ const limitValueVeto = "SEC-001 (go) stays silent when the string literal's own 
 // value veto until this function learns to read them.
 //
 // Every guard lives in internal/core/valueshape, and this function applies
-// none of its own. limitValueVeto, above, restates the guards and their limits
-// in prose, because it is the text codefit-coverage serves to an agent; it is
-// kept in step with valueshape's doc comments by hand.
+// none of its own. limitValueVeto, above, serves their limits to an agent by
+// citing valueshape.DeclaredLimit, so there is no prose here to keep in step.
 func provesNotACredential(value ast.Expr) bool {
 	lit, ok := value.(*ast.BasicLit)
 	if !ok {

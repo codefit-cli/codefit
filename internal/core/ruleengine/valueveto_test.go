@@ -337,6 +337,60 @@ func TestValueVetoRejectsAMetavariableThatCannotHoldALiteral(t *testing.T) {
 	}
 }
 
+// TestValueVetoOnADefaultParameterIsRejectedToday pins a CURRENT behaviour, not
+// a rule of the language: a whole string literal CAN stand as a default
+// parameter value (`function f(p = "lib/a.ts") {}` is valid TypeScript), yet a
+// veto on that spot is refused at compile time.
+//
+// The cause is the parser, not the compile proof's logic. The proof writes a
+// string literal where the metavariable stands and requires the result to
+// parse; the TypeScript grammar this engine embeds reports a string-literal
+// default parameter as a syntax error, in a pattern and in a source file alike,
+// so the proof fails and the rule is rejected. The same pattern without a veto
+// compiles, and matches an identifier default.
+//
+// The rejection fails in the safe direction: a rule author gets a located
+// compile error, never a veto that silently does nothing. It is pinned so that
+// a parser or compile-proof change that starts ACCEPTING this spot is seen and
+// proven to veto there (the accepted table above is where such a row would go),
+// instead of slipping through unexamined. No shipped rule puts a veto here.
+func TestValueVetoOnADefaultParameterIsRejectedToday(t *testing.T) {
+	const pattern = `function $F($P = $V) {}`
+
+	// The cause, observed: the parser flags a string-literal default parameter.
+	src, err := tsParse(`function f(p = "lib/a.ts") {}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !src.HasError() {
+		t.Fatal("the TypeScript parser now accepts a string-literal default parameter; " +
+			"this pin's stated cause is gone, so re-examine whether the veto below still fails to compile, and why")
+	}
+
+	// The control: without the veto the pattern compiles and reaches the spot,
+	// so the rejection below is the veto's alone.
+	plain := ruleengine.Rule{ID: "T-POS", Message: "m", Severity: "high", Dimension: "security", Pattern: pattern}
+	compiled, err := ruleengine.Compile([]ruleengine.Rule{plain}, tsParse)
+	if err != nil {
+		t.Fatalf("control: the pattern without a veto does not compile: %v", err)
+	}
+	if got := vetoMatches(t, compiled, `function f(p = x) {}`); got != 1 {
+		t.Fatalf("control: the pattern without a veto matched an identifier default %d times, want 1", got)
+	}
+
+	_, err = ruleengine.Compile([]ruleengine.Rule{vetoOnly(pattern, "$V")}, tsParse)
+	if err == nil {
+		t.Fatal("Compile now ACCEPTS a veto on a default-parameter value; prove it vetoes there " +
+			"(a row in the accepted table of TestValueVetoRejectsAMetavariableThatCannotHoldALiteral), " +
+			"then retire this pin and the rules/README.md sentence that describes it")
+	}
+	for _, want := range []string{"T-POS", "$V", pattern, "where a string literal", "does not parse"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+}
+
 // TestValueVetoOnlyRule: a rule whose ONLY constraint is the veto compiles and
 // runs. The constraints map is sized from every constraint kind; leaving the
 // veto out of that count would write to a nil map at compile time.

@@ -2112,8 +2112,11 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
   be told apart from one: short test literals (`"s3cr3t"` must fire — a
   credential has no length floor), short identifiers, prose (a passphrase is a
   secret with spaces), paths without a known extension, header names
-  (`X-Api-Key`), and placeholders that are not SCREAMING_SNAKE with an
-  underscore (`changeme`, `<token>`, `TODO`, `__SECRET__`).
+  (`X-Api-Key`), and placeholders that do not match the environment-variable-name
+  pattern — an upper-case letter first, at least one underscore, none leading,
+  trailing or doubled: `changeme`, `<token>`, `TODO`, and `__SECRET__`, whose
+  underscores are all leading or trailing. All four are pinned through the real
+  provider.
 
 Both directions are locked by tests through the real provider
 (`internal/providers/golang/valueveto_test.go`) and served to an agent by
@@ -2121,7 +2124,6 @@ Both directions are locked by tests through the real provider
 all-lowercase-concatenation limit (`internal/providers/golang/capability.go`).
 **TypeScript applies the same veto**, through the rule-engine operator
 `metavariable-value-veto`, with the same limits — see its hardcoded-secrets entry
-above and `internal/providers/typescript/valueveto_test.go`. Its served text adds
-one precision the Go text lacks: `__SECRET__` keeps firing because the
-environment-variable-name pattern needs an upper-case letter first and allows no
-leading, trailing or doubled underscore.
+above and `internal/providers/typescript/valueveto_test.go`. Both providers serve
+ONE text for those limits, `valueshape.DeclaredLimit`, each after a sentence of
+its own saying how its literal reaches the predicate; neither keeps a copy.
