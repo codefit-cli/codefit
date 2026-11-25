@@ -21,6 +21,20 @@ over-fetching). Each isolates one behaviour:
   `array.get`, `cache.get`) that must NOT be enumerated (shape discriminator).
 - `fastify_handler_object.ts` — Fastify options-object form (`{ handler, preHandler }`).
 
+## Parser-form fixtures (`parser_forms/`) — authored here
+Synthetic, one syntactic form per file, never copied from a real project. They
+are the gate for the parser dependency (ADR 0088): each file holds its form on
+line 1 and a hardcoded credential after it, so a test proves the rest of the
+file is still read, not only that the form parses.
+- Valid forms the previous parser (`v0.20.2`) rejected, each in `.ts` and `.tsx`:
+  `typed_arrow_parameter`, `typed_arrow_return_type`, `function_default_literal`,
+  `arrow_default`, `import_type`, `arrow_array_destructured`
+  (`TestParserForms_ValidFormsParseAndKeepTheLaterFinding`).
+- Still a syntax error today (`TestParserForms_StillAnErrorToday`): genuinely
+  broken code (`broken_missing_initializer`, `broken_unclosed_condition`) and the
+  two residual valid forms (`tagged_template_type_arguments` in `.ts` and `.tsx`,
+  `jsx_attribute_bare_ampersand.tsx`).
+
 ## Stress fixtures (safety-cap exit criterion) — real project code
 Real TypeScript from open-source projects, pinned to an exact commit and
 spot-checked as legitimate TS (no network/exec/eval shenanigans):
