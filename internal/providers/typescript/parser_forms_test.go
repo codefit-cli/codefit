@@ -84,6 +84,9 @@ var validForms = []struct {
 		"boundary of residual (c): JSX text starting with `(` parses clean when its opening tag has an attribute"},
 	{"jsx_text_paren_on_own_line", "\n      (optional)\n", tsxOnly, "",
 		"boundary of residual (c): JSX text starting with `(` parses clean on its own line"},
+	{"jsx_text_paren_nested_in_parent", "<div><span>(optional)</span></div>", tsxOnly, "",
+		"boundary of residual (c): the same attribute-less element parses clean when it is nested directly " +
+			"inside another JSX element; only an element standing where an expression stands errors"},
 	// The .tsx forms v0.58.0 rejects and v0.54.0 parses clean are NOT here: three
 	// census files show them, each error 18 to 34 bytes, and none was reduced to a
 	// synthetic fixture. Line-level reduction keeps a structure of more than a
@@ -236,11 +239,13 @@ var stillAnError = []struct {
 			"an array type, with no `await` before the call; the parser leaves an ERROR node instead of a MISSING `!`"},
 	{"jsx_text_leading_paren.tsx", "<span>(optional)</span>", true, false,
 		"residual (c): JSX text that starts with `(` right after an opening tag with no attribute, on the same " +
-			"line. New relative to v0.20.2, which parsed it clean; v0.53.0 and v0.58.0 reject it too. NOT " +
+			"line, in an element that is not nested inside another JSX element or fragment (here after `=>`). " +
+			"New relative to v0.20.2, which parsed it clean; v0.53.0 and v0.58.0 reject it too. NOT " +
 			"local: the ERROR node runs into the start of the next statement, and the finding on the next line is " +
 			"LOST"},
 	{"jsx_text_leading_paren_in_expression.tsx", "<span>(optional)</span>}", true, false,
-		"residual (c) inside a JSX expression container; the ERROR node spans the whole file and the later " +
+		"residual (c) inside a {…} expression container, which is expression position although a parent " +
+			"element surrounds it; the ERROR node spans the whole file and the later " +
 			"finding is LOST"},
 	{"jsx_text_lone_paren.tsx", "<span>(</span>", true, false,
 		"residual (c) with a lone `(` as the text; the ERROR node spans the whole file and the later finding " +

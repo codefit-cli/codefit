@@ -1510,19 +1510,25 @@ exists to prevent — so they get their own answer
   is **new relative to `v0.20.2`**, which parsed it clean (`v0.53.0` rejects it too). `&amp;`, a `&` followed by a
   space, and the same text as a JSX child parse clean.
   (c) in `.tsx` only, JSX text that starts with `(` right after an opening tag with
-  no attribute, on the same line (`<span>(optional)</span>`). Form (c) is **new
+  no attribute, on the same line, when that element is **not nested inside another
+  JSX element or fragment** — where an expression stands: after `return`, `=` or
+  `=>`, in a call argument, or inside a `{…}` container
+  (`return <span>(optional)</span>;`, `<div>{on && <span>(optional)</span>}</div>`).
+  Nested directly inside another element or fragment
+  (`return <div><span>(optional)</span></div>;`) it parses clean. Form (c) is **new
   relative to `v0.20.2`**, which parsed it clean (`v0.53.0` and `v0.58.0` reject it too),
   and it is **not local**: the `ERROR` node runs into the next statement, so on the
-  synthetic fixtures the finding on the next line is **lost**; inside a JSX
-  expression container, or with a lone `(` as the text, the `ERROR` node spans the
-  whole fixture file. The same text after an attribute
-  (`<span className="hint">(optional)</span>`) or on its own line parses clean,
-  pinned as valid rows.
+  synthetic fixtures the finding on the next line is **lost**; inside a `{…}`
+  container, or with a lone `(` as the text, the `ERROR` node spans the whole
+  fixture file. The same text after an attribute
+  (`<span className="hint">(optional)</span>`), on its own line, or nested in a
+  parent element parses clean, pinned as valid rows.
   Forms (a) and (b) are **local**: on the synthetic fixtures the finding on the
   line after the error is still reported. Over the census, compared by identity
   (rule id, file, line), no finding or surface item that `v0.20.2` reported was
-  lost; (a) and (b) are the only forms the census met, and (c) was found
-  afterwards, synthetically, so how often it occurs in real code is not measured.
+  lost. (a) and (b) are the only forms the census met; (c) was found afterwards,
+  synthetically, and 0 of the 614 `.tsx` files of the measured corpus contain its
+  triggering shape (one contains the nested form, which parses clean).
   **Not declared to the agent:** a scan response does not yet say that a file
   parsed with an error, so a residual form inside a file is not visible in it.
 - **SQL-DDL dialect known limits (declared, not silent).** [id: db.sqlddl-dialect-limits] (1) A T-SQL routine

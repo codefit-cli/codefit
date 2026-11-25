@@ -84,8 +84,9 @@ a Next.js route. The delta, +70, is the same.)
 declared in the coverage manifest (`ts.parser-residual-forms`) and pinned row by
 row by `TestParserForms_StillAnErrorToday`; each boundary that parses clean is
 pinned as a valid row. The census met (a) and (b); (c) was found afterwards,
-while reducing other shapes to synthetic fixtures, so how often it occurs in real
-code is not measured.
+while reducing other shapes to synthetic fixtures. Searched for afterwards, 0 of
+the 614 `.tsx` files of the measured corpus contain the shape that triggers (c);
+one contains its nested form, which parses clean.
 
 - **(a) A tagged template whose explicit type argument is an array type**
   (``sql<Row[]>`…` ``), **an object type, alone or inside a tuple**
@@ -104,17 +105,30 @@ code is not measured.
   is the one census file that errors on `v0.54.0` and did not on `v0.20.2`, and
   the identity differential above shows it lost nothing. Local.
 - **(c) In `.tsx`, JSX text that starts with `(` right after an opening tag with
-  no attribute, on the same line** (`<span>(optional)</span>`). New relative to
-  `v0.20.2`, which parsed it clean; `v0.53.0` and `v0.58.0` reject it too. **Not
-  local:** the `ERROR` node runs into the next statement, and on the synthetic
-  fixtures the finding on the next line is lost; inside a JSX expression
-  container, or with a lone `(` as the text, the `ERROR` node spans the whole
-  fixture file. After an attribute (`<span className="hint">(optional)</span>`)
-  or on its own line, the same text parses clean.
+  no attribute, on the same line, when that element is not nested inside another
+  JSX element or fragment** — where an expression stands: after `return`, `=` or
+  `=>`, in a call argument, or inside a `{…}` container
+  (`return <span>(optional)</span>;`, `<div>{on && <span>(optional)</span>}</div>`).
+  Nested directly inside another element or fragment
+  (`return <div><span>(optional)</span></div>;`), the same text parses clean.
+  New relative to `v0.20.2`, which parsed it clean; `v0.53.0` and `v0.58.0`
+  reject it too. **Not local:** the `ERROR` node runs into the next statement,
+  and on the synthetic fixtures the finding on the next line is lost; inside a
+  `{…}` container, or with a lone `(` as the text, the `ERROR` node spans the
+  whole fixture file. After an attribute
+  (`<span className="hint">(optional)</span>`) or on its own line, the same text
+  parses clean.
 
 Form (c) is the one place where `v0.54.0` can lose a finding `v0.20.2` reported.
-The census did not meet it, and `v0.20.2` loses far more (219 files); the
-decision stands, but the cost is declared rather than assumed away.
+No file of the measured corpus triggers it, and `v0.20.2` loses far more (219
+files). The decision stands, under the release condition in the consequences
+below; the cost is declared rather than assumed away.
+
+The measured corpus holds 1,587 unique-content files: 973 `.ts` and 614 `.tsx`.
+Of the `.tsx` files, 83 sit under hidden `.claude/` directories (agent worktree
+copies of the same projects that differ in content, so deduplication by content
+kept them) and 531 outside any hidden directory. Every count in this ADR is over
+all 614.
 
 ### A gate for future bumps: necessary, not sufficient
 
@@ -215,6 +229,11 @@ needed.
   residual form (a) or (b) is audited past the error, one holding form (c) may
   not be, and nothing in the response marks either. That is separate work; this
   decision does not claim it.
+- **Release condition, set by the owner when accepting this decision:** no
+  release is cut from this line until parse-error detection lands (the follow-up
+  work that reports a file whose parse is incomplete), so that in every published
+  version a file holding a residual form is reported as not fully audited. Until
+  then this upgrade lives only on the development line.
 - The environment can now steer the parser more than before. codefit sets none
   of these variables, and an attacker who controls codefit's environment
   already controls more than its parser.

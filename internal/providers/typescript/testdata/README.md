@@ -36,7 +36,8 @@ still read, not only that the form parses.
   - rejected by `v0.43.0`–`v0.53.0`: `jsx_text_equals_sign.tsx`;
   - clean boundaries of the residual: `tagged_template_type_name`,
     `tagged_template_tuple_of_names`, `tagged_template_union` (`.ts` and `.tsx`),
-    `jsx_text_paren_after_attribute.tsx`, `jsx_text_paren_on_own_line.tsx`.
+    `jsx_text_paren_after_attribute.tsx`, `jsx_text_paren_on_own_line.tsx`,
+    `jsx_text_paren_nested_in_parent.tsx`.
 - Still a syntax error today (`TestParserForms_StillAnErrorToday`): genuinely
   broken code (`broken_missing_initializer`, `broken_unclosed_condition`) and the
   residual valid forms — (a) `tagged_template_type_arguments`,
