@@ -55,11 +55,8 @@ from the version bisect that preceded it.
 | slowest single file | 108 ms | 158 ms | 367 ms |
 | stripped release binary, linux/amd64 | 16,363,682 B | 20,844,706 B (+27%) | about +38% |
 
-Both sizes are `go build` with the Makefile's tags and `-s -w`, from an export of
-the tree without `.git`; a build inside the git checkout also stamps VCS data and
-lands a few kilobytes away (20,836,514 B measured once). Both columns build the
-same code, before this change added its coverage-manifest text; the final tree of
-this change, exported the same way, measured 20,848,802 B.
+Both sizes are `go build` with the Makefile's tags and `-s -w`, and both columns
+build the same code, before this change added its coverage-manifest text.
 
 `v0.58.0` was rejected because it turns three `.tsx` files that `v0.54.0`
 parses clean into errors of 19 to 34 bytes, reports the same number of findings
@@ -81,49 +78,90 @@ structural facts. (The bisect counted 421 → 491 surface items: it passed each
 file by its base name, which hides the surface that depends on the path, such as
 a Next.js route. The delta, +70, is the same.)
 
-### The residual: two forms
+### The residual: three forms
 
-`v0.54.0` still parses two forms of valid TypeScript with an error. Both are
-declared in the coverage manifest (`ts.parser-residual-forms`) and pinned by
-`TestParserForms_StillAnErrorToday`:
+`v0.54.0` still parses three forms of valid TypeScript with an error. All are
+declared in the coverage manifest (`ts.parser-residual-forms`) and pinned row by
+row by `TestParserForms_StillAnErrorToday`; each boundary that parses clean is
+pinned as a valid row. The census met (a) and (b); (c) was found afterwards,
+while reducing other shapes to synthetic fixtures, so how often it occurs in real
+code is not measured.
 
-- **(a) A tagged template with explicit type arguments**,
-  ``await sql<[{ id: number }]>`select 1` ``, in `.ts` and `.tsx`. The parser
-  leaves a `MISSING` `!` and a zero-width `ERROR` node. Two census files.
+- **(a) A tagged template whose explicit type argument is an array type**
+  (``sql<Row[]>`…` ``), **an object type, alone or inside a tuple**
+  (``sql<[{ id: number }]>`…` ``), **a generic type** (``sql<Array<Row>>`…` ``)
+  **or two type arguments** (``sql<A, B>`…` ``), in `.ts` and `.tsx`. After
+  `await` the parser leaves a `MISSING` `!` and no `ERROR` node; without `await`,
+  an `ERROR` node. A single type name (`sql<Row>`), a tuple of type names
+  (`sql<[A, B]>`) and a union (`sql<A | B>`) parse clean. The generic-type
+  spelling parsed clean on `v0.20.2`. Two census files. Local: the finding on the
+  next line is still reported.
 - **(b) In `.tsx`, a bare `&` followed by a name, with no closing `;`, inside a
   quoted JSX attribute value** — a query string in an `href`. The parser reads it
-  as an unterminated character reference: a 13-byte error. One census file.
-  `&amp;`, `& b` and the same text as a JSX child parse clean. This form is
-  **new**: `v0.20.2` parsed it clean, so it is the one file that errors on
-  `v0.54.0` and did not on `v0.20.2`; the identity differential above shows it
-  lost nothing.
+  as an unterminated character reference and leaves an `ERROR` node over it, as
+  wide as that text. `&amp;`, `& b` and the same text as a JSX child parse clean.
+  New relative to `v0.20.2`, which parsed it clean (`v0.53.0` rejects it too): it
+  is the one census file that errors on `v0.54.0` and did not on `v0.20.2`, and
+  the identity differential above shows it lost nothing. Local.
+- **(c) In `.tsx`, JSX text that starts with `(` right after an opening tag with
+  no attribute, on the same line** (`<span>(optional)</span>`). New relative to
+  `v0.20.2`, which parsed it clean; `v0.53.0` and `v0.58.0` reject it too. **Not
+  local:** the `ERROR` node runs into the next statement, and on the synthetic
+  fixtures the finding on the next line is lost; inside a JSX expression
+  container, or with a lone `(` as the text, the `ERROR` node spans the whole
+  fixture file. After an attribute (`<span className="hint">(optional)</span>`)
+  or on its own line, the same text parses clean.
 
-Both errors are local: on the synthetic fixtures the finding on the next line is
-still reported, and the root of the tree stays `program`.
+Form (c) is the one place where `v0.54.0` can lose a finding `v0.20.2` reported.
+The census did not meet it, and `v0.20.2` loses far more (219 files); the
+decision stands, but the cost is declared rather than assumed away.
 
-### The gate for every future bump
+### A gate for future bumps: necessary, not sufficient
 
 Upstream behaviour across versions is measured **non-monotonic**: a form fixed
 in one release breaks in a later one. Among the versions bisected,
 `v0.43.1`–`v0.53.0` turn clean `.tsx` files into an error under a `program`
 root, `.tsx` `import()` types break from `v0.22.0` until `v0.47.0`, and `v0.21.0`
-takes 79 to 121 seconds on one 25 KB file. So the version is pinned exactly, and
-a bump is accepted only when the parser-form tests still pass:
+takes 79 to 121 seconds on one 25 KB file. So the version is pinned exactly.
 
-- `TestParserForms_ValidFormsParseAndKeepTheLaterFinding` — one synthetic
-  fixture per census form, in `.ts` and `.tsx`, each with a credential after the
-  form. Each fixture was observed to fail on `v0.20.2` (the form errors and the
-  credential is missing) and to pass on `v0.54.0`.
+The parser-form tests reject a bump that fails a row. Passing them does not
+accept one: they hold only the forms reduced to a synthetic fixture. **Accepting a
+bump also requires re-running the census over real TypeScript projects and
+comparing findings and surface items by identity, as this ADR did; that census is
+not automated in this repository.**
+
+- `TestParserForms_ValidFormsParseAndKeepTheLaterFinding` — one synthetic fixture
+  per form, each with a credential after the form; each row names the versions it
+  was observed to fail on. It catches:
+  - the census forms (typed arrow parameter, return-type arrow, literal default,
+    arrow default, `import("…")` type, array-destructured arrow parameters):
+    observed failing on `v0.20.2`, in `.ts` and `.tsx`;
+  - an `=` in JSX text (`<p>total = gross - tax</p>`), the shape behind the
+    whole-file `.tsx` errors: observed failing, with the later credential lost,
+    on `v0.43.0`, `v0.43.1`, `v0.47.0`, `v0.50.0` and `v0.53.0`;
+  - the clean boundaries of residuals (a) and (c), so a declared residual cannot
+    silently grow.
 - `TestParserForms_StillAnErrorToday` — genuinely broken code (`const x = ;`,
-  `if (x {`) stays an error, and the two residual forms stay errors, each with
-  its reason; a parser that starts accepting a residual form fails it until the
-  manifest is updated.
+  `if (x {`) stays an error, and every residual row stays an error, with whether
+  its later finding is kept pinned in both directions. A version that starts
+  accepting a residual row fails it; that alone does not make the version
+  acceptable.
 - `TestParserForms_ParseTimeCeiling` — every TypeScript fixture under the
   provider's `testdata`, the vendored large real files included, parses within
-  30 seconds. It catches a parser that is slow everywhere. It does **not** catch
-  `v0.21.0`: that version parses the set in about 0.8 s, because its slowdown
-  needs an interaction inside one real file that no synthetic file reproduced,
-  and that file is a foreign project's code, so it is not vendored.
+  30 seconds. It catches a parser that is slow everywhere.
+
+What the tests do **not** catch, measured:
+
+- **`v0.58.0`'s `.tsx` errors.** Three census files that `v0.54.0` parses clean
+  error on `v0.58.0` (18 to 34 bytes). None was reduced to a synthetic fixture:
+  line-level reduction keeps a structure of more than a hundred lines, and
+  renaming its identifiers changes how `v0.54.0` parses it. On `v0.58.0` the
+  tests fail only on the residual (a) rows, because `v0.58.0` accepts them; the
+  reason `v0.58.0` was rejected is pinned nowhere in the test suite, only in this
+  ADR's census.
+- **`v0.21.0`'s slowdown.** That version parses the fixture set in about 1 s;
+  its slowdown needs an interaction inside one real file that no synthetic file
+  reproduced, and that file is a foreign project's code, so it is not vendored.
 
 ### The finding cache
 
@@ -167,14 +205,16 @@ needed.
 
 - Files that used to stop being read are read to the end. A user upgrading
   codefit will see **new** findings and surface items in files that reported
-  nothing past an ordinary line before; nothing that was reported before
-  disappears.
+  nothing past an ordinary line before. Over the census nothing that was reported
+  before disappeared; residual form (c) can hide a finding `v0.20.2` reported, in
+  `.tsx` code the census did not contain.
 - The binary grows by 4,481,024 bytes, about 27%, and the slowest measured parse
   goes from 108 ms to 158 ms, while the census as a whole parses faster. The
   growth is parser runtime code, not grammar data.
 - A scan response does not say that a file parsed with an error. A file holding
-  a residual form is audited past the error, but nothing in the response marks
-  it. That is separate work; this decision does not claim it.
+  residual form (a) or (b) is audited past the error, one holding form (c) may
+  not be, and nothing in the response marks either. That is separate work; this
+  decision does not claim it.
 - The environment can now steer the parser more than before. codefit sets none
   of these variables, and an attacker who controls codefit's environment
   already controls more than its parser.
@@ -183,7 +223,8 @@ needed.
 
 - **Stay on `v0.20.2`.** 219 of 1,587 real files losing everything after an
   ordinary line is the defect itself.
-- **The newest release, `v0.58.0`.** More errors on `.tsx` than `v0.54.0`, the
-  same finding and surface counts, a larger binary and a slower worst case.
+- **The newest release, `v0.58.0`.** More errors on `.tsx` than `v0.54.0` in the
+  census, the same finding and surface counts, a larger binary and a slower worst
+  case. It accepts residual (a) but not (b) or (c).
 - **Recover around the error, or switch parser.** Out of scope for this
   decision; of the 219 files, 217 parse clean after the upgrade without either.

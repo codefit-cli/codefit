@@ -23,17 +23,30 @@ over-fetching). Each isolates one behaviour:
 
 ## Parser-form fixtures (`parser_forms/`) — authored here
 Synthetic, one syntactic form per file, never copied from a real project. They
-are the gate for the parser dependency (ADR 0088): each file holds its form on
-line 1 and a hardcoded credential after it, so a test proves the rest of the
-file is still read, not only that the form parses.
-- Valid forms the previous parser (`v0.20.2`) rejected, each in `.ts` and `.tsx`:
-  `typed_arrow_parameter`, `typed_arrow_return_type`, `function_default_literal`,
-  `arrow_default`, `import_type`, `arrow_array_destructured`
-  (`TestParserForms_ValidFormsParseAndKeepTheLaterFinding`).
+are a gate for the parser dependency (ADR 0088) — necessary, not sufficient:
+they hold only the forms reduced to a fixture, so accepting a bump also needs a
+census over real projects, which is not automated here. Each file holds its form
+and a hardcoded credential after it, so a test proves the rest of the file is
+still read, not only that the form parses.
+- Valid forms (`TestParserForms_ValidFormsParseAndKeepTheLaterFinding`), each row
+  naming the versions it was observed to fail on:
+  - rejected by `v0.20.2`, each in `.ts` and `.tsx`: `typed_arrow_parameter`,
+    `typed_arrow_return_type`, `function_default_literal`, `arrow_default`,
+    `import_type`, `arrow_array_destructured`;
+  - rejected by `v0.43.0`–`v0.53.0`: `jsx_text_equals_sign.tsx`;
+  - clean boundaries of the residual: `tagged_template_type_name`,
+    `tagged_template_tuple_of_names`, `tagged_template_union` (`.ts` and `.tsx`),
+    `jsx_text_paren_after_attribute.tsx`, `jsx_text_paren_on_own_line.tsx`.
 - Still a syntax error today (`TestParserForms_StillAnErrorToday`): genuinely
   broken code (`broken_missing_initializer`, `broken_unclosed_condition`) and the
-  two residual valid forms (`tagged_template_type_arguments` in `.ts` and `.tsx`,
-  `jsx_attribute_bare_ampersand.tsx`).
+  residual valid forms — (a) `tagged_template_type_arguments`,
+  `tagged_template_array_type`, `tagged_template_object_type`,
+  `tagged_template_generic_type`, `tagged_template_two_type_arguments`,
+  `tagged_template_array_type_without_await` (`.ts` and `.tsx`); (b)
+  `jsx_attribute_bare_ampersand.tsx`; (c) `jsx_text_leading_paren.tsx`,
+  `jsx_text_leading_paren_in_expression.tsx`, `jsx_text_lone_paren.tsx`.
+- Not covered by any fixture: the `.tsx` forms `v0.58.0` rejects (not reduced)
+  and the `v0.21.0` slowdown (not reproduced). See ADR 0088.
 
 ## Stress fixtures (safety-cap exit criterion) — real project code
 Real TypeScript from open-source projects, pinned to an exact commit and

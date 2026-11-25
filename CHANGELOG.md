@@ -122,11 +122,14 @@ All notable changes to codefit are documented here. The format is based on
   **Expect new findings** after upgrading, in files that reported nothing past
   an ordinary line before.
 
-  Two forms still parse with a local error and are declared in `COVERAGE.md`
-  (`ts.parser-residual-forms`): a tagged template with explicit type arguments,
-  and, in `.tsx`, a bare `&` followed by a name inside a quoted JSX attribute
-  value (new in `v0.54.0`). A scan response does not yet say that a file parsed
-  with an error.
+  Three forms still parse with an error and are declared in `COVERAGE.md`
+  (`ts.parser-residual-forms`): some tagged templates with explicit type
+  arguments (``sql<Row[]>`…` ``), and, in `.tsx`, a bare `&` followed by a name
+  inside a quoted JSX attribute value, and JSX text that starts with `(` right
+  after an opening tag with no attribute (`<span>(optional)</span>`). The first
+  two are local; the third is not, and can hide the finding that follows it,
+  where `v0.20.2` parsed that text clean. A scan response does not yet say that a
+  file parsed with an error.
 
   Costs, measured: the stripped linux/amd64 binary of the same code grows from
   16,363,682 to 20,844,706 bytes (+27%) with the new parser, and the slowest file of that census parses in 158 ms
@@ -135,7 +138,9 @@ All notable changes to codefit are documented here. The format is based on
   which carries the parser version (pinned by a test). A veto on a default
   parameter value (`function $F($P = $V) {}`) now compiles and vetoes, where the
   old parser made it a compile error (`rules/README.md`). The parser-form tests
-  are the gate for any later bump of this dependency.
+  are a necessary gate for any later bump of this dependency, not a sufficient
+  one: accepting a bump also needs a census over real projects, which is not
+  automated here.
 
 - **A Go string literal made only of quote characters is now reported under a
   credential name** (`#148`). `SEC-001`'s name gate read a literal by trimming
