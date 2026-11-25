@@ -132,7 +132,10 @@ All notable changes to codefit are documented here. The format is based on
   serves one Go-specific sentence followed by that same constant. The four
   placeholders the text promises keep firing (`changeme`, `<token>`, `TODO`,
   `__SECRET__`) are now all pinned through the real Go provider; before, only
-  two were. No verdict moves: this changes the served text, not what fires.
+  two were. The shared text's "not reported" sentence now states the pattern the
+  environment-variable-name form vetoes; it said "an all-caps value containing
+  an underscore", which `__SECRET__`, `A__B` and `ABC_DEF_` contradict — all
+  three fire. No verdict moves: this changes the served text, not what fires.
 - **`const secretFile = "lib/config.ts"` is no longer reported as a hardcoded
   credential — in TypeScript either** (`#148`). The TypeScript `SEC-001` rule
   now asks the same predicate the Go provider asks
@@ -194,7 +197,9 @@ All notable changes to codefit are documented here. The format is based on
   **For a committed baseline:** a `SEC-001` that had been reported on such a
   literal is no longer emitted, so its baseline entry becomes `gone` — stale, not
   wrong — and `codefit-baseline-prune` drops it. Nothing that keeps firing moves.
-  **Declared, not fixed:** an all-caps secret containing an underscore, a bare
+  **Declared, not fixed:** a secret that matches the environment-variable-name
+  pattern (an upper-case letter first, then upper-case letters and digits, at
+  least one underscore, none leading, trailing or doubled), a bare
   file name with a known extension and no separator (`Hunter2024.db`), and a URL
   whose embedded token is shorter than 16 bytes, lacks either a letter or a
   digit, or is cut by the URL's own literal separators into pieces each shorter

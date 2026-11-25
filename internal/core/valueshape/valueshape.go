@@ -47,16 +47,17 @@ const DeclaredLimit = "SEC-001 stays silent when the string literal's own shape 
 	"token, and a fragment that is not key=value is read whole); a urn: URN; a SCREAMING_SNAKE " +
 	"name with at least one underscore; a path ending in a known file extension. Such a " +
 	"literal is not reported at all. " +
-	"Declared, not fixed, in both directions. NOT REPORTED although it may be a secret: an " +
-	"all-caps value containing an underscore; a bare file name with a known extension and no " +
+	"Declared, not fixed, in both directions. NOT REPORTED although it may be a secret: a " +
+	"value that matches the environment-variable-name pattern (an upper-case letter first, " +
+	"then upper-case letters and digits, at least one underscore, none leading, trailing or " +
+	"doubled), whatever it holds; a bare file name with a known extension and no " +
 	"separator (Hunter2024.db); and a URL whose embedded token is shorter than 16 bytes, lacks " +
 	"either a letter or a digit, or is cut by the URL's own literal separators (dots between " +
 	"host labels, slashes between path segments, & or = in a query or fragment) into pieces " +
 	"each shorter than 16 bytes. STILL REPORTED although it is often not a secret, because its " +
 	"shape is indistinguishable from one: short test literals, short identifiers, prose, paths " +
-	"without a known extension, header names, and placeholders that do not match the " +
-	"environment-variable-name pattern (an upper-case letter first, at least one underscore, " +
-	"none leading, trailing or doubled): changeme, <token>, TODO, __SECRET__."
+	"without a known extension, header names, and placeholders that do not match that " +
+	"pattern: changeme, <token>, TODO, __SECRET__."
 
 // urlSchemePattern is the RFC 3986 scheme grammar, checked BEFORE handing the
 // value to url.Parse. url.Parse alone accepts far too much — a bare relative
@@ -304,8 +305,9 @@ var filePathExtensions = map[string]bool{
 //     (an upper-case letter first, at least one underscore, none leading,
 //     trailing or doubled) does not veto: `changeme`, `<token>`, `TODO`, and
 //     `__SECRET__`, whose underscores are all leading or trailing.
-//   - A secret made only of uppercase letters, digits and underscores WITH at
-//     least one underscore IS vetoed by FormEnvVarName. That is a declared
+//   - A secret that matches envVarNamePattern (an upper-case letter first,
+//     then upper-case letters and digits, at least one underscore, none
+//     leading, trailing or doubled) IS vetoed by FormEnvVarName. That is a declared
 //     limit, not an oversight: an AWS access key ID (no underscore) and
 //     `JBSWY3DPEHPK3PXP` (base32, no underscore) both keep firing precisely
 //     because they lack the underscore this guard requires.

@@ -176,6 +176,39 @@ func TestNotACredential_KeepsFiring(t *testing.T) {
 			value:  `CLIENT_SECRET=abc`,
 			reason: "'=' is outside the env-var-name charset — this is a NAME=VALUE pair, not a bare name",
 		},
+		// The placeholders and malformed underscore names DeclaredLimit names
+		// as STILL REPORTED, pinned here at the predicate and not only through
+		// the providers: each misses envVarNamePattern (an upper-case letter
+		// first, then upper-case letters and digits, at least one underscore,
+		// none leading, trailing or doubled) for the reason written beside it.
+		{
+			value:  `__SECRET__`,
+			reason: "all-caps with underscores, but every underscore is leading or trailing: no upper-case letter first",
+		},
+		{
+			value:  `A__B`,
+			reason: "all-caps with an underscore, but the underscore is doubled",
+		},
+		{
+			value:  `ABC_DEF_`,
+			reason: "all-caps with an underscore, but one underscore is trailing",
+		},
+		{
+			value:  `_SECRET`,
+			reason: "all-caps with an underscore, but the underscore is leading: no upper-case letter first",
+		},
+		{
+			value:  `<token>`,
+			reason: "a placeholder in angle brackets: lower case, '<' and '>' fail every guard",
+		},
+		{
+			value:  `changeme`,
+			reason: "a lower-case placeholder with no underscore: fails env-var-name, and no dot fails file-path",
+		},
+		{
+			value:  `TODO`,
+			reason: "an all-caps placeholder with no underscore: env-var-name requires one",
+		},
 		{
 			value:  `Bearer abc123`,
 			reason: "whitespace disqualifies every guard — prose keeps firing",
@@ -434,6 +467,38 @@ func TestDeclaredLimitStatesBothDirectionsForEveryForm(t *testing.T) {
 	for _, provider := range []string{"(go)", "(typescript)"} {
 		if strings.Contains(DeclaredLimit, provider) {
 			t.Errorf("DeclaredLimit names a provider %q; each manifest says who applies it", provider)
+		}
+	}
+	// "an all-caps value containing an underscore" was the NOT REPORTED
+	// wording until 2026-11-25, and it contradicted the STILL REPORTED list:
+	// __SECRET__, A__B and ABC_DEF_ are all-caps with underscores and fire.
+	if strings.Contains(DeclaredLimit, "all-caps value containing an underscore") {
+		t.Errorf("DeclaredLimit still says every all-caps value with an underscore is not reported, "+
+			"which __SECRET__ contradicts:\n%s", DeclaredLimit)
+	}
+}
+
+// stillReportedPlaceholders is the shape DeclaredLimit uses to list the
+// placeholders that keep firing: "do not match that pattern: a, b, c." —
+// names joined by ", ", closed by the sentence's period.
+var stillReportedPlaceholders = regexp.MustCompile(`do not match that pattern: ([^.]+)\.`)
+
+// TestDeclaredLimitPlaceholdersKeepFiring reads the STILL REPORTED placeholder
+// list out of the served text and asks the predicate about each one, so the
+// text cannot name a placeholder the veto in fact silences.
+func TestDeclaredLimitPlaceholdersKeepFiring(t *testing.T) {
+	lists := stillReportedPlaceholders.FindAllStringSubmatch(DeclaredLimit, -1)
+	if len(lists) != 1 {
+		t.Fatalf("DeclaredLimit carries %d placeholder lists (\"do not match that pattern: a, b.\"), want exactly 1:\n%s",
+			len(lists), DeclaredLimit)
+	}
+	names := strings.Split(lists[0][1], ", ")
+	if len(names) < 4 {
+		t.Fatalf("the placeholder list parsed into %d names, want at least 4: %q", len(names), names)
+	}
+	for _, name := range names {
+		if form, vetoed := NotACredential(name); vetoed {
+			t.Errorf("DeclaredLimit says %q is STILL REPORTED, but NotACredential vetoes it as %q", name, form)
 		}
 	}
 }

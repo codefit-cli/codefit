@@ -114,7 +114,10 @@ func hardcodedSecret(name string, value ast.Expr) bool {
 // veto does and does not see, in both directions, that the TypeScript manifest
 // cites too. Restating that text here by hand is how the two drifted before.
 // The prefix carries no form list of its own: TestCapability_SEC001DeclaresTheValueVeto
-// parses exactly one, the constant's.
+// parses exactly one, the constant's. Its SITE list is parsed too, and
+// TestCapability_SEC001ValueVetoPrefixNamesEverySiteTheVetoRunsAt holds it
+// equal to the node types securityChecks dispatches to a secret check, with
+// the veto observed at each of them through the real provider.
 const limitValueVeto = "The Go provider applies the value veto at every site SEC-001 reaches " +
 	"(an assignment, a const or var spec, a composite-literal element keyed by an identifier): the string the " +
 	"literal denotes, escapes decoded by strconv.Unquote, is handed to " +

@@ -1,8 +1,12 @@
 package golang_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,6 +103,195 @@ func TestCapability_SEC001DeclaresTheValueVeto(t *testing.T) {
 	if !slices.Contains(limits, namematch.LimitLowercaseConcatenation) {
 		t.Error("declaring the value veto dropped SEC-001's name-gate limit (ADR 0075)")
 	}
+}
+
+// valueVetoSite is one entry of the site list the Go prefix of the value-veto
+// limit declares: the phrase the served text uses, the go/ast node type
+// security.go dispatches to a secret check for it, and real Go source for every
+// spelling the phrase covers. src takes a name and Go SOURCE for a string
+// literal, quotes included.
+type valueVetoSite struct {
+	phrase  string
+	astType string
+	srcs    map[string]func(name, lit string) string
+}
+
+var valueVetoSites = []valueVetoSite{
+	{
+		phrase:  "an assignment",
+		astType: "AssignStmt",
+		srcs: map[string]func(name, lit string) string{
+			"define": func(name, lit string) string {
+				return "package p\n\nfunc f() { " + name + " := " + lit + "; _ = " + name + " }\n"
+			},
+			// The var spec carries no value, so it never reaches the gate on
+			// its own: the one finding the control expects is the assignment's.
+			"assign": func(name, lit string) string {
+				return "package p\n\nvar " + name + " string\n\nfunc f() { " + name + " = " + lit + " }\n"
+			},
+		},
+	},
+	{
+		phrase:  "a const or var spec",
+		astType: "ValueSpec",
+		srcs: map[string]func(name, lit string) string{
+			"const": func(name, lit string) string { return "package p\n\nconst " + name + " = " + lit + "\n" },
+			"var":   func(name, lit string) string { return "package p\n\nvar " + name + " = " + lit + "\n" },
+		},
+	},
+	{
+		phrase:  "a composite-literal element keyed by an identifier",
+		astType: "KeyValueExpr",
+		srcs: map[string]func(name, lit string) string{
+			"struct field": func(name, lit string) string {
+				return "package p\n\ntype Cfg struct{ " + name + " string }\n\n" +
+					"func f() Cfg { return Cfg{" + name + ": " + lit + "} }\n"
+			},
+		},
+	},
+}
+
+// valueVetoSiteList is the shape the Go prefix uses to enumerate its sites:
+// "at every site SEC-001 reaches (a, b, c)".
+var valueVetoSiteList = regexp.MustCompile(`at every site SEC-001 reaches \(([^()]+)\)`)
+
+// TestCapability_SEC001ValueVetoPrefixNamesEverySiteTheVetoRunsAt pins the
+// Go-specific prefix of the value-veto limit against the code, not against a
+// copy of its text. Three things must agree:
+//
+//  1. the sites SEC-001 reaches, read from security.go's own dispatch (every
+//     case of securityChecks' type switch that calls a checkSecret function);
+//  2. the site list the served prefix declares, parsed as a set;
+//  3. the veto observed at each of those sites, through the real provider:
+//     the same name fires on a value that proves nothing and is silent on one
+//     literal per valueshape.Form.
+//
+// A site added to the code and not to the text, a site dropped from the text,
+// a site the text names where the veto is not shown to apply, or a prefix
+// deleted outright each fail here.
+func TestCapability_SEC001ValueVetoPrefixNamesEverySiteTheVetoRunsAt(t *testing.T) {
+	var veto string
+	for _, l := range golang.New().Capability().Security.Limits {
+		if l.ID == "SEC-001" && strings.Contains(l.Limit, valueshape.DeclaredLimit) {
+			veto = l.Limit
+		}
+	}
+	if valueshape.DeclaredLimit == "" || veto == "" {
+		t.Fatal("no SEC-001 limit carries valueshape.DeclaredLimit")
+	}
+	if !strings.HasSuffix(veto, valueshape.DeclaredLimit) {
+		t.Fatalf("the value-veto limit does not END with valueshape.DeclaredLimit, so its Go prefix cannot be read:\n%s", veto)
+	}
+	prefix := strings.TrimSuffix(veto, valueshape.DeclaredLimit)
+
+	// 1. The code's sites.
+	dispatched := secretCheckDispatch(t)
+	table := make(map[string]bool, len(valueVetoSites))
+	for _, site := range valueVetoSites {
+		table[site.astType] = true
+		if !dispatched[site.astType] {
+			t.Errorf("the test table maps %q to *ast.%s, which securityChecks no longer dispatches to a secret check", site.phrase, site.astType)
+		}
+	}
+	for astType := range dispatched {
+		if !table[astType] {
+			t.Errorf("securityChecks dispatches *ast.%s to a secret check, and no site in the prefix's list stands for it", astType)
+		}
+	}
+
+	// 2. The text's sites.
+	lists := valueVetoSiteList.FindAllStringSubmatch(prefix, -1)
+	if len(lists) != 1 {
+		t.Fatalf("the Go prefix carries %d site lists (\"at every site SEC-001 reaches (a, b)\"), want exactly 1:\n%q", len(lists), prefix)
+	}
+	named := make(map[string]bool)
+	for _, phrase := range strings.Split(lists[0][1], ", ") {
+		named[phrase] = true
+	}
+	for _, site := range valueVetoSites {
+		if !named[site.phrase] {
+			t.Errorf("the Go prefix's site list does not name %q, a site the veto runs at: %q", site.phrase, lists[0][1])
+		}
+		delete(named, site.phrase)
+	}
+	for extra := range named {
+		t.Errorf("the Go prefix's site list names %q, where no test shows the veto applies", extra)
+	}
+
+	// 3. The veto, observed at every spelling of every site.
+	for _, site := range valueVetoSites {
+		for spelling, src := range site.srcs {
+			t.Run(site.astType+"/"+spelling, func(t *testing.T) {
+				if got := sec001Of(t, src(gatedName, strconv.Quote("s3cr3t"))); len(got) != 1 {
+					t.Fatalf("vacuum: %s with a plain short literal emitted %d SEC-001, want 1", spelling, len(got))
+				}
+				for _, form := range valueshape.Forms() {
+					value := vetoedForms[form]
+					if got, ok := valueshape.NotACredential(value); !ok || got != form {
+						t.Fatalf("fixture %q is filed under %q but valueshape says (%q, %v)", value, form, got, ok)
+					}
+					if got := sec001Of(t, src(gatedName, strconv.Quote(value))); len(got) != 0 {
+						t.Errorf("%s: %q proves it is a %s and SEC-001 still fired: %+v", spelling, value, form, got)
+					}
+				}
+			})
+		}
+	}
+}
+
+// secretCheckDispatch reads security.go with go/ast and returns the node types
+// securityChecks dispatches to a function whose name starts with checkSecret.
+// An empty result fails: the comparison would otherwise be made against
+// nothing.
+func secretCheckDispatch(t *testing.T) map[string]bool {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "security.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse security.go: %v", err)
+	}
+	types := make(map[string]bool)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "securityChecks" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			clause, ok := n.(*ast.CaseClause)
+			if !ok {
+				return true
+			}
+			callsSecretCheck := false
+			for _, stmt := range clause.Body {
+				ast.Inspect(stmt, func(m ast.Node) bool {
+					if call, ok := m.(*ast.CallExpr); ok {
+						if id, ok := call.Fun.(*ast.Ident); ok && strings.HasPrefix(id.Name, "checkSecret") {
+							callsSecretCheck = true
+						}
+					}
+					return true
+				})
+			}
+			if !callsSecretCheck {
+				return true
+			}
+			for _, expr := range clause.List {
+				star, ok := expr.(*ast.StarExpr)
+				if !ok {
+					t.Fatalf("securityChecks has a secret-check case on a non-pointer type %T", expr)
+				}
+				sel, ok := star.X.(*ast.SelectorExpr)
+				if !ok {
+					t.Fatalf("securityChecks has a secret-check case on an unexpected type %T", star.X)
+				}
+				types[sel.Sel.Name] = true
+			}
+			return true
+		})
+	}
+	if len(types) == 0 {
+		t.Fatal("found no case of securityChecks that calls a checkSecret function; the probe reads nothing")
+	}
+	return types
 }
 
 // declaredFormList is the shape the value-veto limit uses to enumerate its

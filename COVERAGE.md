@@ -2077,8 +2077,8 @@ by name component through the shared `namematch` vocabulary
 is bound to a non-empty string literal, in an assignment, a `const`/`var`
 declaration, or a composite-literal field. "Non-empty" is judged on the string
 the literal denotes (escapes decoded once, by `strconv.Unquote`), the same string
-the value veto reads: a raw literal made only of double quotes, or one made only
-of backticks, is non-empty and fires. It then asks whether the **value**
+the value veto reads: a raw literal made only of double quotes, or an interpreted
+literal made only of backticks, is non-empty and fires. It then asks whether the **value**
 proves it is something else, and stays silent when it does
 ([ADR 0086](docs/decisions/0086-sec-001-does-not-affirm-a-value-that-proves-it-is-something-else.md)):
 `const secretFile = "lib/config.ts"` used to be affirmed as a hardcoded
@@ -2104,8 +2104,10 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
 
 **Known limits of the veto, declared in both directions.**
 
-- *Not reported, although it may be a secret:* an all-caps value containing an
-  underscore (it has the shape of an environment-variable name); a bare file
+- *Not reported, although it may be a secret:* a value that matches the
+  environment-variable-name pattern — an upper-case letter first, then upper-case
+  letters and digits, at least one underscore, none leading, trailing or doubled —
+  whatever it holds (it has the shape of an environment-variable name); a bare file
   name with a known extension and no separator, such as `Hunter2024.db` (it has
   the shape of a file name); and a URL whose embedded token is shorter than 16
   bytes, lacks either a letter or a digit, or is cut by the URL's own literal
@@ -2115,11 +2117,9 @@ confidence, and no surface item. Whatever still fires does so exactly as before.
   be told apart from one: short test literals (`"s3cr3t"` must fire — a
   credential has no length floor), short identifiers, prose (a passphrase is a
   secret with spaces), paths without a known extension, header names
-  (`X-Api-Key`), and placeholders that do not match the environment-variable-name
-  pattern — an upper-case letter first, at least one underscore, none leading,
-  trailing or doubled: `changeme`, `<token>`, `TODO`, and `__SECRET__`, whose
-  underscores are all leading or trailing. All four are pinned through the real
-  provider.
+  (`X-Api-Key`), and placeholders that do not match that pattern: `changeme`,
+  `<token>`, `TODO`, and `__SECRET__`, whose underscores are all leading or
+  trailing. All four are pinned through the real provider.
 
 Both directions are locked by tests through the real provider
 (`internal/providers/golang/valueveto_test.go`) and served to an agent by
