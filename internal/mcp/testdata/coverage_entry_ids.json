@@ -267,6 +267,10 @@
       "status": "not_covered"
     },
     {
+      "id": "ts.parser-residual-forms",
+      "status": "not_covered"
+    },
+    {
       "id": "db.index-vs-query-residual-gap",
       "status": "not_covered"
     },

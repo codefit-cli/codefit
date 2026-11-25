@@ -1483,6 +1483,32 @@ exists to prevent — so they get their own answer
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
+- **Parser residual: two valid forms still parse with a syntax error.** [id: ts.parser-residual-forms]
+  The TypeScript/TSX parser is gotreesitter `v0.54.0`
+  ([ADR 0088](docs/decisions/0088-the-typescript-parser-moves-to-gotreesitter-v0-54-0.md)).
+  In a census of 1,587 real TypeScript files it left **3** files parsing with an
+  error, against **219** on the previous parser (`v0.20.2`), where an ordinary
+  typed arrow parameter, a literal default parameter, an `import("…")` type or an
+  array-destructured arrow parameter turned the whole file into an error and every
+  finding and surface item after it was lost (issue `#189`). Those forms parse
+  clean now, pinned in `.ts` and `.tsx` by
+  `TestParserForms_ValidFormsParseAndKeepTheLaterFinding`. **Still a syntax
+  error**, pinned by
+  `TestParserForms_StillAnErrorToday`:
+  (a) a tagged template with explicit type arguments
+  (``await sql<[{ id: number }]>`select 1` ``), in `.ts` and `.tsx` — the parser
+  leaves a `MISSING` `!` and a zero-width `ERROR` node;
+  (b) in `.tsx` only, a bare `&` followed by a name with no closing `;` inside a
+  quoted JSX attribute value, as in a query string
+  (`href="/css?family=A&display=swap"`) — read as an unterminated character
+  reference, a 13-byte error. Form (b) is **new in `v0.54.0`**: `v0.20.2` parsed it
+  clean. `&amp;`, a `&` followed by a space, and the same text as a JSX child parse
+  clean. In both forms the error is **local**: on the synthetic fixtures the
+  finding on the line after the error is still reported, and over the census,
+  compared by identity (rule id, file, line), no finding or surface item that
+  `v0.20.2` reported was lost. **Not declared to the agent:** a scan response does
+  not yet say that a file parsed with an error, so a residual form inside a file is
+  not visible in it.
 - **SQL-DDL dialect known limits (declared, not silent).** [id: db.sqlddl-dialect-limits] (1) A T-SQL routine
   body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
   fragment inside a `GO`-batched procedure/trigger body is **absorbed into the
