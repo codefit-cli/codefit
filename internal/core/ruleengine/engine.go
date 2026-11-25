@@ -21,8 +21,9 @@ type CompiledRule struct {
 	either  []syntax.Node // `pattern-either` (OR of base patterns)
 	not     syntax.Node   // `pattern-not` (exclusion)
 	inside  syntax.Node   // `pattern-inside` (the match must be within this)
-	// constraints are the per-metavariable gates from metavariable-regex and
-	// metavariable-name, merged. See [metavarname] in matcher.go.
+	// constraints are the per-metavariable gates from metavariable-regex,
+	// metavariable-name and metavariable-value-veto, merged. See [metavarname]
+	// in matcher.go and [valueveto] in valueveto.go.
 	constraints constraints
 }
 
@@ -66,7 +67,7 @@ func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]Compi
 			}
 			cr.inside = node
 		}
-		if n := len(r.MetavariableRegex) + len(r.MetavariableName); n > 0 {
+		if n := len(r.MetavariableRegex) + len(r.MetavariableName) + len(r.MetavariableValueVeto); n > 0 {
 			cr.constraints = make(constraints, n)
 		}
 		for mv, expr := range r.MetavariableRegex {
@@ -89,6 +90,9 @@ func Compile(rules []Rule, parse func(src string) (syntax.Node, error)) ([]Compi
 			c := cr.constraints[mv]
 			c.set = build()
 			cr.constraints[mv] = c
+		}
+		if err := compileValueVetoes(r, cr.bases(), cr.constraints, parse); err != nil {
+			return nil, err
 		}
 		out = append(out, cr)
 	}
@@ -190,7 +194,9 @@ func containedInAny(node syntax.Node, ranges [][2]int) bool {
 
 // evalRule reports whether a rule matches at node, returning the bindings. The
 // base match is `pattern` or, if set, any of `pattern-either` (OR). The match is
-// then filtered by `pattern-not` (exclusion) and `metavariable-regex`.
+// then filtered by `pattern-not` (exclusion) and by the metavariable
+// constraints (regex, name, value veto), which [matchNode] already consulted
+// while binding.
 func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 	binds, ok := baseMatch(cr, node)
 	if !ok {
@@ -210,6 +216,15 @@ func evalRule(cr CompiledRule, node syntax.Node) (map[string]string, bool) {
 		}
 	}
 	return binds, true
+}
+
+// bases returns the compiled base alternatives in the order [baseMatch] tries
+// them: the single `pattern`, or every `pattern-either` member.
+func (cr CompiledRule) bases() []syntax.Node {
+	if cr.pattern != nil {
+		return []syntax.Node{cr.pattern}
+	}
+	return cr.either
 }
 
 // baseMatch matches the rule's base pattern (or any pattern-either alternative).

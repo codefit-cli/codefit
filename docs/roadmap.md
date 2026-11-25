@@ -754,6 +754,15 @@ On codefit's own tree that is 24 SEC-001 going to 23, with no other census entry
 **TypeScript does not apply the veto yet**: the same line still fires there. That divergence is
 declared in `COVERAGE.md` and stays open until the TypeScript rule reaches the same predicate.
 
+**2026-11-24 — the VALUE half, closed for TypeScript too (issue `#148`).** The TypeScript
+`SEC-001` rule now reaches the same predicate through a rule-engine operator,
+`metavariable-value-veto`, which decodes the bound literal as JavaScript before asking
+`valueshape.NotACredential`
+([ADR 0087](decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md)). The
+divergence the paragraph above declared is gone: `const secretFile = "lib/config.ts"` is silent in
+both providers. Left for the rest of `#148`: the verdict-by-verdict parity table for the value axis,
+and the escape-grammar differences between a Go and a JavaScript literal that ADR 0087 lists.
+
 ### P0-15 — a not-measured `codefit-scan-db` response emits five zeros that read like measurements — [issue #151](https://github.com/codefit-cli/codefit/issues/151)
 
 P0-11's first follow-up, grown. A response that correctly says `"measured": false` still

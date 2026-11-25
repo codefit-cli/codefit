@@ -22,9 +22,14 @@ rules/
 
 Supported operators (core subset): `pattern`, `pattern-either`, `pattern-not`,
 `pattern-inside`, metavariables (`$VAR`), `metavariable-regex`,
-`metavariable-name`. **No `mode:
+`metavariable-name`, `metavariable-value-veto`. **No `mode:
 taint`** / `pattern-sources`/`sinks`/`sanitizers` — that role is covered by the
 agent reasoning over mapped surface.
+
+**An unknown key is a load error.** The loader decodes rule files strictly, at
+every level: a misspelled operator such as `metavariable-regx:` fails the load
+naming the file, the line and the key. It used to be skipped in silence, and the
+rule simply lost the constraint it was written to carry.
 
 ### `metavariable-name`: match an identifier by name COMPONENT
 
@@ -57,6 +62,51 @@ nothing would tell nobody. Adding a vocabulary means adding it to
 **It composes.** A metavariable may carry a name constraint and a regex at once;
 both must hold. And like `metavariable-regex`, it is consulted at bind time, so
 it steers the object-subset search rather than filtering its first answer.
+
+### `metavariable-value-veto`: drop a match whose value proves it is something else
+
+Also codefit's own, and it exists for the same reason `metavariable-name` does:
+the question cannot be asked in a regex.
+
+```yaml
+metavariable-value-veto:
+  $VALUE: not-a-credential
+```
+
+The match is **dropped** when the source text bound to `$VALUE` is one
+JavaScript string literal whose decoded value the named predicate rejects.
+`not-a-credential` is `valueshape.NotACredential` (`internal/core/valueshape`),
+the same function the Go provider calls: a URL with no secret in it, a URN, an
+environment-variable name, a path ending in a known file extension (ADR 0086).
+
+- **The literal is decoded first, as JavaScript.** Single and double quotes,
+  `\n` and the other single-letter escapes, `\0`, `\xHH`, `\uHHHH` (surrogate
+  pairs joined), `\u{…}`, line continuations and identity escapes such as `\/`.
+  Decoding is not cosmetic: `"…?api_key\x3dabc"` denotes a URL carrying
+  `api_key=abc`, and reading the characters between the quotes would see a
+  parameter with no value and veto a credential.
+- **What does not decode proves nothing, and the match is kept.** A
+  concatenation (`"a" + "b"`), a legacy octal escape (`\1`), a lone surrogate, a
+  malformed escape. Every failure falls toward "keeps firing".
+- **It runs at bind time,** like the other two metavariable constraints, so it
+  steers the object search: in `{secretFile: "lib/config.ts", apiKey: "s3cr3t"}`
+  the first pair is rejected while it is being bound, and the search reaches the
+  credential behind it. A filter after the match would have dropped the object.
+- **It is checked at compile time.** An unknown predicate, a key that is not a
+  metavariable, a metavariable that some base alternative never binds (the
+  `...$REST` marker included), and a metavariable that stands where a whole
+  string literal cannot are compile errors. A constraint on a metavariable that
+  is never bound rejects every match, so that alternative would go silent. And a
+  metavariable written inside a string pattern — `f("$V")` — binds the string's
+  contents without their quotes, which never decode, so the veto would never
+  fire; the same holds inside a template or a regex, and a shorthand property, a
+  member name or a declaration name never holds a string. Put the metavariable
+  where the whole literal goes: `f($V)`.
+- **The predicates are a closed set** — today only `not-a-credential`. Adding
+  one means adding it to `valueVetoes` in
+  `internal/core/ruleengine/valueveto.go`. Full semantics in `[valueveto]`
+  there, and the decision in
+  [ADR 0087](../docs/decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md).
 
 ### The one ellipsis: object properties, spelled `...$REST`
 
@@ -133,7 +183,8 @@ rules:
     pattern-either:           # one of: pattern | pattern-either
       - "md5($X)"
       - "sha1($X)"
-    # optional conditions: pattern-not, pattern-inside, metavariable-regex
+    # optional conditions: pattern-not, pattern-inside, metavariable-regex,
+    # metavariable-name, metavariable-value-veto
 ```
 
 Severity is the rule's *natural* severity; the sensor adjusts it by

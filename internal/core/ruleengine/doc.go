@@ -10,7 +10,15 @@
 // is NOT embedded, which would break the single, CGO-free binary.
 //
 // Supported operators (the core subset): pattern, pattern-either, pattern-not,
-// pattern-inside, metavariables ($VAR), metavariable-regex. The `patterns` (AND)
+// pattern-inside, metavariables ($VAR), metavariable-regex, plus two of
+// codefit's own that Semgrep does not have: metavariable-name (match an
+// identifier by name component against a closed vocabulary — see [metavarname]
+// in matcher.go) and metavariable-value-veto (drop a match whose bound string
+// literal proves, by its own shape, that it is something else — see [valueveto]
+// in valueveto.go). Object patterns also accept one scoped ellipsis, spelled
+// `...$REST` (see [objectsubset] in matcher.go). The YAML loader rejects any key
+// it does not know, so a misspelled operator fails the load instead of being
+// dropped. The `patterns` (AND)
 // operator is DECLARED in the Rule shape but compiled by nothing — a rule using
 // it alongside `pattern` loads and silently drops the conjunction. Listed here
 // as absent rather than supported, so the doc stops promising it (found while

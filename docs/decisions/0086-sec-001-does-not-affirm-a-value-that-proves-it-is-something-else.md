@@ -257,3 +257,5 @@ noise: they are what the rule is for.
 The name gate, its vocabulary and layer 1 (the regex over raw text for known
 API-key formats) are untouched. Layer 1 never looks at a name, and no value
 shape vetoes it.
+
+2026-11-24: TypeScript now reaches this predicate through the rule-engine operator `metavariable-value-veto`, and the divergence §6 declared is closed — see [ADR 0087](0087-typescript-reaches-the-value-veto-through-a-rule-operator.md).

@@ -1,6 +1,9 @@
 package valueshape
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestForms locks the exhaustive list: every const exactly once, in the
 // declared order.
@@ -384,5 +387,32 @@ func TestNotACredential_DeclaredBlindSpots(t *testing.T) {
 					tc.value, form, ok, tc.form, tc.limit)
 			}
 		})
+	}
+}
+
+// TestDeclaredLimitStatesBothDirectionsForEveryForm locks the served limit text
+// a provider manifest cites by reference. It must name every form the
+// predicate vetoes, the decision that owns it, and both costs: what it hides
+// and what it leaves firing. It names no provider, because more than one
+// provider cites it.
+func TestDeclaredLimitStatesBothDirectionsForEveryForm(t *testing.T) {
+	if DeclaredLimit == "" {
+		t.Fatal("DeclaredLimit is empty: every manifest that cites it would serve no limit")
+	}
+	for _, form := range Forms() {
+		if !strings.Contains(DeclaredLimit, string(form)) {
+			t.Errorf("DeclaredLimit does not name the form %q", form)
+		}
+	}
+	for _, marker := range []string{"ADR 0086", "internal/core/valueshape", "is not reported at all",
+		"NOT REPORTED", "STILL REPORTED", "16 bytes", "Hunter2024.db", "changeme"} {
+		if !strings.Contains(DeclaredLimit, marker) {
+			t.Errorf("DeclaredLimit is missing %q:\n%s", marker, DeclaredLimit)
+		}
+	}
+	for _, provider := range []string{"(go)", "(typescript)"} {
+		if strings.Contains(DeclaredLimit, provider) {
+			t.Errorf("DeclaredLimit names a provider %q; each manifest says who applies it", provider)
+		}
 	}
 }

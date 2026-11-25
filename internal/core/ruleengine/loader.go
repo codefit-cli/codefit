@@ -1,9 +1,13 @@
 package ruleengine
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -19,6 +23,9 @@ import (
 // rule fails with an error naming the file (and the rule id when known), so a
 // broken rule can never enter the engine silently — a silent rule is a silent
 // vulnerability.
+//
+// Decoding is strict too: an unknown key is an error, not a key to skip. See
+// [decodeRuleFile] for why.
 func LoadFS(fsys fs.FS, dir string) ([]Rule, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -42,13 +49,11 @@ func LoadFS(fsys fs.FS, dir string) ([]Rule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", name, err)
 		}
-		var doc struct {
-			Rules []Rule `yaml:"rules"`
-		}
-		if err := yaml.Unmarshal(data, &doc); err != nil {
+		fileRules, err := decodeRuleFile(data)
+		if err != nil {
 			return nil, fmt.Errorf("%s: parsing YAML: %w", name, err)
 		}
-		for _, r := range doc.Rules {
+		for _, r := range fileRules {
 			if err := validateRule(r); err != nil {
 				return nil, fmt.Errorf("%s: %w", name, err)
 			}
@@ -56,6 +61,58 @@ func LoadFS(fsys fs.FS, dir string) ([]Rule, error) {
 		}
 	}
 	return out, nil
+}
+
+// decodeRuleFile decodes one rule file with unknown keys REJECTED.
+//
+// The lenient yaml.Unmarshal this replaced skipped any key that [Rule] does not
+// declare, so a misspelled operator — `metavariable-regx:`, or
+// `metavariable-valu-veto:` — loaded cleanly and the rule silently lost the
+// constraint it was written to carry. For a constraint that narrows a match
+// that is a rule firing on what it was told to skip; for a veto it is the veto
+// quietly switched off. Neither is visible anywhere, which is the one failure
+// this loader exists to prevent.
+//
+// An empty file is not an error and declares no rules: a streaming decoder
+// reports empty input as io.EOF, which yaml.Unmarshal used to absorb. Only the
+// first YAML document is read, as before.
+func decodeRuleFile(data []byte) ([]Rule, error) {
+	var doc struct {
+		Rules []Rule `yaml:"rules"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		if hasUnknownKey(err) {
+			return nil, fmt.Errorf("a key the loader does not know is rejected, so a misspelled "+
+				"operator cannot be dropped in silence: %w", err)
+		}
+		return nil, err
+	}
+	return doc.Rules, nil
+}
+
+// hasUnknownKey reports whether err is a yaml.TypeError listing at least one
+// unknown field. The same error type also carries duplicate keys and values of
+// the wrong type, which are different mistakes and must not be explained as a
+// misspelled key. yaml.v3 exposes no structured field for the cause, so the
+// message it writes for an unknown field ("field X not found in type T") is
+// what is read; if that wording ever changes, the explanation is dropped and
+// the error itself still names the file, the line and the key.
+func hasUnknownKey(err error) bool {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return false
+	}
+	for _, msg := range typeErr.Errors {
+		if strings.Contains(msg, " not found in type ") {
+			return true
+		}
+	}
+	return false
 }
 
 var validSeverity = map[findings.Severity]bool{

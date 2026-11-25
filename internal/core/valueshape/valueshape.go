@@ -26,6 +26,38 @@ func Forms() []Form {
 	return []Form{FormURL, FormURN, FormEnvVarName, FormFilePath}
 }
 
+// DeclaredLimit is the served text of what the value veto does and does not
+// see, in both directions, for a provider manifest to cite BY REFERENCE instead
+// of restating it by hand. It names no provider: each manifest says who applies
+// the veto and how its literal reaches NotACredential, then appends this.
+//
+// The TypeScript manifest cites it. The Go provider still serves its own copy,
+// limitValueVeto in internal/providers/golang/security.go, which differs in one
+// place: its placeholder sentence says "not SCREAMING_SNAKE with an
+// underscore", which does not explain why __SECRET__ keeps firing. This text
+// states the pattern instead. Every statement here is pinned through the real
+// providers by their valueveto tests.
+const DeclaredLimit = "SEC-001 stays silent when the string literal's own shape proves it is " +
+	"not a credential (ADR 0086, internal/core/valueshape; forms url, urn, env-var-name, " +
+	"file-path): a URL with a scheme and a host, no userinfo, no credential-named query or " +
+	"fragment parameter carrying a value, and nothing token-like (16+ bytes with a letter and " +
+	"a digit) in any host label (an IP-literal host is skipped whole, never read as labels), " +
+	"decoded path segment, query key or value, or fragment key or value (each position is " +
+	"split before it is decoded, so an encoded slash, ampersand or equals sign cannot cut a " +
+	"token, and a fragment that is not key=value is read whole); a urn: URN; a SCREAMING_SNAKE " +
+	"name with at least one underscore; a path ending in a known file extension. Such a " +
+	"literal is not reported at all. " +
+	"Declared, not fixed, in both directions. NOT REPORTED although it may be a secret: an " +
+	"all-caps value containing an underscore; a bare file name with a known extension and no " +
+	"separator (Hunter2024.db); and a URL whose embedded token is shorter than 16 bytes, lacks " +
+	"either a letter or a digit, or is cut by the URL's own literal separators (dots between " +
+	"host labels, slashes between path segments, & or = in a query or fragment) into pieces " +
+	"each shorter than 16 bytes. STILL REPORTED although it is often not a secret, because its " +
+	"shape is indistinguishable from one: short test literals, short identifiers, prose, paths " +
+	"without a known extension, header names, and placeholders that do not match the " +
+	"environment-variable-name pattern (an upper-case letter first, at least one underscore, " +
+	"none leading, trailing or doubled): changeme, <token>, TODO, __SECRET__."
+
 // urlSchemePattern is the RFC 3986 scheme grammar, checked BEFORE handing the
 // value to url.Parse. url.Parse alone accepts far too much — a bare relative
 // path such as "lib/config.ts" parses without error and with no scheme — so
