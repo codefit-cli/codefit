@@ -124,11 +124,16 @@ is pinned byte for byte against values produced by the pre-change code (`main@22
   non-empty full-scan note as an error must read it instead.
 - A pass that analyses no file now reports `parse_status_reported: false` (it was `true` in
   the sensor result, which no response carried).
-- **The skill `codefit init` generates is not updated by this change.** The repository
-  commits its rendered copy (`.claude/skills/codefit/SKILL.md`), locked by
-  `TestCommittedSkillMatchesRenderedSkill`, and that file was outside this change's authorized
-  edit surface. Until the skill is updated, an agent learns the fields from the tool
-  descriptions only.
+- The skill `codefit init` generates gains a "Files not parsed whole" section: what
+  `parse_incomplete`, `parse_status_note`, `parse_status_reported` and
+  `parser_settings_overridden` mean, that an empty list with `parse_status_reported: false`
+  means nothing was checked, and that from the listed line on a missing finding is not evidence
+  of a clean file. `TestSkillTeachesTheRealParseStatusFields` holds it to the JSON tags
+  reflected from `ParseStatusBlock` and to the core's reason constants; the repository's
+  committed render (`.claude/skills/codefit/SKILL.md`) was regenerated with `codefit init` built
+  from this change, and `TestCommittedSkillMatchesRenderedSkill` holds it to the template. The
+  section names `codefit-scan-all` and `codefit-scan-endpoint`, not `codefit-scan-security`,
+  which the skill deliberately leaves to scan-all.
 
 ## Not covered, declared
 

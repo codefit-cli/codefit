@@ -15,6 +15,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/mcp"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	"github.com/codefit-cli/codefit/internal/scaffold"
 )
 
 // These tests drive the REAL handlers over the REAL security sensor and the REAL
@@ -569,6 +570,40 @@ func TestToolDescriptionsNameRealParseFields(t *testing.T) {
 		if !strings.Contains(desc[tool], "`parse_incomplete`") ||
 			!strings.Contains(desc[tool], "do not check whether each file was parsed whole") {
 			t.Errorf("%s's description does not declare that it does not check the parse status: %q", tool, desc[tool])
+		}
+	}
+}
+
+// TestSkillTeachesTheRealParseStatusFields (S14): the skill `codefit init`
+// generates names the parse-status fields by the JSON names the responses
+// really carry — reflected from ParseStatusBlock, never retyped — and the reasons
+// by the core's own constants, for every language whose skill teaches the scan
+// tools. Renaming a tag, or dropping the skill's paragraph, fails here; the
+// committed render is held to the template by TestCommittedSkillMatchesRenderedSkill.
+func TestSkillTeachesTheRealParseStatusFields(t *testing.T) {
+	tags := jsonTags(reflect.TypeOf(mcp.ParseStatusBlock{}))
+	if len(tags) != 4 {
+		t.Fatalf("positive control: ParseStatusBlock has %d JSON fields (%v), want 4", len(tags), tags)
+	}
+	reasons := []string{
+		findings.ParseReasonStoppedPrefix + "<reason>", findings.ParseReasonErrorRoot,
+		findings.ParseReasonErrorNode, findings.ParseReasonMissingNode, findings.ParseReasonErrorFlag,
+	}
+	for _, lang := range []string{"typescript", "go"} {
+		skill, err := scaffold.RenderSkill(scaffold.ProjectInfo{Name: "x", Language: lang})
+		if err != nil {
+			t.Fatalf("RenderSkill(%s): %v", lang, err)
+		}
+		body := string(skill)
+		for _, want := range append(append([]string{}, tags...), reasons...) {
+			if !strings.Contains(body, "`"+want+"`") {
+				t.Errorf("%s: the skill does not name `%s`", lang, want)
+			}
+		}
+		for _, phrase := range []string{"`parse_status_reported: false`", "a missing finding is not evidence of a clean file"} {
+			if !strings.Contains(body, phrase) {
+				t.Errorf("%s: the skill does not say %q", lang, phrase)
+			}
 		}
 	}
 }

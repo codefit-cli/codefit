@@ -174,8 +174,9 @@ All notable changes to codefit are documented here. The format is based on
   `GOTREESITTER_` and `GTS_` variables set in the codefit process, never their
   values, because a non-default parser setting can make broken code read as
   whole. The always-present fields add 51 bytes to a measured `scan-all`
-  response with nothing listed. The tool descriptions teach the fields; the
-  skill `codefit init` generates does not mention them yet.
+  response with nothing listed. The tool descriptions and the skill `codefit init`
+  generates (a new "Files not parsed whole" section) teach the fields; re-run
+  `codefit init` to refresh a skill placed by an earlier version.
 
   Fixed along the way: the cache key did not cover the environment variables
   the parser reads at run time. A scan run once with
