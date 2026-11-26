@@ -13,6 +13,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/config"
 	auditctx "github.com/codefit-cli/codefit/internal/core/context"
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/scope"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/golang"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
@@ -640,5 +641,40 @@ func TestCountingProviderForwardsTheSettingsFingerprint(t *testing.T) {
 	want := typescript.New().SettingsFingerprint()
 	if got := sf.SettingsFingerprint(); want == "" || got != want {
 		t.Errorf("wrapper fingerprint %q, provider fingerprint %q — want equal and non-empty", got, want)
+	}
+}
+
+// TestParseStatus_NoAnalysedFileIsNotReported: a run that analysed NO file has no
+// parse status to report, even with a provider that reports one for every file it
+// sees. Two ways to get there, both through the real sensor and the real
+// TypeScript provider: an empty project, and a project whose only file the scope
+// leaves out. Reporting "reported, nothing incomplete" for either would read as
+// "every file was parsed whole" when no file was parsed at all (L16, finding 2).
+func TestParseStatus_NoAnalysedFileIsNotReported(t *testing.T) {
+	empty := t.TempDir()
+	if res := run(t, empty, typescript.New(), nil); res.ParseStatusReported {
+		t.Errorf("an empty project reports ParseStatusReported = true with %d analysed files", len(res.AuditedFiles))
+	}
+
+	narrowed := t.TempDir()
+	writeSrc(t, narrowed, "src/a.ts", trailingAssignment+"\n")
+	res, err := New(typescript.New()).Run(auditctx.AuditContext{
+		ProjectRoot: narrowed, Language: "ts", Scope: scope.Of([]string{"src/other.ts"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.AuditableTotal != 1 || len(res.AuditedFiles) != 0 {
+		t.Fatalf("positive control: want 1 auditable file and 0 analysed, got %d and %v",
+			res.AuditableTotal, res.AuditedFiles)
+	}
+	if res.ParseStatusReported {
+		t.Error("a scope that analysed no file reports ParseStatusReported = true")
+	}
+
+	// The other direction, so the assertions above cannot pass because the
+	// status is never reported: the same project, whole scope.
+	if whole := run(t, narrowed, typescript.New(), nil); !whole.ParseStatusReported {
+		t.Error("positive control: one analysed TypeScript file reports ParseStatusReported = false")
 	}
 }

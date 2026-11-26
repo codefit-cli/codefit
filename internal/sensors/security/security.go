@@ -93,7 +93,10 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	var audited []string
 	var incomplete []findings.IncompleteFile
 	// The run reports parse status only when EVERY analysed file has one; one
-	// file without it makes the empty incomplete list mean "not checked".
+	// file without it makes the empty incomplete list mean "not checked". A run
+	// that analysed no file has no status either (checked after the walk): an
+	// empty list over zero files says nothing was parsed, not that every file
+	// was parsed whole.
 	_, statusReported := s.provider.(providers.FileAnalyzer)
 	auditable := 0
 	// Counted across the whole walk so the "keep" consequence is stated ONCE per
@@ -176,7 +179,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		Surface:             surface,
 		AuditableTotal:      auditable,
 		AuditedFiles:        audited,
-		ParseStatusReported: statusReported,
+		ParseStatusReported: statusReported && len(audited) > 0,
 		ParseIncomplete:     incomplete,
 		DurationMs:          time.Since(start).Milliseconds(),
 	}, nil

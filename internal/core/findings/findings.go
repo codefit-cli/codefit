@@ -265,8 +265,10 @@ type SensorResult struct {
 	// looked": a requested path missing from here was never examined.
 	AuditedFiles []string `json:"audited_files,omitempty"`
 	// ParseStatusReported is true when the sensor's provider reported a parse
-	// status for EVERY analysed file (ADR 0089). When it is false, an empty
-	// ParseIncomplete means "nobody checked", not "every file was read whole".
+	// status for EVERY analysed file AND at least one file was analysed (ADR
+	// 0089). When it is false, an empty ParseIncomplete means "nobody
+	// checked" — the provider reports no status, or no file was analysed in this
+	// pass — not "every file was read whole".
 	ParseStatusReported bool `json:"parse_status_reported"`
 	// ParseIncomplete lists the analysed files whose parse the provider reported
 	// incomplete, sorted by path. Their findings and surface are still in the
