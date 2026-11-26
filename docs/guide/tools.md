@@ -108,7 +108,9 @@ which files those are
   stopped early, e.g. a memory budget), `error_root`, `error_node`, `missing_node` or
   `error_flag` — and its first affected line. It is always present, `[]` when nothing is
   listed. A listed file **still counts** in `audited` and in the score: the list is a
-  caveat, never an exclusion.
+  caveat, never an exclusion. The list is not capped: in `codefit-scan-all` it counts
+  against the response budget, so several hundred listed files make scan-all withhold
+  endpoints sooner, and skip the baseline write if even that does not fit.
 - **`parse_status_reported: false` means nobody checked**, and `parse_status_note` says why:
   the language's provider reports no parse status (Go), or the pass analysed no file. An
   empty list then is not a clean read. A clean TypeScript run shows `true`, `[]`, and no

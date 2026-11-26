@@ -166,7 +166,10 @@ All notable changes to codefit are documented here. The format is based on
   listed it says that their findings cover only what the parser read and that
   from the listed line on a missing finding is not evidence of a clean file
   (under a partial scan the sentence is appended to the partial note). Every other
-  existing field is unchanged. `parse_status_reported: false` means nobody
+  existing field is unchanged, with one limit: `parse_incomplete` is not capped and
+  counts against `scan-all`'s response budget, so with several hundred listed files
+  scan-all starts withholding endpoints sooner (declared in `budget.withheld`) and
+  can skip writing `.codefit-baseline` when even that does not fit. `parse_status_reported: false` means nobody
   checked, with a note saying why: the Go provider reports no status, and a pass
   that analysed no file now reports none either (it used to report "reported,
   nothing incomplete"). The `codefit-surface-*` tools always answer `false`, `[]`

@@ -149,3 +149,13 @@ is pinned byte for byte against values produced by the pre-change code (`main@22
   and every direct caller of `Parse`.
 - **Go**: the Go provider reports no parse status, and the responses say "not checked"; its
   provider still aborts a whole scan on one syntax error, which is a separate follow-up.
+- **`parse_incomplete` is not capped.** Every listed file is an entry, and in `codefit-scan-all`
+  the list counts against the response budget like any other always-present field, but it is
+  not droppable: when it pushes the response over the budget, scan-all withholds endpoints
+  (declared in `budget.withheld`), and if the response still does not fit with every droppable
+  endpoint withheld, `.codefit-baseline` is not written for that pass. Measured by the
+  independent verifier on a synthetic project: about 79 bytes per entry (it grows with the
+  path), about 400 listed files still fit (36,406 bytes), about 500 go over the budget, an
+  endpoint is withheld and the baseline write is skipped where `main@22617b8` wrote it. Under
+  the default settings real code was measured far below that (3 of 1,587 files, ADR 0088); a
+  low parser memory budget makes it plausible. A cap is deferred, not designed here.
