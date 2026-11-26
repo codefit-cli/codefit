@@ -103,3 +103,57 @@ func TestSensorResultCarriesSurface(t *testing.T) {
 		t.Errorf("sensor result JSON missing 'surface': %s", data)
 	}
 }
+
+// TestParseStatus_StatesAreDistinctAndTheZeroValueIsNeverComplete pins the three
+// states a provider can report about a file's parse, and the one property the
+// whole design leans on: a status nobody set — the zero value, or a field
+// dropped on the way to a cache entry — reads as NOT REPORTED, never as
+// complete. A zero value that meant "complete" would be a clean verdict nobody
+// computed.
+func TestParseStatus_StatesAreDistinctAndTheZeroValueIsNeverComplete(t *testing.T) {
+	var zero findings.ParseStatus
+	if zero.Reported || zero.Complete {
+		t.Errorf("zero ParseStatus = %+v, want neither reported nor complete", zero)
+	}
+	if got := findings.ParseNotReported(); got != zero {
+		t.Errorf("ParseNotReported() = %+v, want the zero value", got)
+	}
+
+	complete := findings.ParseComplete()
+	if !complete.Reported || !complete.Complete || complete.Reason != "" || complete.Line != 0 {
+		t.Errorf("ParseComplete() = %+v, want reported, complete, no reason, no line", complete)
+	}
+
+	incomplete := findings.ParseIncomplete(findings.ParseReasonMissingNode, 7)
+	want := findings.ParseStatus{Reported: true, Complete: false, Reason: "missing_node", Line: 7}
+	if incomplete != want {
+		t.Errorf("ParseIncomplete(missing_node, 7) = %+v, want %+v", incomplete, want)
+	}
+}
+
+// TestParseStatus_JSONShape locks the wire shape a cache entry stores: reported
+// and complete are always written (an absent field must not be read as a
+// value), reason and line only when set.
+func TestParseStatus_JSONShape(t *testing.T) {
+	cases := []struct {
+		name string
+		in   findings.ParseStatus
+		want string
+	}{
+		{"not reported", findings.ParseNotReported(), `{"reported":false,"complete":false}`},
+		{"complete", findings.ParseComplete(), `{"reported":true,"complete":true}`},
+		{"incomplete", findings.ParseIncomplete("stopped:memory_budget", 1),
+			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			data, err := json.Marshal(c.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != c.want {
+				t.Errorf("JSON = %s, want %s", data, c.want)
+			}
+		})
+	}
+}

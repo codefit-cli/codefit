@@ -136,6 +136,78 @@ type SurfaceItem struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
+// ParseStatus is a provider's account of whether it read a WHOLE file: whether
+// the tree its findings and surface were computed from covers the file, or the
+// parser gave up on part of it.
+//
+// It exists because an error-recovering parser never fails loudly. Given a form
+// its grammar does not accept, it returns a tree anyway — with an ERROR node, a
+// MISSING node, or a stop before the end — and every rule and surface query then
+// reads that tree. A file whose later half was never read reports no findings
+// there, and "no findings" is indistinguishable from "clean" unless something
+// says the read was partial (issue #189, ADR 0089).
+//
+// Three states, and the zero value is the SAFE one:
+//
+//   - not reported (Reported false): the provider does not report parse status
+//     (the Go provider today). It never means complete. The zero value is this
+//     state, so a status nobody set can never pass for a clean read.
+//   - complete (Reported true, Complete true): the provider's own parse check
+//     found nothing wrong with the tree.
+//   - incomplete (Reported true, Complete false): the parse check found a
+//     problem; Reason names which one and Line where it starts.
+//
+// Reason is one of the ParseReason* values, or ParseReasonStoppedPrefix
+// followed by the parser's own stop reason (e.g. "stopped:memory_budget"). Line
+// is the 1-based line of the first affected node, 0 when unknown.
+//
+// What a status does NOT see: valid code the parser misreads into an
+// error-free tree of the wrong shape is reported complete — the check trusts
+// the parser's own error marks and has nothing else to compare against.
+type ParseStatus struct {
+	Reported bool   `json:"reported"`
+	Complete bool   `json:"complete"`
+	Reason   string `json:"reason,omitempty"`
+	Line     int    `json:"line,omitempty"`
+}
+
+// The reasons a provider gives for an incomplete parse. A provider applies them
+// in a FIXED order — the first that holds is the reason — so each one is
+// observable in a result and a test can catch its removal (the TypeScript
+// provider documents its order beside the check).
+const (
+	// ParseReasonStoppedPrefix precedes the parser's own stop reason when the
+	// parse stopped before accepting the input (a memory budget, a node limit,
+	// a timeout): "stopped:memory_budget".
+	ParseReasonStoppedPrefix = "stopped:"
+	// ParseReasonErrorRoot: the root of the tree is itself an error node — the
+	// whole file is unread.
+	ParseReasonErrorRoot = "error_root"
+	// ParseReasonErrorNode: an error node sits somewhere under a healthy root;
+	// how much of the file it hides depends on the form.
+	ParseReasonErrorNode = "error_node"
+	// ParseReasonMissingNode: the parser inserted a node the source does not
+	// have (a zero-width MISSING token) to keep going.
+	ParseReasonMissingNode = "missing_node"
+	// ParseReasonErrorFlag: the tree is flagged as holding an error but no
+	// error or missing node could be located. Defensive: no measured input
+	// produces it; it exists so an unlocated error is never reported complete.
+	ParseReasonErrorFlag = "error_flag"
+)
+
+// ParseNotReported is the status of a file whose provider does not report parse
+// status. It is the zero value, spelled out at the call site.
+func ParseNotReported() ParseStatus { return ParseStatus{} }
+
+// ParseComplete is the status of a file whose tree the provider found whole.
+func ParseComplete() ParseStatus { return ParseStatus{Reported: true, Complete: true} }
+
+// ParseIncomplete is the status of a file the provider did not read whole, for
+// the given reason, starting at line (1-based; 0 when unknown).
+func ParseIncomplete(reason string, line int) ParseStatus {
+	return ParseStatus{Reported: true, Complete: false, Reason: reason, Line: line}
+}
+
 // SensorResult is what a single sensor returns after a run: its deterministic
 // findings, the surface to be reasoned by the agent, the dimension score, how
 // long it took, and an error string if it failed (kept as a string so partial
