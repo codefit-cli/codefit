@@ -61,6 +61,13 @@ type Entry struct {
 type Cache struct {
 	Dir      string
 	Analyzer string
+	// Settings fingerprints the analyzer's result-affecting settings that are
+	// NOT in its bytes — for the TypeScript provider, the parser's environment
+	// variables (ADR 0089). The sensor sets it from its provider after Open; ""
+	// means none. It is part of every KEY and deliberately not of the generation
+	// directory: a run under another setting is a miss, never a reason to prune
+	// the entries the usual setting wrote.
+	Settings string
 }
 
 // Open builds a cache under dir bound to the RUNNING analyzer's identity. It
@@ -84,13 +91,18 @@ func Open(dir string) (*Cache, error) {
 }
 
 // Key is the entry key for a file: the SHA-256 of the analyzer identity, the
-// file's project-relative path and the file's content.
+// analyzer's run-time settings, the file's project-relative path and the file's
+// content.
 //
-// All three are named because all three can change the answer (spec R2):
+// All four are named because all four can change the answer (spec R2):
 //
 //   - the ANALYZER, because the rules, the detectors, the parser and the surface
 //     queries all live in the binary. Keying on the file alone would let a codefit
 //     upgrade report "clean" under rules it never ran.
+//   - the SETTINGS, because the same binary reads settings at run time that
+//     change its answer: a parser memory budget stops a large file early
+//     (ADR 0089). The segment is always written, empty or not, so no path can
+//     stand in for it.
 //   - the PATH, because every finding and surface item carries its File and a
 //     fingerprint derived from it. Two files with identical bytes are a real and
 //     ordinary thing; sharing one entry between them would report the first file's
@@ -105,6 +117,8 @@ func (c *Cache) Key(file string, content []byte) string {
 	}
 	h := sha256.New()
 	h.Write([]byte(c.Analyzer))
+	h.Write([]byte{0})
+	h.Write([]byte(c.Settings))
 	h.Write([]byte{0})
 	h.Write([]byte(filepath.ToSlash(file)))
 	h.Write([]byte{0})

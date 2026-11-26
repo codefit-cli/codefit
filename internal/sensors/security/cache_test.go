@@ -63,6 +63,17 @@ func (p *countingProvider) AnalyzeFile(src providers.SourceFile) (providers.File
 	return a, nil
 }
 
+// SettingsFingerprint forwards the wrapped provider's settings fingerprint
+// (ADR 0089), for the same reason AnalyzeFile is written out: the embedded
+// interface hides it. TestCountingProviderForwardsTheSettingsFingerprint fails
+// if it stops forwarding.
+func (p *countingProvider) SettingsFingerprint() string {
+	if sf, ok := p.LanguageProvider.(providers.SettingsFingerprinter); ok {
+		return sf.SettingsFingerprint()
+	}
+	return ""
+}
+
 // withExtra appends the newer analyzer's extra finding, when one is set.
 func (p *countingProvider) withExtra(src providers.SourceFile, fs []findings.Finding) []findings.Finding {
 	if p.extra == "" {
@@ -626,6 +637,8 @@ func plantPoisonedEntry(t *testing.T, root, dir, rel string) {
 	if err != nil {
 		t.Fatalf("opening the cache: %v", err)
 	}
+	// The key is the one the sensor computes, parser settings included.
+	bindSettings(c, typescript.New())
 	raw, err := os.ReadFile(filepath.Join(root, rel))
 	if err != nil {
 		t.Fatal(err)

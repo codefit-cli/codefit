@@ -86,6 +86,7 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	exts := s.provider.FileExtensions()
 	narrowed := ctx.Scope.Narrows()
 	fileCache := cacheFor(ctx)
+	bindSettings(fileCache, s.provider)
 
 	var all []findings.Finding
 	var surface []findings.SurfaceItem
@@ -211,6 +212,22 @@ func cacheFor(ctx auditctx.AuditContext) *cache.Cache {
 		return nil
 	}
 	return c
+}
+
+// bindSettings mixes the provider's run-time settings fingerprint into every key
+// the run's cache computes (ADR 0089), so a result computed under one parser
+// setting is never served under another: a warm run equals a cold run whatever
+// the environment. The sensor does it, not cache.Open, because the sensor holds
+// the provider and the cache must not know which one it is (or that its
+// settings are environment variables at all). A provider without
+// providers.SettingsFingerprinter contributes nothing.
+func bindSettings(c *cache.Cache, p providers.LanguageProvider) {
+	if c == nil {
+		return
+	}
+	if sf, ok := p.(providers.SettingsFingerprinter); ok {
+		c.Settings = sf.SettingsFingerprint()
+	}
 }
 
 // cached returns a file's stored analysis — findings, surface and parse status —

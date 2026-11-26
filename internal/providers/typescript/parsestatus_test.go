@@ -222,3 +222,44 @@ func TestAnalyzeFile_ReportsTheFirstAffectedLine(t *testing.T) {
 		})
 	}
 }
+
+// TestSettingsFingerprint_FollowsEveryParserEnvironmentPrefix (D2): the
+// fingerprint changes with every variable under each name prefix gotreesitter
+// v0.54.0 reads — GOT_ (57 names, GOT_PARSE_MEMORY_BUDGET_MB among them),
+// GOTREESITTER_ (the grammar loader) and GTS_ (the admission and dispatch
+// switches) — and with a lower-case spelling, which Windows' environment treats
+// as the same name. The probe names are ones the parser does not read, so this
+// test cannot change how any other test in the process parses.
+func TestSettingsFingerprint_FollowsEveryParserEnvironmentPrefix(t *testing.T) {
+	p := typescript.New()
+	for _, name := range []string{
+		"GOT_CODEFIT_FINGERPRINT_PROBE",
+		"GOTREESITTER_CODEFIT_FINGERPRINT_PROBE",
+		"GTS_CODEFIT_FINGERPRINT_PROBE",
+		"got_codefit_fingerprint_probe_lower",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "1")
+			one := p.SettingsFingerprint()
+			t.Setenv(name, "2")
+			two := p.SettingsFingerprint()
+			if one == "" || one == two {
+				t.Errorf("fingerprint with %s=1 is %q and with %s=2 is %q — a setting the parser may read "+
+					"does not reach the cache key", name, one, name, two)
+			}
+		})
+	}
+}
+
+// TestSettingsFingerprint_IgnoresUnrelatedEnvironment: the other direction. A
+// fingerprint of the WHOLE environment would be safe but would make the cache
+// miss on every shell difference; only the parser's names count.
+func TestSettingsFingerprint_IgnoresUnrelatedEnvironment(t *testing.T) {
+	p := typescript.New()
+	t.Setenv("CODEFIT_UNRELATED_FINGERPRINT_PROBE", "1")
+	one := p.SettingsFingerprint()
+	t.Setenv("CODEFIT_UNRELATED_FINGERPRINT_PROBE", "2")
+	if two := p.SettingsFingerprint(); one != two {
+		t.Errorf("an unrelated variable changed the fingerprint (%q then %q)", one, two)
+	}
+}

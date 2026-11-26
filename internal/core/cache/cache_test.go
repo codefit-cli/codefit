@@ -233,6 +233,31 @@ func TestKeyIncludesAnalyzerIdentity(t *testing.T) {
 	}
 }
 
+// ADR 0089 — the key names the analyzer's run-time SETTINGS as well. The same
+// binary under another parser setting (a memory budget that stops large files)
+// computes a different answer for the same bytes, so it must not share an entry:
+// a warm run under the usual setting would otherwise be served the stopped,
+// truncated result.
+func TestKeyIncludesSettings(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("const x = 1;\n")
+	plain := &cache.Cache{Dir: dir, Analyzer: "analyzer-a"}
+	budget := &cache.Cache{Dir: dir, Analyzer: "analyzer-a", Settings: "fingerprint-of-a-budget"}
+	again := &cache.Cache{Dir: dir, Analyzer: "analyzer-a", Settings: "fingerprint-of-a-budget"}
+
+	if plain.Key("src/a.ts", content) == budget.Key("src/a.ts", content) {
+		t.Error("two settings produced the SAME key — a result computed under one parser setting " +
+			"would be served under another")
+	}
+	if budget.Key("src/a.ts", content) != again.Key("src/a.ts", content) {
+		t.Error("the same settings produced different keys — the cache could never hit")
+	}
+	if cache.GenerationDir(plain) != cache.GenerationDir(budget) {
+		t.Error("the settings changed the generation directory — a run under another setting would " +
+			"prune the entries the usual one wrote")
+	}
+}
+
 // R2 — the key names the FILE, path included. Two files with identical bytes at
 // different paths must not share an entry: every finding and surface item carries
 // its File and a fingerprint derived from it, so sharing would report the wrong

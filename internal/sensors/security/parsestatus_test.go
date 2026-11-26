@@ -434,3 +434,90 @@ func TestParseStatus_BudgetTooLowForTheRulesFailsTheScan(t *testing.T) {
 			ruleCompileFailsBudgetMB, oc.Error)
 	}
 }
+
+// --- parser settings in the cache identity (D2) -------------------------------
+
+// settingsProbe is a variable under the parser's GOT_ prefix that the parser
+// does not read: changing it moves the fingerprint without changing any parse,
+// so it can be set in this process without disturbing other tests.
+const settingsProbe = "GOT_CODEFIT_FINGERPRINT_PROBE"
+
+// TestCache_ParserSettingsAreKeyedInProcess (D2): the sensor keys the cache on
+// its provider's settings fingerprint. The same files, the same binary, another
+// value of a parser-prefixed variable: every file is a miss; the same value
+// again: every file is a hit.
+func TestCache_ParserSettingsAreKeyedInProcess(t *testing.T) {
+	root := tsProject(t)
+	cfg := cacheConfig(filepath.Join(t.TempDir(), "cache"))
+
+	t.Setenv(settingsProbe, "1")
+	run(t, root, counting(), cfg)
+
+	t.Setenv(settingsProbe, "2")
+	other := counting()
+	run(t, root, other, cfg)
+	if other.fileCalls != 3 {
+		t.Errorf("under another parser setting %d of 3 files were re-analysed — entries computed under "+
+			"the first setting were served under the second", other.fileCalls)
+	}
+
+	same := counting()
+	run(t, root, same, cfg)
+	if same.calls() != 0 {
+		t.Errorf("under the same setting %d file(s) were re-analysed — the fingerprint is not stable", same.calls())
+	}
+}
+
+// TestParseStatus_ParserSettingsArePartOfTheCacheIdentity (D2, end to end): a
+// child run under a memory budget writes the cache with the large file stopped;
+// a run of the SAME binary without the budget, over the same cache, must not be
+// served that entry. It re-analyses, reports every file complete, and equals an
+// uncached run. Without the settings in the key, the second run would report the
+// first run's truncated analysis as its own.
+func TestParseStatus_ParserSettingsArePartOfTheCacheIdentity(t *testing.T) {
+	root := budgetProject(t)
+	dir := filepath.Join(t.TempDir(), "cache")
+
+	child := runChild(t, stopBudgetMB, root, dir)
+	if child.Error != "" {
+		t.Fatalf("the child scan failed: %s", child.Error)
+	}
+	if len(child.Result.ParseIncomplete) != 1 {
+		t.Fatalf("the child did not stop the large file (incomplete = %+v) — nothing to keep apart",
+			child.Result.ParseIncomplete)
+	}
+	if n := len(entryFiles(t, dir)); n != 2 {
+		t.Fatalf("the child wrote %d cache entries, want 2", n)
+	}
+
+	parent := counting()
+	res := run(t, root, parent, cacheConfig(dir))
+	if parent.fileCalls != 2 {
+		t.Errorf("without the budget %d of 2 files were re-analysed — the run was served entries "+
+			"computed under the budget", parent.fileCalls)
+	}
+	if !res.ParseStatusReported || len(res.ParseIncomplete) != 0 {
+		t.Errorf("without the budget: reported=%v incomplete=%+v, want every file complete",
+			res.ParseStatusReported, res.ParseIncomplete)
+	}
+	control := run(t, root, typescript.New(), &config.Config{Project: cacheConfig(dir).Project})
+	if got, want := wire(t, res), wire(t, control); got != want {
+		t.Errorf("the run after a budgeted run differs from an uncached run.\nuncached: %s\ngot:      %s", want, got)
+	}
+}
+
+// TestCountingProviderForwardsTheSettingsFingerprint guards the test wrapper the
+// same way as for the combined call: the embedded interface hides
+// SettingsFingerprinter, so the wrapper must forward it or every cache test
+// would run with no settings in its keys.
+func TestCountingProviderForwardsTheSettingsFingerprint(t *testing.T) {
+	t.Setenv(settingsProbe, "1")
+	sf, ok := any(counting()).(providers.SettingsFingerprinter)
+	if !ok {
+		t.Fatal("countingProvider does not implement providers.SettingsFingerprinter")
+	}
+	want := typescript.New().SettingsFingerprint()
+	if got := sf.SettingsFingerprint(); want == "" || got != want {
+		t.Errorf("wrapper fingerprint %q, provider fingerprint %q — want equal and non-empty", got, want)
+	}
+}
