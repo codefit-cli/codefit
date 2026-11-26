@@ -86,15 +86,27 @@ func (*Provider) DefaultPathCriticality() config.PathCriticality {
 // parser-agnostic AST. The concrete gotreesitter tree is hidden behind
 // syntax.Node so the core never depends on the parser.
 func (*Provider) Parse(src providers.SourceFile) (syntax.Node, error) {
+	_, root, err := parseTree(src)
+	if err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
+// parseTree parses src once and returns both the concrete tree — which alone
+// knows why the parse stopped — and its root adapted to syntax.Node. Parse keeps
+// only the root; AnalyzeFile keeps the tree too, so the parse status it reports
+// describes the same tree the findings and the surface were computed from.
+func parseTree(src providers.SourceFile) (*ts.Tree, tsNode, error) {
 	lang := grammars.TypescriptLanguage()
 	if strings.HasSuffix(src.Path, ".tsx") {
 		lang = grammars.TsxLanguage()
 	}
 	tree, err := ts.NewParser(lang).Parse(src.Content)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %q: %w", src.Path, err)
+		return nil, tsNode{}, fmt.Errorf("parsing %q: %w", src.Path, err)
 	}
-	return tsNode{n: tree.RootNode(), lang: lang, src: src.Content}, nil
+	return tree, tsNode{n: tree.RootNode(), lang: lang, src: src.Content}, nil
 }
 
 // --- Security rules (Prompt 1.2) ---
@@ -147,6 +159,33 @@ func (p *Provider) AnalyzeSecurity(src providers.SourceFile) ([]findings.Finding
 		return nil, err
 	}
 	return ruleengine.Match(compiled, root, src.Path), nil
+}
+
+// compile-time check that Provider reports parse status through the combined call.
+var _ providers.FileAnalyzer = (*Provider)(nil)
+
+// AnalyzeFile parses src ONCE and returns, from that one tree, exactly the
+// findings AnalyzeSecurity returns, exactly the surface AnalyzeSurface returns,
+// and the parse status of the tree (see parseStatusOf for what it checks and in
+// which order). The security sensor uses it in place of the two calls; the two
+// calls keep their own behaviour for every other caller.
+func (p *Provider) AnalyzeFile(src providers.SourceFile) (providers.FileAnalysis, error) {
+	// The same steps, in the same order, as AnalyzeSecurity then AnalyzeSurface:
+	// the rules load first, so a rule that fails to compile fails this call
+	// exactly as it fails AnalyzeSecurity.
+	compiled, err := securityRules()
+	if err != nil {
+		return providers.FileAnalysis{}, err
+	}
+	tree, root, err := parseTree(src)
+	if err != nil {
+		return providers.FileAnalysis{}, err
+	}
+	return providers.FileAnalysis{
+		Findings: ruleengine.Match(compiled, root, src.Path),
+		Surface:  surface.Run(p.surfaceQueries(), root, src.Path),
+		Parse:    parseStatusOf(tree),
+	}, nil
 }
 
 // AnalyzePractices is a stub; the best-practice rules arrive in Prompt 1.2.

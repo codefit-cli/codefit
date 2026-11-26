@@ -144,6 +144,39 @@ All notable changes to codefit are documented here. The format is based on
   one: accepting a bump also needs a census over real projects, which is not
   automated here.
 
+- **A TypeScript file the parser did not read whole is now detected, recorded
+  and cached as such — but not yet shown in any scan response** (`#189`,
+  [ADR 0089](docs/decisions/0089-a-file-the-parser-did-not-read-whole-is-recorded-and-cached-as-such.md)).
+  The parser is error-recovering: a form it rejects leaves an `ERROR` or
+  `MISSING` node, or a stop before the end, and nothing read those marks, so a
+  file whose later lines were never read looked clean. The TypeScript provider
+  now reports, from the one tree its findings and surface come from, whether
+  that tree is whole (`stopped:<reason>`, `error_root`, `error_node`,
+  `missing_node`, `error_flag`, with the first affected line), and the security sensor lists
+  every file that is not. The finding cache stores that status, so a warm scan
+  keeps it; an entry without one is re-analysed. **This is internal for now:**
+  no MCP tool response carries the list yet, so an agent still cannot see it.
+  The Go provider reports no status.
+
+  Fixed along the way: the cache key did not cover the environment variables
+  the parser reads at run time. A scan run once with
+  `GOT_PARSE_MEMORY_BUDGET_MB` set cached a large file as stopped, and the next
+  scan of the same binary without it reported that truncated result as its
+  own. The key now includes a fingerprint of every `GOT_`, `GOTREESITTER_` and
+  `GTS_` variable, so changing one is a cache miss. The sensor also parses each
+  TypeScript file once instead of twice: over the repository's TypeScript test
+  fixtures the security scan took a median of about 291 ms instead of about
+  465 ms on one machine, with identical findings and surface.
+
+  A parse stopped for a reason that may not recur on the next run over the
+  same bytes and settings — the parser's process-heap hard ceiling, a timeout,
+  a cancellation, or any stop the parser does not document as deterministic —
+  is still listed as not read whole in its run, but is no longer cached: the
+  next scan parses that file again instead of serving a stop that may not
+  happen twice. Stops the parser documents as deterministic (its soft memory
+  budget, node and stack-depth limits) stay cached. Like the rest of this
+  entry, nothing of it reaches an MCP response yet.
+
 - **A Go string literal made only of quote characters is now reported under a
   credential name** (`#148`). `SEC-001`'s name gate read a literal by trimming
   quote and backtick characters from its source text, so `` signingKey = `""` ``

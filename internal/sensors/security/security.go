@@ -86,10 +86,15 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 	exts := s.provider.FileExtensions()
 	narrowed := ctx.Scope.Narrows()
 	fileCache := cacheFor(ctx)
+	bindSettings(fileCache, s.provider)
 
 	var all []findings.Finding
 	var surface []findings.SurfaceItem
 	var audited []string
+	var incomplete []findings.IncompleteFile
+	// The run reports parse status only when EVERY analysed file has one; one
+	// file without it makes the empty incomplete list mean "not checked".
+	_, statusReported := s.provider.(providers.FileAnalyzer)
 	auditable := 0
 	// Counted across the whole walk so the "keep" consequence is stated ONCE per
 	// run, not once per file.
@@ -131,14 +136,22 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		if fileCache != nil {
 			key = fileCache.Key(rel, raw)
 		}
-		fileFindings, fileSurface, hit := cached(fileCache, key)
+		fileFindings, fileSurface, fileParse, hit := cached(fileCache, key)
 		if !hit {
 			var fileErr error
-			fileFindings, fileSurface, fileErr = s.scanFile(rel, raw)
+			fileFindings, fileSurface, fileParse, fileErr = s.scanFile(rel, raw)
 			if fileErr != nil {
 				return fileErr
 			}
-			store(fileCache, key, rel, fileFindings, fileSurface)
+			store(fileCache, key, rel, fileFindings, fileSurface, fileParse)
+		}
+		// The parse status is read off the entry exactly as the findings are: a
+		// cached file keeps saying whether it was read whole (ADR 0089).
+		statusReported = statusReported && fileParse.Reported
+		if fileParse.Reported && !fileParse.Complete {
+			incomplete = append(incomplete, findings.IncompleteFile{
+				File: rel, Reason: fileParse.Reason, Line: fileParse.Line,
+			})
 		}
 		// Criticality is applied HERE, on the way out, to a cached entry exactly
 		// as to a fresh one: what is cached is the analysis, not its weighting.
@@ -153,16 +166,19 @@ func (s *Sensor) Run(ctx auditctx.AuditContext) (findings.SensorResult, error) {
 		return findings.SensorResult{Sensor: s.Name(), Error: walkErr.Error()}, walkErr
 	}
 	sort.Strings(audited)
+	sort.Slice(incomplete, func(i, j int) bool { return incomplete[i].File < incomplete[j].File })
 	warnKeepModeLeftCriticals(ctx.Config, keptCritical)
 
 	return findings.SensorResult{
-		Sensor:         s.Name(),
-		Score:          scoring.DimensionScore(all),
-		Findings:       all,
-		Surface:        surface,
-		AuditableTotal: auditable,
-		AuditedFiles:   audited,
-		DurationMs:     time.Since(start).Milliseconds(),
+		Sensor:              s.Name(),
+		Score:               scoring.DimensionScore(all),
+		Findings:            all,
+		Surface:             surface,
+		AuditableTotal:      auditable,
+		AuditedFiles:        audited,
+		ParseStatusReported: statusReported,
+		ParseIncomplete:     incomplete,
+		DurationMs:          time.Since(start).Milliseconds(),
 	}, nil
 }
 
@@ -198,18 +214,37 @@ func cacheFor(ctx auditctx.AuditContext) *cache.Cache {
 	return c
 }
 
-// cached returns a file's stored analysis and whether it was found. No cache and
-// no key are both plain misses, and so is an unreadable or corrupt entry: the
-// cache may never be the reason a file is not analysed.
-func cached(c *cache.Cache, key string) ([]findings.Finding, []findings.SurfaceItem, bool) {
+// bindSettings mixes the provider's run-time settings fingerprint into every key
+// the run's cache computes (ADR 0089), so a result computed under one parser
+// setting is never served under another: a warm run equals a cold run whatever
+// the environment. The sensor does it, not cache.Open, because the sensor holds
+// the provider and the cache must not know which one it is (or that its
+// settings are environment variables at all). A provider without
+// providers.SettingsFingerprinter contributes nothing.
+func bindSettings(c *cache.Cache, p providers.LanguageProvider) {
+	if c == nil {
+		return
+	}
+	if sf, ok := p.(providers.SettingsFingerprinter); ok {
+		c.Settings = sf.SettingsFingerprint()
+	}
+}
+
+// cached returns a file's stored analysis — findings, surface and parse status —
+// and whether it was found. No cache and no key are both plain misses, and so is
+// an unreadable or corrupt entry, or one with no parse status: cache.Get rejects
+// that one (ADR 0089), and the nil check here only keeps a pointer it should never
+// see from being dereferenced. The cache may never be the reason a file is not
+// analysed.
+func cached(c *cache.Cache, key string) ([]findings.Finding, []findings.SurfaceItem, findings.ParseStatus, bool) {
 	if c == nil || key == "" {
-		return nil, nil, false
+		return nil, nil, findings.ParseStatus{}, false
 	}
 	e, ok := c.Get(key)
-	if !ok {
-		return nil, nil, false
+	if !ok || e.Parse == nil {
+		return nil, nil, findings.ParseStatus{}, false
 	}
-	return e.Findings, e.Surface, true
+	return e.Findings, e.Surface, *e.Parse, true
 }
 
 // store records a file's analysis. An EMPTY result is stored like any other: a
@@ -219,11 +254,21 @@ func cached(c *cache.Cache, key string) ([]findings.Finding, []findings.SurfaceI
 //
 // A failed write is a note, never a failed scan. The audit already happened; all
 // that is lost is the saving on the next run.
-func store(c *cache.Cache, key, rel string, fs []findings.Finding, surface []findings.SurfaceItem) {
-	if c == nil || key == "" {
+//
+// The parse status is stored WITH the analysis it describes, a not-reported one
+// included: an entry without it is a miss (ADR 0089).
+//
+// An analysis whose status is not Reproducible — a parse stopped for a reason
+// that depends on the state of the process, not on the bytes and the settings —
+// is NOT stored. It was reported in this run like any other; the next run
+// parses the file again instead of being served a stop that may not recur
+// (ADR 0089).
+func store(c *cache.Cache, key, rel string, fs []findings.Finding, surface []findings.SurfaceItem,
+	parse findings.ParseStatus) {
+	if c == nil || key == "" || !parse.Reproducible {
 		return
 	}
-	if err := c.Set(key, cache.Entry{Findings: fs, Surface: surface}); err != nil {
+	if err := c.Set(key, cache.Entry{Findings: fs, Surface: surface, Parse: &parse}); err != nil {
 		slog.Warn("finding cache write failed; the file was audited and reported normally, "+
 			"only the saving on the next scan is lost", "file", rel, "error", err)
 	}
@@ -236,7 +281,7 @@ func store(c *cache.Cache, key, rel string, fs []findings.Finding, surface []fin
 // The bytes are read by the caller because the cache is keyed on them: reading
 // the file twice to answer the same question is the kind of cost the cache exists
 // to remove, not to add.
-func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []findings.SurfaceItem, error) {
+func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []findings.SurfaceItem, findings.ParseStatus, error) {
 	// Bytes become TEXT before any layer sees them. A source file carrying a
 	// byte-order mark — an ordinary thing in a repository a Windows tool has
 	// touched — used to reach layer 1's regexes and the provider's AST as
@@ -247,7 +292,11 @@ func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []finding
 	// text the layers read.
 	//
 	// DECLARED RESIDUAL (ADR 0044): a BOM-LESS UTF-16 source file is still read
-	// as-is and still yields nothing, silently. sourcetext.Decode refuses to
+	// as-is and still yields no finding. It is no longer silent where the
+	// provider reports a parse status: the TypeScript provider's tree of those
+	// bytes holds an ERROR node, so the file is listed as not parsed whole
+	// (error_node, line 1; ADR 0089). It is still not analysed, and a provider
+	// that reports no status still says nothing about it. sourcetext.Decode refuses to
 	// guess an encoding, and the source-level floor that turns that refusal
 	// into a report exists only for the DB dimension's small, CONFIGURED source
 	// list — a per-file note across a whole repository walk, where yielding no
@@ -259,21 +308,41 @@ func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []finding
 	// Layer 1: language-agnostic regex for obvious secrets.
 	out = append(out, layer1Secrets(rel, content)...)
 
-	// Layer 2: provider AST analysis — deterministic findings + mapped surface.
-	astFindings, err := s.provider.AnalyzeSecurity(src)
+	// Layer 2: provider AST analysis — deterministic findings + mapped surface,
+	// and how much of the file the parser read.
+	astFindings, surface, parse, err := s.analyzeAST(src)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, findings.ParseStatus{}, err
 	}
 	out = append(out, astFindings...)
 
-	surface, err := s.provider.AnalyzeSurface(src)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	deduped := dedupeFindings(out)
 	stampFingerprints(rel, content, deduped, surface)
-	return deduped, surface, nil
+	return deduped, surface, parse, nil
+}
+
+// analyzeAST runs the provider's layer-2 analysis of one file. A provider that
+// implements providers.FileAnalyzer is asked ONCE, and its findings, surface and
+// parse status all come from the same tree (ADR 0089). Any other provider is
+// asked twice, as before, and the file's status is ParseNotReported — never
+// complete: the sensor does not claim a check nobody ran.
+func (s *Sensor) analyzeAST(src providers.SourceFile) ([]findings.Finding, []findings.SurfaceItem, findings.ParseStatus, error) {
+	if fa, ok := s.provider.(providers.FileAnalyzer); ok {
+		a, err := fa.AnalyzeFile(src)
+		if err != nil {
+			return nil, nil, findings.ParseStatus{}, err
+		}
+		return a.Findings, a.Surface, a.Parse, nil
+	}
+	astFindings, err := s.provider.AnalyzeSecurity(src)
+	if err != nil {
+		return nil, nil, findings.ParseStatus{}, err
+	}
+	surface, err := s.provider.AnalyzeSurface(src)
+	if err != nil {
+		return nil, nil, findings.ParseStatus{}, err
+	}
+	return astFindings, surface, findings.ParseNotReported(), nil
 }
 
 // stampFingerprints sets the baseline content identity of every finding and

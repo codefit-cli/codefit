@@ -64,7 +64,8 @@ func TestIdentityIsTheHashOfTheRunningExecutable(t *testing.T) {
 }
 
 // R2 — computed ONCE per process. A repository walk parses hundreds of files;
-// re-hashing a ~5 MB binary per file would be the cache's own cost.
+// re-hashing a ~21 MB binary per file (the stripped release binary, ADR 0088)
+// would be the cache's own cost.
 func TestIdentityIsComputedOncePerProcess(t *testing.T) {
 	calls := 0
 	self := currentExecutable(t)

@@ -2,6 +2,7 @@ package security
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,7 +32,58 @@ type countingProvider struct {
 	providers.LanguageProvider
 	securityCalls int
 	surfaceCalls  int
+	fileCalls     int    // combined AnalyzeFile calls; each also counts as one of each above
 	extra         string // when set, an extra finding ID emitted for every file
+}
+
+// AnalyzeFile forwards the combined call (ADR 0089). It has to be written out:
+// the embedded LanguageProvider hides every OPTIONAL interface the wrapped
+// provider implements, so without this method the sensor would take the
+// two-call path, record "not reported" for every file, and every cache test in
+// this package would pass over a parse status nobody computed.
+// TestCountingProviderForwardsTheParseStatus fails if it stops forwarding.
+//
+// One combined call is one file analysed for security AND for surface, so it
+// counts as one of each: the tests that count "files re-analysed" keep meaning
+// the same thing whichever path the sensor takes.
+func (p *countingProvider) AnalyzeFile(src providers.SourceFile) (providers.FileAnalysis, error) {
+	p.securityCalls++
+	p.surfaceCalls++
+	p.fileCalls++
+	fa, ok := p.LanguageProvider.(providers.FileAnalyzer)
+	if !ok {
+		return providers.FileAnalysis{}, fmt.Errorf("countingProvider: %T does not implement providers.FileAnalyzer",
+			p.LanguageProvider)
+	}
+	a, err := fa.AnalyzeFile(src)
+	if err != nil {
+		return providers.FileAnalysis{}, err
+	}
+	a.Findings = p.withExtra(src, a.Findings)
+	return a, nil
+}
+
+// SettingsFingerprint forwards the wrapped provider's settings fingerprint
+// (ADR 0089), for the same reason AnalyzeFile is written out: the embedded
+// interface hides it. TestCountingProviderForwardsTheSettingsFingerprint fails
+// if it stops forwarding.
+func (p *countingProvider) SettingsFingerprint() string {
+	if sf, ok := p.LanguageProvider.(providers.SettingsFingerprinter); ok {
+		return sf.SettingsFingerprint()
+	}
+	return ""
+}
+
+// withExtra appends the newer analyzer's extra finding, when one is set.
+func (p *countingProvider) withExtra(src providers.SourceFile, fs []findings.Finding) []findings.Finding {
+	if p.extra == "" {
+		return fs
+	}
+	return append(fs, findings.Finding{
+		ID: p.extra, Dimension: findings.DimensionSecurity,
+		Severity: findings.SeverityMedium, File: src.Path, Line: 1,
+		Title: "a rule the newer analyzer ships", Confidence: 1.0,
+	})
 }
 
 func (p *countingProvider) AnalyzeSecurity(src providers.SourceFile) ([]findings.Finding, error) {
@@ -40,14 +92,7 @@ func (p *countingProvider) AnalyzeSecurity(src providers.SourceFile) ([]findings
 	if err != nil {
 		return nil, err
 	}
-	if p.extra != "" {
-		fs = append(fs, findings.Finding{
-			ID: p.extra, Dimension: findings.DimensionSecurity,
-			Severity: findings.SeverityMedium, File: src.Path, Line: 1,
-			Title: "a rule the newer analyzer ships", Confidence: 1.0,
-		})
-	}
-	return fs, nil
+	return p.withExtra(src, fs), nil
 }
 
 func (p *countingProvider) AnalyzeSurface(src providers.SourceFile) ([]findings.SurfaceItem, error) {
@@ -592,14 +637,20 @@ func plantPoisonedEntry(t *testing.T, root, dir, rel string) {
 	if err != nil {
 		t.Fatalf("opening the cache: %v", err)
 	}
+	// The key is the one the sensor computes, parser settings included.
+	bindSettings(c, typescript.New())
 	raw, err := os.ReadFile(filepath.Join(root, rel))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// It carries a parse status like every entry the sensor writes: without one
+	// it would be a miss whatever the sensor did (ADR 0089), and the test that
+	// plants it would pass without proving the sensor never read it.
+	complete := findings.ParseComplete()
 	err = c.Set(c.Key(rel, raw), cache.Entry{Findings: []findings.Finding{{
 		ID: "POISON-001", Dimension: findings.DimensionSecurity,
 		Severity: findings.SeverityCritical, File: rel, Line: 1, Confidence: 1.0,
-	}}})
+	}}, Parse: &complete})
 	if err != nil {
 		t.Fatalf("planting a cache entry: %v", err)
 	}

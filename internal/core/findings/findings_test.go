@@ -103,3 +103,72 @@ func TestSensorResultCarriesSurface(t *testing.T) {
 		t.Errorf("sensor result JSON missing 'surface': %s", data)
 	}
 }
+
+// TestParseStatus_StatesAreDistinctAndTheZeroValueIsNeverComplete pins the three
+// states a provider can report about a file's parse, and the one property the
+// whole design leans on: a status nobody set — the zero value, or a field
+// dropped on the way to a cache entry — reads as NOT REPORTED, never as
+// complete. A zero value that meant "complete" would be a clean verdict nobody
+// computed.
+func TestParseStatus_StatesAreDistinctAndTheZeroValueIsNeverComplete(t *testing.T) {
+	var zero findings.ParseStatus
+	if zero.Reported || zero.Complete {
+		t.Errorf("zero ParseStatus = %+v, want neither reported nor complete", zero)
+	}
+	// The zero value is also NOT reproducible: a status nobody vouched for is
+	// never cached (ADR 0089).
+	if zero.Reproducible {
+		t.Errorf("zero ParseStatus = %+v, want not reproducible", zero)
+	}
+	if want := (findings.ParseStatus{Reproducible: true}); findings.ParseNotReported() != want {
+		t.Errorf("ParseNotReported() = %+v, want %+v — not reported, and cached as before",
+			findings.ParseNotReported(), want)
+	}
+
+	complete := findings.ParseComplete()
+	if want := (findings.ParseStatus{Reported: true, Complete: true, Reproducible: true}); complete != want {
+		t.Errorf("ParseComplete() = %+v, want %+v", complete, want)
+	}
+
+	incomplete := findings.ParseIncomplete(findings.ParseReasonMissingNode, 7)
+	want := findings.ParseStatus{Reported: true, Complete: false, Reason: "missing_node", Line: 7, Reproducible: true}
+	if incomplete != want {
+		t.Errorf("ParseIncomplete(missing_node, 7) = %+v, want %+v", incomplete, want)
+	}
+
+	transient := findings.ParseIncompleteNotReproducible("stopped:timeout", 3)
+	wantTransient := findings.ParseStatus{Reported: true, Complete: false, Reason: "stopped:timeout", Line: 3}
+	if transient != wantTransient {
+		t.Errorf("ParseIncompleteNotReproducible(stopped:timeout, 3) = %+v, want %+v", transient, wantTransient)
+	}
+}
+
+// TestParseStatus_JSONShape locks the wire shape a cache entry stores: reported,
+// complete and reproducible are always written (an absent field must not be
+// read as a value), reason and line only when set.
+func TestParseStatus_JSONShape(t *testing.T) {
+	cases := []struct {
+		name string
+		in   findings.ParseStatus
+		want string
+	}{
+		{"not reported", findings.ParseNotReported(), `{"reported":false,"complete":false,"reproducible":true}`},
+		{"complete", findings.ParseComplete(), `{"reported":true,"complete":true,"reproducible":true}`},
+		{"incomplete", findings.ParseIncomplete("stopped:memory_budget", 1),
+			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1,"reproducible":true}`},
+		{"incomplete, not reproducible", findings.ParseIncompleteNotReproducible("stopped:memory_budget", 1),
+			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1,"reproducible":false}`},
+		{"zero value", findings.ParseStatus{}, `{"reported":false,"complete":false,"reproducible":false}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			data, err := json.Marshal(c.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != c.want {
+				t.Errorf("JSON = %s, want %s", data, c.want)
+			}
+		})
+	}
+}

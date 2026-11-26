@@ -40,6 +40,14 @@ type Entry struct {
 	Key      string                 `json:"key"`
 	Findings []findings.Finding     `json:"findings"`
 	Surface  []findings.SurfaceItem `json:"surface"`
+	// Parse is the parse status of the analysis this entry holds (ADR 0089),
+	// stored so a cached result keeps saying whether its file was read whole.
+	// It is a POINTER so its absence is visible: an entry with no parse status
+	// — written before the field existed, or by a writer that dropped it — is
+	// a MISS, never a hit (Get), and Set refuses to write one. A status of "not
+	// reported" (a provider that reports none) is a present, non-nil value and
+	// is a hit like any other.
+	Parse *findings.ParseStatus `json:"parse"`
 }
 
 // Cache stores one [Entry] per (analyzer, file, content) under Dir. A hit means
@@ -53,6 +61,13 @@ type Entry struct {
 type Cache struct {
 	Dir      string
 	Analyzer string
+	// Settings fingerprints the analyzer's result-affecting settings that are
+	// NOT in its bytes — for the TypeScript provider, the parser's environment
+	// variables (ADR 0089). The sensor sets it from its provider after Open; ""
+	// means none. It is part of every KEY and deliberately not of the generation
+	// directory: a run under another setting is a miss, never a reason to prune
+	// the entries the usual setting wrote.
+	Settings string
 }
 
 // Open builds a cache under dir bound to the RUNNING analyzer's identity. It
@@ -76,13 +91,18 @@ func Open(dir string) (*Cache, error) {
 }
 
 // Key is the entry key for a file: the SHA-256 of the analyzer identity, the
-// file's project-relative path and the file's content.
+// analyzer's run-time settings, the file's project-relative path and the file's
+// content.
 //
-// All three are named because all three can change the answer (spec R2):
+// All four are named because all four can change the answer (spec R2):
 //
 //   - the ANALYZER, because the rules, the detectors, the parser and the surface
 //     queries all live in the binary. Keying on the file alone would let a codefit
 //     upgrade report "clean" under rules it never ran.
+//   - the SETTINGS, because the same binary reads settings at run time that
+//     change its answer: a parser memory budget stops a large file early
+//     (ADR 0089). The segment is always written, empty or not, so no path can
+//     stand in for it.
 //   - the PATH, because every finding and surface item carries its File and a
 //     fingerprint derived from it. Two files with identical bytes are a real and
 //     ordinary thing; sharing one entry between them would report the first file's
@@ -97,6 +117,8 @@ func (c *Cache) Key(file string, content []byte) string {
 	}
 	h := sha256.New()
 	h.Write([]byte(c.Analyzer))
+	h.Write([]byte{0})
+	h.Write([]byte(c.Settings))
 	h.Write([]byte{0})
 	h.Write([]byte(filepath.ToSlash(file)))
 	h.Write([]byte{0})
@@ -114,7 +136,8 @@ func (c *Cache) Key(file string, content []byte) string {
 // precisely why an entry has to PROVE it is one: parsing is not provenance, and
 // an unproven empty hit is a clean verdict codefit never computed (ADR 0053).
 //
-// So the payload must name this key. Anything else — a stray {} an editor or a
+// So the payload must name this key, and must carry a parse status (ADR 0089).
+// Anything else — a stray {} an editor or a
 // sync tool left in .codefit/cache, a half-restored backup, a well-formed entry
 // sitting at another key's path, an entry written before the stamp existed — is
 // a miss, and a miss is just an ordinary analysis. The check does not enumerate
@@ -139,6 +162,13 @@ func (c *Cache) Get(key string) (Entry, bool) {
 	if e.Key != key {
 		return Entry{}, false
 	}
+	// An entry must also say whether its file was read whole (ADR 0089). One
+	// that cannot — written before the field existed, or by a writer that
+	// dropped it — would serve findings with no word on how much of the file
+	// produced them. It is a miss for the same reason as a foreign payload.
+	if e.Parse == nil {
+		return Entry{}, false
+	}
 	return e, true
 }
 
@@ -160,6 +190,9 @@ func (c *Cache) Get(key string) (Entry, bool) {
 func (c *Cache) Set(key string, e Entry) error {
 	if key == "" {
 		return fmt.Errorf("refusing to store a cache entry without a key")
+	}
+	if e.Parse == nil {
+		return fmt.Errorf("refusing to store a cache entry without a parse status")
 	}
 	dir := c.genDir()
 	if dir == "" {
