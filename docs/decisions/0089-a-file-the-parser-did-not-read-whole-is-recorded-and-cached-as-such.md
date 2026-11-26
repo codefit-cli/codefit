@@ -142,12 +142,16 @@ A parse with no reported stop is not classified: complete, `error_root`, `error_
 `missing_node` and `error_flag` are cached as before. `error_flag`'s shape ends in
 `no_stacks_alive`, which is not a reported stop; whether it is reproducible is **unknown**.
 
-Measured through the security sensor (a child process; `real_vscode_strings.ts`, 92,023 bytes,
-beside a small file; 10 cold-then-warm pairs per value). With the default garbage collector,
+The basis for treating the hard ceiling as not reproducible is upstream's contract above, not a
+measurement here. One machine's measurement, the one this change was written on, through the
+security sensor (a child process; `real_vscode_strings.ts`, 92,023 bytes, beside a small file;
+10 cold-then-warm pairs per value): with the default garbage collector,
 `GOT_PARSE_MEMORY_HARD_CEILING_MB` at 1 or 2 stopped the large file on 9 of 10 cold runs and at
-4 on 8 of 10, the rest parsing it whole — the same bytes, the same settings. With `GOGC=off`
-1 to 4 MB stopped it on 10 of 10 runs (also under `-race`), at 8 MB on 0 of 10 (2 of 10 under
-`-race`). `TestParseStatus_TransientStopIsReportedButNotCached` runs at 1 MB with `GOGC=off`: the
+4 on 8 of 10, the rest parsing it whole — the same bytes, the same settings. The independent
+verifier's 20 child runs without `GOGC=off` all stopped, so how often a run escapes the ceiling
+varies by machine and moment; that it can is what the contract says. With `GOGC=off`, on the
+same one machine, 1 to 4 MB stopped it on 10 of 10 runs (also under `-race`), at 8 MB on 0 of 10
+(2 of 10 under `-race`). `TestParseStatus_TransientStopIsReportedButNotCached` runs at 1 MB with `GOGC=off`: the
 file is listed `stopped:memory_budget` on both runs, the second run re-parses that file and only
 that file, and the cache holds the small file alone. Caching it anyway fails it, and so does
 classifying the hard ceiling as reproducible. Classifying the arena guard as not reproducible
@@ -204,10 +208,13 @@ hard-ceiling stop is never stored.
   budget counts the parse's own arena allocations, not the process heap, so it is
   deterministic: the test at 5 MB passed `-count=10` with and without `-race`.
 - **`root.EndByte()` against the content length** was measured as a further signal and
-  rejected. On every fixture, every still-an-error row and every deterministic budget stop
-  the root ends exactly at the end of the content. The only short root measured came from
-  the heap hard ceiling (`GOT_PARSE_MEMORY_HARD_CEILING_MB`), which is not deterministic and
-  is reported as a stop anyway.
+  rejected. Under the default settings, on every fixture, every still-an-error row and every
+  deterministic budget stop the root ends exactly at the end of the content; the only short
+  root measured there came from the heap hard ceiling (`GOT_PARSE_MEMORY_HARD_CEILING_MB`),
+  which is reported as a stop anyway. With `GOT_C_RECOVERY=0` two more short roots were
+  measured: the `error_flag` shape, which check 5 already reports, and the lone-backslash
+  inputs under "Not covered" below, which read complete. Every other input that read complete
+  under that setting had a full-span root, so a span check would not reach them (below).
 - **A BOM-less UTF-16 file** (the declared residual of ADR 0044) now gets `error_node` on
   line 1: it is listed as not parsed whole. It is still not analysed.
 - **Environment names read by the parser's non-test sources:** 57 under `GOT_`, 10 under
@@ -258,13 +265,28 @@ hard-ceiling stop is never stored.
   removing it falls through to `error_node`. **`error_flag`** is pinned through the real
   parser only under `GOT_C_RECOVERY=0`; whether the default settings ever produce it is
   unknown.
-- **Broken code with no mark, under `GOT_C_RECOVERY=0`.** With that setting the parser
-  returns trees with no error flag, no `ERROR` and no `MISSING` node for inputs that are
-  broken: both `broken_*` parser-form rows (`const x = ;`, `if (x {`), a line of `@@@`, and
-  a lone-backslash line — the last with a root that ends 3 bytes before the file. Each reads
-  as **complete**. It is measured through the real provider, deterministic over 30 runs,
-  and not handled: whether to add a root-span check, or to treat that setting otherwise, is
-  an open owner decision. Under the default settings none of these inputs reads complete.
+- **Broken code with no mark, under the non-default setting `GOT_C_RECOVERY=0`.** With that
+  setting the parser returns trees with no error flag, no `ERROR` and no `MISSING` node for
+  inputs that are broken, and each reads as **complete**. Measured on 2026-11-26: of 101
+  inputs the default settings report incomplete (the 20 committed still-an-error rows and 81
+  generated ones), 22 read complete under the setting, each identical on 10 of 10 runs. Six
+  are committed rows — both `broken_*` rows (`const x = ;`, `if (x {`) and the
+  tagged-template row without `await`, each in `.ts` and `.tsx`; the rest are garbage tails
+  after valid statements (`#!x`, `a b c`, `<div>`, `1a`, `0x`, `@@@`, `if (a {`, a lone
+  backslash). 19 of the 22 have a root that ends exactly at the end of the content. The other
+  3 are the lone-backslash shape, a line holding only `\` as the last line of the file —
+  byte for byte, in C escape notation (`\n` a newline, `\\` one backslash), `const a = 1;\n\\\n` (15 bytes, root ends at 12) and
+  `const a = 1;\nconst b = 2;\n\\\n` (28 bytes, root ends at 25), the first as `.ts` and
+  `.tsx`. The independent verifier measured 10 of its 13 broken inputs reading complete under
+  the setting, all with a full-span root. So no mark and no span check can detect the
+  full-span ones; a span check would reach at most the lone-backslash shape. Nothing at this
+  layer can detect it. Whether codefit should tell the caller that parser settings are
+  overridden is deferred to the exposure task (T3). It is not fixed.
+- **Broken code with no mark, under the default settings.** At least one broken shape is
+  accepted by the parser with no mark and a full-span root: a double comma inside an object
+  literal (`const o = { a: 1,, b: 2 };`, also with three commas and as a call argument). It
+  is reported **complete**, identical on 10 of 10 runs (the first spelling also as `.tsx`). It is not fixed;
+  the check trusts the parser's marks.
 - **Which stops are reproducible rests on upstream's word** for `node_limit`,
   `stack_depth_limit` and the arena/scratch guards of `memory_budget` (D4); only the arena
   guard is measured here. The `error_flag` shape has no reported stop and is cached; whether

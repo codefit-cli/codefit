@@ -152,7 +152,7 @@ All notable changes to codefit are documented here. The format is based on
   file whose later lines were never read looked clean. The TypeScript provider
   now reports, from the one tree its findings and surface come from, whether
   that tree is whole (`stopped:<reason>`, `error_root`, `error_node`,
-  `missing_node`, with the first affected line), and the security sensor lists
+  `missing_node`, `error_flag`, with the first affected line), and the security sensor lists
   every file that is not. The finding cache stores that status, so a warm scan
   keeps it; an entry without one is re-analysed. **This is internal for now:**
   no MCP tool response carries the list yet, so an agent still cannot see it.
