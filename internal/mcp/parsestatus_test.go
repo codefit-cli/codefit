@@ -494,3 +494,81 @@ func TestParseStatus_OverriddenSettingsAreNamedNotValued(t *testing.T) {
 		t.Errorf("the setting's VALUE reached the scan-all response: %s", raw)
 	}
 }
+
+// jsonTags returns the JSON names of a struct type's fields, following embedded
+// structs the way encoding/json flattens them.
+func jsonTags(t reflect.Type) []string {
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Anonymous && f.Type.Kind() == reflect.Struct {
+			out = append(out, jsonTags(f.Type)...)
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// TestToolDescriptionsNameRealParseFields (S14): the descriptions an agent reads
+// over tools/list name the parse-status fields by the JSON names the responses
+// really carry — reflected from ParseStatusBlock, and from SecuritySection for
+// scan-all's `security.`-prefixed spelling — so renaming a tag without the
+// description, or the reverse, fails here.
+func TestToolDescriptionsNameRealParseFields(t *testing.T) {
+	block := jsonTags(reflect.TypeOf(mcp.ParseStatusBlock{}))
+	if len(block) != 4 {
+		t.Fatalf("positive control: ParseStatusBlock has %d JSON fields (%v), want 4", len(block), block)
+	}
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(mcp.ScanResponse{}), reflect.TypeOf(mcp.SecuritySection{}),
+		reflect.TypeOf(mcp.ScanEndpointResponse{}), reflect.TypeOf(mcp.SurfaceResponse{}),
+	} {
+		got := strings.Join(jsonTags(typ), " ")
+		for _, tag := range block {
+			if !strings.Contains(" "+got+" ", " "+tag+" ") {
+				t.Errorf("%s does not carry the JSON field %q (has: %s)", typ.Name(), tag, got)
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	serverT, clientT := mcpsdk.NewInMemoryTransports()
+	go func() { _ = mcp.NewServer().Run(ctx, serverT) }()
+	session, err := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "codefit-itest", Version: "0"}, nil).Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+	lt, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc := map[string]string{}
+	for _, tool := range lt.Tools {
+		desc[tool.Name] = tool.Description
+	}
+
+	for _, tool := range []string{"codefit-scan-security", "codefit-scan-endpoint"} {
+		for _, tag := range block {
+			if !strings.Contains(desc[tool], "`"+tag+"`") {
+				t.Errorf("%s's description does not name `%s`", tool, tag)
+			}
+		}
+	}
+	for _, tag := range block {
+		if !strings.Contains(desc["codefit-scan-all"], "`security."+tag+"`") {
+			t.Errorf("codefit-scan-all's description does not name `security.%s`", tag)
+		}
+	}
+	for _, tool := range []string{"codefit-surface-idor", "codefit-surface-authz", "codefit-surface-overfetch", "codefit-surface-nplus1"} {
+		if !strings.Contains(desc[tool], "`parse_incomplete`") ||
+			!strings.Contains(desc[tool], "do not check whether each file was parsed whole") {
+			t.Errorf("%s's description does not declare that it does not check the parse status: %q", tool, desc[tool])
+		}
+	}
+}

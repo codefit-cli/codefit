@@ -22,6 +22,22 @@ const recognizedAuthzHelpersDescNote = " `recognized_authz_helpers` names the pr
 	"count; a low or zero count there reflects codefit's KNOWLEDGE, not the project's actual guarding — " +
 	"read it before concluding known_authz_detected: false means unauthorized. Also read authz_result_used (TypeScript): known_authz_detected TRUE beside authz_result_used FALSE means a recognized guard was CALLED and its result went NOWHERE, so it gates nothing at that site — the item stays actionable. That is a fact, not a verdict: a helper that throws or redirects gates correctly with its result unused, and codefit cannot see the helper body from the handler. Check what the helper does on failure. The key is ABSENT for languages that do not compute it, and an absent fact is never read as false."
 
+// parseStatusDescNote is the agent-facing declaration of the parse-status
+// fields (ParseStatusBlock, ADR 0090), shared by codefit-scan-security's and
+// codefit-scan-all's descriptions so the two cannot drift. It is worded to be
+// read BEFORE the agent reports a file as clean: fewer findings in a file the
+// parser did not read whole is indistinguishable from a cleaner file unless the
+// agent knows to look here.
+const parseStatusDescNote = " `parse_status_reported`, `parse_incomplete` and `parse_status_note` declare which " +
+	"analysed files the parser did NOT read whole: each `parse_incomplete` entry gives the file, the reason " +
+	"(`stopped:<reason>`, `error_root`, `error_node`, `missing_node`, `error_flag`) and the first affected line. " +
+	"Such a file still counts in `scope.audited` and in the score, but its findings and surface cover only what " +
+	"the parser read — from that line on, a missing finding is NOT evidence of a clean file, and `scope.note` " +
+	"says so whenever the list is non-empty. `parse_status_reported: false` means nobody checked (the language's " +
+	"provider reports no parse status, or no file was analysed) and `parse_status_note` says which: an empty list " +
+	"then is not a clean read. `parser_settings_overridden` (absent when none) names the parser settings set in " +
+	"the codefit process, never their values: under one, a file can read as parsed whole when it was not."
+
 // NewServer builds the codefit MCP server with its tools registered. Each tool is
 // a THIN adapter: it hands the SDK's typed request to the core handler that
 // already exists and is tested, and returns the core's result as structured
@@ -33,7 +49,7 @@ func NewServer() *mcpsdk.Server {
 
 	addTool(s, string(ToolScanSecurity),
 		"Run the deterministic security rules and the mapped surface over a project. Input: {root, language, changed_files?}. Pass changed_files to audit only those paths; the response's scope block then declares the narrowing, and score/blocked describe only the audited slice. Returns findings + surface + score + blocked + scope."+
-			recognizedAuthzHelpersDescNote,
+			recognizedAuthzHelpersDescNote+parseStatusDescNote,
 		HandleScanSecurity)
 	addTool(s, string(ToolScanAll),
 		"The actionable summary per endpoint. Every endpoint is NAMED, not inlined: `actionable` gives file, line, method, how many concerns and of which categories, which kinds of gap, the highest certainty reached and whether an affirmation is present — enough to rank and choose. The per-concern signals and reason_to_review text is NOT here; fetch any endpoint's full concerns with codefit-scan-endpoint, which re-runs the same analysis. Deterministic findings are the exception: they are facts codefit already concluded, so they come back IN FULL in actionable.endpoints[].deterministic_concerns and never need a second call. resolved_clean and frontier_pending are named the same way. Every response declares a byte `budget`; if the endpoint list did not fit, budget.withheld says how many endpoints are missing and budget.ordering says what ranking the ones you have are a prefix of — never a silent cut. Manages the committed .codefit-baseline: returns a `baseline` delta (new/changed/known/gone) and shows only what is not yet tracked — act on baseline.new and baseline.changed. Input: {root, language, changed_files?}. "+
@@ -51,6 +67,10 @@ func NewServer() *mcpsdk.Server {
 			"reason_to_review question), call codefit-scan-db with `{root, language, detail: [ids]}` — scan-all's db bucket carries no detail of its own. "+
 			"`security.recognized_authz_helpers` and `security.recognized_authz_helpers_note` (present only when `security.measured` is true) are the same declaration as codefit-scan-security's, scoped under `security`:"+
 			recognizedAuthzHelpersDescNote+
+			" `security.parse_status_reported`, `security.parse_incomplete`, `security.parse_status_note` and `security.parser_settings_overridden` "+
+			"(present only when `security.measured` is true) are the same parse-status declaration as codefit-scan-security's, scoped under `security`; "+
+			"when files are listed and the db dimension ran, the note adds that the code×schema cross parsed them separately and reports no status:"+
+			parseStatusDescNote+
 			" The `baseline` delta also reports what AGENTS have already reasoned, so you do not re-reason it: `baseline.reasoned_by_agent` is the complete number of items carrying a verdict "+
 			"(always present — 0 means codefit looked and found none, never that it did not look), `baseline.reasoned_items` names them (fingerprint/file/category/latest verdict/when/conflict) and "+
 			"`baseline.in_conflict` + `baseline.in_conflict_count` name the items whose verdicts DISAGREE — one agent said vulnerable, another said not_vulnerable — which only a HUMAN resolves. "+
@@ -65,19 +85,22 @@ func NewServer() *mcpsdk.Server {
 			"critical security affirmations.",
 		HandleScanAll)
 	addTool(s, string(ToolScanEndpoint),
-		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. Input: {root, language, file}.",
+		"Re-analyse ONE file on demand and return its endpoints' full concerns (signals, reason_to_review, certainty). Stateless: it re-runs the static analysis, it stores nothing, so what it returns is EXACTLY what codefit-scan-all left out for that endpoint. This is how you read the detail of ANY endpoint scan-all named — actionable, resolved_clean or frontier_pending. "+
+			"The response also carries codefit-scan-security's parse-status fields narrowed to this file: `parse_incomplete` holds its entry (reason and first affected line) when the parser did not read it whole — "+
+			"then its concerns cover only what the parser read — and is `[]` when it did; `parse_status_reported` is `false`, with `parse_status_note` saying why, when there is no status for it (the provider reports none, or the pass did not analyse the file), "+
+			"and `parser_settings_overridden` names parser settings set in the process. Input: {root, language, file}.",
 		HandleScanEndpoint)
 	addTool(s, string(ToolSurfaceIDOR),
-		"Enumerate the IDOR surface (id→resource endpoints) for the agent to reason about ownership checks. "+helperScopeNote+" Input: {files:[{path, content}]}.",
+		"Enumerate the IDOR surface (id→resource endpoints) for the agent to reason about ownership checks. "+helperScopeNote+" "+surfaceParseStatusNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceIDOR)
 	addTool(s, string(ToolSurfaceAuthz),
-		"Enumerate the broken-authorization surface (handlers doing something sensitive), ordered unchecked-first. "+helperScopeNote+" Input: {files:[{path, content}]}.",
+		"Enumerate the broken-authorization surface (handlers doing something sensitive), ordered unchecked-first. "+helperScopeNote+" "+surfaceParseStatusNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceAuthz)
 	addTool(s, string(ToolSurfaceOverfetch),
-		"Enumerate the over-fetching surface (domain-object serializations), ordered by structural certainty. Input: {files:[{path, content}]}.",
+		"Enumerate the over-fetching surface (domain-object serializations), ordered by structural certainty. "+surfaceParseStatusNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceOverfetch)
 	addTool(s, string(ToolSurfaceNPlus1),
-		"Enumerate the N+1 surface (query calls inside a loop), ordered by structural certainty (frontier last, never dropped). Dimension: db. Input: {files:[{path, content}]}.",
+		"Enumerate the N+1 surface (query calls inside a loop), ordered by structural certainty (frontier last, never dropped). Dimension: db. "+surfaceParseStatusNote+" Input: {files:[{path, content}]}.",
 		HandleSurfaceNPlus1)
 	addTool(s, string(ToolConfirmSurface),
 		"Integrate the agent's verdicts on surface items: vulnerable ones become probabilistic findings (confidence < 1.0) anchored to the item. Stateless: codefit recomputes the id to validate.",
