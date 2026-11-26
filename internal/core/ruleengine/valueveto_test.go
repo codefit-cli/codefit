@@ -337,57 +337,54 @@ func TestValueVetoRejectsAMetavariableThatCannotHoldALiteral(t *testing.T) {
 	}
 }
 
-// TestValueVetoOnADefaultParameterIsRejectedToday pins a CURRENT behaviour, not
-// a rule of the language: a whole string literal CAN stand as a default
-// parameter value (`function f(p = "lib/a.ts") {}` is valid TypeScript), yet a
-// veto on that spot is refused at compile time.
+// TestValueVetoOnADefaultParameterCompilesAndVetoes pins what is true since the
+// TypeScript parser was upgraded to gotreesitter v0.54.0 (ADR 0088): a whole
+// string literal can stand as a default parameter value, so a veto on
+// `function $F($P = $V) {}` compiles and vetoes there.
 //
-// The cause is the parser, not the compile proof's logic. The proof writes a
-// string literal where the metavariable stands and requires the result to
-// parse; the TypeScript grammar this engine embeds reports a string-literal
-// default parameter as a syntax error, in a pattern and in a source file alike,
-// so the proof fails and the rule is rejected. The same pattern without a veto
-// compiles, and matches an identifier default.
+// Until that upgrade the opposite was pinned. The compile proof writes a string
+// literal where the metavariable stands and requires the result to parse, and
+// gotreesitter v0.20.2 reported an untyped parameter whose default is a literal
+// as a syntax error — whatever the literal, in a function declaration and in a
+// class method alike — so the proof failed and the rule was rejected. That pin
+// fired, by design, when the parser started accepting the form; this test
+// replaces it with the behaviour the parser has now.
 //
-// The rejection fails in the safe direction: a rule author gets a located
-// compile error, never a veto that silently does nothing. It is pinned so that
-// a parser or compile-proof change that starts ACCEPTING this spot is seen and
-// proven to veto there (the accepted table above is where such a row would go),
-// instead of slipping through unexamined. No shipped rule puts a veto here.
-func TestValueVetoOnADefaultParameterIsRejectedToday(t *testing.T) {
+// The parse rows are the cause, observed: if any of them errors again, the
+// parser regressed on this form, and the compile result below is no longer
+// explained by them. The veto rows prove the veto does not merely compile but
+// fires: a file path is dropped and a credential-like value is kept. No shipped
+// rule puts a veto here; SEC-001 does not reach default parameters at all.
+func TestValueVetoOnADefaultParameterCompilesAndVetoes(t *testing.T) {
 	const pattern = `function $F($P = $V) {}`
 
-	// The cause, observed: the parser flags a string-literal default parameter.
-	src, err := tsParse(`function f(p = "lib/a.ts") {}`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if !src.HasError() {
-		t.Fatal("the TypeScript parser now accepts a string-literal default parameter; " +
-			"this pin's stated cause is gone, so re-examine whether the veto below still fails to compile, and why")
-	}
-
-	// The control: without the veto the pattern compiles and reaches the spot,
-	// so the rejection below is the veto's alone.
-	plain := ruleengine.Rule{ID: "T-POS", Message: "m", Severity: "high", Dimension: "security", Pattern: pattern}
-	compiled, err := ruleengine.Compile([]ruleengine.Rule{plain}, tsParse)
-	if err != nil {
-		t.Fatalf("control: the pattern without a veto does not compile: %v", err)
-	}
-	if got := vetoMatches(t, compiled, `function f(p = x) {}`); got != 1 {
-		t.Fatalf("control: the pattern without a veto matched an identifier default %d times, want 1", got)
-	}
-
-	_, err = ruleengine.Compile([]ruleengine.Rule{vetoOnly(pattern, "$V")}, tsParse)
-	if err == nil {
-		t.Fatal("Compile now ACCEPTS a veto on a default-parameter value; prove it vetoes there " +
-			"(a row in the accepted table of TestValueVetoRejectsAMetavariableThatCannotHoldALiteral), " +
-			"then retire this pin and the rules/README.md sentence that describes it")
-	}
-	for _, want := range []string{"T-POS", "$V", pattern, "where a string literal", "does not parse"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not contain %q", err.Error(), want)
+	// The cause, observed: the forms v0.20.2 rejected now parse clean.
+	for _, src := range []string{
+		`function f(p = "lib/a.ts") {}`,
+		`function f(p = 1) {}`,
+		`class C { m(p = "lib/a.ts") {} }`,
+	} {
+		n, err := tsParse(src)
+		if err != nil {
+			t.Fatalf("parse %q: %v", src, err)
 		}
+		if n.HasError() {
+			t.Errorf("the TypeScript parser reports %q as a syntax error again: the parser regressed on "+
+				"literal default parameters (ADR 0088). Re-examine the compile result below", src)
+		}
+	}
+
+	compiled, err := ruleengine.Compile([]ruleengine.Rule{vetoOnly(pattern, "$V")}, tsParse)
+	if err != nil {
+		t.Fatalf("Compile rejects a veto on a default-parameter value again: %v. If the parser regressed "+
+			"(see the parse rows above), restore the rejection pin and the rules/README.md sentence that "+
+			"described it", err)
+	}
+	if got := vetoMatches(t, compiled, `function f(p = "s3cr3t") {}`); got != 1 {
+		t.Errorf("control: a credential-like default -> %d findings, want 1", got)
+	}
+	if got := vetoMatches(t, compiled, `function f(p = "lib/a.ts") {}`); got != 0 {
+		t.Errorf("a file-path default -> %d findings, want 0 — the veto must fire here", got)
 	}
 }
 

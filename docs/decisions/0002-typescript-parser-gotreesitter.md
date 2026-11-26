@@ -129,3 +129,7 @@ Both caveats were resolved when the parsing layer was built:
 - This audit is the first application of the project's
   [dependency policy](../../SECURITY.md#dependency-policy); future core
   dependencies follow the same checklist and get the same ADR treatment.
+
+## Notes
+
+2026-11-25: Superseded on two points by [ADR 0088](0088-the-typescript-parser-moves-to-gotreesitter-v0-54-0.md). The pinned version is now `v0.54.0`. And the conclusion of caveat 2, "the caps do not bite typical project code", rested on three files and is measured false for the grammar, if not for the caps: in a census of 1,587 real TypeScript files, `v0.20.2` parsed 219 with an error, from ordinary forms such as a typed arrow parameter, and a whole-file error silenced every finding after it (issue `#189`). The binary-size figures above (about 5.4 MB) are also out of date: a release-flag build of codefit at `v0.20.2` measured 16,363,682 bytes, and at `v0.54.0` 20,844,706 bytes (linux/amd64).

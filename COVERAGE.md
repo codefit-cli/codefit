@@ -1483,6 +1483,54 @@ exists to prevent — so they get their own answer
   intermediate variable, no local Prisma access) may not link to that indirect
   access; bound to a variable first, it links. The local-access case always
   enumerates.
+- **Parser residual: three valid forms still parse with a syntax error.** [id: ts.parser-residual-forms]
+  The TypeScript/TSX parser is gotreesitter `v0.54.0`
+  ([ADR 0088](docs/decisions/0088-the-typescript-parser-moves-to-gotreesitter-v0-54-0.md)).
+  In a census of 1,587 real TypeScript files it left **3** files parsing with an
+  error, in two syntactic forms, (a) and (b) below, against **219** on the
+  previous parser (`v0.20.2`), where an ordinary
+  typed arrow parameter, a literal default parameter, an `import("…")` type or an
+  array-destructured arrow parameter turned the whole file into an error and every
+  finding and surface item after it was lost (issue `#189`). Those forms parse
+  clean now, pinned in `.ts` and `.tsx` by
+  `TestParserForms_ValidFormsParseAndKeepTheLaterFinding`. **Still a syntax
+  error**, pinned row by row by `TestParserForms_StillAnErrorToday`:
+  (a) a tagged template whose explicit type argument is an array type
+  (``sql<Row[]>`select 1` ``), an object type, alone or inside a tuple
+  (``sql<[{ id: number }]>`select 1` ``), a generic type
+  (``sql<Array<Row>>`select 1` ``), or two type arguments (``sql<A, B>`select 1` ``),
+  in `.ts` and `.tsx`. After `await` the parser leaves a `MISSING` `!` and no
+  `ERROR` node; without `await`, an `ERROR` node. A single type name
+  (`sql<Row>`), a tuple of type names (`sql<[A, B]>`) and a union (`sql<A | B>`)
+  parse clean, pinned as valid rows. The generic-type spelling parsed clean on
+  `v0.20.2`.
+  (b) in `.tsx` only, a bare `&` followed by a name with no closing `;` inside a
+  quoted JSX attribute value, as in a query string (`href="/x?a=1&b=2"`) — read as
+  an unterminated character reference, it leaves an `ERROR` node over it. Form (b)
+  is **new relative to `v0.20.2`**, which parsed it clean (`v0.53.0` rejects it too). `&amp;`, a `&` followed by a
+  space, and the same text as a JSX child parse clean.
+  (c) in `.tsx` only, JSX text that starts with `(` right after an opening tag with
+  no attribute, on the same line, when that element is **not nested inside another
+  JSX element or fragment** — where an expression stands: after `return`, `=` or
+  `=>`, in a call argument, or inside a `{…}` container
+  (`return <span>(optional)</span>;`, `<div>{on && <span>(optional)</span>}</div>`).
+  Nested directly inside another element or fragment
+  (`return <div><span>(optional)</span></div>;`) it parses clean. Form (c) is **new
+  relative to `v0.20.2`**, which parsed it clean (`v0.53.0` and `v0.58.0` reject it too),
+  and it is **not local**: the `ERROR` node runs into the next statement, so on the
+  synthetic fixtures the finding on the next line is **lost**; inside a `{…}`
+  container, or with a lone `(` as the text, the `ERROR` node spans the whole
+  fixture file. The same text after an attribute
+  (`<span className="hint">(optional)</span>`), on its own line, or nested in a
+  parent element parses clean, pinned as valid rows.
+  Forms (a) and (b) are **local**: on the synthetic fixtures the finding on the
+  line after the error is still reported. Over the census, compared by identity
+  (rule id, file, line), no finding or surface item that `v0.20.2` reported was
+  lost. (a) and (b) are the only forms the census met; (c) was found afterwards,
+  synthetically, and 0 of the 614 `.tsx` files of the measured corpus contain its
+  triggering shape (one contains the nested form, which parses clean).
+  **Not declared to the agent:** a scan response does not yet say that a file
+  parsed with an error, so a residual form inside a file is not visible in it.
 - **SQL-DDL dialect known limits (declared, not silent).** [id: db.sqlddl-dialect-limits] (1) A T-SQL routine
   body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
   fragment inside a `GO`-batched procedure/trigger body is **absorbed into the
