@@ -19,20 +19,29 @@ import (
 //     reason memory_budget, a one-node ERROR root, error flag set. It comes
 //     first because the stop is the CAUSE; the ERROR root it leaves is the
 //     symptom, and naming the symptom would hide the knob that produced it.
-//  2. error_root — the root itself is an ERROR node. No input measured on
-//     v0.54.0 reaches this arm: no committed fixture and none of 68 synthetic
-//     inputs tried for it parses to an ERROR root without a stop, and the stop
-//     outranks it. It is kept so a future parser that returns an ERROR root
-//     without a stop is still named for what it is; removing it would fall
-//     through to error_node, still incomplete.
+//  2. error_root — the root itself is an ERROR node. Under the default settings
+//     no input measured on v0.54.0 reaches this arm: no committed fixture and
+//     none of 68 synthetic inputs tried for it parses to an ERROR root without
+//     a stop, and the stop outranks it. With GOT_C_RECOVERY=0 two residual (c)
+//     rows do (measured, not pinned). It is kept so an ERROR root without a stop
+//     is named for what it is; removing it would fall through to error_node,
+//     still incomplete.
 //  3. error_node — an ERROR node anywhere under the root, reported at the
 //     first one in document order. This is the shape a healthy-looking
 //     `program` root hides: root type alone proves nothing.
 //  4. missing_node — no ERROR node, but a zero-width MISSING node the parser
 //     inserted (the tagged-template residual of ADR 0088 after `await`).
 //  5. error_flag — the tree says it holds an error but neither kind of node is
-//     found. Defensive: no measured input produces it; without it an unlocated
-//     error would read as complete.
+//     found. Upstream documents the shape beside markTruncatedTreeHasError
+//     (gotreesitter v0.54.0, parser_api.go): the GLR frontier dies mid-file
+//     (stop reason no_stacks_alive, which ParseStoppedEarly does not report)
+//     after the stack reduced to a clean root, so the parser returns a root cut
+//     short before the end of the file, with no ERROR or MISSING node, and sets
+//     only the root's error flag. Reproduced here through the real parser only
+//     with GOT_C_RECOVERY=0 (TestAnalyzeFile_CutShortCleanPrefixReportsErrorFlag,
+//     which pins this arm); no input tried under the default settings reaches
+//     it. Without this arm that tree — whose later lines were never read — would
+//     read as complete. Its line is 0: no node names the place.
 //
 // An ERROR node outranks a MISSING node regardless of position: an ERROR node
 // can swallow source text (residual (c) loses the finding on the next line),
@@ -42,11 +51,13 @@ import (
 // the first ERROR or MISSING node, else of the end of what was parsed.
 //
 // Measured and rejected as a further signal: root.EndByte() against the content
-// length. On every committed fixture, every still-an-error row and every
-// deterministic budget stop the root ends exactly at the end of the content;
-// the only short root measured (a heap-ceiling stop, not deterministic) is also
-// a stop, which check 1 already reports. A signal with no shape it alone
-// catches would be untestable, so it is not added.
+// length. Under the default settings, on every committed fixture, every
+// still-an-error row and every deterministic budget stop the root ends exactly
+// at the end of the content; the only short root measured there (a heap-ceiling
+// stop, not deterministic) is also a stop, which check 1 already reports. With
+// GOT_C_RECOVERY=0 short roots do occur without a stop: the error_flag shape
+// above (caught by check 5), and also inputs whose root ends early with no mark
+// at all, which this check reads as complete (ADR 0089, "Not covered").
 //
 // What this does NOT see: valid code the parser misreads into an ERROR-free,
 // MISSING-free tree of the wrong shape; that tree reads as complete.

@@ -86,8 +86,8 @@ Why this is right rather than clever:
 
 Cost: one SHA-256 of the binary, once per process. *(Corrected 2026-11-25: this said
 "~5 MB". The stripped linux/amd64 release binary measured 16.4 MB on gotreesitter v0.20.2
-and 20,844,706 bytes on v0.54.0, ADR 0088; `sha256sum` hashes a release-flag build of about
-that size in about 60 ms on the machine that measured it.)* Against a repository walk that
+and 20,844,706 bytes on v0.54.0, ADR 0088. Corrected again 2026-11-26: a hashing time
+cited here could not be reproduced and was removed.)* Against a repository walk that
 parses hundreds of files, it is small.
 
 ## R3 — What is cached: the whole raw output of one file's analysis

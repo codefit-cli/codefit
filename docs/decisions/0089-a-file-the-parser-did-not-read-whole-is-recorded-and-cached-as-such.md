@@ -3,8 +3,11 @@
 Date: 2026-11-25
 Status: accepted
 Amends [ADR 0050](0050-the-cache-key-is-the-analyzers-own-bytes.md) (the cache key gains a
-settings segment) and [ADR 0053](0053-a-cache-entry-names-its-own-key-and-a-hit-must-prove-it.md) (an entry
-must also carry a parse status). Follows [ADR 0088](0088-the-typescript-parser-moves-to-gotreesitter-v0-54-0.md).
+settings segment). Applies the provenance rule of
+[ADR 0053](0053-a-cache-entry-names-its-own-key-and-a-hit-must-prove-it.md) — a hit must prove
+itself — and extends it to one more field, the parse status (D3); ADR 0053 itself is unchanged
+and carries no back-reference to this ADR yet. Follows
+[ADR 0088](0088-the-typescript-parser-moves-to-gotreesitter-v0-54-0.md).
 Issue `#189`.
 
 ## Context
@@ -45,7 +48,11 @@ resolved by type assertion, like `QueryExtractor` and `SchemaParser`. The TypeSc
 provider implements it with one parse per file. `Parse`, `AnalyzeSecurity` and
 `AnalyzeSurface` keep their signatures and behaviour for their other callers, and a test
 pins that the combined call returns exactly what the two calls return, in the same order,
-over every TypeScript fixture.
+over every TypeScript fixture of the provider's testdata and one inline route handler, with
+a provider that registers a project authz helper. Its positive controls require the inputs
+to fire every rule id the real loader loads, to produce every surface category the
+provider declares, and to show the registered helper flipping `known_authz_detected`, so a
+combined call that dropped a rule, a surface query or the project's helpers fails it.
 
 A provider that does not implement it is analysed through the two calls as before, and its
 files carry the status **not reported** — never complete. The status type,
@@ -97,18 +104,40 @@ its file produced its findings is not evidence of anything.
 
 ## What was measured (gotreesitter v0.54.0, linux/amd64)
 
-- **Every committed TypeScript fixture**, 64 files: every valid row and every real or
-  representative file parses with a `program` root, no error flag, stop reason `accepted`.
-  Every still-an-error row also has a `program` root: an `ERROR` node under it
-  (`error_node`) or, for the tagged-template residual after `await` and an unclosed
-  condition, a `MISSING` node and no `ERROR` node (`missing_node`).
-- **No `ERROR` root without a stop.** No committed fixture and none of 68 synthetic inputs
-  tried for it (stray punctuation and operators, lone brackets and keywords, unterminated
-  strings, control bytes, a byte-order mark — 34 inputs, each as `.ts` and `.tsx`) parses
-  to an `ERROR` root. The only `ERROR` root measured is a parse
-  stopped by the memory budget, which `stopped:` outranks. So `error_root` and `error_flag`
-  are defensive arms with no measured input; removing either falls through to a later arm or
-  to incomplete, never to complete.
+- **Every TypeScript fixture under `internal/providers/typescript/testdata`**, 64 files:
+  every valid row and every real or representative file parses with a `program` root, no
+  error flag, stop reason `accepted`. Every still-an-error row also has a `program` root: an
+  `ERROR` node under it (`error_node`) or, for the tagged-template residual after `await`
+  and an unclosed condition, a `MISSING` node and no `ERROR` node (`missing_node`). The
+  repository commits 68 `.ts`/`.tsx` files in all; the other 4 live under
+  `internal/providers/registry/testdata` and `internal/scaffold/testdata`, and classify as
+  complete under the default settings (measured in the correction batch below).
+- **No `ERROR` root without a stop, under the default settings.** No committed fixture and
+  none of 68 synthetic inputs tried for it (stray punctuation and operators, lone brackets
+  and keywords, unterminated strings, control bytes, a byte-order mark — 34 inputs, each as
+  `.ts` and `.tsx`) parses to an `ERROR` root. The only `ERROR` root measured under the
+  default settings is a parse stopped by the memory budget, which `stopped:` outranks. With
+  `GOT_C_RECOVERY=0` (the parser's older, resync-based recovery) two residual (c) rows do
+  parse to an `ERROR` root without a stop; that is measured, not pinned. Removing the
+  `error_root` arm falls through to `error_node`, still incomplete; no test pins the arm.
+- **The `error_flag` arm, reproduced with a non-default setting.** gotreesitter `v0.54.0`
+  documents the shape beside `markTruncatedTreeHasError` (`parser_api.go`): the GLR
+  frontier dies mid-file (stop reason `no_stacks_alive`, which `ParseStoppedEarly` does not
+  report) after the stack reduced to a clean root, so the root ends before the file, holds
+  no `ERROR` or `MISSING` node, and carries only the error flag. In the correction batch of
+  2026-11-26 no input reached it under the default settings — the 68 committed files, 91
+  generated inputs (mostly garbage tails after valid statements, in `.ts` and `.tsx`), and a
+  TypeScript `lib.dom.d.ts` — nor, over the committed files and `lib.dom.d.ts`, with
+  `GOT_GLR_MAX_STACKS` at 1 or 2, `GOT_GLR_MAX_MERGE_PER_KEY=1`, or ten values of nine other
+  parser switches tried one at a time. With
+  `GOT_C_RECOVERY=0` it is reached: two valid statements, then a line holding a backslash
+  and the text `x01`, then a credential — stop reason `no_stacks_alive`, the root ends at
+  byte 25 of 56 (the end of line 2), error flag set, no `ERROR` or `MISSING` node, the
+  credential lost; the same on 30 of 30 runs and under `-race`.
+  `TestAnalyzeFile_CutShortCleanPrefixReportsErrorFlag` runs that input through the real
+  provider in a child process with the setting and pins `error_flag`, line 0; making the
+  arm return complete fails it. What is pinned is the classification of that shape; what is
+  not is that the default settings ever produce it.
 - **The memory budget**, through the security sensor, with and without `-race` (identical):
   at 8 and 7 MB nothing stops; at 6 and 5 MB the 92 KB vendored real file stops
   (`stopped:memory_budget`, a one-node `ERROR` root, error flag set) while a small file in
@@ -130,10 +159,13 @@ its file produced its findings is not evidence of anything.
 - **Results unchanged.** The security sensor over the repository's TypeScript testdata, on
   the base and on this change, compared by identity (rule id or surface category, file,
   line, fingerprint, facts): 39 findings and 114 surface items, identical.
-- **Cost.** The same harness, 20 runs, three rounds each, same machine: the base takes a
-  median of about 465 ms over those 64 files, this change about 291 ms. The saving is the
-  second parse the sensor no longer does. The status check itself measured within noise:
-  the same change with the check short-circuited to "complete" also took about 291 ms.
+- **Cost, one machine's measurement.** The same scratch harness (the security sensor over
+  those 64 files), 20 runs, three rounds each, on the one linux/amd64 machine the change was
+  written on: the base takes a median of about 465 ms, this change about 291 ms. The
+  independent verifier's runs reproduced the direction, not the figures (about 563 ms →
+  392 ms). The saving is the second parse the sensor no longer does. The status check
+  itself measured within noise on that machine: the same change with the check
+  short-circuited to "complete" also took about 291 ms.
 
 ## Consequences
 
@@ -162,8 +194,31 @@ its file produced its findings is not evidence of anything.
   is not reproducible through the real parser on `v0.54.0`, so it is not pinned with a
   hand-built tree. A stop of that kind would still be reported by check 1, which reads the
   stop reason, not the flag.
-- **`error_root` and `error_flag`** have no measured input (above); no test can catch their
-  removal through the real parser.
+- **`error_root`** is reached only with `GOT_C_RECOVERY=0` (above) and is not pinned;
+  removing it falls through to `error_node`. **`error_flag`** is pinned through the real
+  parser only under `GOT_C_RECOVERY=0`; whether the default settings ever produce it is
+  unknown.
+- **Broken code with no mark, under `GOT_C_RECOVERY=0`.** With that setting the parser
+  returns trees with no error flag, no `ERROR` and no `MISSING` node for inputs that are
+  broken: both `broken_*` parser-form rows (`const x = ;`, `if (x {`), a line of `@@@`, and
+  a lone-backslash line — the last with a root that ends 3 bytes before the file. Each reads
+  as **complete**. It is measured through the real provider, deterministic over 30 runs,
+  and not handled: whether to add a root-span check, or to treat that setting otherwise, is
+  an open owner decision. Under the default settings none of these inputs reads complete.
+- **A stop at the parser's process-heap hard ceiling is not deterministic, and is cached.**
+  Upstream (`parser_memory_budget_runtime.go`, `runtimeMemoryBudgetStopReasonNow` and its
+  "DETERMINISM CONTRACT (issue #454)") stops a parse when the PROCESS's `HeapAlloc` has grown
+  past the ceiling since the parse began, and says that only this ceiling may stop a parse
+  from a `runtime.MemStats` reading because those readings depend on garbage-collection
+  timing. It arms only for sources of at least 64 KiB; the ceiling is 2 GiB or twice the
+  per-parse budget, or a fixed `GOT_PARSE_MEMORY_HARD_CEILING_MB`; it reports the same stop
+  reason as the soft budget, `memory_budget`. The sensor stores every analysis it computes,
+  so a result stopped this way is cached with its `stopped:memory_budget` status and served
+  on later runs until the file, the binary or a fingerprinted parser setting changes. `GOGC`
+  and `GOMEMLIMIT` set the Go collector's pacing, so they can move when this path fires (an
+  inference from upstream's own explanation, not measured here); they are not in the
+  settings fingerprint, which covers only `GOT_`, `GOTREESITTER_` and `GTS_`. Whether such a
+  result should be cached at all is an open owner decision; this ADR does not change it.
 - **Out-of-scope files** under a narrowed scan are not analysed and carry no status.
 - **Layer 1** (the regex secrets scan) reads the raw text, not the tree; its findings in an
   incomplete file are unaffected by the parse and are still reported.

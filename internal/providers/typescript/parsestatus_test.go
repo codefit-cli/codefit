@@ -1,7 +1,9 @@
 package typescript_test
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -328,6 +330,96 @@ func TestAnalyzeFile_ReportsTheFirstAffectedLine(t *testing.T) {
 				t.Errorf("status %+v, want %+v", got, c.want)
 			}
 		})
+	}
+}
+
+// --- the error_flag arm, in a child process ------------------------------------
+
+// The parser reads GOT_C_RECOVERY once per process (its environment knobs are
+// loaded once), so the setting can only be changed for a whole process: the test
+// re-runs this test binary as a child with it set, the child runs the real
+// AnalyzeFile and writes the analysis to a file, and the parent asserts on it.
+const (
+	errorFlagChildEnv    = "CODEFIT_TEST_TS_ERROR_FLAG_CHILD"
+	errorFlagChildOutput = "CODEFIT_TEST_TS_ERROR_FLAG_CHILD_OUTPUT"
+	cRecoveryEnv         = "GOT_C_RECOVERY"
+)
+
+// cutShortSource reaches the last arm, error_flag, through the real parser. It is
+// the shape gotreesitter v0.54.0 documents beside markTruncatedTreeHasError
+// (parser_api.go): the GLR frontier dies mid-file (stop reason no_stacks_alive,
+// which is NOT a stop ParseStoppedEarly reports) after the live stack reduced to
+// a clean `program`, so the parser returns a prefix-only root with no ERROR and
+// no MISSING node, and only sets the root's error flag because real source past
+// the root's end was dropped.
+//
+// Measured on v0.54.0 with GOT_C_RECOVERY=0 (the parser's older, resync-based
+// recovery): stop reason no_stacks_alive, truncated, the root ends at byte 25 —
+// the end of line 2 — of 56, error flag set, no ERROR or MISSING node; the same
+// on 30 of 30 runs. Line 3 is a lone backslash followed by the text x01 (a
+// literal backslash, not a control byte). Under the default settings the same
+// bytes give an ERROR node on line 3 instead, and neither shape was found under
+// the default settings in the 68 committed TypeScript files, the generated
+// inputs tried for it, or a TypeScript lib.dom.d.ts.
+const cutShortSource = "const a = 1;\nconst b = 2;\n\\x01\n" + `const apiKey = "s3cr3t";` + "\n"
+
+// TestHelperProcessTypeScriptErrorFlag is not a test: it is the child process
+// TestAnalyzeFile_CutShortCleanPrefixReportsErrorFlag runs. Without its
+// environment variable it does nothing.
+func TestHelperProcessTypeScriptErrorFlag(t *testing.T) {
+	if os.Getenv(errorFlagChildEnv) != "1" {
+		t.Skip("helper process for the error_flag test; runs only as its child")
+	}
+	a, err := typescript.New().AnalyzeFile(providers.SourceFile{Path: "cut_short.ts", Content: []byte(cutShortSource)})
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	data, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv(errorFlagChildOutput), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAnalyzeFile_CutShortCleanPrefixReportsErrorFlag pins the last arm through
+// the real parser: a root cut short mid-file with only the error flag set is
+// reported incomplete with reason error_flag — and its line 0, because no node
+// names the place — never complete. The credential on line 4 lies past the root's
+// end and is lost, which is exactly why "complete" here would be a false clean.
+// The in-process run is the control: under the default settings the same bytes
+// take another arm, so the child's result comes from the setting, not the input.
+func TestAnalyzeFile_CutShortCleanPrefixReportsErrorFlag(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "child.json")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcessTypeScriptErrorFlag$", "-test.count=1")
+	cmd.Env = append(os.Environ(), errorFlagChildEnv+"=1", errorFlagChildOutput+"="+output, cRecoveryEnv+"=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child process failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("the child wrote no result: %v", err)
+	}
+	var child providers.FileAnalysis
+	if err := json.Unmarshal(data, &child); err != nil {
+		t.Fatalf("decoding the child result: %v", err)
+	}
+	if want := findings.ParseIncomplete(findings.ParseReasonErrorFlag, 0); child.Parse != want {
+		t.Errorf("with %s=0 the status is %+v, want %+v — a root cut short with only the error flag "+
+			"set must read as incomplete", cRecoveryEnv, child.Parse, want)
+	}
+	for _, f := range child.Findings {
+		if f.ID == "SEC-001" && f.Line == 4 {
+			t.Errorf("with %s=0 the credential on line 4 IS reported — the root is no longer cut short "+
+				"before it, so this input no longer reaches the error_flag shape; re-measure: %+v",
+				cRecoveryEnv, child.Findings)
+		}
+	}
+
+	control := analyzeFile(t, providers.SourceFile{Path: "cut_short.ts", Content: []byte(cutShortSource)}).Parse
+	if want := findings.ParseIncomplete(findings.ParseReasonErrorNode, 3); control != want {
+		t.Errorf("control: under the default settings the status is %+v, want %+v", control, want)
 	}
 }
 

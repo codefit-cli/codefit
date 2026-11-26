@@ -286,7 +286,11 @@ func (s *Sensor) scanFile(rel string, raw []byte) ([]findings.Finding, []finding
 	// text the layers read.
 	//
 	// DECLARED RESIDUAL (ADR 0044): a BOM-LESS UTF-16 source file is still read
-	// as-is and still yields nothing, silently. sourcetext.Decode refuses to
+	// as-is and still yields no finding. It is no longer silent where the
+	// provider reports a parse status: the TypeScript provider's tree of those
+	// bytes holds an ERROR node, so the file is listed as not parsed whole
+	// (error_node, line 1; ADR 0089). It is still not analysed, and a provider
+	// that reports no status still says nothing about it. sourcetext.Decode refuses to
 	// guess an encoding, and the source-level floor that turns that refusal
 	// into a report exists only for the DB dimension's small, CONFIGURED source
 	// list — a per-file note across a whole repository walk, where yielding no
