@@ -144,9 +144,10 @@ All notable changes to codefit are documented here. The format is based on
   one: accepting a bump also needs a census over real projects, which is not
   automated here.
 
-- **A TypeScript file the parser did not read whole is now detected, recorded
-  and cached as such — but not yet shown in any scan response** (`#189`,
-  [ADR 0089](docs/decisions/0089-a-file-the-parser-did-not-read-whole-is-recorded-and-cached-as-such.md)).
+- **A TypeScript file the parser did not read whole is now detected, recorded,
+  cached as such, and named in the scan responses** (`#189`,
+  [ADR 0089](docs/decisions/0089-a-file-the-parser-did-not-read-whole-is-recorded-and-cached-as-such.md),
+  [ADR 0090](docs/decisions/0090-scan-responses-name-the-files-the-parser-did-not-read-whole.md)).
   The parser is error-recovering: a form it rejects leaves an `ERROR` or
   `MISSING` node, or a stop before the end, and nothing read those marks, so a
   file whose later lines were never read looked clean. The TypeScript provider
@@ -154,9 +155,27 @@ All notable changes to codefit are documented here. The format is based on
   that tree is whole (`stopped:<reason>`, `error_root`, `error_node`,
   `missing_node`, `error_flag`, with the first affected line), and the security sensor lists
   every file that is not. The finding cache stores that status, so a warm scan
-  keeps it; an entry without one is re-analysed. **This is internal for now:**
-  no MCP tool response carries the list yet, so an agent still cannot see it.
-  The Go provider reports no status.
+  keeps it; an entry without one is re-analysed.
+
+  **What the agent now sees:** `codefit-scan-security`, `codefit-scan-endpoint`
+  (narrowed to the requested file) and `codefit-scan-all` (inside `security`)
+  carry `parse_status_reported`, `parse_incomplete` (each file with its reason
+  and first affected line; always `[]` when none, never `null`) and
+  `parse_status_note`. A listed file still counts in `audited` and in the score;
+  **`scope.note` is no longer always empty under a full scan**: whenever files are
+  listed it says that their findings cover only what the parser read and that
+  from the listed line on a missing finding is not evidence of a clean file
+  (under a partial scan the sentence is appended to the partial note). Every other
+  existing field is unchanged. `parse_status_reported: false` means nobody
+  checked, with a note saying why: the Go provider reports no status, and a pass
+  that analysed no file now reports none either (it used to report "reported,
+  nothing incomplete"). The `codefit-surface-*` tools always answer `false`, `[]`
+  and a note: they do not check. `parser_settings_overridden` names the `GOT_`,
+  `GOTREESITTER_` and `GTS_` variables set in the codefit process, never their
+  values, because a non-default parser setting can make broken code read as
+  whole. The always-present fields add 51 bytes to a measured `scan-all`
+  response with nothing listed. The tool descriptions teach the fields; the
+  skill `codefit init` generates does not mention them yet.
 
   Fixed along the way: the cache key did not cover the environment variables
   the parser reads at run time. A scan run once with

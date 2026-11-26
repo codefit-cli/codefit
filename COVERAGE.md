@@ -1529,8 +1529,20 @@ exists to prevent — so they get their own answer
   lost. (a) and (b) are the only forms the census met; (c) was found afterwards,
   synthetically, and 0 of the 614 `.tsx` files of the measured corpus contain its
   triggering shape (one contains the nested form, which parses clean).
-  **Not declared to the agent:** a scan response does not yet say that a file
-  parsed with an error, so a residual form inside a file is not visible in it.
+  **Declared to the agent**
+  ([ADR 0090](docs/decisions/0090-scan-responses-name-the-files-the-parser-did-not-read-whole.md)):
+  `codefit-scan-security`, `codefit-scan-all` (under `security`) and
+  `codefit-scan-endpoint` list every analysed file the parser did not read whole in
+  `parse_incomplete`, with its reason and first affected line, so a file holding one
+  of these forms is named in the response: over the committed fixtures every
+  still-an-error row of (a), (b) and (c) is listed (`error_node`, or `missing_node`
+  for (a) after `await`). The file still counts as audited and in the score, and
+  `scope.note` says that from the listed line on a missing finding is not evidence
+  of a clean file. **Limits kept:** a form the parser accepts with no mark (a double
+  comma inside an object literal, ADR 0089) reads as complete and is not listed;
+  the `codefit-surface-*` tools and the code×schema cross parse files separately and
+  report no parse status; Go reports none; under a non-default parser setting, named
+  in `parser_settings_overridden`, some broken code reads as complete.
 - **SQL-DDL dialect known limits (declared, not silent).** [id: db.sqlddl-dialect-limits] (1) A T-SQL routine
   body is captured to the `GO` batch separator (or EOF), so a `CREATE TABLE`-shaped
   fragment inside a `GO`-batched procedure/trigger body is **absorbed into the

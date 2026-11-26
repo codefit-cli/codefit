@@ -13,7 +13,7 @@ codefit exposes its capabilities as MCP tools in three roles:
 | --- | --- |
 | `codefit-scan-all` | The per-endpoint synthesis: three buckets (`actionable` / `resolved_clean` / `frontier_pending`) + the baseline delta (including `reasoned_by_agent` / `reasoned_items` / `in_conflict` — what agents already concluded, so nothing is reasoned twice), plus a parallel `db` section (database-structure findings/surface) and a per-dimension `score`. Every bucket **names** its endpoints with what it takes to rank them; the concern text is fetched on demand (deterministic findings come back in full). Carries a declared byte `budget` and says how many endpoints it withheld, if any. The main entry point. Optional `changed_files` narrows the audit — see [Scoping a scan](#scoping-a-scan-to-the-files-you-changed). |
 | `codefit-scan-endpoint` | Full detail of one file on demand — the concerns `scan-all` named but did not spell out, for **any** bucket. |
-| `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). Also takes the optional `changed_files`. |
+| `codefit-scan-security` | The deterministic findings + mapped surface over a project (the flat result). Also takes the optional `changed_files`. Like `scan-all` and `scan-endpoint`, it names the files the parser did not read whole — see [Files not parsed whole](#files-not-parsed-whole). |
 | `codefit-scan-db` | The database-structure audit over the configured schema (`database.schema_paths` — a Prisma `schema.prisma` or SQL-DDL migrations in PostgreSQL, MySQL, or SQL Server dialect per `database.type`): affirmations (e.g. a table with no primary key) + surface (un-indexed FKs, duplicate indexes, …). Returns `measured: false` with a note when there is no schema or parser — and equally when every configured schema source was found but none of them could be read, so an unreadable schema is never reported as a clean one. |
 | `codefit-surface-idor` / `-authz` / `-overfetch` | Enumerate one surface category for the agent to reason. |
 | `codefit-surface-nplus1` | Enumerate the N+1 surface: query call sites sitting inside a loop, ordered by structural certainty (the cross-function frontier last, never dropped). |
@@ -74,8 +74,55 @@ What a partial scan does **not** claim:
   memory of a file it did not open — and `codefit-baseline-prune` accepts no scope at all.
   Scanning may be partial; forgetting may not.
 
+A full scan's `note` is empty, with one exception: when audited files were not parsed
+whole (next section), the note says so — under a partial scan that sentence is appended
+to the partial note.
+
 This decides **which files get audited**, not which results get reused — that is the
 [finding cache](#the-finding-cache-opt-in) below, and the two are independent.
+
+## Files not parsed whole
+
+The TypeScript parser never fails: given a form it does not accept, it returns a tree
+with the damage marked in it, and every rule and surface query walks that tree. A file
+it stopped reading, or read around an error, yields fewer findings — which looks exactly
+like a cleaner file. So `codefit-scan-security`, `codefit-scan-endpoint` and
+`codefit-scan-all` (inside `security`, present only when security was measured) say
+which files those are
+([ADR 0090](../decisions/0090-scan-responses-name-the-files-the-parser-did-not-read-whole.md)):
+
+```json
+"scope": {
+  "mode": "full",
+  "requested": 0,
+  "audited": 2,
+  "auditable_total": 2,
+  "note": "1 audited file(s) were not parsed whole and are listed in `parse_incomplete`: each still counts as audited and in the score, but its findings and surface cover only what the parser read — from the listed line on, a missing finding is not evidence of a clean file."
+},
+"parse_status_reported": true,
+"parse_incomplete": [{ "file": "src/broken.ts", "reason": "error_node", "line": 3 }],
+"parse_status_note": "1 analysed file(s) were not parsed whole and are listed in `parse_incomplete` … Reasons: …"
+```
+
+- **`parse_incomplete`** lists each file with its reason — `stopped:<reason>` (the parser
+  stopped early, e.g. a memory budget), `error_root`, `error_node`, `missing_node` or
+  `error_flag` — and its first affected line. It is always present, `[]` when nothing is
+  listed. A listed file **still counts** in `audited` and in the score: the list is a
+  caveat, never an exclusion.
+- **`parse_status_reported: false` means nobody checked**, and `parse_status_note` says why:
+  the language's provider reports no parse status (Go), or the pass analysed no file. An
+  empty list then is not a clean read. A clean TypeScript run shows `true`, `[]`, and no
+  note.
+- **`codefit-scan-endpoint`** narrows the list to the requested file.
+- **The `codefit-surface-*` tools do not check:** they always answer `false`, `[]`, and a
+  note pointing to `codefit-scan-security` / `codefit-scan-all`.
+- **`parser_settings_overridden`** (absent when none) names the parser settings set in the
+  codefit process — `GOT_`, `GOTREESITTER_` or `GTS_` variables — never their values. Under
+  a non-default setting, some broken code reads as parsed whole.
+
+What it does **not** catch, declared in ADR 0089 and ADR 0090: a broken form the parser
+accepts with no mark (a double comma inside an object literal reads as complete), and the
+code×schema cross in `db`, which parses the code separately and reports no status.
 
 ## The finding cache (opt-in)
 
