@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 	"github.com/codefit-cli/codefit/internal/core/scoring"
 	"github.com/codefit-cli/codefit/internal/mcp"
+	"github.com/codefit-cli/codefit/internal/providers/typescript"
 )
 
 // These tests drive the REAL handlers over the REAL security sensor and the REAL
@@ -122,6 +124,7 @@ func TestScanSecurity_BrokenFileIsListedWithReasonAndLine(t *testing.T) {
 //   - `scope.note` is empty, exactly as before parse status existed;
 //   - findings and `blocked` are what the same file yields anyway.
 func TestScanSecurity_CleanRunShowsEmptyListAndNoNote(t *testing.T) {
+	clearParserEnv(t)
 	root := writeProj(t, map[string]string{"src/clean.ts": lateLine + "\n"})
 	resp, err := mcp.HandleScanSecurity(mcp.ScanRequest{Root: root, Language: "typescript"})
 	if err != nil {
@@ -430,4 +433,64 @@ func TestServerProtocolEndToEnd_ParseIncomplete(t *testing.T) {
 	}
 	assertParseKeys("codefit-scan-all security", security)
 	scopeNote("codefit-scan-all", all)
+}
+
+// clearParserEnv unsets, for the duration of the test, every parser setting the
+// process inherited, so an environment that sets one cannot decide these tests.
+// The real provider names them; t.Setenv records each for restoration first.
+func clearParserEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range typescript.New().SettingsOverridden() {
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestParseStatus_OverriddenSettingsAreNamedNotValued (decision 2 of ADR 0090):
+// a parser setting set in the process is NAMED in `parser_settings_overridden`
+// — in scan-security's response and in scan-all's `security` — with one sentence
+// in the note, and its value appears nowhere in the response. Without it the key
+// is absent. The probe name is one the parser does not read, so setting it
+// cannot change how this or any other test parses.
+func TestParseStatus_OverriddenSettingsAreNamedNotValued(t *testing.T) {
+	clearParserEnv(t)
+	const name, value = "GOT_CODEFIT_OVERRIDE_PROBE", "probe-value-7f3a"
+	root := writeProj(t, map[string]string{"src/clean.ts": "export const ok = 1;\n"})
+
+	before, err := mcp.HandleScanSecurity(mcp.ScanRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, raw := rawObject(t, before); m["parser_settings_overridden"] != nil {
+		t.Fatalf("no parser setting is set, yet the key is present: %s", raw)
+	}
+
+	t.Setenv(name, value)
+	sec, err := mcp.HandleScanSecurity(mcp.ScanRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := mcp.HandleScanAll(mcp.ScanAllRequest{Root: root, Language: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for where, v := range map[string]any{"codefit-scan-security": sec, "codefit-scan-all security": all.Security} {
+		m, raw := rawObject(t, v)
+		if got := string(m["parser_settings_overridden"]); got != `["`+name+`"]` {
+			t.Errorf("%s: parser_settings_overridden = %s, want [%q]", where, got, name)
+		}
+		if strings.Contains(raw, value) {
+			t.Errorf("%s: the setting's VALUE reached the response: %s", where, raw)
+		}
+		var note string
+		_ = json.Unmarshal(m["parse_status_note"], &note)
+		if !strings.Contains(note, "`parser_settings_overridden`") {
+			t.Errorf("%s: parse_status_note does not mention the overridden settings: %q", where, note)
+		}
+	}
+	if _, raw := rawObject(t, all); strings.Contains(raw, value) {
+		t.Errorf("the setting's VALUE reached the scan-all response: %s", raw)
+	}
 }

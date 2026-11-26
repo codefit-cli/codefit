@@ -95,7 +95,7 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 		SurfaceCoverage:            surfaceCoverageFor(req.Language),
 		RecognizedAuthzHelpers:     nonNilStrings(helpers),
 		RecognizedAuthzHelpersNote: recognizedAuthzHelpersNote(helpers),
-		ParseStatusBlock:           parseStatusFor(res),
+		ParseStatusBlock:           withOverriddenSettings(parseStatusFor(res), req.Language),
 	}, nil
 }
 

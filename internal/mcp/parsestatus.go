@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/providers"
 )
 
 // ParseStatusBlock is a response's account of WHICH analysed files the parser did
@@ -35,6 +36,10 @@ type ParseStatusBlock struct {
 	ParseStatusReported bool                      `json:"parse_status_reported"`
 	ParseIncomplete     []findings.IncompleteFile `json:"parse_incomplete"`
 	ParseStatusNote     string                    `json:"parse_status_note,omitempty"`
+	// ParserSettingsOverridden names, sorted, the provider's parser settings
+	// set in this process — names only, never values (decision 2 of ADR 0090).
+	// Absent when none is set or the provider declares none.
+	ParserSettingsOverridden []string `json:"parser_settings_overridden,omitempty"`
 }
 
 // The reasons a provider can give, and what they mean, stated once for every note
@@ -77,6 +82,35 @@ const surfaceParseStatusNote = "The codefit-surface-* tools do not check whether
 const parseCrossNote = " The code×schema cross in `db` (DB-010/DB-013) reads these files with a " +
 	"separate parse that reports no parse status: a cross finding missing from one of them is not " +
 	"evidence either."
+
+// parseSettingsNote is the sentence a note carries when parser settings are
+// overridden: a non-default setting can hide damage from the status itself (ADR
+// 0089, "Not covered"), so a listed-complete file under one proves less.
+const parseSettingsNote = "Parser settings are overridden in this process (named in " +
+	"`parser_settings_overridden`; values are never reported): a non-default setting can change what " +
+	"the parser reads and can hide damage from this status, so a file under one can read as parsed " +
+	"whole when it was not."
+
+// withOverriddenSettings declares the language's overridden parser settings on
+// the block: their names, and one sentence in the note. The provider is asked
+// through providers.SettingsOverrideReporter; a provider without it, or with
+// nothing set, leaves the block exactly as it was.
+func withOverriddenSettings(block ParseStatusBlock, language string) ParseStatusBlock {
+	so, ok := providerForLanguage(language, nil).(providers.SettingsOverrideReporter)
+	if !ok {
+		return block
+	}
+	names := so.SettingsOverridden()
+	if len(names) == 0 {
+		return block
+	}
+	block.ParserSettingsOverridden = names
+	if block.ParseStatusNote != "" {
+		block.ParseStatusNote += " "
+	}
+	block.ParseStatusNote += parseSettingsNote
+	return block
+}
 
 // parseStatusFor projects a security run's parse status into the response
 // block. It is the ONE place the block is built for a security run, so

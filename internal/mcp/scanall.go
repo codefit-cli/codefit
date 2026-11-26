@@ -201,6 +201,9 @@ type SecuritySection struct {
 	ParseStatusReported *bool                      `json:"parse_status_reported,omitempty"`
 	ParseIncomplete     *[]findings.IncompleteFile `json:"parse_incomplete,omitempty"`
 	ParseStatusNote     string                     `json:"parse_status_note,omitempty"`
+	// ParserSettingsOverridden is ParseStatusBlock's field of the same name:
+	// parser settings set in this process, by name only, absent when none is.
+	ParserSettingsOverridden []string `json:"parser_settings_overridden,omitempty"`
 }
 
 // DBSection is the database dimension's result inside scan-all. Measured=false with
@@ -807,6 +810,7 @@ func securitySection(secRan bool, language string, helpers []string, secRes find
 		if len(ps.ParseIncomplete) > 0 && dbRan {
 			ps.ParseStatusNote += parseCrossNote
 		}
+		ps = withOverriddenSettings(ps, language)
 		return SecuritySection{
 			Measured:                   true,
 			SurfaceCoverage:            &cs,
@@ -815,6 +819,7 @@ func securitySection(secRan bool, language string, helpers []string, secRes find
 			ParseStatusReported:        &ps.ParseStatusReported,
 			ParseIncomplete:            &ps.ParseIncomplete,
 			ParseStatusNote:            ps.ParseStatusNote,
+			ParserSettingsOverridden:   ps.ParserSettingsOverridden,
 		}
 	}
 	return SecuritySection{
@@ -999,7 +1004,7 @@ func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
 			matched = append(matched, ep)
 		}
 	}
-	parse := parseStatusForFile(res, req.File)
+	parse := withOverriddenSettings(parseStatusForFile(res, req.File), req.Language)
 	if len(matched) == 0 {
 		return ScanEndpointResponse{
 			File:  req.File,
