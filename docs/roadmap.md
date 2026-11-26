@@ -764,8 +764,12 @@ declared in `COVERAGE.md` and stays open until the TypeScript rule reaches the s
 `valueshape.NotACredential`
 ([ADR 0087](decisions/0087-typescript-reaches-the-value-veto-through-a-rule-operator.md)). The
 divergence the paragraph above declared is gone: `const secretFile = "lib/config.ts"` is silent in
-both providers. Left for the rest of `#148`: the verdict-by-verdict parity table for the value axis,
-and the escape-grammar differences between a Go and a JavaScript literal that ADR 0087 lists.
+both providers. **2026-11-26:** the verdict-by-verdict parity table for the value axis landed
+(`internal/core/valueshape/crossprovider_test.go`): every value runs through both real providers
+at every site, and a difference between the columns is admitted only as a quote of ADR 0087's
+list. Still open: three items of that list measured and kept out of the table because no document
+writes their verdict difference (a line continuation in TypeScript, Go's `\a` and `\U` escapes),
+awaiting a decision; and the field test of `#148`.
 
 ### P0-15 — a not-measured `codefit-scan-db` response emits five zeros that read like measurements — [issue #151](https://github.com/codefit-cli/codefit/issues/151)
 
