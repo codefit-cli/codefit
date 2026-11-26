@@ -28,14 +28,20 @@ const (
 //     extension, outside the project, inside a skipped directory. Without it an
 //     agent that passes three wrong paths gets "0 findings" and reads it as
 //     clean. Requested always equals Audited + len(Unmatched).
-//   - Note is MANDATORY when partial and FORBIDDEN when full (see Validate).
+//   - Note is MANDATORY when partial and, when full, FORBIDDEN unless audited
+//     files were not parsed whole (see Validate): that is the one caveat a full
+//     audit can have, and it is then mandatory too (ADR 0090).
+//   - ParseIncomplete is how many audited files the parser did not read whole.
+//     It is never serialized — the response lists the files themselves in
+//     `parse_incomplete` — and exists so Validate can hold the note to it.
 type ScopeBlock struct {
-	Mode           string   `json:"mode"`
-	Requested      int      `json:"requested"`
-	Audited        int      `json:"audited"`
-	AuditableTotal int      `json:"auditable_total"`
-	Unmatched      []string `json:"unmatched,omitempty"`
-	Note           string   `json:"note"`
+	Mode            string   `json:"mode"`
+	Requested       int      `json:"requested"`
+	Audited         int      `json:"audited"`
+	AuditableTotal  int      `json:"auditable_total"`
+	Unmatched       []string `json:"unmatched,omitempty"`
+	Note            string   `json:"note"`
+	ParseIncomplete int      `json:"-"`
 }
 
 // Validate enforces the honesty invariant in BOTH directions: a partial scan
@@ -43,14 +49,23 @@ type ScopeBlock struct {
 // no basis for. Handlers call it before returning, so a violation is a loud
 // error rather than an unlabelled partial result an agent would read as a full
 // one — the failure this whole block exists to prevent.
+//
+// Files not parsed whole are the one basis a full scan has for a caveat, so
+// under full a note is allowed exactly when ParseIncomplete > 0, and under
+// either mode ParseIncomplete > 0 with no note fails (amended 2026-11-26,
+// docs/specs/change-scope.md R1).
 func (s ScopeBlock) Validate() error {
+	if s.ParseIncomplete > 0 && s.Note == "" {
+		return fmt.Errorf("codefit internal: %d audited file(s) were not parsed whole and the scope reported no note — "+
+			"an audit that did not read its files whole must say so", s.ParseIncomplete)
+	}
 	switch s.Mode {
 	case ScopeModePartial:
 		if s.Note == "" {
 			return fmt.Errorf("codefit internal: a partial scan reported no note — a partial audit must declare itself")
 		}
 	case ScopeModeFull:
-		if s.Note != "" {
+		if s.Note != "" && s.ParseIncomplete == 0 {
 			return fmt.Errorf("codefit internal: a full scan reported the note %q — a full audit has nothing to caveat", s.Note)
 		}
 	default:
@@ -95,6 +110,23 @@ func scopeBlockFor(scp scope.Scope, auditedFiles []string, auditableTotal int) S
 		Unmatched:      unmatched,
 		Note:           partialNote(audited, auditableTotal, unmatched),
 	}
+}
+
+// withParseIncomplete records how many audited files were not parsed whole and,
+// when there are any, appends the caveat to the note: alone under a full scan,
+// after the partial note under a partial one. With zero it returns the block
+// unchanged, so a run whose files were all read whole keeps the exact scope it
+// had before parse status existed.
+func (s ScopeBlock) withParseIncomplete(n int) ScopeBlock {
+	s.ParseIncomplete = n
+	if n == 0 {
+		return s
+	}
+	if s.Note != "" {
+		s.Note += " "
+	}
+	s.Note += parseScopeSentence(n)
+	return s
 }
 
 // partialNote states what the numbers mean for the agent reading them. It names

@@ -59,6 +59,16 @@ Every scan response that ran under a partial scope carries a `scope` block:
 - **`note` MUST be non-empty whenever `mode` is `partial`.** Test-locked, in both
   directions.
 
+> **Amended 2026-11-26 ([ADR 0090](../decisions/0090-scan-responses-name-the-files-the-parser-did-not-read-whole.md)).**
+> Audited files the parser did not read whole are the one caveat a **full** scan can
+> have. When the response lists any in `parse_incomplete`, `note` MUST be non-empty
+> under either mode — alone under `full`, appended to the partial note under
+> `partial` — and states that those files still count as audited and in the score,
+> that their findings cover only what the parser read, and that from the listed line
+> on a missing finding is not evidence of a clean file. `mode: full` with a non-empty
+> note and no such file still fails. `audited`, `auditable_total`, the score and
+> `blocked` are computed exactly as before.
+
 ### R2 — `blocked: false` from a partial scan is a narrower claim
 
 `scoring.IsBlocked` is unchanged and stays non-configurable. But under a partial
@@ -164,7 +174,9 @@ commit or PR.
    check.*
 4. Zero-value `Scope{}` prunes nothing.
 5. `mode: partial` with an empty `note` fails; `mode: full` with a non-empty note
-   fails.
+   fails. *Amended 2026-11-26 (R1):* `mode: full` with a non-empty note fails only when
+   no audited file is listed as not parsed whole; with one listed, an empty note fails
+   under either mode.
 6. A requested path the walk never reaches appears in `unmatched`.
 7. Scope canonicalization: `src\a.ts`, `./src/a.ts` and `src/a.ts` are the same file.
 8. A partial scan whose scope contains no configured schema path reports the DB

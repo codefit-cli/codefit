@@ -482,10 +482,23 @@ func TestScanAllBudget_WithholdingIsDeclaredNeverSilent(t *testing.T) {
 	// under 4000": on origin/main a 4000-byte budget FIT, at exactly 4000 bytes
 	// with 2 endpoints rendered. At HEAD the smallest response this fixture can
 	// produce is 4546, so a 4000-byte budget lands in the impossible-budget case
-	// instead of the partial-withholding one this test is about. 4800 sits inside
-	// the [4546, 5277] window: it renders 3 of 8 endpoints at 4774 bytes.
+	// instead of the partial-withholding one this test is about. 4800 sat inside
+	// the [4546, 5277] window then: it rendered 3 of 8 endpoints at 4774 bytes.
 	// (4530 is NOT the floor — it is the size at a 4530-byte budget, where 2
 	// endpoints fit; an earlier revision of this comment called it the floor.)
+	//
+	// Re-measured 2026-11-26 (ADR 0090), same method, the floor read at a
+	// 4800-byte budget and the full response at ResponseBudgetBytes:
+	//
+	//	                       main@22617b8   this change    delta
+	//	floor (1 endpoint)            4745           4796      +51
+	//	full response (8)             5741           5792      +51
+	//
+	// The numbers above had already moved on main before this change (4546 and
+	// 5277 are no longer what main produces); the +51 is this change's own cost:
+	// `"parse_status_reported":true,"parse_incomplete":[]` inside `security`,
+	// present on every measured run. 4800 is still inside the window, by 4 bytes
+	// over the floor: it renders 1 of 8 endpoints at 4796 bytes.
 	// The guards immediately below fail loudly if this number ever stops
 	// producing partial withholding.
 	const tightBudget = 4800

@@ -205,6 +205,33 @@ func TestScopeBlock_Validate_NoteInvariant(t *testing.T) {
 	}
 }
 
+// TestScopeBlock_Validate_ParseIncompleteNote is the amendment of 2026-11-26
+// (docs/specs/change-scope.md R1, test case 5): audited files not parsed whole
+// are the one caveat a FULL scan may carry, and then it must carry it.
+func TestScopeBlock_Validate_ParseIncompleteNote(t *testing.T) {
+	if err := (ScopeBlock{Mode: ScopeModeFull, ParseIncomplete: 1}).Validate(); err == nil {
+		t.Error("mode:full with files not parsed whole and an EMPTY note must fail — the caveat is mandatory")
+	}
+	if err := (ScopeBlock{Mode: ScopeModeFull, ParseIncomplete: 1, Note: "1 audited file(s) were not parsed whole"}).Validate(); err != nil {
+		t.Errorf("mode:full with files not parsed whole and a note is valid, got %v", err)
+	}
+	if err := (ScopeBlock{Mode: ScopeModeFull, ParseIncomplete: 0, Note: "some caveat"}).Validate(); err == nil {
+		t.Error("mode:full with a note and NO file left incomplete must still fail")
+	}
+	if err := (ScopeBlock{Mode: ScopeModePartial, ParseIncomplete: 2}).Validate(); err == nil {
+		t.Error("mode:partial with files not parsed whole and an EMPTY note must fail")
+	}
+	// withParseIncomplete, the one producer of the count: zero leaves the block
+	// untouched, so a clean full run keeps its exact pre-change scope.
+	full := ScopeBlock{Mode: ScopeModeFull, Audited: 2, AuditableTotal: 2}
+	if got := full.withParseIncomplete(0); !reflect.DeepEqual(got, full) {
+		t.Errorf("withParseIncomplete(0) changed the block: %+v", got)
+	}
+	if got := full.withParseIncomplete(1); got.Note == "" || got.Validate() != nil {
+		t.Errorf("withParseIncomplete(1) under full: note %q, Validate %v", got.Note, got.Validate())
+	}
+}
+
 // Test contract item 8: a partial scan whose scope holds no configured schema
 // path reports the DB dimension as null (NOT MEASURED) — never 100.
 func TestScanAll_PartialScopeWithoutSchemaPath_DBIsNotMeasured(t *testing.T) {
