@@ -116,7 +116,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 func TestAnalyzeFile_EqualsTheTwoSeparateCalls(t *testing.T) {
 	p := typescript.New(typescript.WithAuthzHelpers([]string{everyRuleHelper}))
 	inline := providers.SourceFile{Path: "app/orders/[id]/route.ts", Content: []byte(everyRuleSource)}
-	sources := []providers.SourceFile{inline}
+	// The same bytes under a path with upper-case letters. Next.js route-file
+	// detection compares the base name case-sensitively, so "Route.ts" is NOT a
+	// route file: its surface differs from the lower-case path's (positive
+	// control 4 below), and every finding and surface item reports the path as
+	// given. A combined call that altered the path's case would not compare equal.
+	mixedCase := providers.SourceFile{Path: mixedCasePath, Content: []byte(everyRuleSource)}
+	sources := []providers.SourceFile{inline, mixedCase}
 	for _, path := range tsFixtures(t) {
 		sources = append(sources, readSource(t, path))
 	}
@@ -197,7 +203,25 @@ func TestAnalyzeFile_EqualsTheTwoSeparateCalls(t *testing.T) {
 			"the equivalence cannot see the combined call drop the project's authz helpers.\n"+
 			"without: %+v\nwith: %+v", everyRuleHelper, plain, withHelper)
 	}
+	// Positive control 4: the result depends on the path's case, so the
+	// mixed-case input really checks that the combined call passes it unchanged.
+	mixed, err := p.AnalyzeSurface(mixedCase)
+	if err != nil {
+		t.Fatalf("AnalyzeSurface(%s): %v", mixedCasePath, err)
+	}
+	lowered, err := p.AnalyzeSurface(providers.SourceFile{Path: strings.ToLower(mixedCasePath), Content: mixedCase.Content})
+	if err != nil {
+		t.Fatalf("AnalyzeSurface(lower-cased): %v", err)
+	}
+	if len(mixed) == len(lowered) {
+		t.Errorf("%s and its lower-cased path give %d surface items each — the input no longer depends on "+
+			"the path's case, so it cannot catch a combined call that changes it", mixedCasePath, len(mixed))
+	}
 }
+
+// mixedCasePath is a route-shaped path whose base name differs from a Next.js
+// route file only by case.
+const mixedCasePath = "app/Orders/[id]/Route.ts"
 
 // authzDetected reports whether items hold an authz item whose
 // known_authz_detected fact equals want.
