@@ -41,8 +41,16 @@ var (
 // therefore a miss: wasted work, never a stale verdict, which is the safe
 // direction.
 //
-// The cost is one SHA-256 of a ~5 MB binary, once. Against a walk that parses
-// hundreds of files it does not register.
+// The cost is one SHA-256 of the binary, once per process. The stripped
+// linux/amd64 release binary measured 20,844,706 bytes on gotreesitter v0.54.0
+// (ADR 0088), and sha256sum hashed a release-flag build of about that size in
+// about 60 ms on the machine that measured it — small against a walk that parses
+// hundreds of files.
+//
+// The binary is not every input, though: the parser also reads environment
+// variables at run time. Those reach the key through Cache.Settings, not here,
+// so this identity — and the generation directory named after it — stays the
+// binary alone (ADR 0089).
 //
 // An error means the identity is UNKNOWN, and an unknown key input means do not
 // reuse: callers disable caching for the run rather than guess.

@@ -193,3 +193,20 @@ differently.
   because it was about to be wired. This is that wiring.
 - ADR 0009 — the baseline's content fingerprint, which is why the path had to enter the key.
 - `docs/specs/finding-cache.md` — the contract, including the R2 formula this ADR corrects.
+
+## Notes
+
+- **2026-11-25 — the binary size above is stale.** "~5 MB" was wrong: the stripped
+  linux/amd64 release binary measured 16.4 MB on gotreesitter v0.20.2 and 20,844,706 bytes
+  on v0.54.0 (ADR 0088). Hashing it is still once per process; `sha256sum` hashes a
+  release-flag build of about that size in about 60 ms on the machine that measured it.
+  The decision does not move.
+- **2026-11-25 — the binary is not the only input; the key gains a settings segment.**
+  This ADR says hashing the binary covers *every* input that can change a verdict. It does
+  not: the TypeScript parser reads environment variables at run time, and
+  `GOT_PARSE_MEMORY_BUDGET_MB` stops large files early. A scan run once with it set cached
+  the truncated analysis and the next scan of the same binary without it was served that
+  entry. The key is now `sha256(analyzer ‖ settings ‖ path ‖ content)`, where `settings` is
+  an opaque fingerprint the sensor takes from its provider. The analyzer identity and the
+  generation directory stay the binary alone. See ADR 0089, which also records that every
+  entry now carries the file's parse status and that an entry without one is a miss.

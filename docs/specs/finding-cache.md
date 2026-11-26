@@ -57,6 +57,18 @@ process and memoized).
 > of a written contract is lost if it is edited to match whatever was built; see ADR 0050.
 > The rest of R2 is unchanged and shipped as stated.
 
+> **Amended 2026-11-25 — a fourth component: the analyzer's run-time settings (ADR 0089).**
+> The binary is not the only input that can change a verdict for the same bytes: the
+> TypeScript parser reads environment variables at run time, and
+> `GOT_PARSE_MEMORY_BUDGET_MB` makes it stop a large file early. Under the three-part key a
+> scan run once with that variable set cached the stopped, truncated analysis, and the next
+> scan of the same binary without it was served that entry. The key is now
+> `sha256(analyzer ‖ settings ‖ path ‖ content)`. `settings` is an opaque fingerprint the
+> sensor takes from its provider (`providers.SettingsFingerprinter`; the TypeScript one
+> hashes every variable under `GOT_`, `GOTREESITTER_` and `GTS_`); the cache never learns
+> what it fingerprints. It is in the key and deliberately NOT in the generation directory,
+> so a run under another setting misses instead of pruning the usual setting's entries.
+
 Why this is right rather than clever:
 
 - The analysis is a pure function of *(file bytes, analyzer)*. The key names both. Nothing
@@ -72,8 +84,11 @@ Why this is right rather than clever:
 - If `os.Executable()` fails, the analyzer identity is unknown, so **the cache disables
   itself for that run**. Unknown key inputs mean do not reuse. Never guess.
 
-Cost: one SHA-256 of a ~5 MB binary, once per process. Against a repository walk that
-parses hundreds of files, it does not register.
+Cost: one SHA-256 of the binary, once per process. *(Corrected 2026-11-25: this said
+"~5 MB". The stripped linux/amd64 release binary measured 16.4 MB on gotreesitter v0.20.2
+and 20,844,706 bytes on v0.54.0, ADR 0088; `sha256sum` hashes a release-flag build of about
+that size in about 60 ms on the machine that measured it.)* Against a repository walk that
+parses hundreds of files, it is small.
 
 ## R3 — What is cached: the whole raw output of one file's analysis
 
@@ -81,6 +96,13 @@ parses hundreds of files, it does not register.
 holds **both** — today's inert `Cache.Get` returns only `[]findings.Finding`, which would
 silently drop the surface and make a warm scan differ from a cold one, violating R1. The
 API widens.
+
+> **Amended 2026-11-25 — the entry also holds the parse status (ADR 0089).** `scanFile`
+> now returns the parse status of the tree its findings and surface came from, and the entry
+> stores it in a `parse` field, so a warm scan still says which files were not read whole.
+> An entry without that field is a miss and `Set` refuses to write one: an entry that cannot
+> say how much of its file produced the findings is not proof of anything. A provider that
+> reports no status stores the explicit "not reported" value, which is a hit.
 
 **The entry stores the output of `scanFile` BEFORE `applyCriticality` runs.** This is not
 an implementation detail, it is what keeps the cache correct across config edits:
