@@ -1,6 +1,7 @@
 package cache_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +12,21 @@ import (
 	"github.com/codefit-cli/codefit/internal/core/findings"
 )
 
-// entry is the raw output of one file's analysis: findings AND surface. The
-// cache that stored only findings would silently drop the surface and make a
-// warm scan differ from a cold one (spec R1/R3).
+// parsed is the parse status every entry a sensor writes carries (ADR 0089).
+// An entry without one is a miss, so the fixtures below that expect a HIT carry
+// it like the real writer does.
+func parsed() *findings.ParseStatus {
+	st := findings.ParseComplete()
+	return &st
+}
+
+// entry is the raw output of one file's analysis: findings AND surface, and the
+// parse status of the tree they came from. The cache that stored only findings
+// would silently drop the surface and make a warm scan differ from a cold one
+// (spec R1/R3).
 func entry() cache.Entry {
 	return cache.Entry{
+		Parse: parsed(),
 		Findings: []findings.Finding{{
 			ID: "SEC-001", Dimension: findings.DimensionSecurity,
 			Severity: findings.SeverityCritical, File: "a.ts", Line: 3,
@@ -73,7 +84,7 @@ func TestEntryRoundTripCarriesFindingsAndSurface(t *testing.T) {
 func TestEmptyResultIsCachedAndFound(t *testing.T) {
 	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
 
-	if err := c.Set("empty", cache.Entry{}); err != nil {
+	if err := c.Set("empty", cache.Entry{Parse: parsed()}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	got, ok := c.Get("empty")
@@ -169,7 +180,7 @@ func TestGetRejectsAWellFormedEntryStoredUnderAnotherKey(t *testing.T) {
 	clean := c.Key("src/clean.ts", []byte("export const a = 1;\n"))
 	leaky := c.Key("src/leaky.ts", []byte("const key = \"sk-ant-abcdefgh12345678\";\n"))
 
-	if err := c.Set(clean, cache.Entry{}); err != nil {
+	if err := c.Set(clean, cache.Entry{Parse: parsed()}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	gen := cache.GenerationDir(c)
@@ -194,7 +205,7 @@ func TestSetStampsTheKeySoItsOwnEntriesStillHit(t *testing.T) {
 	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
 	key := c.Key("src/a.ts", []byte("const x = 1;\n"))
 
-	if err := c.Set(key, cache.Entry{}); err != nil {
+	if err := c.Set(key, cache.Entry{Parse: parsed()}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if _, ok := c.Get(key); !ok {
@@ -267,7 +278,7 @@ func TestKeyIsEmptyWithoutAnalyzerIdentity(t *testing.T) {
 func TestSetIsSafeUnderConcurrentWriters(t *testing.T) {
 	c := &cache.Cache{Dir: filepath.Join(t.TempDir(), "cache"), Analyzer: "analyzer-x"}
 	key := c.Key("src/a.ts", []byte("const a = 1;\n"))
-	want := cache.Entry{Findings: []findings.Finding{{ID: "SEC-001", Title: "x"}}}
+	want := cache.Entry{Findings: []findings.Finding{{ID: "SEC-001", Title: "x"}}, Parse: parsed()}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -307,7 +318,9 @@ func TestFailedSetLeavesNoTempFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := c.Set(key, cache.Entry{}); err == nil {
+	// The entry is a valid one, so the only reason this Set can fail is the
+	// directory in the entry's place — not the refusal of a status-less entry.
+	if err := c.Set(key, cache.Entry{Parse: parsed()}); err == nil {
 		t.Fatal("Set should fail when the entry path is a directory")
 	}
 
@@ -319,5 +332,76 @@ func TestFailedSetLeavesNoTempFile(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Errorf("temp file survived a FAILED Set: %s", e.Name())
 		}
+	}
+}
+
+// ADR 0089 — an entry must PROVE it carries a parse status. A payload that names
+// its key but has no parse status is what a writer from before the field existed
+// leaves behind, or one that dropped it. Serving it would hand back findings with
+// no word on whether the file was read whole — and a file that was NOT read
+// whole would be reported as if it were. It is a miss, and a miss is just an
+// ordinary analysis.
+func TestGetRejectsAnEntryWithoutAParseStatus(t *testing.T) {
+	payloads := map[string]string{
+		"parse field absent": `{"key":%q,"findings":[],"surface":null}`,
+		"parse field null":   `{"key":%q,"findings":[],"surface":null,"parse":null}`,
+	}
+	for name, payload := range payloads {
+		t.Run(name, func(t *testing.T) {
+			c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+			key := c.Key("src/a.ts", []byte("export const a = 1;\n"))
+			gen := cache.GenerationDir(c)
+			if err := os.MkdirAll(gen, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(payload, key)
+			if err := os.WriteFile(filepath.Join(gen, key+".json"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := c.Get(key); ok {
+				t.Errorf("Get served %s as a HIT (%+v) — an entry that cannot say whether its file "+
+					"was read whole must be re-analysed, not trusted", body, got)
+			}
+		})
+	}
+}
+
+// ADR 0089 — the writer side of the same rule: Set refuses an entry without a
+// parse status instead of writing one Get would reject forever.
+func TestSetRefusesAnEntryWithoutAParseStatus(t *testing.T) {
+	c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+	key := c.Key("src/a.ts", []byte("x"))
+	if err := c.Set(key, cache.Entry{}); err == nil {
+		t.Error("Set stored an entry with no parse status")
+	}
+	if _, ok := c.Get(key); ok {
+		t.Error("a refused entry is readable")
+	}
+}
+
+// ADR 0089 — every parse status round-trips unchanged, and a status of "not
+// reported" is a HIT: it is a present value (a provider that reports none), not
+// an absent one. Making it a miss would re-analyse every Go file forever.
+func TestEntryRoundTripCarriesTheParseStatus(t *testing.T) {
+	statuses := map[string]findings.ParseStatus{
+		"complete":     findings.ParseComplete(),
+		"incomplete":   findings.ParseIncomplete("stopped:memory_budget", 1),
+		"not reported": findings.ParseNotReported(),
+	}
+	for name, st := range statuses {
+		t.Run(name, func(t *testing.T) {
+			c := newCache(t, filepath.Join(t.TempDir(), "cache"), "analyzer-a")
+			key := c.Key("src/a.ts", []byte("x"))
+			if err := c.Set(key, cache.Entry{Parse: &st}); err != nil {
+				t.Fatalf("Set: %v", err)
+			}
+			got, ok := c.Get(key)
+			if !ok {
+				t.Fatalf("an entry with parse status %+v was a miss", st)
+			}
+			if got.Parse == nil || *got.Parse != st {
+				t.Errorf("parse status = %+v, want %+v", got.Parse, st)
+			}
+		})
 	}
 }

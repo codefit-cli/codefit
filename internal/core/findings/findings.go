@@ -234,6 +234,24 @@ type SensorResult struct {
 	// sorted. It is the difference between "audited and clean" and "never
 	// looked": a requested path missing from here was never examined.
 	AuditedFiles []string `json:"audited_files,omitempty"`
-	DurationMs   int64    `json:"duration_ms"`
-	Error        string   `json:"error,omitempty"`
+	// ParseStatusReported is true when the sensor's provider reported a parse
+	// status for EVERY analysed file (ADR 0089). When it is false, an empty
+	// ParseIncomplete means "nobody checked", not "every file was read whole".
+	ParseStatusReported bool `json:"parse_status_reported"`
+	// ParseIncomplete lists the analysed files whose parse the provider reported
+	// incomplete, sorted by path. Their findings and surface are still in the
+	// result, but they cover only what the parser read: an absent finding in one
+	// of these files is not evidence of its absence.
+	ParseIncomplete []IncompleteFile `json:"parse_incomplete,omitempty"`
+	DurationMs      int64            `json:"duration_ms"`
+	Error           string           `json:"error,omitempty"`
+}
+
+// IncompleteFile is one file a provider reported it did not parse whole: the
+// project-relative path, and the reason and first affected line of its
+// ParseStatus.
+type IncompleteFile struct {
+	File   string `json:"file"`
+	Reason string `json:"reason"`
+	Line   int    `json:"line,omitempty"`
 }
