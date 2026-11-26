@@ -92,6 +92,49 @@ func TestParseStatus_BrokenFilesAreListedWithReasonAndLine(t *testing.T) {
 	}
 }
 
+// TestParseStatus_IncompleteListIsSortedByPathNotByWalkOrder: the list is
+// documented as sorted by path. The layout makes the two orders differ: the walk
+// visits the directory `a` (entry name "a") before the file `a.ts`, so it meets
+// `a/inner.ts` first, while sorted by path `a.ts` comes first ('.' sorts before
+// '/'). The first assertion is the positive control that the layout really
+// separates them, so the second cannot pass by coincidence.
+func TestParseStatus_IncompleteListIsSortedByPathNotByWalkOrder(t *testing.T) {
+	root := t.TempDir()
+	broken := "const a = 1;\n}}}}\n"
+	writeSrc(t, root, "a.ts", broken)
+	writeSrc(t, root, "a/inner.ts", broken)
+
+	var walked []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			walked = append(walked, filepath.ToSlash(rel))
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walking the layout: %v", err)
+	}
+	if want := []string{"a/inner.ts", "a.ts"}; !reflect.DeepEqual(walked, want) {
+		t.Fatalf("positive control: the walk visits %v, want %v — the layout no longer separates walk order "+
+			"from path order, so this test would prove nothing", walked, want)
+	}
+
+	res := run(t, root, typescript.New(), nil)
+	want := []findings.IncompleteFile{
+		{File: "a.ts", Reason: findings.ParseReasonErrorNode, Line: 2},
+		{File: "a/inner.ts", Reason: findings.ParseReasonErrorNode, Line: 2},
+	}
+	if !reflect.DeepEqual(res.ParseIncomplete, want) {
+		t.Errorf("ParseIncomplete = %+v, want %+v (sorted by path)", res.ParseIncomplete, want)
+	}
+}
+
 // TestParseStatus_WarmRunFromCacheStillReportsTheStatus: a second run is served
 // entirely from the cache — zero re-analysis — and still reports the same files
 // as incomplete, byte-identical to the cold run. A cache that dropped the status
