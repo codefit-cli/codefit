@@ -104,6 +104,16 @@ API widens.
 > say how much of its file produced the findings is not proof of anything. A provider that
 > reports no status stores the explicit "not reported" value, which is a hit.
 
+> **Amended 2026-11-26 — a stop that may not recur is not stored (ADR 0089, D4).** The parse
+> status carries `reproducible`, the provider's word that the same bytes, binary and settings
+> give the same analysis. The sensor reports a file whose status is not reproducible exactly
+> like any other, and does not write its entry, so the next run parses it again. The
+> TypeScript provider marks not reproducible every stop upstream does not document as
+> deterministic — the process-heap hard ceiling, a timeout, a cancellation, and every
+> undocumented or unknown reason; the soft memory budget's arena and scratch guards and the
+> node and stack-depth limits stay cached. This is R1 applied to a stop: a warm run equals a
+> cold run.
+
 **The entry stores the output of `scanFile` BEFORE `applyCriticality` runs.** This is not
 an implementation detail, it is what keeps the cache correct across config edits:
 `path_criticality` is applied by the sensor after `scanFile` returns, so caching the

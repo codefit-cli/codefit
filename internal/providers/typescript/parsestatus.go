@@ -19,6 +19,8 @@ import (
 //     reason memory_budget, a one-node ERROR root, error flag set. It comes
 //     first because the stop is the CAUSE; the ERROR root it leaves is the
 //     symptom, and naming the symptom would hide the knob that produced it.
+//     A stop is also classified as reproducible or not (stopIsReproducible),
+//     which decides whether the result may be cached.
 //  2. error_root — the root itself is an ERROR node. Under the default settings
 //     no input measured on v0.54.0 reaches this arm: no committed fixture and
 //     none of 68 synthetic inputs tried for it parses to an ERROR root without
@@ -75,7 +77,11 @@ func parseStatusOf(tree *ts.Tree) findings.ParseStatus {
 		} else {
 			line = int(root.EndPoint().Row) + 1
 		}
-		return findings.ParseIncomplete(findings.ParseReasonStoppedPrefix+string(tree.ParseStopReason()), line)
+		reason := findings.ParseReasonStoppedPrefix + string(tree.ParseStopReason())
+		if stopIsReproducible(tree.ParseStopReason(), tree.ParseRuntime().MemoryBudgetStopSource) {
+			return findings.ParseIncomplete(reason, line)
+		}
+		return findings.ParseIncompleteNotReproducible(reason, line)
 	}
 	if root.IsError() {
 		return findings.ParseIncomplete(findings.ParseReasonErrorRoot, startLine(root))
@@ -90,6 +96,47 @@ func parseStatusOf(tree *ts.Tree) findings.ParseStatus {
 		return findings.ParseIncomplete(findings.ParseReasonMissingNode, startLine(n))
 	}
 	return findings.ParseIncomplete(findings.ParseReasonErrorFlag, 0)
+}
+
+// stopIsReproducible reports whether a parse stopped early for this reason (and,
+// for a memory-budget stop, this budget guard) stops the same bytes at the same
+// place on every run, so its result may be cached (findings.ParseStatus
+// .Reproducible, ADR 0089). It answers true ONLY where gotreesitter v0.54.0
+// documents determinism, and false for everything else, unknown reasons and a
+// guard it does not name included: an extra parse is acceptable, a frozen
+// transient result is not.
+//
+// The evidence is the "DETERMINISM CONTRACT (issue #454)" beside
+// runtimeMemoryBudgetStopReasonNow (parser_memory_budget_runtime.go): "the arena
+// budget (nodeArena.budgetExhausted), the scratch budget
+// (parserScratch.budgetExhausted), and the node and stack-depth limits. Those
+// stop the same input at the same place every time", while the hard ceiling
+// reads the process-global heap and runtime_heap/runtime_sys readings "make the
+// returned tree a function of GC timing rather than of the input". Each stop
+// reason ParseStoppedEarly reports (tree.go), classified:
+//
+//	memory_budget, guard arena or scratch   reproducible (documented)
+//	memory_budget, guard hard_ceiling       NOT (process heap; measured varying)
+//	memory_budget, runtime_heap/runtime_sys NOT (documented as GC-timing bound)
+//	memory_budget, no guard named           NOT (cannot tell which guard)
+//	node_limit, stack_depth_limit           reproducible (documented)
+//	timeout, cancelled                      NOT (wall clock / caller)
+//	iteration_limit, reuse_budget,
+//	token_source_eof, invariant_violation   NOT (no determinism documented)
+//
+// The memory-budget guard is told apart by ParseRuntime().MemoryBudgetStopSource,
+// which the parser sets to the first guard that fired. A parse with no reported
+// stop (no_stacks_alive, the error_flag shape) is not classified here and is
+// cached like any other result; whether that shape is reproducible is unknown.
+func stopIsReproducible(reason ts.ParseStopReason, memoryGuard string) bool {
+	switch reason {
+	case ts.ParseStopNodeLimit, ts.ParseStopStackDepthLimit:
+		return true
+	case ts.ParseStopMemoryBudget:
+		return memoryGuard == "arena" || memoryGuard == "scratch"
+	default:
+		return false
+	}
 }
 
 // firstNode returns the first node, in document order (pre-order, children left

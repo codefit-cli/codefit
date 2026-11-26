@@ -102,6 +102,63 @@ A cache entry with no parse status is a miss, and `Set` refuses to write one. Th
 provenance rule of ADR 0053 extended to one more field: an entry that cannot say how much of
 its file produced its findings is not evidence of anything.
 
+### D4 — A stop that may not recur is reported, never cached
+
+The owner was asked on 2026-11-26: "¿Excluyo del caché las paradas no deterministas?" The
+answer: "si". The reason is D2's: a warm run must equal a cold run. A stop that depends on the
+state of the process rather than on the bytes and the settings can fall elsewhere, or not at
+all, on the next run over the same file; caching it would freeze a transient result until the
+file or the analyzer changed.
+
+`findings.ParseStatus` gains `Reproducible`: the provider's word that the same bytes, binary
+and settings give the same analysis. Every constructor sets it except
+`ParseIncompleteNotReproducible`; its zero value is false, so a status nobody vouched for is not
+cached. `ParseNotReported` is the zero value with `Reproducible` set, so a provider that reports
+no status (Go) is cached exactly as before. The security sensor reports a not-reproducible file
+in its run like any other — listed with its `stopped:` reason and line, findings and surface
+returned — and does not write it to the cache. The core names no parser, reason or variable; the
+TypeScript provider classifies.
+
+It classifies every stop reason `ParseStoppedEarly` reports (gotreesitter `v0.54.0`, `tree.go`)
+by what upstream documents. The evidence is the "DETERMINISM CONTRACT (issue #454)" beside
+`runtimeMemoryBudgetStopReasonNow` (`parser_memory_budget_runtime.go`): the arena and scratch
+budgets "and the node and stack-depth limits. Those stop the same input at the same place every
+time", while readings of the process heap make the tree "a function of GC timing rather than of
+the input". The guard behind a `memory_budget` stop is read from
+`ParseRuntime().MemoryBudgetStopSource`, so the hard ceiling and the soft budget, which report
+the same stop reason, are told apart.
+
+| Stop reason | Guard | Cached | Evidence |
+|---|---|---|---|
+| `memory_budget` | `arena`, `scratch` | yes | documented deterministic; arena measured (the 5 MB stop, every run) |
+| `memory_budget` | `hard_ceiling` | **no** | process heap; measured varying (below) |
+| `memory_budget` | `runtime_heap`, `runtime_sys`, none named | **no** | documented as GC-timing bound; unnamed cannot be told apart |
+| `node_limit`, `stack_depth_limit` | — | yes | documented deterministic; not measured here |
+| `timeout`, `cancelled` | — | **no** | wall clock, caller |
+| `iteration_limit`, `reuse_budget`, `token_source_eof`, `invariant_violation` | — | **no** | no determinism documented |
+| any other or future reason | — | **no** | not classified |
+
+A parse with no reported stop is not classified: complete, `error_root`, `error_node`,
+`missing_node` and `error_flag` are cached as before. `error_flag`'s shape ends in
+`no_stacks_alive`, which is not a reported stop; whether it is reproducible is **unknown**.
+
+Measured through the security sensor (a child process; `real_vscode_strings.ts`, 92,023 bytes,
+beside a small file; 10 cold-then-warm pairs per value). With the default garbage collector,
+`GOT_PARSE_MEMORY_HARD_CEILING_MB` at 1 or 2 stopped the large file on 9 of 10 cold runs and at
+4 on 8 of 10, the rest parsing it whole — the same bytes, the same settings. With `GOGC=off`
+1 to 4 MB stopped it on 10 of 10 runs (also under `-race`), at 8 MB on 0 of 10 (2 of 10 under
+`-race`). `TestParseStatus_TransientStopIsReportedButNotCached` runs at 1 MB with `GOGC=off`: the
+file is listed `stopped:memory_budget` on both runs, the second run re-parses that file and only
+that file, and the cache holds the small file alone. Caching it anyway fails it, and so does
+classifying the hard ceiling as reproducible. Classifying the arena guard as not reproducible
+fails `TestParseStatus_ParserSettingsArePartOfTheCacheIdentity`, which needs the soft-budget stop
+cached; `TestParseStatus_WarmRunFromCacheStillReportsTheStatus` fails if every incomplete result
+stops being cached.
+
+`GOGC` and `GOMEMLIMIT` set the collector's pacing, so they move when the hard ceiling fires;
+they remain outside the settings fingerprint (D2), which no longer matters for caching: a
+hard-ceiling stop is never stored.
+
 ## What was measured (gotreesitter v0.54.0, linux/amd64)
 
 - **Every TypeScript fixture under `internal/providers/typescript/testdata`**, 64 files:
@@ -169,8 +226,11 @@ its file produced its findings is not evidence of anything.
 
 ## Consequences
 
-- The cache entry format gains a `parse` field. An entry without it is a miss; in practice
-  every existing entry is already a miss, because a new binary is a new analyzer identity.
+- The cache entry format gains a `parse` field, which carries `reproducible`. An entry without
+  it is a miss; in practice every existing entry is already a miss, because a new binary is a
+  new analyzer identity.
+- A file stopped for a not-reproducible reason (D4) is parsed again on every run that meets it:
+  an extra parse, never a frozen stop.
 - Setting or changing any `GOT_`, `GOTREESITTER_` or `GTS_` variable invalidates the cache
   for that run (a miss, not a prune): the parser may obey it.
 - The Go provider reports no parse status; its results say `ParseStatusReported: false`,
@@ -205,20 +265,11 @@ its file produced its findings is not evidence of anything.
   as **complete**. It is measured through the real provider, deterministic over 30 runs,
   and not handled: whether to add a root-span check, or to treat that setting otherwise, is
   an open owner decision. Under the default settings none of these inputs reads complete.
-- **A stop at the parser's process-heap hard ceiling is not deterministic, and is cached.**
-  Upstream (`parser_memory_budget_runtime.go`, `runtimeMemoryBudgetStopReasonNow` and its
-  "DETERMINISM CONTRACT (issue #454)") stops a parse when the PROCESS's `HeapAlloc` has grown
-  past the ceiling since the parse began, and says that only this ceiling may stop a parse
-  from a `runtime.MemStats` reading because those readings depend on garbage-collection
-  timing. It arms only for sources of at least 64 KiB; the ceiling is 2 GiB or twice the
-  per-parse budget, or a fixed `GOT_PARSE_MEMORY_HARD_CEILING_MB`; it reports the same stop
-  reason as the soft budget, `memory_budget`. The sensor stores every analysis it computes,
-  so a result stopped this way is cached with its `stopped:memory_budget` status and served
-  on later runs until the file, the binary or a fingerprinted parser setting changes. `GOGC`
-  and `GOMEMLIMIT` set the Go collector's pacing, so they can move when this path fires (an
-  inference from upstream's own explanation, not measured here); they are not in the
-  settings fingerprint, which covers only `GOT_`, `GOTREESITTER_` and `GTS_`. Whether such a
-  result should be cached at all is an open owner decision; this ADR does not change it.
+- **Which stops are reproducible rests on upstream's word** for `node_limit`,
+  `stack_depth_limit` and the arena/scratch guards of `memory_budget` (D4); only the arena
+  guard is measured here. The `error_flag` shape has no reported stop and is cached; whether
+  it is reproducible is unknown. A not-reproducible stop is not counted anywhere a later run
+  could see: the next run simply parses the file again.
 - **Out-of-scope files** under a narrowed scan are not analysed and carry no status.
 - **Layer 1** (the regex secrets scan) reads the raw text, not the tree; its findings in an
   incomplete file are unaffected by the parse and are still reported.

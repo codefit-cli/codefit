@@ -275,7 +275,7 @@ func TestParseStatus_GoFilesAreNotReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"parse":{"reported":false,"complete":false}`) {
+	if !strings.Contains(string(data), `"parse":{"reported":false,"complete":false,"reproducible":true}`) {
 		t.Errorf("the Go entry does not store the not-reported status: %s", data)
 	}
 
@@ -371,6 +371,9 @@ const ruleCompileFailsBudgetMB = "2"
 type childOutcome struct {
 	Result findings.SensorResult `json:"result"`
 	Error  string                `json:"error"`
+	// FileCalls is how many files the child's provider analysed (the rest were
+	// served from the cache).
+	FileCalls int `json:"file_calls"`
 }
 
 // TestHelperProcessSecuritySensor is not a test: it is the child process the
@@ -383,10 +386,11 @@ func TestHelperProcessSecuritySensor(t *testing.T) {
 	if dir := os.Getenv(childCache); dir != "" {
 		cfg = cacheConfig(dir)
 	}
-	res, err := New(typescript.New()).Run(auditctx.AuditContext{
+	provider := counting()
+	res, err := New(provider).Run(auditctx.AuditContext{
 		ProjectRoot: os.Getenv(childRoot), Language: "ts", Config: cfg,
 	})
-	out := childOutcome{Result: res}
+	out := childOutcome{Result: res, FileCalls: provider.fileCalls}
 	if err != nil {
 		out.Error = err.Error()
 	}
@@ -403,11 +407,18 @@ func TestHelperProcessSecuritySensor(t *testing.T) {
 // GOT_PARSE_MEMORY_BUDGET_MB to budget, optionally with the cache at cacheDir.
 func runChild(t *testing.T, budget, root, cacheDir string) childOutcome {
 	t.Helper()
+	return runChildEnv(t, root, cacheDir, budgetEnv+"="+budget)
+}
+
+// runChildEnv runs the sensor over root in a child process with extra
+// environment pairs, optionally with the cache at cacheDir.
+func runChildEnv(t *testing.T, root, cacheDir string, settings ...string) childOutcome {
+	t.Helper()
 	output := filepath.Join(t.TempDir(), "child.json")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcessSecuritySensor$", "-test.count=1")
 	cmd.Env = append(os.Environ(),
-		childEnv+"=1", childRoot+"="+root, childCache+"="+cacheDir, childOutput+"="+output,
-		budgetEnv+"="+budget)
+		append([]string{childEnv + "=1", childRoot + "=" + root, childCache + "=" + cacheDir,
+			childOutput + "=" + output}, settings...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("child process failed: %v\n%s", err, out)
 	}
@@ -463,6 +474,73 @@ func TestParseStatus_MemoryBudgetStopIsReported(t *testing.T) {
 	control := run(t, root, typescript.New(), nil)
 	if len(control.ParseIncomplete) != 0 {
 		t.Errorf("control without a budget: ParseIncomplete = %+v, want none", control.ParseIncomplete)
+	}
+}
+
+// hardCeilingEnv sets gotreesitter's process-heap hard ceiling. Unlike the soft
+// budget above, it stops a parse when the PROCESS's heap has grown past it since
+// the parse began (parser_memory_budget_runtime.go,
+// runtimeMemoryBudgetStopReasonNow), which depends on garbage-collection timing,
+// so WHERE it stops is not a function of the input. It arms only for sources of
+// at least 64 KiB, so the small file and the rule patterns are never stopped.
+const hardCeilingEnv = "GOT_PARSE_MEMORY_HARD_CEILING_MB"
+
+// hardCeilingMB is the ceiling the transient-stop test runs under, with the
+// child's garbage collector off (GOGC=off), so that the heap growth the ceiling
+// reads is the parse's own allocation and the stop is certain in the test.
+// Measured on gotreesitter v0.54.0, linux/amd64, through this sensor in the
+// child below, budgetProject, 10 cold+warm pairs per value:
+//
+//	ceiling MB   GOGC=off              GOGC=off, -race        default GC
+//	1, 2         10/10 stop, line 27   10/10 stop, line 27    9/10 stop
+//	4            10/10 stop, line 27   10/10 stop, line 27    8/10 stop
+//	8            0/10 stop             2/10 stop, line 61     0/10 stop
+//	16, 32       0/10 stop             (not run)              0/10 stop
+//
+// The default-GC column is the reason for the decision: the same bytes under
+// the same settings stopped on some runs and not on others. 1 MB sits at the
+// bottom of the window, furthest from 8. The test asserts that the file stopped
+// and why, and a line >= 1, not the line itself, which follows where it stopped.
+const hardCeilingMB = "1"
+
+// TestParseStatus_TransientStopIsReportedButNotCached (ADR 0089): a parse
+// stopped by the process-heap hard ceiling is reported in its run exactly like
+// a deterministic stop — listed as stopped:memory_budget, its findings and
+// surface returned — but it is not written to the cache. A second run with the
+// SAME settings over the same cache parses that file again, and only that
+// file: the small complete file from the same runs is served from the cache.
+// TestParseStatus_WarmRunFromCacheStillReportsTheStatus is the other side: a
+// deterministic incomplete result is still cached.
+func TestParseStatus_TransientStopIsReportedButNotCached(t *testing.T) {
+	root := budgetProject(t)
+	dir := filepath.Join(t.TempDir(), "cache")
+	settings := []string{hardCeilingEnv + "=" + hardCeilingMB, "GOGC=off"}
+
+	for i, name := range []string{"first run", "second run, same settings"} {
+		oc := runChildEnv(t, root, dir, settings...)
+		if oc.Error != "" {
+			t.Fatalf("%s: the scan failed: %s", name, oc.Error)
+		}
+		got := oc.Result.ParseIncomplete
+		if len(got) != 1 || got[0].File != "src/strings.ts" || got[0].Reason != "stopped:memory_budget" || got[0].Line < 1 {
+			t.Fatalf("%s: ParseIncomplete = %+v, want src/strings.ts stopped:memory_budget at a line >= 1 — "+
+				"the ceiling no longer stops the large file, so this test would prove nothing", name, got)
+		}
+		if !hasFindingAt(oc.Result.Findings, "src/small.ts", "SEC-001", 1) {
+			t.Errorf("%s: the small file's secret is not reported: %+v", name, oc.Result.Findings)
+		}
+		wantCalls := 2
+		if i > 0 {
+			wantCalls = 1
+		}
+		if oc.FileCalls != wantCalls {
+			t.Errorf("%s: %d file(s) analysed, want %d — the transient stop must be re-parsed and the "+
+				"complete file served from the cache", name, oc.FileCalls, wantCalls)
+		}
+		if n := len(entryFiles(t, dir)); n != 1 {
+			t.Errorf("%s: %d cache entries, want 1 (the complete file only) — a transient stop was cached",
+				name, n)
+		}
 	}
 }
 

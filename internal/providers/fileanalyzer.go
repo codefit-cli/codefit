@@ -26,6 +26,10 @@ import "github.com/codefit-cli/codefit/internal/core/findings"
 //   - Parse is reported (Reported true) for every file the call returns without
 //     error. An error means no analysis at all, exactly as for the two calls.
 //   - It is per-file and filesystem-free, like the calls it combines.
+//   - Parse.Reproducible is true only when the same bytes, binary and settings
+//     give the same analysis; the provider sets it false for a stop that may not
+//     recur, and the security sensor then reports the file but does not cache it
+//     (ADR 0089, D4).
 //
 // What it does NOT cover: callers that do not go through the security sensor —
 // ExtractQueryFilters, the stateless file-level surface tools, Parse itself —

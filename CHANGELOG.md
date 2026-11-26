@@ -168,6 +168,15 @@ All notable changes to codefit are documented here. The format is based on
   fixtures the security scan took a median of about 291 ms instead of about
   465 ms on one machine, with identical findings and surface.
 
+  A parse stopped for a reason that may not recur on the next run over the
+  same bytes and settings — the parser's process-heap hard ceiling, a timeout,
+  a cancellation, or any stop the parser does not document as deterministic —
+  is still listed as not read whole in its run, but is no longer cached: the
+  next scan parses that file again instead of serving a stop that may not
+  happen twice. Stops the parser documents as deterministic (its soft memory
+  budget, node and stack-depth limits) stay cached. Like the rest of this
+  entry, nothing of it reaches an MCP response yet.
+
 - **A Go string literal made only of quote characters is now reported under a
   credential name** (`#148`). `SEC-001`'s name gate read a literal by trimming
   quote and backtick characters from its source text, so `` signingKey = `""` ``

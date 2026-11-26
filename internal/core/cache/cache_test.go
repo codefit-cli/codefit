@@ -412,6 +412,9 @@ func TestEntryRoundTripCarriesTheParseStatus(t *testing.T) {
 		"complete":     findings.ParseComplete(),
 		"incomplete":   findings.ParseIncomplete("stopped:memory_budget", 1),
 		"not reported": findings.ParseNotReported(),
+		// Reproducible round-trips in both values: the sensor never stores a
+		// false one, but the cache must not be what decides that.
+		"not reproducible": findings.ParseIncompleteNotReproducible("stopped:timeout", 2),
 	}
 	for name, st := range statuses {
 		t.Run(name, func(t *testing.T) {

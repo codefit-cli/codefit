@@ -150,8 +150,8 @@ type SurfaceItem struct {
 // Three states, and the zero value is the SAFE one:
 //
 //   - not reported (Reported false): the provider does not report parse status
-//     (the Go provider today). It never means complete. The zero value is this
-//     state, so a status nobody set can never pass for a clean read.
+//     (the Go provider today). It never means complete. The zero value is in
+//     this state, so a status nobody set can never pass for a clean read.
 //   - complete (Reported true, Complete true): the provider's own parse check
 //     found nothing wrong with the tree.
 //   - incomplete (Reported true, Complete false): the parse check found a
@@ -161,14 +161,29 @@ type SurfaceItem struct {
 // followed by the parser's own stop reason (e.g. "stopped:memory_budget"). Line
 // is the 1-based line of the first affected node, 0 when unknown.
 //
+// Reproducible is the provider's word that the same bytes, analysed by the same
+// binary under the same settings, give the same analysis and the same status —
+// so the result may be cached and served to a later run. A parse stopped for a
+// reason that depends on the state of the process rather than on the input (a
+// wall-clock timeout, a cancellation, a ceiling on the whole process's heap) is
+// reported in its own run exactly like any other, but it is NOT reproducible,
+// and the security sensor does not cache it: a warm run must equal a cold run,
+// and caching a transient stop would freeze it until the file or the analyzer
+// changed (ADR 0089). Every constructor below sets it to true except
+// ParseIncompleteNotReproducible. Its zero value is false, so a status built by
+// hand that never said otherwise is not cached — the safe direction: an extra
+// parse costs time, a frozen transient result costs the truth. The zero value of
+// the whole struct is therefore not reported AND not reproducible.
+//
 // What a status does NOT see: valid code the parser misreads into an
 // error-free tree of the wrong shape is reported complete — the check trusts
 // the parser's own error marks and has nothing else to compare against.
 type ParseStatus struct {
-	Reported bool   `json:"reported"`
-	Complete bool   `json:"complete"`
-	Reason   string `json:"reason,omitempty"`
-	Line     int    `json:"line,omitempty"`
+	Reported     bool   `json:"reported"`
+	Complete     bool   `json:"complete"`
+	Reason       string `json:"reason,omitempty"`
+	Line         int    `json:"line,omitempty"`
+	Reproducible bool   `json:"reproducible"`
 }
 
 // The reasons a provider gives for an incomplete parse. A provider applies them
@@ -190,21 +205,36 @@ const (
 	// have (a zero-width MISSING token) to keep going.
 	ParseReasonMissingNode = "missing_node"
 	// ParseReasonErrorFlag: the tree is flagged as holding an error but no
-	// error or missing node could be located. Defensive: no measured input
-	// produces it; it exists so an unlocated error is never reported complete.
+	// error or missing node could be located. It exists so an unlocated error
+	// is never reported complete (the TypeScript provider documents the one
+	// shape measured to produce it).
 	ParseReasonErrorFlag = "error_flag"
 )
 
 // ParseNotReported is the status of a file whose provider does not report parse
-// status. It is the zero value, spelled out at the call site.
-func ParseNotReported() ParseStatus { return ParseStatus{} }
+// status. It is the zero value with Reproducible set: the analysis of such a
+// provider is cached exactly as it was before parse status existed (the Go
+// provider, the only one without it today, parses with go/ast, which has no
+// run-time budget to stop it).
+func ParseNotReported() ParseStatus { return ParseStatus{Reproducible: true} }
 
 // ParseComplete is the status of a file whose tree the provider found whole.
-func ParseComplete() ParseStatus { return ParseStatus{Reported: true, Complete: true} }
+func ParseComplete() ParseStatus {
+	return ParseStatus{Reported: true, Complete: true, Reproducible: true}
+}
 
 // ParseIncomplete is the status of a file the provider did not read whole, for
-// the given reason, starting at line (1-based; 0 when unknown).
+// the given reason, starting at line (1-based; 0 when unknown), when the same
+// input under the same settings is known to give the same result.
 func ParseIncomplete(reason string, line int) ParseStatus {
+	return ParseStatus{Reported: true, Complete: false, Reason: reason, Line: line, Reproducible: true}
+}
+
+// ParseIncompleteNotReproducible is ParseIncomplete for a parse whose stop the
+// provider cannot vouch for: one that may fall elsewhere, or not at all, on
+// another run over the same bytes and settings. It is reported in its run and
+// never cached (see Reproducible).
+func ParseIncompleteNotReproducible(reason string, line int) ParseStatus {
 	return ParseStatus{Reported: true, Complete: false, Reason: reason, Line: line}
 }
 

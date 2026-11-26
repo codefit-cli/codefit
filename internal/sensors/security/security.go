@@ -257,9 +257,15 @@ func cached(c *cache.Cache, key string) ([]findings.Finding, []findings.SurfaceI
 //
 // The parse status is stored WITH the analysis it describes, a not-reported one
 // included: an entry without it is a miss (ADR 0089).
+//
+// An analysis whose status is not Reproducible — a parse stopped for a reason
+// that depends on the state of the process, not on the bytes and the settings —
+// is NOT stored. It was reported in this run like any other; the next run
+// parses the file again instead of being served a stop that may not recur
+// (ADR 0089).
 func store(c *cache.Cache, key, rel string, fs []findings.Finding, surface []findings.SurfaceItem,
 	parse findings.ParseStatus) {
-	if c == nil || key == "" {
+	if c == nil || key == "" || !parse.Reproducible {
 		return
 	}
 	if err := c.Set(key, cache.Entry{Findings: fs, Surface: surface, Parse: &parse}); err != nil {

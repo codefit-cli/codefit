@@ -115,35 +115,50 @@ func TestParseStatus_StatesAreDistinctAndTheZeroValueIsNeverComplete(t *testing.
 	if zero.Reported || zero.Complete {
 		t.Errorf("zero ParseStatus = %+v, want neither reported nor complete", zero)
 	}
-	if got := findings.ParseNotReported(); got != zero {
-		t.Errorf("ParseNotReported() = %+v, want the zero value", got)
+	// The zero value is also NOT reproducible: a status nobody vouched for is
+	// never cached (ADR 0089).
+	if zero.Reproducible {
+		t.Errorf("zero ParseStatus = %+v, want not reproducible", zero)
+	}
+	if want := (findings.ParseStatus{Reproducible: true}); findings.ParseNotReported() != want {
+		t.Errorf("ParseNotReported() = %+v, want %+v — not reported, and cached as before",
+			findings.ParseNotReported(), want)
 	}
 
 	complete := findings.ParseComplete()
-	if !complete.Reported || !complete.Complete || complete.Reason != "" || complete.Line != 0 {
-		t.Errorf("ParseComplete() = %+v, want reported, complete, no reason, no line", complete)
+	if want := (findings.ParseStatus{Reported: true, Complete: true, Reproducible: true}); complete != want {
+		t.Errorf("ParseComplete() = %+v, want %+v", complete, want)
 	}
 
 	incomplete := findings.ParseIncomplete(findings.ParseReasonMissingNode, 7)
-	want := findings.ParseStatus{Reported: true, Complete: false, Reason: "missing_node", Line: 7}
+	want := findings.ParseStatus{Reported: true, Complete: false, Reason: "missing_node", Line: 7, Reproducible: true}
 	if incomplete != want {
 		t.Errorf("ParseIncomplete(missing_node, 7) = %+v, want %+v", incomplete, want)
 	}
+
+	transient := findings.ParseIncompleteNotReproducible("stopped:timeout", 3)
+	wantTransient := findings.ParseStatus{Reported: true, Complete: false, Reason: "stopped:timeout", Line: 3}
+	if transient != wantTransient {
+		t.Errorf("ParseIncompleteNotReproducible(stopped:timeout, 3) = %+v, want %+v", transient, wantTransient)
+	}
 }
 
-// TestParseStatus_JSONShape locks the wire shape a cache entry stores: reported
-// and complete are always written (an absent field must not be read as a
-// value), reason and line only when set.
+// TestParseStatus_JSONShape locks the wire shape a cache entry stores: reported,
+// complete and reproducible are always written (an absent field must not be
+// read as a value), reason and line only when set.
 func TestParseStatus_JSONShape(t *testing.T) {
 	cases := []struct {
 		name string
 		in   findings.ParseStatus
 		want string
 	}{
-		{"not reported", findings.ParseNotReported(), `{"reported":false,"complete":false}`},
-		{"complete", findings.ParseComplete(), `{"reported":true,"complete":true}`},
+		{"not reported", findings.ParseNotReported(), `{"reported":false,"complete":false,"reproducible":true}`},
+		{"complete", findings.ParseComplete(), `{"reported":true,"complete":true,"reproducible":true}`},
 		{"incomplete", findings.ParseIncomplete("stopped:memory_budget", 1),
-			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1}`},
+			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1,"reproducible":true}`},
+		{"incomplete, not reproducible", findings.ParseIncompleteNotReproducible("stopped:memory_budget", 1),
+			`{"reported":true,"complete":false,"reason":"stopped:memory_budget","line":1,"reproducible":false}`},
+		{"zero value", findings.ParseStatus{}, `{"reported":false,"complete":false,"reproducible":false}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
