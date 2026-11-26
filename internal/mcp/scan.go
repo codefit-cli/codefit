@@ -63,6 +63,12 @@ type ScanResponse struct {
 	// (recognizedAuthzHelpersNote in scanall.go) so the two responses cannot
 	// drift in phrasing.
 	RecognizedAuthzHelpersNote string `json:"recognized_authz_helpers_note"`
+	// ParseStatusBlock declares which analysed files the parser did not read
+	// whole (parse_status_reported, parse_incomplete, parse_status_note; ADR
+	// 0090). ALWAYS present: a run whose provider reports no status, or that
+	// analysed no file, says so with false and a note — never an absence an
+	// agent could read as "complete".
+	ParseStatusBlock
 }
 
 // HandleScanSecurity runs the security sensor over the project and returns the
@@ -76,7 +82,7 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 	if err != nil {
 		return ScanResponse{}, err
 	}
-	block := scopeBlockFor(scp, res.AuditedFiles, res.AuditableTotal)
+	block := scopeBlockFor(scp, res.AuditedFiles, res.AuditableTotal).withParseIncomplete(len(res.ParseIncomplete))
 	if err := block.Validate(); err != nil {
 		return ScanResponse{}, err
 	}
@@ -89,6 +95,7 @@ func HandleScanSecurity(req ScanRequest) (ScanResponse, error) {
 		SurfaceCoverage:            surfaceCoverageFor(req.Language),
 		RecognizedAuthzHelpers:     nonNilStrings(helpers),
 		RecognizedAuthzHelpersNote: recognizedAuthzHelpersNote(helpers),
+		ParseStatusBlock:           withOverriddenSettings(parseStatusFor(res), req.Language),
 	}, nil
 }
 

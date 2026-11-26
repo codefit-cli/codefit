@@ -109,6 +109,19 @@ ALWAYS read the ` + "`scope`" + ` block before you report anything:
   dimension may still be measured on its own). Null is not 100 — the code was not looked at.
 - A partial scan is for a fast pass on a change. NEVER prune the baseline after one (below).
 
+## Files not parsed whole
+` + "`codefit-scan-all`" + ` (under ` + "`security`" + `) and ` + "`codefit-scan-endpoint`" + ` say which files the parser did NOT
+read whole. Read this before you call a file clean:
+- ` + "`parse_incomplete`" + ` lists each such file with its reason (` + "`stopped:<reason>`" + `, ` + "`error_root`" + `,
+  ` + "`error_node`" + `, ` + "`missing_node`" + `, ` + "`error_flag`" + `) and the first affected line; ` + "`parse_status_note`" + `
+  explains. The file still counts in ` + "`scope.audited`" + ` and in the score, but from the listed line
+  on, a missing finding is not evidence of a clean file — say that instead of reporting it clean.
+- ` + "`parse_status_reported`" + ` says whether that check ran. An empty ` + "`parse_incomplete`" + ` with
+  ` + "`parse_status_reported: false`" + ` means nothing was checked (the language's provider reports no
+  parse status, or no file was analysed) — not that every file was read whole.
+- ` + "`parser_settings_overridden`" + ` names parser settings set in the codefit process, never their
+  values: under one, a file can read as parsed whole when it was not.
+
 ## Read ` + "`summary`" + ` as PER-DIMENSION counts, never as the project's state
 Every count declares which dimension it counted:
 - ` + "`summary.security`" + ` — ` + "`endpoints`" + `, ` + "`deterministic_findings`" + `, ` + "`surface_items`" + `,

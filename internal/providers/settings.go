@@ -24,3 +24,18 @@ package providers
 type SettingsFingerprinter interface {
 	SettingsFingerprint() string
 }
+
+// SettingsOverrideReporter is the optional capability a provider implements to
+// NAME the settings outside its binary that are set in this process — the same
+// settings SettingsFingerprinter fingerprints (ADR 0090). It returns their
+// names, sorted, and never their values: a value can be anything the user put
+// in their environment, and a response that carries it would publish it.
+//
+// The MCP layer resolves it by type assertion and declares the names in scan
+// responses, because a non-default parser setting can change what the parser
+// reads and can hide damage from the parse status: a file read under one can be
+// reported complete when it is not (ADR 0089, "Not covered"). The core never
+// sees the names, only the MCP adapter does.
+type SettingsOverrideReporter interface {
+	SettingsOverridden() []string
+}

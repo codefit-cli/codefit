@@ -42,6 +42,10 @@ type SurfaceResponse struct {
 	// helper set: "no mention" and "nothing to mention" must not be the same
 	// bytes.
 	HelperScope string `json:"helper_scope,omitempty"`
+	// ParseStatusBlock is constant here: these tools parse what they are handed
+	// without asking whether each parse was whole, so every response says
+	// parse_status_reported false, parse_incomplete [], and why (ADR 0090).
+	ParseStatusBlock
 }
 
 // helperScopeNote is the built-in-only helper-scope declaration shared by
@@ -180,7 +184,7 @@ func handleSurface(req SurfaceIDORRequest, category string) (SurfaceResponse, er
 		}
 	}
 	surface.StampIDs(items) // idempotent: guarantees every emitted item is anchorable
-	return SurfaceResponse{Surface: items}, nil
+	return SurfaceResponse{Surface: items, ParseStatusBlock: surfaceParseStatus()}, nil
 }
 
 // ConfirmSurfaceRequest carries the agent's verdicts back to codefit.

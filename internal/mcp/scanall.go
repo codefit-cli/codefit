@@ -191,6 +191,19 @@ type SecuritySection struct {
 	// false — a built-in helper match sets known_authz_detected=true
 	// independent of the registered count).
 	RecognizedAuthzHelpersNote string `json:"recognized_authz_helpers_note,omitempty"`
+	// ParseStatusReported, ParseIncomplete and ParseStatusNote are
+	// codefit-scan-security's parse-status declaration (ParseStatusBlock, ADR
+	// 0090), scoped under `security`. Present only when Measured is true,
+	// mirroring SurfaceCoverage: pointers, so a pass where security did not run
+	// serializes no key at all — `measured: false` already says the code was not
+	// audited. ParseIncomplete never addresses a nil slice (it would marshal
+	// `null`, a third meaning beside absent and `[]`).
+	ParseStatusReported *bool                      `json:"parse_status_reported,omitempty"`
+	ParseIncomplete     *[]findings.IncompleteFile `json:"parse_incomplete,omitempty"`
+	ParseStatusNote     string                     `json:"parse_status_note,omitempty"`
+	// ParserSettingsOverridden is ParseStatusBlock's field of the same name:
+	// parser settings set in this process, by name only, absent when none is.
+	ParserSettingsOverridden []string `json:"parser_settings_overridden,omitempty"`
 }
 
 // DBSection is the database dimension's result inside scan-all. Measured=false with
@@ -727,7 +740,8 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 	if !secRan {
 		auditableTotal = len(dbSources)
 	}
-	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), auditableTotal)
+	block := scopeBlockFor(scp, append(append([]string{}, secRes.AuditedFiles...), dbRes.AuditedFiles...), auditableTotal).
+		withParseIncomplete(len(secRes.ParseIncomplete))
 	if err := block.Validate(); err != nil {
 		return ScanAllResponse{}, nil, nil, err
 	}
@@ -756,7 +770,7 @@ func buildScanAll(req ScanAllRequest, scp scope.Scope, baselinePath string) (Sca
 			Note:      frontierNote(len(frontier), resolvedLocally, secRan),
 			Endpoints: frontier,
 		},
-		Security: securitySection(secRan, req.Language, helpers),
+		Security: securitySection(secRan, req.Language, helpers, secRes, dbRan),
 		DB:       dbSection,
 	}, actionable, diff.Next, nil
 }
@@ -784,15 +798,28 @@ func distinctCanon(paths []string) []string {
 // response: the schema may still have been audited (by the DB dimension)
 // while the code was not — this is reachable only after the
 // nothing-measurable guard, so a DB-only pass having run is guaranteed here.
-func securitySection(secRan bool, language string, helpers []string) SecuritySection {
+//
+// secRes carries the run's parse status (ADR 0090). When files are listed and
+// the db dimension ran (dbRan), the note adds that the code×schema cross parsed
+// those files separately and reports no status for that parse.
+func securitySection(secRan bool, language string, helpers []string, secRes findings.SensorResult, dbRan bool) SecuritySection {
 	if secRan {
 		cs := surfaceCoverageFor(language)
 		h := nonNilStrings(helpers)
+		ps := parseStatusFor(secRes)
+		if len(ps.ParseIncomplete) > 0 && dbRan {
+			ps.ParseStatusNote += parseCrossNote
+		}
+		ps = withOverriddenSettings(ps, language)
 		return SecuritySection{
 			Measured:                   true,
 			SurfaceCoverage:            &cs,
 			RecognizedAuthzHelpers:     &h,
 			RecognizedAuthzHelpersNote: recognizedAuthzHelpersNote(helpers),
+			ParseStatusReported:        &ps.ParseStatusReported,
+			ParseIncomplete:            &ps.ParseIncomplete,
+			ParseStatusNote:            ps.ParseStatusNote,
+			ParserSettingsOverridden:   ps.ParserSettingsOverridden,
 		}
 	}
 	return SecuritySection{
@@ -946,11 +973,16 @@ type ScanEndpointRequest struct {
 // every handler in it with all its concerns (signals, reason_to_review, certainty,
 // fact fields) — the same concern contract as scan-all. Found is false when the
 // file has no auditable concerns (not a route handler, or nothing to enumerate).
+//
+// ParseStatusBlock is codefit-scan-security's parse-status declaration narrowed
+// to the requested file: its entry when the parser did not read it whole, none
+// when it did, and not reported when the pass did not analyse it (ADR 0090).
 type ScanEndpointResponse struct {
 	File      string                  `json:"file"`
 	Found     bool                    `json:"found"`
 	Endpoints []report.EndpointReport `json:"endpoints,omitempty"`
 	Note      string                  `json:"note,omitempty"`
+	ParseStatusBlock
 }
 
 // HandleScanEndpoint re-analyses a single file on demand and returns its endpoints
@@ -972,15 +1004,17 @@ func HandleScanEndpoint(req ScanEndpointRequest) (ScanEndpointResponse, error) {
 			matched = append(matched, ep)
 		}
 	}
+	parse := withOverriddenSettings(parseStatusForFile(res, req.File), req.Language)
 	if len(matched) == 0 {
 		return ScanEndpointResponse{
 			File:  req.File,
 			Found: false,
 			Note: "No auditable concerns for this file: it is not a route handler codefit enumerates, " +
 				"or there was nothing to surface. This is a fact about the file, not a clearance.",
+			ParseStatusBlock: parse,
 		}, nil
 	}
-	return ScanEndpointResponse{File: req.File, Found: true, Endpoints: matched}, nil
+	return ScanEndpointResponse{File: req.File, Found: true, Endpoints: matched, ParseStatusBlock: parse}, nil
 }
 
 // providerForLanguage resolves a provider by language name, filtered to
