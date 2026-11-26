@@ -8,8 +8,11 @@ import (
 	"testing"
 
 	"github.com/codefit-cli/codefit/internal/core/findings"
+	"github.com/codefit-cli/codefit/internal/core/ruleengine"
+	"github.com/codefit-cli/codefit/internal/core/surface"
 	"github.com/codefit-cli/codefit/internal/providers"
 	"github.com/codefit-cli/codefit/internal/providers/typescript"
+	"github.com/codefit-cli/codefit/rules"
 )
 
 // These tests drive the REAL provider over the REAL parser (ADR 0089). Every
@@ -63,41 +66,146 @@ func analyzeFile(t *testing.T, src providers.SourceFile) providers.FileAnalysis 
 	return a
 }
 
+// everyRuleHelper is a project authorization helper the built-in set does not
+// know. The equivalence test registers it, so the combined call must thread the
+// project's helpers exactly as the separate surface call does.
+const everyRuleHelper = "assertTeamMember"
+
+// everyRuleSource is one Next.js route handler file shaped so that EVERY
+// TypeScript security rule fires and EVERY surface category appears, each line
+// reusing the shape the rule's own tests drive. Its credential literal is the
+// same non-key-format value the other tests in this file use, so the
+// repository's self-audit (a Go-provider run over this tree, whose layer 1
+// matches only known API-key formats) gains no site from it.
+const everyRuleSource = `import { createHash } from "crypto";
+
+const apiKey = "s3cr3t";
+const sessionToken = Math.random().toString(36);
+const digest = md5(payload);
+const weak = createHash("sha1");
+const evaluated = eval(userInput);
+const concatenated = { __html: "<b>" + name + "</b>" };
+const interpolated = { __html: ` + "`<b>${name}</b>`" + ` };
+db.query("SELECT * FROM t WHERE id = " + id);
+db.query(` + "`SELECT * FROM t WHERE id = ${id}`" + `);
+
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  await ` + everyRuleHelper + `("orders:read");
+  for (const lineId of lineIds) {
+    await prisma.line.findUnique({ where: { id: lineId } });
+  }
+  return Response.json(await prisma.order.findUnique({ where: { id: params.id } }));
+}
+`
+
 // TestAnalyzeFile_EqualsTheTwoSeparateCalls: the combined call is an
 // optimisation of AnalyzeSecurity + AnalyzeSurface, never a different analysis.
-// Over every TypeScript fixture, errored ones included, it returns exactly the
-// same findings and the same surface, in the same order.
+// Over every TypeScript fixture, errored ones included, and over
+// everyRuleSource, a provider configured WITH a project authz helper returns
+// exactly the same findings and the same surface, in the same order, from both.
+//
+// The comparison only controls what the inputs exercise, so two positive
+// controls guard it: the inputs must fire every rule id the real loader loads
+// and produce every surface category the provider declares — derived, not
+// typed, so a rule or category added later that no input exercises fails here
+// instead of leaving the combined call free to drop it — and the registered
+// helper must change the surface, or dropping the helpers from the combined call
+// would compare equal.
 func TestAnalyzeFile_EqualsTheTwoSeparateCalls(t *testing.T) {
-	p := typescript.New()
-	totalFindings, totalSurface := 0, 0
+	p := typescript.New(typescript.WithAuthzHelpers([]string{everyRuleHelper}))
+	inline := providers.SourceFile{Path: "app/orders/[id]/route.ts", Content: []byte(everyRuleSource)}
+	sources := []providers.SourceFile{inline}
 	for _, path := range tsFixtures(t) {
-		src := readSource(t, path)
-		combined := analyzeFile(t, src)
+		sources = append(sources, readSource(t, path))
+	}
 
+	ruleIDs := map[string]bool{}
+	categories := map[surface.Category]bool{}
+	for _, src := range sources {
+		combined, err := p.AnalyzeFile(src)
+		if err != nil {
+			t.Fatalf("AnalyzeFile(%s): %v", src.Path, err)
+		}
 		sec, err := p.AnalyzeSecurity(src)
 		if err != nil {
-			t.Fatalf("AnalyzeSecurity(%s): %v", path, err)
+			t.Fatalf("AnalyzeSecurity(%s): %v", src.Path, err)
 		}
 		surf, err := p.AnalyzeSurface(src)
 		if err != nil {
-			t.Fatalf("AnalyzeSurface(%s): %v", path, err)
+			t.Fatalf("AnalyzeSurface(%s): %v", src.Path, err)
 		}
 		if !reflect.DeepEqual(combined.Findings, sec) {
 			t.Errorf("%s: AnalyzeFile findings differ from AnalyzeSecurity.\ncombined: %+v\nseparate: %+v",
-				path, combined.Findings, sec)
+				src.Path, combined.Findings, sec)
 		}
 		if !reflect.DeepEqual(combined.Surface, surf) {
 			t.Errorf("%s: AnalyzeFile surface differs from AnalyzeSurface.\ncombined: %+v\nseparate: %+v",
-				path, combined.Surface, surf)
+				src.Path, combined.Surface, surf)
 		}
-		totalFindings += len(sec)
-		totalSurface += len(surf)
+		for _, f := range sec {
+			ruleIDs[f.ID] = true
+		}
+		for _, it := range surf {
+			categories[surface.Category(it.Category)] = true
+		}
 	}
-	// Positive control: an equality over empty results proves nothing.
-	if totalFindings == 0 || totalSurface == 0 {
-		t.Fatalf("the fixtures produced %d findings and %d surface items — the comparison is vacuous",
-			totalFindings, totalSurface)
+
+	// Positive control 1: every rule the real loader loads fired somewhere.
+	raw, err := ruleengine.LoadFS(rules.FS, "typescript/security")
+	if err != nil {
+		t.Fatalf("loading the typescript security rules: %v", err)
 	}
+	if len(raw) == 0 {
+		t.Fatal("the real loader returned no typescript security rules — the control would be vacuous")
+	}
+	for _, r := range raw {
+		if !ruleIDs[r.ID] {
+			t.Errorf("no input fires %s — the equivalence cannot see the combined call drop it; "+
+				"extend everyRuleSource with the shape that rule's own tests use", r.ID)
+		}
+	}
+	// Positive control 2: every surface category the provider declares appeared,
+	// and nothing outside the declaration did.
+	declared := map[surface.Category]bool{}
+	for _, c := range p.Capability().Surface {
+		declared[c] = true
+		if !categories[c] {
+			t.Errorf("no input produces %q surface — the equivalence cannot see the combined call drop "+
+				"that query; extend everyRuleSource", c)
+		}
+	}
+	for c := range categories {
+		if !declared[c] {
+			t.Errorf("the inputs produced %q surface, which the provider's Capability does not declare", c)
+		}
+	}
+	// Positive control 3: the registered helper changes the result — the authz
+	// item's known_authz_detected fact flips from false to true — so a combined
+	// call that ignored the project's helpers would not compare equal.
+	plain, err := typescript.New().AnalyzeSurface(inline)
+	if err != nil {
+		t.Fatalf("AnalyzeSurface without helpers: %v", err)
+	}
+	withHelper, err := p.AnalyzeSurface(inline)
+	if err != nil {
+		t.Fatalf("AnalyzeSurface with helpers: %v", err)
+	}
+	if !authzDetected(plain, false) || !authzDetected(withHelper, true) {
+		t.Errorf("registering %s does not flip known_authz_detected on everyRuleSource's authz item — "+
+			"the equivalence cannot see the combined call drop the project's authz helpers.\n"+
+			"without: %+v\nwith: %+v", everyRuleHelper, plain, withHelper)
+	}
+}
+
+// authzDetected reports whether items hold an authz item whose
+// known_authz_detected fact equals want.
+func authzDetected(items []findings.SurfaceItem, want bool) bool {
+	for _, it := range items {
+		if it.Category == string(surface.CategoryAuthz) && it.StructuralFacts["known_authz_detected"] == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestAnalyzeFile_ValidAndRealCodeReportComplete is the negative fixture of the
