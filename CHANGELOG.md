@@ -52,6 +52,18 @@ All notable changes to codefit are documented here. The format is based on
   non-pre-release tag is cut.
 
 ### Documentation
+- **`SEC-001` counted over six real projects, after the value veto** (`#148`).
+  A new dogfood harness, `TestDogfoodSEC001FieldCounts` (build tag `dogfood`,
+  skip-if-absent), runs the real security sensor with both providers over each
+  configured project and prints counts only: files audited, files not parsed
+  whole, `SEC-001` reported. Its counter is locked in the ordinary gate by
+  `TestSEC001FieldCountsSeeBothProviders`, which plants a secret and a vetoed
+  path in a `.ts` and a `.go` file and requires exactly the secret from each
+  provider. Measured 2026-11-28 with `main` at `7a9f80b` over copies of
+  salonpro, bitacoras, plantalinda, metricasbatch, a small private Go project
+  and codefit itself: 162 `SEC-001` in all, and 163 with the value veto switched
+  off; the one report the veto removes is a credential-named constant holding a
+  file path in codefit's own tests. Table in `docs/guide/languages.md`.
 - **Decided: detection is per-language; the YAML rule engine is TypeScript's**
   ([ADR 0083](docs/decisions/0083-detection-is-per-language-the-rule-engine-is-typescripts.md)).
   Five language simulations (Java, Python, C#, Ruby, Rust) unanimously broke the

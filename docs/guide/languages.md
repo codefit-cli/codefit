@@ -295,6 +295,47 @@ Read the milliseconds as what they are:
 - **Four projects one person happened to have clones of are not a representative sample**,
   and this is not a benchmark. It is evidence that both features survive real code.
 
+### SEC-001 after the value veto (issue #148)
+
+A second harness in the same place, `TestDogfoodSEC001FieldCounts`
+(`internal/mcp/dogfood_sec001_test.go`, same `dogfood` tag, same config format, same
+skip-if-absent), counts what `SEC-001` reports on each project, per provider. It runs the
+real security sensor with both providers and an in-memory configuration with no cache, so
+it only reads; it runs a planted control first, the same one the ordinary gate runs on
+every change (`TestSEC001FieldCountsSeeBothProviders`), so the counter is shown alive in
+the run that prints the numbers; and it prints counts only, never a location.
+
+**One Linux machine, six projects, 2026-11-28, measured with `main` at `7a9f80b`**, over
+copies of the projects (never the working clones); the codefit row is codefit's own tree at
+that commit:
+
+| project | provider | files audited | not parsed whole | `SEC-001` |
+|---|---|---|---|---|
+| salonpro | TypeScript | 742 | 3 | 85 |
+| bitacoras | TypeScript | 885 | 0 | 1 |
+| plantalinda | TypeScript | 419 | 0 | 6 |
+| metricasbatch | TypeScript | 115 | 0 | 7 |
+| a small private Go project | Go | 23 | not reported | 0 |
+| the same project | TypeScript | 1 | 0 | 0 |
+| codefit | Go | 478 | not reported | 24 |
+| codefit | TypeScript | 68 | 20 | 39 |
+
+A provider that audits no file in a project is left out of its rows. The Go provider
+reports no parse status, so "not reported" there means nobody checked, not zero. The file
+counts are this run's copies and are not comparable to the table above.
+
+**What the value veto did to these reports**, measured by switching it off in both
+providers in a scratch copy of the same tree and counting again: **163** reports with it
+off, **162** with it on. The one
+report it removes is in codefit's own Go tests, a credential-named constant holding a file
+path, which is exactly the form the veto exists for; on the four TypeScript projects and on
+the private Go project it removes **none**. Run over the code just before this feature's
+first merge (`76dbaec`), the same harness gives 81, 1, 2 and 5 on the four TypeScript
+projects, 25 (Go) and 16 (TypeScript) on codefit, and 0 on the private project; that tree
+differs from today's by more than the veto (the TypeScript parser upgrade and the
+line-continuation fix among others), so that comparison does not isolate it, and the
+switched-off run does.
+
 
 ## Supported languages
 
