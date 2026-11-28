@@ -85,6 +85,13 @@ environment-variable name, a path ending in a known file extension (ADR 0086).
   Decoding is not cosmetic: `"…?api_key\x3dabc"` denotes a URL carrying
   `api_key=abc`, and reading the characters between the quotes would see a
   parameter with no value and veto a credential.
+- **The decoder only sees what the rule lets through.** A `metavariable-regex`
+  on the same metavariable is checked as well, and in RE2 the dot does not
+  match a line feed: a rule that writes `.+` between the quotes never matches a
+  literal holding a line continuation, so its value is never decoded and the
+  rule is silent on it whatever it holds. SEC-001's regex therefore writes the
+  middle as `(?:.|\\\r?\n)+`, which admits a line feed only right after a
+  backslash.
 - **What does not decode proves nothing, and the match is kept.** A
   concatenation (`"a" + "b"`), a legacy octal escape (`\1`), a lone surrogate, a
   malformed escape. Every failure falls toward "keeps firing".

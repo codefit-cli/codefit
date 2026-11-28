@@ -452,14 +452,27 @@ type grammarRow struct {
 	// escape marks a row about an escape: both spellings must carry a
 	// backslash, or text decoded on its way into this file left the row
 	// pinning plain characters under an escape's name.
-	escape     bool
-	why        string
-	divergence string
+	escape bool
+	// continuation is the line terminator of a line-continuation row (lineFeed
+	// or carriageReturnLineFeed), "" for every other row. Both spellings must
+	// hold bs immediately followed by it: a continuation lost on its way into this
+	// file (turned into a real line break, or its backslash dropped) would leave
+	// the row pinning another literal under the continuation's name.
+	continuation string
+	why          string
+	divergence   string
 }
 
 // bs is one backslash. The four-hex unicode escape is assembled from it, so its
 // spelling cannot be decoded away on the way into this file.
 const bs = "\\"
+
+// The two line terminators the line-continuation rows put after bs, spelled as
+// \x escapes so the bytes (0x0A, and 0x0D 0x0A) are unambiguous in this source.
+const (
+	lineFeed               = "\x0a"
+	carriageReturnLineFeed = "\x0d\x0a"
+)
 
 // adr0087 prefixes every divergence below. What follows it is a QUOTE of that
 // section, checked against the file, so a divergence cannot be admitted by a
@@ -507,13 +520,42 @@ var grammarRows = []grammarRow{
 		goDenotes: "lib/config.ts", goWant: quiet, tsWant: quiet, escape: true,
 		why: "both grammars decode four hex digits to '/'",
 	},
-	// NOT IN THE TABLE, on purpose: a line continuation. Measured 2026-11-26:
-	// Go has no spelling for it, and in TypeScript SEC-001 is quiet on it
-	// whatever the value ("s3cr" + backslash + line break + "3t" is quiet too),
-	// because the rule's $VALUE regex does not match across a line break, so the
-	// literal never reaches the decoder (with "(?s)" added to that regex, in a
-	// scratch copy, the same secret fires). That silence is written nowhere, so
-	// it is reported to the owner instead of being recorded here as parity.
+	// A line continuation: a backslash immediately followed by a line terminator.
+	// Go has no spelling for it (an interpreted string literal cannot hold a line
+	// break). Until 2026-11-28 TypeScript SEC-001 was quiet on it WHATEVER the
+	// value, because the rule's $VALUE regex did not match across a line feed and
+	// the literal never reached the decoder; the regex now admits a line feed right
+	// after a backslash, so the secret fires and the path is vetoed. The bytes are
+	// assembled from bs, lineFeed and carriageReturnLineFeed, and the byte guard
+	// in TestCrossProviderLiteralGrammar checks each row for them.
+	{
+		item: "a line continuation (LF) in a secret exists only in JavaScript", goLit: `"s3cr` + bs + lineFeed + `3t"`,
+		tsLit: `"s3cr` + bs + lineFeed + `3t"`, continuation: lineFeed,
+		goWant: noSpelling, tsWant: fires, escape: true,
+		why:        "the continuation denotes nothing in JavaScript, so the literal is s3cr3t and fires; Go refuses a line break in a string",
+		divergence: adr0087 + "`\\/`, `\\u{…}` and line continuations exist only in JavaScript",
+	},
+	{
+		item: "a line continuation (CR LF) in a secret exists only in JavaScript", goLit: `"s3cr` + bs + carriageReturnLineFeed + `3t"`,
+		tsLit: `"s3cr` + bs + carriageReturnLineFeed + `3t"`, continuation: carriageReturnLineFeed,
+		goWant: noSpelling, tsWant: fires, escape: true,
+		why:        "a CR LF continuation denotes nothing either: s3cr3t fires; Go refuses a line break in a string",
+		divergence: adr0087 + "`\\/`, `\\u{…}` and line continuations exist only in JavaScript",
+	},
+	{
+		item: "a line continuation (LF) in a path exists only in JavaScript", goLit: `"lib/con` + bs + lineFeed + `fig.ts"`,
+		tsLit: `"lib/con` + bs + lineFeed + `fig.ts"`, continuation: lineFeed,
+		goWant: noSpelling, tsWant: quiet, escape: true,
+		why:        "the literal denotes lib/config.ts in JavaScript and the value veto silences it; Go refuses a line break in a string",
+		divergence: adr0087 + "`\\/`, `\\u{…}` and line continuations exist only in JavaScript",
+	},
+	{
+		item: "a line continuation (CR LF) in a path exists only in JavaScript", goLit: `"lib/con` + bs + carriageReturnLineFeed + `fig.ts"`,
+		tsLit: `"lib/con` + bs + carriageReturnLineFeed + `fig.ts"`, continuation: carriageReturnLineFeed,
+		goWant: noSpelling, tsWant: quiet, escape: true,
+		why:        "lib/config.ts through a CR LF continuation is still vetoed in JavaScript; Go refuses a line break in a string",
+		divergence: adr0087 + "`\\/`, `\\u{…}` and line continuations exist only in JavaScript",
+	},
 	{
 		item: "octal \\NNN decodes in Go and is refused in JavaScript", goLit: `"lib/config\056ts"`, tsLit: `"lib/config\056ts"`,
 		goDenotes: "lib/config.ts", goWant: quiet, tsWant: fires, escape: true,
@@ -531,7 +573,8 @@ var grammarRows = []grammarRow{
 	// verdict difference: "lib/config\a.ts" (go fires: the bell byte leaves the
 	// file-path charset; typescript quiet: lib/configa.ts is a path) and
 	// "https:\U0000002f\U0000002fapi.example.com/v1/users" (go quiet: a URL;
-	// typescript fires: no "://" survives). Reported to the owner.
+	// typescript fires: no "://" survives). Pending: to be declared as known
+	// differences with the field test of #148, not fixed.
 	{
 		item: "\\a exists only in Go, in a secret", goLit: `"s3cr\at"`, tsLit: `"s3cr\at"`,
 		goDenotes: "s3cr\at", goWant: fires, tsWant: fires, escape: true,
@@ -601,6 +644,23 @@ func TestCrossProviderLiteralGrammar(t *testing.T) {
 			t.Errorf("%s: an escape row whose spelling carries no backslash pins plain text: go %s, ts %s",
 				r.item, r.goLit, r.tsLit)
 			continue
+		}
+		// The byte guard for line continuations: a row that names one must say
+		// which terminator it holds, and both spellings must hold the backslash
+		// immediately followed by it (0x5C 0x0A, or 0x5C 0x0D 0x0A).
+		if strings.Contains(r.item, "line continuation") && r.continuation == "" {
+			t.Errorf("%s: a line-continuation row must name its line terminator", r.item)
+			continue
+		}
+		if r.continuation != "" {
+			want := bs + r.continuation
+			if !strings.Contains(r.goLit, want) || !strings.Contains(r.tsLit, want) ||
+				(r.continuation == lineFeed && (strings.Contains(r.goLit, bs+carriageReturnLineFeed) ||
+					strings.Contains(r.tsLit, bs+carriageReturnLineFeed))) {
+				t.Errorf("%s: a line-continuation row does not hold the bytes % x: go %q, ts %q",
+					r.item, []byte(want), r.goLit, r.tsLit)
+				continue
+			}
 		}
 		// Go's denoted string, checked by the language's own decoder, so the row
 		// is about the value it says it is about.
