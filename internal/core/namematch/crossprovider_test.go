@@ -234,7 +234,8 @@ func tsNameVocabulary(t *testing.T) map[string]bool {
 // value predicate about $VALUE. Go applies valueshape.NotACredential in its own
 // code; TypeScript reaches the same function only through this declaration, so
 // deleting it would bring the Go/TypeScript value divergence back silently. The
-// verdict-by-verdict parity table for the value axis is separate work (T5).
+// verdict-by-verdict parity table for the value axis is
+// internal/core/valueshape/crossprovider_test.go.
 func TestSEC001DeclaresTheValueVetoOnValue(t *testing.T) {
 	loaded, err := ruleengine.LoadFS(rules.FS, "typescript/security")
 	if err != nil {
