@@ -59,9 +59,12 @@ so a blind spot is *declared and known*, never silent (PRD §10).
 
 - **Hardcoded secrets.** [id: ts.hardcoded-secrets] A variable whose **name** looks like a credential
   (`password`, `apiKey`, `token`, `secret`, `authToken`, …) assigned a static
-  string literal. Matched by variable **name + literal value** — codefit does NOT
-  scan values for the shape of an API key, private key, or connection string, so a
-  hardcoded secret not tied to a credential-named variable is not caught here.
+  string literal. Matched by variable **name + literal value**. Separately, the
+  security sensor's **line scan** reports `SEC-001` on any line that holds a value
+  in one of five known API-key formats, whatever the variable is called (the
+  formats are listed below); no other key format, no private key and no
+  connection string is scanned for, so any other hardcoded secret not tied to a
+  credential-named variable is not caught.
   **Shapes reached:** `const`, `let`, `var`, a **type-annotated** `const`/`let`
   (`const apiKey: string = "…"`), and an **object-literal property**
   (`{ baseUrl: "…", apiKey: "…", retries: 3 }`) at any position, in an object of
@@ -127,11 +130,19 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   field, a template literal, a parenthesized or `as`-cast value, a bare
   assignment, a destructuring default, a concatenation whose first or last
   operand is not a quoted literal, a concatenation broken across lines with no
-  backslash right before the line feed, and **a literal secret used as the
-  fallback operand** of `||`, `??` or a ternary, such as
+  backslash right before the line feed, a literal followed by `satisfies` and a
+  type (the bound text ends with the type, not a quote), and **a literal secret
+  used as the fallback operand** of `||`, `??` or a ternary, such as
   `process.env.KEY || "s3cr3t"` (the bound expression starts with its first
   operand, not with a quote; measured, not scheduled) — is neither vetoed nor
-  reported. The veto's own limits,
+  reported **by the rule**. **The line scan, the other producer of `SEC-001`:**
+  the security sensor reports `SEC-001` on any line that holds a value in one of
+  five known API-key formats — an Anthropic key (`sk-ant-` and 8 or more characters), an OpenAI key (`sk-` and
+  20 or more letters or digits), a GitHub personal access token (`ghp_` and 20 or
+  more), a Slack token (`xoxb-`, `xoxa-`, `xoxp-`, `xoxr-` or `xoxs-` and 10 or
+  more) or an AWS access key id (`AKIA` and 16 upper-case letters or digits) — whatever the
+  code around it, so a key in one of those formats is still reported in every
+  shape above. The veto's own limits,
   in both directions, are the same as Go's and are listed under the Go
   provider's hardcoded-secrets entry below; they are served to an agent by
   `codefit-coverage` from one shared text (`valueshape.DeclaredLimit`).
@@ -2185,18 +2196,29 @@ never a suspicion, and it covers exactly four forms (`internal/core/valueshape`)
 A vetoed literal emits **nothing**: no finding at a lower severity or
 confidence, and no surface item. Whatever still fires does so exactly as before.
 
-**What SEC-001 (go) never reads.** It reads a value only when it is **one**
-string literal, interpreted or raw (`stringLit` accepts one `*ast.BasicLit` and
-nothing else). A value written any other way is **neither vetoed nor reported**,
-whatever it holds: a concatenation of literals (`"s3cr" + "3t"`), a
-parenthesized literal, a conversion such as `string("s3cr3t")`, a reference to a
-constant or a variable (the provider parses without type information and does
-not follow the name), and a call that returns a fallback, such as
-`cmp.Or(os.Getenv("KEY"), "s3cr3t")` — Go has no `||`, `??` or ternary on
-strings. TypeScript's SEC-001 binds a concatenation of quoted literals and keeps
-firing on it, so the two providers differ there. Each form is pinned at every
-site through the real provider (`internal/providers/golang/sec001_forms_test.go`)
-and served by `codefit-coverage`.
+**What SEC-001's name-and-value rule (go) never reads.** It reads a value only
+when it is **one** string literal, interpreted or raw, bound to a name it can
+read (`stringLit` accepts one `*ast.BasicLit` and nothing else). A value written
+any other way is **neither vetoed nor reported by that rule**, whatever it holds:
+a concatenation of literals (`"s3cr" + "3t"`), a parenthesized literal, a
+conversion such as `string("s3cr3t")`, a reference to a constant or a variable
+(the provider parses without type information and does not follow the name),
+and a call that returns a fallback, such as `cmp.Or(os.Getenv("KEY"), "s3cr3t")`
+— Go has no `||`, `??` or ternary on strings. The same holds for a name the rule
+does not read: an assignment to a field through a selector
+(`c.signingKey = "…"`) and a string map key (`{"signingKey": "…"}`).
+Separately, the security sensor's **line scan** reports `SEC-001` on any line
+that holds a value in one of five known API-key formats — an Anthropic key (`sk-ant-` and 8 or more characters), an OpenAI key (`sk-` and
+20 or more letters or digits), a GitHub personal access token (`ghp_` and 20 or
+more), a Slack token (`xoxb-`, `xoxa-`, `xoxp-`, `xoxr-` or `xoxs-` and 10 or
+more) or an AWS access key id (`AKIA` and 16 upper-case letters or digits) — whatever the code around it, so a key in one of
+those formats is still reported in every shape above
+(`internal/sensors/security/sec001_linescan_shapes_test.go`, through the real
+sensor). TypeScript's SEC-001 binds a concatenation whose first and last
+operands are quoted literals on one line and keeps firing on it, so the two
+providers differ there. Each form is pinned through the real provider
+(`internal/providers/golang/sec001_forms_test.go`) and served by
+`codefit-coverage`.
 
 **Escapes only Go decodes.** `\a` (a bell byte) and `\U00…` are decoded by Go
 and read as the letter itself by JavaScript, so the same spelling can get two

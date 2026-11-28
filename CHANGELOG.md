@@ -65,17 +65,25 @@ All notable changes to codefit are documented here. The format is based on
   off; the one report the veto removes is a credential-named constant holding a
   file path in codefit's own tests. Table in `docs/guide/languages.md`.
 - **`SEC-001`'s measured limits are now served to the agent** (`#148`). Nothing
-  about detection changed. Go: what its `SEC-001` never reads — a concatenation,
-  a parenthesized literal, a conversion, a reference to a constant or a variable,
-  a call such as `cmp.Or(os.Getenv("KEY"), "…")` — is neither vetoed nor
-  reported, now in its served limit and pinned at every site. Both providers:
+  about detection changed. Go: what its `SEC-001` name-and-value rule never
+  reads — a concatenation, a parenthesized literal, a conversion, a reference to
+  a constant or a variable, a call such as `cmp.Or(os.Getenv("KEY"), "…")`, a
+  selector on the left of an assignment, a string map key — is neither vetoed
+  nor reported by that rule, now in its served limit and pinned. Both
+  providers' coverage now also declares the sensor's line scan, which reports
+  `SEC-001` on any line holding a value in one of five known API-key formats
+  (`sk-ant-`, `sk-`, `ghp_`, `xox[baprs]-`, `AKIA`) whatever its shape, so such a
+  key is still reported in every one of those shapes; the TypeScript claim that
+  codefit "does NOT scan values for the shape of an API key", older than this
+  change, is corrected the same way. Both providers:
   two known differences on the same spelling, from escapes only Go decodes —
   `"lib/config\a.ts"` fires in Go and is vetoed in TypeScript, and
   `"https:\U0000002f\U0000002fapi.example.com/v1/users"` is vetoed in Go and
   fires in TypeScript — now rows of the value-axis parity table and named in
   both providers' coverage. TypeScript: a literal secret used as the fallback of
-  `||`, `??` or a ternary (`process.env.KEY || "s3cr3t"`) is not seen, measured
-  and declared, not fixed; a concatenation broken across lines right after a
+  `||`, `??` or a ternary (`process.env.KEY || "s3cr3t"`), and a literal
+  followed by `satisfies` and a type, are not read by the rule, measured and
+  declared, not fixed; a concatenation broken across lines right after a
   line comment that ends in a backslash is reported; a literal holding only a
   line continuation is reported while an empty one-line literal is not.
   `rules/README.md` no longer says the old `.+` pattern never matched a literal

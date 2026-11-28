@@ -79,23 +79,34 @@ func (*Provider) Capability() providers.Capability {
 	}
 }
 
-// limitOneLiteralOnly declares the values Go's SEC-001 never reads (issue
-// #148). hardcodedSecret asks stringLit for the value, and stringLit accepts one
-// *ast.BasicLit of kind STRING and nothing else, so every other expression under
-// a credential name is neither vetoed nor reported, whatever it holds. Each form
-// named here is measured through the real provider, at every site, by
-// TestSEC001ValueFormsGoNeverReaches, which also requires its phrase to appear
-// in the served limit. It is a prefix of the value-veto limit, not a limit of
+// limitOneLiteralOnly declares the values and names Go's name-and-value rule
+// for SEC-001 never reads (issue #148). hardcodedSecret asks stringLit for the
+// value, and stringLit accepts one *ast.BasicLit of kind STRING and nothing
+// else; securityChecks reads a name only as an *ast.Ident. Each form named here
+// is measured through the real provider by TestSEC001ValueFormsGoNeverReaches
+// and TestSEC001ShapesGoNeverReaches, which also require its phrase to appear in
+// the served limit. The rule is not SEC-001's only producer: the sensor's line
+// scan (apiKeyPatterns, internal/sensors/security) reports a known-format API
+// key on any line, which TestSEC001LineScanReportsKnownFormatKeysInFormsTheRuleDoesNotRead
+// pins through the real sensor; the text says so, so "not read by the rule" is
+// never read as "not reported". It is a prefix of the value-veto limit, not a limit of
 // its own, and it must not contain the phrases the value-veto tests parse ("at
 // every site SEC-001 reaches (", or the word "forms" before a list).
-const limitOneLiteralOnly = "SEC-001 (go) reads a value only when it is ONE string literal, " +
-	"interpreted or raw. A value written any other way is neither vetoed nor reported, whatever it " +
-	"holds: a concatenation of literals (\"s3cr\" + \"3t\"), a parenthesized literal, a conversion " +
-	"such as string(\"s3cr3t\"), a reference to a constant or a variable (the provider parses without " +
-	"type information and does not follow the name), and a call that returns a fallback, such as " +
-	"cmp.Or(os.Getenv(\"KEY\"), \"s3cr3t\") (Go has no ||, ?? or ternary on strings). TypeScript's " +
-	"SEC-001 binds a concatenation of quoted literals and keeps firing on it, so the two providers " +
-	"differ there. "
+const limitOneLiteralOnly = "SEC-001's name-and-value rule (go) reads a value only when it is ONE string " +
+	"literal, interpreted or raw, bound to a name it can read. A value written any other way is neither vetoed nor " +
+	"reported BY THAT RULE, whatever it holds: a concatenation of literals (\"s3cr\" + \"3t\"), a parenthesized " +
+	"literal, a conversion such as string(\"s3cr3t\"), a reference to a constant or a variable (the provider parses " +
+	"without type information and does not follow the name), and a call that returns a fallback, such as " +
+	"cmp.Or(os.Getenv(\"KEY\"), \"s3cr3t\") (Go has no ||, ?? or ternary on strings). The same holds for a name " +
+	"the rule does not read: an assignment to a field through a selector (c.signingKey = \"…\") and a string map " +
+	"key ({\"signingKey\": \"…\"}). Separately, the security sensor's line scan reports SEC-001 on any line that " +
+	"holds a value in one of five known API-key formats — an Anthropic key (sk-ant- and 8 or more characters), " +
+	"an OpenAI key (sk- and 20 or more letters or digits), a GitHub personal access token (ghp_ and 20 or more), " +
+	"a Slack token (xoxb-, xoxa-, xoxp-, xoxr- or xoxs- and 10 or more) or an AWS access key id (AKIA and 16 " +
+	"upper-case letters or digits) — " +
+	"whatever the code around it, so a key in one of those formats is still reported in every shape above. " +
+	"TypeScript's SEC-001 binds a concatenation whose first and last operands are quoted literals on one line " +
+	"and keeps firing on it, so the two providers differ there. "
 
 // limitGoOnlyEscapes declares the two known differences between the providers on
 // the same spelling that come from escapes only Go decodes (issue #148,

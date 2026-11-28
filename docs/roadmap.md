@@ -779,8 +779,10 @@ parity table, named in both providers' served coverage and in `COVERAGE.md`. The
 over copies of salonpro, bitacoras, plantalinda, metricasbatch, a small private Go project and
 codefit itself, `SEC-001` reports 162, and 163 with the value veto switched off; the one report the
 veto removes is a file path in codefit's own tests. Table in `docs/guide/languages.md`. What Go's
-`SEC-001` never reads (a concatenation, a parenthesized literal, a conversion, a reference to a
-constant, a call such as `cmp.Or`) is declared in its served limit. Issue `#148`'s "short
+`SEC-001` name-and-value rule never reads (a concatenation, a parenthesized literal, a conversion,
+a reference to a constant, a call such as `cmp.Or`, a selector on the left of an assignment, a
+string map key) is declared in its served limit, beside the sensor's line scan, which still
+reports a value in one of its five known API-key formats in any of those shapes. Issue `#148`'s "short
 identifier" case is declared, not fixed: still reported, because its shape cannot be told apart
 from a short secret (`COVERAGE.md`, the Go hardcoded-secrets entry, and `valueshape.DeclaredLimit`).
 
@@ -790,21 +792,29 @@ cross a line feed on a string value. Of the six `metavariable-regex` entries und
 `SEC-080` (`dangerouslySetInnerHTML`), both `` ^`.*\$\{ ``. Through the real provider each fires on a
 one-line interpolated template and is silent on the same template when its first `${` comes after a
 line feed, a common way to write a SQL query. The other three (`SEC-014`, `SEC-053`, `SEC-058`) use
-no dot. `SEC-001` itself still does not see a concatenation whose first or last operand is not a
+no dot. `SEC-001`'s rule itself still does not read a concatenation whose first or last operand is not a
 quoted literal, or one broken across lines with no backslash right before the line feed (after a
 line comment that ends in a backslash it is bound and keeps firing); both are declared in
 `COVERAGE.md`.
 
 Measured with the field test of `#148` and **not scheduled**:
 
-- **A literal secret used as a fallback is not seen by TypeScript `SEC-001`.** In
+- **A literal secret used as a fallback is not read by TypeScript `SEC-001`'s rule.** In
   `process.env.KEY || "s3cr3t"`, and the same with `??` or as the last operand of a ternary, the
   bound expression starts with its first operand, not with a quote, so the `$VALUE` regex refuses
   it at all six sites. It predates the value veto. Measured through the real provider
   (`internal/providers/typescript/sec001_fallback_test.go`, which also pins the boundary: a
   fallback between two quoted literals is bound and fires) and declared in `COVERAGE.md`. Go has
-  no such operator on strings; its idiom, `cmp.Or(…, "s3cr3t")`, is a call, unseen like every
-  value that is not one literal.
+  no such operator on strings; its idiom, `cmp.Or(…, "s3cr3t")`, is a call, not read by the rule
+  like every value that is not one literal. In both languages the sensor's line scan still
+  reports `SEC-001` when the fallback is a value in one of its five known API-key formats
+  (`internal/sensors/security/sec001_linescan_shapes_test.go`); an ordinary secret there is not
+  reported.
+- **Three more shapes the rule does not read, measured the same at the pre-feature baseline.**
+  Go: a selector on the left of an assignment (`c.signingKey = "…"`) and a string map key
+  (`{"signingKey": "…"}`), pinned by `TestSEC001ShapesGoNeverReaches`. TypeScript: a literal
+  followed by `satisfies` and a type, pinned in `TestTSSEC001StringFormsStillUnseen`. Declared in
+  both coverage sources and `COVERAGE.md`; the line scan still reports a known-format key there.
 - **The response-budget dogfood harness can write inside a project.** Its header says it is
   read-only over the projects, like the cache harness. Measured by reading the code, not
   reproduced: `TestDogfoodResponseBudget` calls `buildScanAll`, which calls `runSecurity`

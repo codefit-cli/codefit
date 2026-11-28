@@ -47,6 +47,10 @@ type sec001FieldCount struct {
 	SEC001              int
 	DurationMs          int64
 	sec001              []findings.Finding
+	// otherRules counts the findings of every other rule. It is never
+	// printed; the lock uses it to show the control's decoy was produced and
+	// left out of SEC001.
+	otherRules int
 }
 
 // summary renders the counts, and nothing else, as one line.
@@ -105,6 +109,8 @@ func sec001FieldCounts(root string) ([]sec001FieldCount, error) {
 			if f.ID == "SEC-001" {
 				c.SEC001++
 				c.sec001 = append(c.sec001, f)
+			} else {
+				c.otherRules++
 			}
 		}
 		out = append(out, c)
@@ -114,9 +120,11 @@ func sec001FieldCounts(root string) ([]sec001FieldCount, error) {
 
 // sec001FieldControl is the planted project: in each language, one secret
 // SEC-001 must report and one value the value veto must keep quiet, under the
-// same credential name. want is the one finding each language owes, by file and
-// line; a provider missing from the run, an extra provider, a second finding or
-// a finding on the vetoed line all fail.
+// same credential name, plus one DECOY of another rule (SEC-052, a weak hash,
+// declared by both providers) that the count must leave out. want is the one
+// finding each language owes, by file and line; a provider missing from the run,
+// an extra provider, a second finding, a finding on the vetoed line, a decoy
+// counted as SEC-001 or a decoy that was never produced all fail.
 var sec001FieldControl = struct {
 	files map[string]string
 	want  map[string]struct {
@@ -126,18 +134,20 @@ var sec001FieldControl = struct {
 }{
 	files: map[string]string{
 		"app/config.ts": "const signingKey = \"s3cr3t\";\n" +
-			"const secretFile = \"lib/config.ts\";\n",
+			"const secretFile = \"lib/config.ts\";\n" +
+			"export const digest = md5(\"payload\");\n",
 		"cmd/app/main.go": "package main\n\n" +
+			"import \"crypto/md5\"\n\n" +
 			"const signingKey = \"s3cr3t\"\n\n" +
 			"const secretFile = \"lib/config.ts\"\n\n" +
-			"func main() {}\n",
+			"func main() { _ = md5.Sum(nil) }\n",
 	},
 	want: map[string]struct {
 		file string
 		line int
 	}{
 		"typescript": {"app/config.ts", 1},
-		"go":         {"cmd/app/main.go", 3},
+		"go":         {"cmd/app/main.go", 5},
 	},
 }
 
@@ -174,6 +184,10 @@ func requireSEC001FieldControl(t *testing.T) {
 		}
 		if c.ParseStatusReported && c.FilesNotParsedWhole != 0 {
 			t.Errorf("%s reports %d control files not parsed whole, want 0", c.Language, c.FilesNotParsedWhole)
+		}
+		if c.otherRules != 1 {
+			t.Errorf("%s produced %d findings of other rules on the control, want 1 (the SEC-052 decoy): "+
+				"without it the count cannot show it filters by rule id", c.Language, c.otherRules)
 		}
 		if c.SEC001 != 1 || len(c.sec001) != 1 {
 			t.Errorf("%s counted %d SEC-001 on the control, want 1 (the secret, not the vetoed path): %+v",

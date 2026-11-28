@@ -194,6 +194,8 @@ func TestTSSEC001StringFormsStillUnseen(t *testing.T) {
 			"a concatenation ending in a non-literal operand: the bound text does not end in a quote"},
 		{"const signingKey = prefix + \"s3cr3t\";\n",
 			"a concatenation starting with a non-literal operand: the bound text does not start with a quote"},
+		{"const signingKey = \"s3cr3t\" satisfies string;\n",
+			"a literal followed by satisfies and a type: the bound text ends with the type, not a quote (measured 2026-11-28, declared, not fixed)"},
 	}
 	for _, tc := range cases {
 		if got := analyzeWhole(t, tc.src); len(got) != 0 {

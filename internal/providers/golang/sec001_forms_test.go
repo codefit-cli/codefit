@@ -43,14 +43,7 @@ func TestSEC001ValueFormsGoNeverReaches(t *testing.T) {
 			"a *ast.CallExpr: the literal is an argument, and SEC-001 reads only the value itself"},
 	}
 
-	var limits strings.Builder
-	for _, l := range golang.New().Capability().Security.Limits {
-		if l.ID == "SEC-001" {
-			limits.WriteString(l.Limit)
-			limits.WriteString("\n")
-		}
-	}
-	served := limits.String()
+	served := servedSEC001Limits()
 
 	for _, tc := range cases {
 		if tc.reason == "" {
@@ -73,4 +66,59 @@ func TestSEC001ValueFormsGoNeverReaches(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestSEC001ShapesGoNeverReaches is the sibling for the LEFT-hand side: shapes
+// whose name never reaches the name gate, so whatever literal they hold is
+// neither vetoed nor reported. securityChecks reads an assignment's left side
+// only as an *ast.Ident and a composite-literal key only as an *ast.Ident.
+// Measured 2026-11-28 (found by the T7 verifier, the same at the pre-feature
+// baseline); declared, not fixed.
+func TestSEC001ShapesGoNeverReaches(t *testing.T) {
+	cases := []struct {
+		shape    string
+		src      string
+		declared string
+		reason   string
+	}{
+		{"selector on the left of an assignment",
+			"package p\n\ntype cfg struct{ signingKey string }\n\nfunc f(c *cfg) { c.signingKey = \"s3cr3t\" }\n",
+			"an assignment to a field through a selector",
+			"the left side is an *ast.SelectorExpr; checkSecretAssign reads only an *ast.Ident"},
+		{"string map key",
+			"package p\n\nvar cfg = map[string]string{\"signingKey\": \"s3cr3t\"}\n",
+			"a string map key",
+			"the key is an *ast.BasicLit; checkSecretKeyValue reads only an *ast.Ident key"},
+	}
+	served := servedSEC001Limits()
+	for _, tc := range cases {
+		if tc.reason == "" {
+			t.Errorf("%s: no reason written", tc.shape)
+			continue
+		}
+		if !strings.Contains(served, tc.declared) {
+			t.Errorf("%s: the served SEC-001 limits do not declare it (missing %q)", tc.shape, tc.declared)
+		}
+		if got := sec001Of(t, tc.src); len(got) != 0 {
+			t.Errorf("SEC-001 fired on a %s — %s; Go's SEC-001 widened, so move the row and update the declaration: %+v",
+				tc.shape, tc.reason, got)
+		}
+	}
+	// The name and the value are not what keeps these quiet: as a plain
+	// assignment and as an identifier-keyed field they fire.
+	for _, site := range sec001Sites {
+		requireSiteReachesTheGate(t, site)
+	}
+}
+
+// servedSEC001Limits joins every SEC-001 limit the Go provider serves.
+func servedSEC001Limits() string {
+	var limits strings.Builder
+	for _, l := range golang.New().Capability().Security.Limits {
+		if l.ID == "SEC-001" {
+			limits.WriteString(l.Limit)
+			limits.WriteString("\n")
+		}
+	}
+	return limits.String()
 }
