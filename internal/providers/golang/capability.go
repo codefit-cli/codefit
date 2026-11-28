@@ -49,7 +49,13 @@ func (*Provider) Capability() providers.Capability {
 					// reason: the const lives in security.go beside the veto it
 					// describes. A literal the veto silences is otherwise
 					// indistinguishable, to an agent, from "no credential here".
-					Limit: limitValueVeto,
+					// It is preceded by what reaches the veto at all
+					// (limitOneLiteralOnly, below) and by the escapes only Go
+					// decodes (limitGoOnlyEscapes): the three describe one
+					// question — which values SEC-001 reads, what it reads them
+					// as, and which of those it withholds — so they are served as
+					// one limit.
+					Limit: limitOneLiteralOnly + limitGoOnlyEscapes + limitValueVeto,
 				},
 			},
 		},
@@ -72,3 +78,45 @@ func (*Provider) Capability() providers.Capability {
 		CoverageManifest: false,
 	}
 }
+
+// limitOneLiteralOnly declares the values and names Go's name-and-value rule
+// for SEC-001 never reads (issue #148). hardcodedSecret asks stringLit for the
+// value, and stringLit accepts one *ast.BasicLit of kind STRING and nothing
+// else; securityChecks reads a name only as an *ast.Ident. Each form named here
+// is measured through the real provider by TestSEC001ValueFormsGoNeverReaches
+// and TestSEC001ShapesGoNeverReaches, which also require its phrase to appear in
+// the served limit. The rule is not SEC-001's only producer: the sensor's line
+// scan (apiKeyPatterns, internal/sensors/security) reports a known-format API
+// key on any line, which TestSEC001LineScanReportsKnownFormatKeysInFormsTheRuleDoesNotRead
+// pins through the real sensor; the text says so, so "not read by the rule" is
+// never read as "not reported". It is a prefix of the value-veto limit, not a limit of
+// its own, and it must not contain the phrases the value-veto tests parse ("at
+// every site SEC-001 reaches (", or the word "forms" before a list).
+const limitOneLiteralOnly = "SEC-001's name-and-value rule (go) reads a value only when it is ONE string " +
+	"literal, interpreted or raw, bound to a name it can read. A value written any other way is neither vetoed nor " +
+	"reported BY THAT RULE, whatever it holds: a concatenation of literals (\"s3cr\" + \"3t\"), a parenthesized " +
+	"literal, a conversion such as string(\"s3cr3t\"), a reference to a constant or a variable (the provider parses " +
+	"without type information and does not follow the name), and a call that returns a fallback, such as " +
+	"cmp.Or(os.Getenv(\"KEY\"), \"s3cr3t\") (Go has no ||, ?? or ternary on strings). The same holds for a name " +
+	"the rule does not read: an assignment to a field through a selector (c.signingKey = \"…\") and a string map " +
+	"key ({\"signingKey\": \"…\"}). Separately, the security sensor's line scan reports SEC-001 on any line that " +
+	"holds a value in one of five known API-key formats — an Anthropic key (sk-ant- and 8 or more characters), " +
+	"an OpenAI key (sk- and 20 or more letters or digits), a GitHub personal access token (ghp_ and 20 or more), " +
+	"a Slack token (xoxb-, xoxa-, xoxp-, xoxr- or xoxs- and 10 or more) or an AWS access key id (AKIA and 16 " +
+	"upper-case letters or digits) — " +
+	"whatever the code around it, so a key in one of those formats is still reported in every shape above. " +
+	"TypeScript's SEC-001 binds a concatenation whose first and last operands are quoted literals on one line " +
+	"and keeps firing on it, so the two providers differ there. "
+
+// limitGoOnlyEscapes declares the two known differences between the providers on
+// the same spelling that come from escapes only Go decodes (issue #148,
+// declared 2026-11-28, not fixed). Both are rows of the value-axis parity table,
+// internal/core/valueshape/crossprovider_test.go, admitted there by ADR 0087's
+// sentence that these escapes exist only in Go; TestCrossProviderDivergencesAreServed
+// there requires this text and the TypeScript manifest to name both spellings.
+const limitGoOnlyEscapes = "Go decodes \\a (a bell byte) and \\U00… escapes, which JavaScript reads " +
+	"as the letter itself, so the same spelling can get two verdicts, both known and not fixed: " +
+	"\"lib/config\\a.ts\" fires in Go (the bell byte is outside the file-path charset) and is vetoed in " +
+	"TypeScript (lib/configa.ts is a path); \"https:\\U0000002f\\U0000002fapi.example.com/v1/users\" is " +
+	"vetoed in Go (a URL) and fires in TypeScript (no :// survives). An octal escape (\\056) in a path " +
+	"is vetoed in Go and fires in TypeScript, whose decoder refuses a legacy octal escape. "
