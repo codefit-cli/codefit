@@ -767,9 +767,22 @@ divergence the paragraph above declared is gone: `const secretFile = "lib/config
 both providers. **2026-11-26:** the verdict-by-verdict parity table for the value axis landed
 (`internal/core/valueshape/crossprovider_test.go`): every value runs through both real providers
 at every site, and a difference between the columns is admitted only as a quote of ADR 0087's
-list. Still open: three items of that list measured and kept out of the table because no document
-writes their verdict difference (a line continuation in TypeScript, Go's `\a` and `\U` escapes),
-awaiting a decision; and the field test of `#148`.
+list. **2026-11-28:** the first of three items T5 measured and kept out of the table is fixed: a
+literal holding a line continuation (a backslash before LF or CR LF) was never matched by the
+TypeScript rule's `$VALUE` regex, because the RE2 dot stops at a line feed, so `SEC-001` was silent
+on it whatever it held; the regex now admits a line feed right after a backslash, and the table
+records the item. Still open: the other two (Go's `\a` in a path and `\U` in a URL, whose verdict
+difference no document writes), to be declared as known differences with the field test of `#148`,
+not fixed; and that field test.
+
+Measured with that fix and **not scheduled**: two more TypeScript rules carry a dot that cannot
+cross a line feed on a string value. Of the six `metavariable-regex` entries under
+`rules/typescript/`, three apply a dot to a string: `SEC-001` (fixed), and `SEC-011` (SQL) and
+`SEC-080` (`dangerouslySetInnerHTML`), both `` ^`.*\$\{ ``. Through the real provider each fires on a
+one-line interpolated template and is silent on the same template when its first `${` comes after a
+line feed, a common way to write a SQL query. The other three (`SEC-014`, `SEC-053`, `SEC-058`) use
+no dot. `SEC-001` itself still does not see a concatenation whose first or last operand is not a
+quoted literal, or one broken across lines; both are declared in `COVERAGE.md`.
 
 ### P0-15 — a not-measured `codefit-scan-db` response emits five zeros that read like measurements — [issue #151](https://github.com/codefit-cli/codefit/issues/151)
 

@@ -108,6 +108,26 @@ All notable changes to codefit are documented here. The format is based on
 
 ### Fixed
 
+- **TypeScript `SEC-001` sees a secret written across a line continuation**
+  (`#148`). A backslash right before LF or CR LF inside a quoted string denotes
+  nothing, so `"s3cr` + backslash + newline + `3t"` is the string `s3cr3t`. The
+  value decoder always handled it, and `COVERAGE.md` said so, but the rule
+  never reached it: its `$VALUE` regex was `^["'].+["']$`, and in RE2 the dot
+  does not match a line feed, so such a literal never matched and `SEC-001` was
+  silent on it **whatever it held**, a false all-clear. The regex now writes the
+  middle as `(?:.|\\\r?\n)+`, admitting a line feed only right after a
+  backslash: a continued secret fires, and a continued path or URL is still
+  silenced by the value veto. Not `(?s)`, which would also admit a line break
+  between two operands (`"a" +` newline `"b"`), a separate widening. Only the
+  rule file changed, not the rule engine. Over the 68 JavaScript and TypeScript
+  files tracked in this repository, `SEC-001` gives the same 39 findings before
+  and after (none of them holds a backslash before a line feed). Still unseen,
+  and now declared: a concatenation whose first or last operand is not a quoted
+  literal, and a concatenation broken across lines. `SEC-011` and `SEC-080`
+  carry the same `.*` and are measured blind on a multi-line template whose
+  first `${` comes after a line feed; not changed here, listed in
+  `docs/roadmap.md`.
+
 - **Valid TypeScript no longer silences the rest of its file** (`#189`). The
   TypeScript/TSX parser, `github.com/odvcencio/gotreesitter`, moves from
   `v0.20.2` to `v0.54.0`

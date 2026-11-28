@@ -100,15 +100,22 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   the bound literal is decoded as **one JavaScript string** — single or double
   quotes, `\n`-style escapes, `\0`, `\xHH`, `\uHHHH` with surrogate pairs,
   `\u{…}`, line continuations, identity escapes such as `\/` — before the
-  predicate reads it, so `"…?api_key\x3dabc"` keeps firing. The veto applies at
+  predicate reads it, so `"…?api_key\x3dabc"` keeps firing. A literal holding a
+  **line continuation** (a backslash right before LF or CR LF) reaches the rule
+  too: SEC-001's `$VALUE` regex admits a line feed only right after a backslash,
+  because the RE2 dot stops at a line feed, so a secret written across such a
+  continuation fires and a continued path is vetoed. The veto applies at
   every shape above, the object property included, and belongs to one pair: in
   `{ secretFile: "lib/config.ts", apiKey: "…" }` the credential still fires.
   **What the veto does not decide:** a value that is not exactly one literal (a
-  concatenation such as `"a" + "b"`) or uses an escape the decoder refuses (a
-  legacy octal escape, a lone surrogate, a malformed escape) proves nothing and
+  concatenation of two quoted literals on one line, such as `"a" + "b"`) or uses
+  an escape the decoder refuses (a legacy octal escape, a lone surrogate, a
+  malformed escape) proves nothing and
   **keeps firing**; and a shape SEC-001 does not reach — a class field, a
   template literal, a parenthesized or `as`-cast value, a bare assignment, a
-  destructuring default — is neither vetoed nor reported. The veto's own limits,
+  destructuring default, a concatenation whose first or last operand is not a
+  quoted literal, a concatenation broken across lines (its line feed is outside
+  any literal) — is neither vetoed nor reported. The veto's own limits,
   in both directions, are the same as Go's and are listed under the Go
   provider's hardcoded-secrets entry below; they are served to an agent by
   `codefit-coverage` from one shared text (`valueshape.DeclaredLimit`).
