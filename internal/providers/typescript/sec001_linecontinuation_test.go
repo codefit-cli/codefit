@@ -185,7 +185,9 @@ func TestTSSEC001StringFormsStillUnseen(t *testing.T) {
 		reason string
 	}{
 		{"const signingKey = `s3cr" + backslash + lf + "3t`;\n",
-			"a template literal, with or without a continuation: the regex admits only a single or double quote"},
+			"a template literal with a continuation: the regex admits only a single or double quote"},
+		{"const signingKey = `s3cr3t`;\n",
+			"a template literal on one line: the regex admits only a single or double quote, with or without a continuation"},
 		{"const signingKey = \"s3cr\" +" + lf + "  \"3t\";\n",
 			"a concatenation broken across lines: the line feed is outside any literal, and the regex admits one only after a backslash"},
 		{"const signingKey = \"s3cr3t\" + suffix;\n",
@@ -199,5 +201,61 @@ func TestTSSEC001StringFormsStillUnseen(t *testing.T) {
 		}
 	}
 	// The probe value is not what keeps them quiet: at a declared site it fires.
+	requireTSSiteReachesTheGate(t, tsSites[0])
+}
+
+// TestTSSEC001ContinuationEdgesAsMeasured pins two verdicts the independent
+// verifier of the line-continuation fix measured (advisories A1 and A2,
+// 2026-11-28). Neither is a bug the rule should lose; both are consequences of
+// admitting a line feed right after a backslash, written down so the
+// documentation can say exactly where the line runs.
+func TestTSSEC001ContinuationEdgesAsMeasured(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		// pair: the source must hold a backslash right before a line feed
+		// (0x5C 0x0A), the bytes the row is about.
+		pair   bool
+		want   int
+		reason string
+	}{
+		// A1. The backslash that admits the line feed need not be inside a
+		// literal: a line comment can end in one. Then the bound text runs from
+		// the first quote to the last across the break, the regex admits it, the
+		// decoder refuses it as not one literal, and it fires like a one-line
+		// concatenation of two literals.
+		{"concatenation across lines after a comment ending in a backslash",
+			"const signingKey = \"s3cr\" + // split" + backslash + lf + "  \"3t\";\n", true, 1,
+			"the comment's backslash sits right before the line feed, so the regex admits the break; not one literal, so it keeps firing"},
+		// The same concatenation without that backslash stays unseen (the
+		// negative fixture above): the comment is what makes the difference.
+		{"concatenation across lines after a comment with no backslash",
+			"const signingKey = \"s3cr\" + // split" + lf + "  \"3t\";\n", false, 0,
+			"the line feed follows no backslash, so the regex refuses the break"},
+		// A2. A literal holding nothing but a continuation denotes the empty
+		// string. It is reported, while the empty literal on one line is not:
+		// the regex needs at least one step between the quotes, and the
+		// backslash with its line feed is one.
+		{"a literal holding only a line continuation",
+			"const signingKey = \"" + backslash + lf + "\";\n", true, 1,
+			"the backslash and line feed satisfy the regex's middle; the value denotes the empty string, which proves nothing, so it fires"},
+		{"an empty literal on one line",
+			"const signingKey = \"\";\n", false, 0,
+			"nothing stands between the quotes, so the regex refuses it"},
+	}
+	for _, tc := range cases {
+		if tc.reason == "" {
+			t.Errorf("%s: no reason written", tc.name)
+			continue
+		}
+		if strings.Contains(tc.src, backslash+lf) != tc.pair {
+			t.Errorf("%s: holding the byte pair 0x5C 0x0A is %v, the row says %v: %q",
+				tc.name, !tc.pair, tc.pair, tc.src)
+			continue
+		}
+		if got := analyzeWhole(t, tc.src); len(got) != tc.want {
+			t.Errorf("%s: got %d SEC-001, want %d — %s:\n%q", tc.name, len(got), tc.want, tc.reason, tc.src)
+		}
+	}
 	requireTSSiteReachesTheGate(t, tsSites[0])
 }

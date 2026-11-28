@@ -88,10 +88,15 @@ environment-variable name, a path ending in a known file extension (ADR 0086).
 - **The decoder only sees what the rule lets through.** A `metavariable-regex`
   on the same metavariable is checked as well, and in RE2 the dot does not
   match a line feed: a rule that writes `.+` between the quotes never matches a
-  literal holding a line continuation, so its value is never decoded and the
-  rule is silent on it whatever it holds. SEC-001's regex therefore writes the
-  middle as `(?:.|\\\r?\n)+`, which admits a line feed only right after a
-  backslash.
+  literal holding a line feed, so a line continuation that ends in LF or CR LF
+  is never decoded and the rule is silent on it whatever it holds. (A
+  continuation that ends in a bare CR, U+2028 or U+2029 did match: the dot
+  admits those.) SEC-001's regex therefore writes the middle as
+  `(?:.|\\\r?\n)+`, which admits a line feed only right after a backslash.
+  The regex does not know whether that backslash is inside a literal: a line
+  comment that ends in one admits the line feed too, so a concatenation broken
+  across lines right after such a comment is bound, refused by the decoder as
+  not one literal, and reported.
 - **What does not decode proves nothing, and the match is kept.** A
   concatenation (`"a" + "b"`), a legacy octal escape (`\1`), a lone surrogate, a
   malformed escape. Every failure falls toward "keeps firing".

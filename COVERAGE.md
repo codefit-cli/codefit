@@ -104,18 +104,34 @@ so a blind spot is *declared and known*, never silent (PRD §10).
   **line continuation** (a backslash right before LF or CR LF) reaches the rule
   too: SEC-001's `$VALUE` regex admits a line feed only right after a backslash,
   because the RE2 dot stops at a line feed, so a secret written across such a
-  continuation fires and a continued path is vetoed. The veto applies at
-  every shape above, the object property included, and belongs to one pair: in
+  continuation fires and a continued path is vetoed. **Known differences from
+  Go on the same spelling**, measured and not fixed, each a row of
+  `internal/core/valueshape/crossprovider_test.go`: Go decodes `\a` (a bell
+  byte) and `\U00…` escapes, which JavaScript reads as the letter itself, so
+  `"lib/config\a.ts"` is vetoed here (`lib/configa.ts` is a path) and fires in
+  Go, and `"https:\U0000002f\U0000002fapi.example.com/v1/users"` fires here (no
+  `://` survives) and is vetoed in Go; an octal escape (`\056`) in a path fires
+  here, because the decoder refuses a legacy octal escape, and is vetoed in Go.
+  The veto applies at every shape above, the object property included, and belongs to one pair: in
   `{ secretFile: "lib/config.ts", apiKey: "…" }` the credential still fires.
-  **What the veto does not decide:** a value that is not exactly one literal (a
-  concatenation of two quoted literals on one line, such as `"a" + "b"`) or uses
-  an escape the decoder refuses (a legacy octal escape, a lone surrogate, a
-  malformed escape) proves nothing and
-  **keeps firing**; and a shape SEC-001 does not reach — a class field, a
-  template literal, a parenthesized or `as`-cast value, a bare assignment, a
-  destructuring default, a concatenation whose first or last operand is not a
-  quoted literal, a concatenation broken across lines (its line feed is outside
-  any literal) — is neither vetoed nor reported. The veto's own limits,
+  **What the veto does not decide:** a value that is not exactly one literal or
+  uses an escape the decoder refuses (a legacy octal escape, a lone surrogate, a
+  malformed escape) proves nothing and **keeps firing**. Not one literal: a
+  concatenation of two quoted literals on one line, such as `"a" + "b"`; a
+  fallback between two quoted literals, such as `"" || "b"`; and a concatenation
+  broken across lines right after a line comment that ends in a backslash,
+  because that backslash, outside any literal, still admits the line feed. A
+  literal holding **only** a line continuation denotes the empty string and is
+  reported, while an empty literal on one line is not: the regex needs at least
+  one step between the quotes. And a shape SEC-001 does not reach — a class
+  field, a template literal, a parenthesized or `as`-cast value, a bare
+  assignment, a destructuring default, a concatenation whose first or last
+  operand is not a quoted literal, a concatenation broken across lines with no
+  backslash right before the line feed, and **a literal secret used as the
+  fallback operand** of `||`, `??` or a ternary, such as
+  `process.env.KEY || "s3cr3t"` (the bound expression starts with its first
+  operand, not with a quote; measured, not scheduled) — is neither vetoed nor
+  reported. The veto's own limits,
   in both directions, are the same as Go's and are listed under the Go
   provider's hardcoded-secrets entry below; they are served to an agent by
   `codefit-coverage` from one shared text (`valueshape.DeclaredLimit`).
@@ -2168,6 +2184,28 @@ never a suspicion, and it covers exactly four forms (`internal/core/valueshape`)
 
 A vetoed literal emits **nothing**: no finding at a lower severity or
 confidence, and no surface item. Whatever still fires does so exactly as before.
+
+**What SEC-001 (go) never reads.** It reads a value only when it is **one**
+string literal, interpreted or raw (`stringLit` accepts one `*ast.BasicLit` and
+nothing else). A value written any other way is **neither vetoed nor reported**,
+whatever it holds: a concatenation of literals (`"s3cr" + "3t"`), a
+parenthesized literal, a conversion such as `string("s3cr3t")`, a reference to a
+constant or a variable (the provider parses without type information and does
+not follow the name), and a call that returns a fallback, such as
+`cmp.Or(os.Getenv("KEY"), "s3cr3t")` — Go has no `||`, `??` or ternary on
+strings. TypeScript's SEC-001 binds a concatenation of quoted literals and keeps
+firing on it, so the two providers differ there. Each form is pinned at every
+site through the real provider (`internal/providers/golang/sec001_forms_test.go`)
+and served by `codefit-coverage`.
+
+**Escapes only Go decodes.** `\a` (a bell byte) and `\U00…` are decoded by Go
+and read as the letter itself by JavaScript, so the same spelling can get two
+verdicts, both known and not fixed: `"lib/config\a.ts"` fires in Go (the bell
+byte is outside the file-path charset) and is vetoed in TypeScript;
+`"https:\U0000002f\U0000002fapi.example.com/v1/users"` is vetoed in Go (a URL)
+and fires in TypeScript (no `://` survives). An octal escape (`\056`) in a path
+is vetoed in Go and fires in TypeScript. All three are rows of the value-axis
+parity table, `internal/core/valueshape/crossprovider_test.go`.
 
 **Known limits of the veto, declared in both directions.**
 

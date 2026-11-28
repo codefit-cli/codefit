@@ -773,7 +773,16 @@ TypeScript rule's `$VALUE` regex, because the RE2 dot stops at a line feed, so `
 on it whatever it held; the regex now admits a line feed right after a backslash, and the table
 records the item. Still open: the other two (Go's `\a` in a path and `\U` in a URL, whose verdict
 difference no document writes), to be declared as known differences with the field test of `#148`,
-not fixed; and that field test.
+not fixed; and that field test. **2026-11-28, later:** both are declared, not fixed: rows of the
+parity table, named in both providers' served coverage and in `COVERAGE.md`. The field test ran
+(`TestDogfoodSEC001FieldCounts`, behind the `dogfood` tag, its counter locked in the ordinary gate):
+over copies of salonpro, bitacoras, plantalinda, metricasbatch, a small private Go project and
+codefit itself, `SEC-001` reports 162, and 163 with the value veto switched off; the one report the
+veto removes is a file path in codefit's own tests. Table in `docs/guide/languages.md`. What Go's
+`SEC-001` never reads (a concatenation, a parenthesized literal, a conversion, a reference to a
+constant, a call such as `cmp.Or`) is declared in its served limit. Issue `#148`'s "short
+identifier" case is declared, not fixed: still reported, because its shape cannot be told apart
+from a short secret (`COVERAGE.md`, the Go hardcoded-secrets entry, and `valueshape.DeclaredLimit`).
 
 Measured with that fix and **not scheduled**: two more TypeScript rules carry a dot that cannot
 cross a line feed on a string value. Of the six `metavariable-regex` entries under
@@ -782,7 +791,28 @@ cross a line feed on a string value. Of the six `metavariable-regex` entries und
 one-line interpolated template and is silent on the same template when its first `${` comes after a
 line feed, a common way to write a SQL query. The other three (`SEC-014`, `SEC-053`, `SEC-058`) use
 no dot. `SEC-001` itself still does not see a concatenation whose first or last operand is not a
-quoted literal, or one broken across lines; both are declared in `COVERAGE.md`.
+quoted literal, or one broken across lines with no backslash right before the line feed (after a
+line comment that ends in a backslash it is bound and keeps firing); both are declared in
+`COVERAGE.md`.
+
+Measured with the field test of `#148` and **not scheduled**:
+
+- **A literal secret used as a fallback is not seen by TypeScript `SEC-001`.** In
+  `process.env.KEY || "s3cr3t"`, and the same with `??` or as the last operand of a ternary, the
+  bound expression starts with its first operand, not with a quote, so the `$VALUE` regex refuses
+  it at all six sites. It predates the value veto. Measured through the real provider
+  (`internal/providers/typescript/sec001_fallback_test.go`, which also pins the boundary: a
+  fallback between two quoted literals is bound and fires) and declared in `COVERAGE.md`. Go has
+  no such operator on strings; its idiom, `cmp.Or(…, "s3cr3t")`, is a call, unseen like every
+  value that is not one literal.
+- **The response-budget dogfood harness can write inside a project.** Its header says it is
+  read-only over the projects, like the cache harness. Measured by reading the code, not
+  reproduced: `TestDogfoodResponseBudget` calls `buildScanAll`, which calls `runSecurity`
+  (`internal/mcp/scan.go`), which loads the project's own `.codefit.yaml`; a config there that
+  enables the finding cache with a relative directory (or none, which defaults to
+  `.codefit/cache`) makes the sensor join that directory onto the project root, and the cache
+  creates it and writes its entries there. The cache and `SEC-001` field harnesses build their
+  configuration in memory and do not have this path.
 
 ### P0-15 — a not-measured `codefit-scan-db` response emits five zeros that read like measurements — [issue #151](https://github.com/codefit-cli/codefit/issues/151)
 

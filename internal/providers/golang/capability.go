@@ -49,7 +49,13 @@ func (*Provider) Capability() providers.Capability {
 					// reason: the const lives in security.go beside the veto it
 					// describes. A literal the veto silences is otherwise
 					// indistinguishable, to an agent, from "no credential here".
-					Limit: limitValueVeto,
+					// It is preceded by what reaches the veto at all
+					// (limitOneLiteralOnly, below) and by the escapes only Go
+					// decodes (limitGoOnlyEscapes): the three describe one
+					// question — which values SEC-001 reads, what it reads them
+					// as, and which of those it withholds — so they are served as
+					// one limit.
+					Limit: limitOneLiteralOnly + limitGoOnlyEscapes + limitValueVeto,
 				},
 			},
 		},
@@ -72,3 +78,34 @@ func (*Provider) Capability() providers.Capability {
 		CoverageManifest: false,
 	}
 }
+
+// limitOneLiteralOnly declares the values Go's SEC-001 never reads (issue
+// #148). hardcodedSecret asks stringLit for the value, and stringLit accepts one
+// *ast.BasicLit of kind STRING and nothing else, so every other expression under
+// a credential name is neither vetoed nor reported, whatever it holds. Each form
+// named here is measured through the real provider, at every site, by
+// TestSEC001ValueFormsGoNeverReaches, which also requires its phrase to appear
+// in the served limit. It is a prefix of the value-veto limit, not a limit of
+// its own, and it must not contain the phrases the value-veto tests parse ("at
+// every site SEC-001 reaches (", or the word "forms" before a list).
+const limitOneLiteralOnly = "SEC-001 (go) reads a value only when it is ONE string literal, " +
+	"interpreted or raw. A value written any other way is neither vetoed nor reported, whatever it " +
+	"holds: a concatenation of literals (\"s3cr\" + \"3t\"), a parenthesized literal, a conversion " +
+	"such as string(\"s3cr3t\"), a reference to a constant or a variable (the provider parses without " +
+	"type information and does not follow the name), and a call that returns a fallback, such as " +
+	"cmp.Or(os.Getenv(\"KEY\"), \"s3cr3t\") (Go has no ||, ?? or ternary on strings). TypeScript's " +
+	"SEC-001 binds a concatenation of quoted literals and keeps firing on it, so the two providers " +
+	"differ there. "
+
+// limitGoOnlyEscapes declares the two known differences between the providers on
+// the same spelling that come from escapes only Go decodes (issue #148,
+// declared 2026-11-28, not fixed). Both are rows of the value-axis parity table,
+// internal/core/valueshape/crossprovider_test.go, admitted there by ADR 0087's
+// sentence that these escapes exist only in Go; TestCrossProviderDivergencesAreServed
+// there requires this text and the TypeScript manifest to name both spellings.
+const limitGoOnlyEscapes = "Go decodes \\a (a bell byte) and \\U00… escapes, which JavaScript reads " +
+	"as the letter itself, so the same spelling can get two verdicts, both known and not fixed: " +
+	"\"lib/config\\a.ts\" fires in Go (the bell byte is outside the file-path charset) and is vetoed in " +
+	"TypeScript (lib/configa.ts is a path); \"https:\\U0000002f\\U0000002fapi.example.com/v1/users\" is " +
+	"vetoed in Go (a URL) and fires in TypeScript (no :// survives). An octal escape (\\056) in a path " +
+	"is vetoed in Go and fires in TypeScript, whose decoder refuses a legacy octal escape. "

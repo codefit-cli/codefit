@@ -64,6 +64,22 @@ All notable changes to codefit are documented here. The format is based on
   and codefit itself: 162 `SEC-001` in all, and 163 with the value veto switched
   off; the one report the veto removes is a credential-named constant holding a
   file path in codefit's own tests. Table in `docs/guide/languages.md`.
+- **`SEC-001`'s measured limits are now served to the agent** (`#148`). Nothing
+  about detection changed. Go: what its `SEC-001` never reads — a concatenation,
+  a parenthesized literal, a conversion, a reference to a constant or a variable,
+  a call such as `cmp.Or(os.Getenv("KEY"), "…")` — is neither vetoed nor
+  reported, now in its served limit and pinned at every site. Both providers:
+  two known differences on the same spelling, from escapes only Go decodes —
+  `"lib/config\a.ts"` fires in Go and is vetoed in TypeScript, and
+  `"https:\U0000002f\U0000002fapi.example.com/v1/users"` is vetoed in Go and
+  fires in TypeScript — now rows of the value-axis parity table and named in
+  both providers' coverage. TypeScript: a literal secret used as the fallback of
+  `||`, `??` or a ternary (`process.env.KEY || "s3cr3t"`) is not seen, measured
+  and declared, not fixed; a concatenation broken across lines right after a
+  line comment that ends in a backslash is reported; a literal holding only a
+  line continuation is reported while an empty one-line literal is not.
+  `rules/README.md` no longer says the old `.+` pattern never matched a literal
+  holding a line continuation: one ending in a bare CR, U+2028 or U+2029 did.
 - **Decided: detection is per-language; the YAML rule engine is TypeScript's**
   ([ADR 0083](docs/decisions/0083-detection-is-per-language-the-rule-engine-is-typescripts.md)).
   Five language simulations (Java, Python, C#, Ruby, Rust) unanimously broke the
@@ -131,11 +147,13 @@ All notable changes to codefit are documented here. The format is based on
   backslash: a continued secret fires, and a continued path or URL is still
   silenced by the value veto. Not `(?s)`, which would also admit a line break
   between two operands (`"a" +` newline `"b"`), a separate widening. Only the
-  rule file changed, not the rule engine. Over the 68 JavaScript and TypeScript
-  files tracked in this repository, `SEC-001` gives the same 39 findings before
-  and after (none of them holds a backslash before a line feed). Still unseen,
-  and now declared: a concatenation whose first or last operand is not a quoted
-  literal, and a concatenation broken across lines. `SEC-011` and `SEC-080`
+  rule file changed, not the rule engine. Over the 68 TypeScript files (`.ts`
+  and `.tsx`) tracked in this repository, `SEC-001` gives the same 39 findings
+  before and after (none of them holds a backslash before a line feed). Still
+  unseen, and now declared: a concatenation whose first or last operand is not a
+  quoted literal, and a concatenation broken across lines with no backslash
+  right before the line feed (after a line comment that ends in a backslash, the
+  rule binds it and it keeps firing). `SEC-011` and `SEC-080`
   carry the same `.*` and are measured blind on a multi-line template whose
   first `${` comes after a line feed; not changed here, listed in
   `docs/roadmap.md`.

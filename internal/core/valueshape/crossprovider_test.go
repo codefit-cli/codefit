@@ -497,6 +497,11 @@ func adr0087Section(t *testing.T) string {
 	return strings.Join(strings.Fields(text[start:end]), " ")
 }
 
+// goOnlyEscapes admits the two differences declared on 2026-11-28 (a path with
+// \a, a URL with \U). TestCrossProviderDivergencesAreServed requires both
+// providers' served coverage to name each row it admits.
+const goOnlyEscapes = adr0087 + "`\\a`, `\\U00…` and octal `\\NNN` exist only in Go"
+
 var grammarRows = []grammarRow{
 	{
 		item: "\\xHH below 0x80, the same escape in both", goLit: `"lib\x2fconfig.ts"`, tsLit: `"lib\x2fconfig.ts"`,
@@ -568,13 +573,26 @@ var grammarRows = []grammarRow{
 		why: "the two decode to different strings (byte 0xE9, or U+00E9 in UTF-8), and neither is in the file-path charset",
 	},
 	// \a and \U exist only in Go; JavaScript reads both as identity escapes (the
-	// letter itself). Only the rows where the two verdicts agree are here.
-	// Measured 2026-11-26 and NOT IN THE TABLE, because no document writes the
-	// verdict difference: "lib/config\a.ts" (go fires: the bell byte leaves the
-	// file-path charset; typescript quiet: lib/configa.ts is a path) and
-	// "https:\U0000002f\U0000002fapi.example.com/v1/users" (go quiet: a URL;
-	// typescript fires: no "://" survives). Pending: to be declared as known
-	// differences with the field test of #148, not fixed.
+	// letter itself). Two rows agree (a secret with \a, a path with \U) and two do
+	// not: a path with \a and a URL with \U. The two that do not were measured
+	// 2026-11-26 and kept out until a decision; on 2026-11-28 they were declared
+	// as known differences, not fixed (#148), admitted by the section's sentence
+	// that \a and \U exist only in Go.
+	{
+		item: "\\a exists only in Go, in a path", goLit: `"lib/config\a.ts"`, tsLit: `"lib/config\a.ts"`,
+		goDenotes: "lib/config\a.ts", goWant: fires, tsWant: quiet, escape: true,
+		why: "Go denotes a bell byte, which is outside the file-path charset, so nothing is proved and it fires; " +
+			"JavaScript denotes lib/configa.ts, a path, and vetoes it",
+		divergence: goOnlyEscapes,
+	},
+	{
+		item: "\\U exists only in Go, in a URL", goLit: `"https:\U0000002f\U0000002fapi.example.com/v1/users"`,
+		tsLit:     `"https:\U0000002f\U0000002fapi.example.com/v1/users"`,
+		goDenotes: "https://api.example.com/v1/users", goWant: quiet, tsWant: fires, escape: true,
+		why: "Go denotes https://api.example.com/v1/users, a URL, and vetoes it; JavaScript denotes " +
+			"https:U0000002fU0000002fapi.example.com/v1/users, where no :// survives, so nothing is proved and it fires",
+		divergence: goOnlyEscapes,
+	},
 	{
 		item: "\\a exists only in Go, in a secret", goLit: `"s3cr\at"`, tsLit: `"s3cr\at"`,
 		goDenotes: "s3cr\at", goWant: fires, tsWant: fires, escape: true,
@@ -695,5 +713,45 @@ func TestCrossProviderLiteralGrammar(t *testing.T) {
 		if r.goWant == r.tsWant && r.divergence != "" {
 			t.Errorf("C4: %s: the providers agree (%s) but a divergence is still recorded: %s", r.item, r.goWant, r.divergence)
 		}
+	}
+}
+
+// TestCrossProviderDivergencesAreServed: a difference the table admits is known
+// to the repository, but an agent reads only what codefit-coverage serves. For
+// the two rows admitted by goOnlyEscapes, the spelling must appear in the Go
+// provider's SEC-001 limits AND in the TypeScript manifest's hardcoded-secrets
+// entry, so neither provider's silence (or report) on it reads as the other's.
+func TestCrossProviderDivergencesAreServed(t *testing.T) {
+	var goText strings.Builder
+	for _, l := range golang.New().Capability().Security.Limits {
+		if l.ID == "SEC-001" {
+			goText.WriteString(l.Limit)
+		}
+	}
+	tsText := ""
+	for _, e := range typescript.New().CoverageManifest().Deterministic {
+		if e.ID == "ts.hardcoded-secrets" {
+			tsText = e.Detail
+		}
+	}
+	if goText.Len() == 0 || tsText == "" {
+		t.Fatalf("a served text is missing (go %d bytes, typescript %d bytes): the check would compare against nothing",
+			goText.Len(), len(tsText))
+	}
+	admitted := 0
+	for _, r := range grammarRows {
+		if r.divergence != goOnlyEscapes {
+			continue
+		}
+		admitted++
+		if !strings.Contains(goText.String(), r.goLit) {
+			t.Errorf("%s: the Go SEC-001 limits do not name %s", r.item, r.goLit)
+		}
+		if !strings.Contains(tsText, r.tsLit) {
+			t.Errorf("%s: the TypeScript hardcoded-secrets entry does not name %s", r.item, r.tsLit)
+		}
+	}
+	if admitted != 2 {
+		t.Errorf("goOnlyEscapes admits %d rows, want 2 (a path with \\a, a URL with \\U)", admitted)
 	}
 }
